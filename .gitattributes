@@ -1,3 +1,8 @@
+# 内置技能包按字节钉 sha256（official/catalog.json 逐包校验），换行符转换会
+# 改字节打碎校验——Windows checkout 默认 autocrlf 必须对它们关闭（2026-10-08
+# win 探针实测：不关则内置三项技能全部 SHA-256 校验失败，运行时同样装不上）。
+src/main/skills/official/** -text
+
 # These files are verified byte-for-byte on every packaging platform.
 third-party/** text eol=lf
 third-party/*.tar.gz -text
