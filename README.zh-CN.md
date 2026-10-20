@@ -4,6 +4,8 @@
 
 Hemi 是一款 macOS 桌面 AI 助手，用语音或文字交代任务，让 AI 在电脑上行动。
 
+[下载安装包：macOS（Apple Silicon）／Windows（x64）](https://github.com/PiuQiuPiaQia/Hemi/releases/latest)
+
 ## 自动路由与成本控制
 
 为主模型与不同角色分别配置模型，按任务需要分工协作，兼顾能力与调用成本。实际请求用量可追溯。

@@ -4,6 +4,8 @@ English · [简体中文](README.zh-CN.md)
 
 Hemi is a macOS AI assistant. Give it a task by voice or text and let it act on your computer.
 
+[Download for macOS (Apple Silicon) and Windows (x64)](https://github.com/PiuQiuPiaQia/Hemi/releases/latest)
+
 ## Model routing and cost control
 
 Configure models for the main agent and individual roles. Delegate as needed to balance capability and API cost, with request usage recorded for review.
