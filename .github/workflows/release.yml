@@ -5,9 +5,8 @@
 # - GITHUB_TOKEN：内置，无需配置（contents:write 权限已在下方声明）。
 # - HEMI_UPDATE_TOKEN：可选。仅 contents:read 的 fine-grained PAT（只授权本仓库）——
 #   私有仓更新检查必需；repo 转公开后可不配（应用内更新匿名可达）。
-# - 签名：默认不签（与本机手工打包一致）。将来配 CSC_LINK / CSC_KEY_PASSWORD
-#   及 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 后 electron-builder
-#   自动启用 Developer ID 签名与公证，无需改本文件。
+# - macOS 默认 ad-hoc 签名，确保资源封印完整。Developer ID 发布需覆盖
+#   build.mac.identity 并配置证书与公证凭据。
 name: Release
 
 on:
@@ -67,6 +66,7 @@ jobs:
           # AGENTS.md 口径：产物内 ._ * 垃圾必须为 0。
           GARBAGE=$(find release/mac-arm64/Hemi.app -name '._*' | wc -l | tr -d ' ')
           test "$GARBAGE" = "0"
+          codesign --verify --deep --strict release/mac-arm64/Hemi.app
           node scripts/verify-distribution-licenses.mjs release/mac-arm64/Hemi.app release/licenses-macos.json
           cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
 
