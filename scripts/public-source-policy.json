@@ -1,0 +1,52 @@
+{
+  "status": "candidate; does not authorize publication or deletion",
+  "includeRoots": [
+    "src",
+    "scripts",
+    "build",
+    "extensions",
+    "skills-market",
+    ".github",
+    "third-party"
+  ],
+  "includeFiles": [
+    ".gitattributes",
+    ".gitignore",
+    ".gitleaks.toml",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "THIRD-PARTY-NOTICES.md",
+    "components.json",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "vite.config.ts",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs/development.md",
+    "docs/development.zh-CN.md"
+  ],
+  "includePrefixes": [
+    "docs/media/"
+  ],
+  "excludeFiles": [
+    "scripts/render-070-readme-preview.mjs",
+    "scripts/verify-059-design-reference.mjs",
+    "scripts/verify-059-human-input-design.mjs",
+    "scripts/verify-062-media-repair.mjs",
+    "scripts/verify-conversation-history.mjs",
+    "scripts/lib/verify-conversation-history-child.mjs",
+    "scripts/verify-060-history-live.mjs",
+    "scripts/verify-067-virtualization.mjs"
+  ],
+  "guidanceTemplate": "scripts/public-agent-guidance.md",
+  "privateSubstitutions": "requirements/070-open-source-release/technical-plan/private-path-substitutions.json",
+  "replacements": [
+    {
+      "file": "src/renderer/src/fixtures-main.tsx",
+      "pattern": "/Volumes/[^/]+/Projects/video",
+      "to": "/Users/demo/Projects/video"
+    }
+  ]
+}

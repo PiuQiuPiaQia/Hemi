@@ -1,0 +1,360 @@
+/**
+ * 037 视觉系统 · 首启引导（surfaces 稿「首启 · 欢迎 / 麦克风 / 模型」）。
+ * 覆盖 globals.css 里 032 的 .onboarding-* 旧规则（类名保留给 real-app-032-onboarding 脚本），
+ * 控件叠 h37-btn / h37-input-lg / h37-badge / h37-orb 共用类。只用 tokens.css 变量。
+ */
+
+/* —— 画布与裸顶栏：左「← 返回」，右 5 段进度 —— */
+.setup-shell.onboarding-page {
+  background: var(--bg-canvas);
+}
+
+.setup-shell.onboarding-page .app-bar {
+  border-bottom-color: transparent;
+}
+
+.setup-shell .onboarding-back {
+  margin-left: calc(var(--sp-10) * -1);
+  padding: 0 var(--sp-10);
+  color: var(--body);
+  text-decoration: none;
+}
+
+.setup-shell .onboarding-back:hover {
+  text-decoration: none;
+}
+
+.setup-shell .onboarding-step-count {
+  display: inline-flex;
+  align-items: center;
+  letter-spacing: 0;
+}
+
+.setup-shell .onboarding-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.setup-shell .onboarding-steps i {
+  display: block;
+  width: 20px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  transition:
+    width var(--dur-4) var(--ease-move),
+    background-color var(--dur-4) linear;
+}
+
+.setup-shell .onboarding-steps i[data-state='done'] {
+  background: var(--g-300);
+}
+
+.setup-shell .onboarding-steps i[data-state='now'] {
+  width: 28px;
+  background: var(--accent);
+}
+
+/* —— 舞台：440 单列，垂直居中略偏上 —— */
+.setup-shell .onboarding-shell {
+  overflow-x: hidden;
+  padding: var(--sp-24) var(--sp-24) 10vh;
+}
+
+.setup-shell .onboarding-scene {
+  max-width: 440px;
+  animation: hemi-drill var(--dur-4) var(--ease-out);
+}
+
+.setup-shell .onboarding-scene[data-dir='back'] {
+  animation-name: h37-onboarding-back;
+}
+
+@keyframes h37-onboarding-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+.setup-shell .onboarding-scene[data-center='true'] {
+  align-items: center;
+  text-align: center;
+}
+
+.setup-shell .onboarding-brand-icon {
+  width: var(--sp-64);
+  height: var(--sp-64);
+  margin: 0 0 var(--sp-32);
+}
+
+.setup-shell .onboarding-step-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--sp-20);
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--g-700);
+}
+
+.setup-shell .onboarding-step-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* 各步标题 20；欢迎页 28 */
+.setup-shell .onboarding-title {
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-scene[data-center='true'] .onboarding-title {
+  font-size: var(--fs-28);
+  line-height: 1.3;
+}
+
+.setup-shell .onboarding-lead {
+  margin: var(--sp-6) 0 0;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-scene[data-center='true'] .onboarding-lead {
+  margin-top: var(--sp-8);
+  font-size: var(--fs-14);
+}
+
+/* 麦克风：系统弹窗预告 */
+.setup-shell .onboarding-preview-ask {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--sp-12);
+  margin-top: var(--sp-20);
+  padding: var(--sp-12) var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--body);
+}
+
+.setup-shell .onboarding-preview-ask svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-preview-ask b {
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+/* —— 操作区 —— */
+.setup-shell .onboarding-actions {
+  gap: var(--sp-8);
+  margin-top: var(--sp-32);
+}
+
+.setup-shell .onboarding-actions[data-row='true'] {
+  gap: var(--sp-8);
+}
+
+.setup-shell .onboarding-primary {
+  min-width: 140px;
+  font-weight: var(--fw-medium);
+}
+
+.setup-shell .onboarding-secondary,
+.setup-shell .onboarding-actions .onboarding-link {
+  font-weight: var(--fw-medium);
+  color: var(--body);
+}
+
+.setup-shell .onboarding-actions .onboarding-link:hover {
+  text-decoration: none;
+}
+
+/* —— 字段 —— */
+.setup-shell .onboarding-field {
+  margin-top: var(--sp-32);
+}
+
+.setup-shell .onboarding-field-top {
+  align-items: center;
+  margin-bottom: var(--sp-6);
+}
+
+.setup-shell .onboarding-field-label,
+.setup-shell .onboarding-openai-fields label {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--body);
+}
+
+.setup-shell .onboarding-field-top .onboarding-link {
+  font-size: var(--fs-12);
+  color: var(--accent-text);
+}
+
+.setup-shell .onboarding-openai-fields {
+  gap: var(--sp-16);
+  margin-top: var(--sp-32);
+}
+
+.setup-shell .onboarding-openai-fields label {
+  gap: var(--sp-6);
+}
+
+.setup-shell .onboarding-input {
+  height: 40px;
+  padding: 0 var(--sp-12);
+  background: var(--bg-surface);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-regular);
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-input::placeholder {
+  color: var(--faint);
+}
+
+.setup-shell .onboarding-input[data-error='true'] {
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.setup-shell .onboarding-privacy,
+.setup-shell .onboarding-field-help {
+  margin: var(--sp-6) 0 0;
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-field-error {
+  margin: var(--sp-8) 0 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--danger);
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+/* 测试连接：次级按钮 + 结果（成功 badge / 失败红字） */
+.setup-shell .onboarding-test-row {
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin-top: var(--sp-16);
+}
+
+.setup-shell .onboarding-test-button {
+  height: 30px;
+  padding: 0 var(--sp-12);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-test-button:hover:not(:disabled) {
+  background: var(--bg-surface);
+}
+
+.setup-shell .onboarding-test-result {
+  min-width: 0;
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+.setup-shell .onboarding-test-result[data-kind='ok'] {
+  color: var(--accent-text);
+}
+
+.setup-shell .onboarding-test-result[data-kind='error'] {
+  flex: 1 1 200px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+/* 已保存的语音密钥 */
+.setup-shell .onboarding-saved {
+  gap: var(--sp-12);
+  margin-top: var(--sp-24);
+  padding: var(--sp-12) var(--sp-16);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+}
+
+.setup-shell .onboarding-saved-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--g-50);
+  color: var(--accent-text);
+}
+
+.setup-shell .onboarding-saved strong {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-saved small {
+  margin-top: var(--sp-2);
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-saved button {
+  color: var(--accent-text);
+}
+
+/* —— 断点 —— */
+@media (max-width: 880px) {
+  .setup-shell .onboarding-shell {
+    padding: var(--sp-24) var(--sp-24) 10vh;
+  }
+}
+
+@media (max-width: 600px) {
+  .setup-shell .onboarding-shell {
+    padding: var(--sp-16) var(--sp-24) 8vh;
+  }
+
+  .setup-shell .onboarding-scene[data-center='true'] .onboarding-title {
+    font-size: var(--fs-20);
+  }
+
+  .setup-shell .onboarding-lead {
+    font-size: var(--fs-13);
+  }
+
+  .setup-shell .onboarding-actions {
+    margin-top: var(--sp-24);
+  }
+
+  .setup-shell .onboarding-primary,
+  .setup-shell .onboarding-secondary {
+    height: 40px;
+  }
+
+  .setup-shell .onboarding-openai-fields {
+    gap: var(--sp-16);
+    margin-top: var(--sp-24);
+  }
+
+  .setup-shell .onboarding-openai-fields .onboarding-input {
+    height: 40px;
+    font-size: var(--fs-14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-shell .onboarding-scene,
+  .setup-shell .onboarding-steps i {
+    animation: none;
+    transition: none;
+  }
+}

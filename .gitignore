@@ -1,0 +1,51 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/.vinext/
+/out/
+
+# misc
+.DS_Store
+# exFAT 外置盘上 macOS 会为每个文件生成 AppleDouble 伴生文件
+._*
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# local environment
+.env*
+
+# deployment and generated files
+.vercel
+next-env.d.ts
+/dist/
+/dist-renderer/
+/release/
+/.wrangler/
+/outputs/
+/output/
+/tmp/
+/work/
+
+# 本地工作区（AI 助手的工作记录，不属于源码）
+/.workbuddy/
+/.zcode/
+# 视觉回归 skill 的工作目录（快照、对比图、配置）
+/.visual/
+.verify-059/

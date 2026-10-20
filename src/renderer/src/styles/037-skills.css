@@ -1,0 +1,811 @@
+/**
+ * 037 视觉系统 · 技能中心（surfaces 稿「技能 · 市场」「技能 · 添加前确认」）。
+ * 旧 windows/voice/skill-market.css 的 h34 规则已整体迁来；类名（h34-*）保留给
+ * capture-skill-fixtures / verify-skillsmp-ui 脚本，控件一律叠 h37-* 共用类。只用 tokens.css 变量。
+ */
+
+/* —— 顶栏：标题「技能」＋ 分段控件（portal 进 #h37-skills-topbar）＋ 右侧导入 —— */
+.compact-shell .h37-skills-topbar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-12);
+}
+
+.compact-shell .h37-skills-topbar .h34-import,
+.h34-inline-top .h34-import {
+  margin-left: auto;
+}
+
+/* 技能页顶栏不放「开始通话」；通话进行中（data-calling=true）的回跳 chip 仍保留。 */
+.compact-shell.h24-shell[data-market-open='true'] .h24-call-nav[data-calling='false'] {
+  display: none;
+}
+
+/* 找不到顶栏槽时（独立挂载）的页内退路 */
+.h34-inline-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-24) 0;
+}
+
+/* —— 页面容器 —— */
+.compact-shell .h34-market {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-canvas);
+  color: var(--ink);
+}
+
+/* v5 拉伸链：详情页内容不足一屏时安装条仍落底部；超一屏时 sticky 常驻 */
+.h34-market .h34-column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+}
+
+.h34-market .h34-list-wrap {
+  flex: 1;
+}
+
+.h34-market .h34-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.h34-market .h34-column {
+  padding-top: var(--sp-8);
+}
+
+.h34-list-wrap {
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+/* 页级提示（等待权限 / 存储错误 / 目录错误 / 操作失败） */
+.h34-market .h37-note {
+  align-items: flex-start;
+  margin-bottom: var(--sp-12);
+}
+
+.h34-market .h37-note > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.h34-market .h34-note-action {
+  flex: none;
+  color: inherit;
+  font-weight: var(--fw-semibold);
+}
+
+/* —— 工具条：搜索框（36）＋ 排序分段 ＋ 搜索 —— */
+.h34-market .h34-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.h34-market .h34-toolbar .h34-search {
+  flex: 1;
+  height: 36px;
+}
+
+.h34-market .h34-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+.h34-market .h34-toolbar-row > .h34-toolbar {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.h34-market .h34-search-submit {
+  flex: none;
+}
+
+.h34-market .h34-cache-note {
+  margin: 0 var(--sp-2) var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+/* —— 卡片网格（≥300px 自适应；1440 三列）—— */
+.h34-market .h34-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-12);
+}
+
+.h34-market .h34-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  min-width: 0;
+  padding: var(--sp-16);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  transition: box-shadow var(--dur-2) linear;
+}
+
+.h34-market .h34-card:hover {
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    0 4px 12px -4px color-mix(in srgb, var(--n-900) 10%, transparent);
+}
+
+html.kb-nav .h34-market .h34-card:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.h34-market .h34-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  min-width: 0;
+}
+
+.h34-market .h34-card-top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+
+.h34-market .h34-card-top .h37-badge {
+  margin-left: auto;
+}
+
+/* 卡片右缘入口暗示：整卡可点，chevron 说明「点开看详情」 */
+.h34-market .h34-card-go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  color: var(--faint);
+}
+
+.h34-market .h34-card-top .h37-badge + .h34-card-go {
+  margin-left: 0;
+}
+
+.h34-market .h34-card-go svg {
+  width: 14px;
+  height: 14px;
+}
+
+.h34-market .h34-card-desc {
+  display: -webkit-box;
+  min-height: 2.9em;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: var(--fs-13);
+  line-height: 1.45;
+  color: var(--body);
+}
+
+.h34-market .h34-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-12);
+  min-width: 0;
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h34-market .h34-card-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.h34-market .h34-card-meta svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 骨架卡（搜索 >300ms 才出现） */
+.h34-market .h34-card-skeleton {
+  cursor: default;
+}
+
+.h34-market .h34-card-skeleton:hover {
+  box-shadow: var(--shadow-1);
+}
+
+.h34-market .h34-card-skeleton .h37-skeleton {
+  display: block;
+  width: 100%;
+}
+
+.h34-market .h34-card-skeleton .h34-sk-tile {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.h34-market .h34-card-skeleton .h34-sk-name {
+  width: 40%;
+  height: 14px;
+}
+
+.h34-market .h34-card-skeleton .h34-sk-short {
+  width: 70%;
+}
+
+.h34-market .h34-card-skeleton .h34-sk-meta {
+  width: 50%;
+  height: 10px;
+}
+
+/* 空态 / 推荐词 / 页脚免责 */
+.h34-market .h34-empty {
+  padding: var(--sp-40) var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--bg-subtle);
+  font-size: var(--fs-13);
+  text-align: center;
+  color: var(--muted);
+}
+
+.h34-market .h34-suggest {
+  padding: var(--sp-20);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.h34-market .h34-suggest > p {
+  margin: 0 0 var(--sp-16);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--body);
+}
+
+.h34-market .h34-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+
+.h34-market .h34-footnote {
+  display: flex;
+  gap: var(--sp-8);
+  margin: var(--sp-20) 0 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.h34-market .h34-footnote svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--faint);
+}
+
+/* —— 详情 / 添加前确认（下钻页，h37-drill 280ms 自右 24px）—— */
+.h34-market .h34-detail-back {
+  margin: 0 0 var(--sp-16) calc(var(--sp-8) * -1);
+}
+
+.h34-market .h34-detail-back svg {
+  width: 14px;
+  height: 14px;
+}
+
+.h34-market .h34-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-16);
+  margin-bottom: var(--sp-24);
+}
+
+.h34-market .h34-hero-tile {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+.h34-market .h34-hero-tile svg {
+  width: 22px;
+  height: 22px;
+}
+
+.h34-market .h34-hero-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.h34-market .h34-detail-tag {
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h34-market .h34-hero h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.h34-market .h34-hero p {
+  display: -webkit-box;
+  margin: var(--sp-2) 0 var(--sp-8);
+  overflow: hidden;
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  color: var(--body);
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+/* 头图元信息行（作者·星标·语言·收录）：市场详情用它替代独立概况卡，页面更紧凑 */
+.h34-market .h34-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-12);
+  margin: var(--sp-2) 0 var(--sp-8);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h34-market .h34-hero-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.h34-market .h34-hero-meta svg {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+.h34-market .h34-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-16);
+}
+
+.h34-market .h34-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+.h34-market .h34-hero-cta {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-6);
+  margin-left: auto;
+}
+
+.h34-market .h34-hero-cta small {
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h34-market .h34-cta-row {
+  display: flex;
+  gap: var(--sp-8);
+}
+
+.h34-market .h34-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: calc(var(--sp-8) * -1) 0 0 var(--sp-64);
+}
+
+/* 键值组：96px 标签列，行间 1px 分隔 */
+.h34-market .h34-kv {
+  margin: 0;
+}
+
+.h34-market .h34-kv > div {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.h34-market .h34-kv > div + div {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.h34-market .h34-kv dt,
+.h34-market .h34-kv dd {
+  margin: 0;
+  padding: var(--sp-10) var(--sp-16);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.h34-market .h34-kv dt {
+  color: var(--muted);
+}
+
+.h34-market .h34-kv dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.h34-market .h34-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+.h34-market .h34-stars {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.h34-market .h34-stars svg {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+/* 文件清单（路径行用紧凑密度：几十个文件的技能不该占满整屏） */
+.h34-market .h34-file-list {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.h34-market .h34-file-row {
+  min-height: 32px;
+  gap: var(--sp-10);
+}
+
+.h34-market .h34-file-row > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+.h34-market .h34-file-row > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.h34-market .h34-file-row > em {
+  flex: none;
+  font-size: var(--fs-12);
+  font-style: normal;
+  color: var(--faint);
+}
+
+.h34-market .h34-detail .h37-note {
+  margin: var(--sp-16) 0 0;
+}
+
+/* 原文 */
+.h34-market .h34-source pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--sp-12) var(--sp-16);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  color: var(--body);
+}
+
+/* 检查更新 */
+.h34-market .h34-update-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-12);
+  padding: var(--sp-10) var(--sp-16);
+}
+
+.h34-market .h34-update-box p {
+  display: flex;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-12);
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  color: var(--body);
+}
+
+/* —— 034 v4：读取态、折叠区块、吸底确认条 —— */
+
+/* 点安装后读来源的等待块（裸 group 自带块间距，与上方说明卡不贴死） */
+.h34-market .h34-loading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-12) var(--sp-16);
+  margin-top: var(--gap-section);
+  padding: var(--sp-16) var(--pad-card);
+}
+
+.h34-market .h34-loading p {
+  flex: 1 1 240px;
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  color: var(--body);
+}
+
+.h34-market .h34-loading small {
+  color: var(--faint);
+}
+
+/* 折叠区块：标题行与 h37-section-head 同形，chevron 指示开合 */
+.h34-market .h34-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0 0 var(--gap-head) calc(var(--sp-4) * -1);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  list-style: none;
+  cursor: default;
+}
+
+.h34-market .h34-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.h34-market .h34-fold > summary:hover {
+  background: var(--bg-subtle);
+}
+
+.h34-market .h34-fold > summary .h34-fold-title {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.h34-market .h34-fold > summary .h37-count {
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h34-market .h34-fold > summary > svg {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform var(--dur-2) linear;
+}
+
+.h34-market .h34-fold[open] > summary > svg {
+  transform: rotate(90deg);
+}
+
+html.kb-nav .h34-market .h34-fold > summary:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* 吸底确认条：证据再长，确认动作始终同屏 */
+.h34-market .h34-confirm-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-16);
+  margin-top: auto;
+  padding: var(--sp-14) var(--sp-8) var(--sp-16);
+  /* 半透底＋毛玻璃：长页滚动时内容从条下穿过仍有「一整条」的份量感（对齐 h25 跟随条的 blur 惯例） */
+  background: color-mix(in srgb, var(--bg-canvas) 86%, transparent);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 -1px 0 var(--line), 0 -16px 24px -20px color-mix(in srgb, var(--n-900) 30%, transparent);
+}
+
+/* 状态行：空闲是安全承诺（弱），进行中是进度（强，带 spinner） */
+.h34-market .h34-bar-status {
+  display: inline-flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h34-market .h34-confirm-bar[data-busy='true'] .h34-bar-status {
+  color: var(--body);
+}
+
+.h34-market .h34-bar-status .h37-spinner {
+  flex: none;
+}
+
+/* 点安装后会怎样：三步说明行 */
+.h34-market .h34-step {
+  align-items: flex-start;
+  gap: var(--sp-12);
+  padding: var(--sp-10) var(--pad-card);
+}
+
+.h34-market .h34-step > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: var(--sp-2);
+  color: var(--faint);
+}
+
+.h34-market .h34-step > div {
+  min-width: 0;
+}
+
+.h34-market .h34-step strong {
+  display: block;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.h34-market .h34-step small {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* 验看区入口（装前先看内容）：图标＋两行文案＋动作钮；裸 group 跟在 section 后须自带块间距 */
+.h34-market .h34-panel-teaser {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  margin-top: var(--gap-section);
+  padding: var(--sp-12) var(--pad-card);
+}
+
+.h34-market .h34-panel-teaser > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--faint);
+}
+
+.h34-market .h34-panel-teaser > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.h34-market .h34-panel-teaser strong {
+  display: block;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.h34-market .h34-panel-teaser small {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.h34-market .h34-panel-teaser .h37-btn {
+  flex: none;
+}
+
+/* 验看区读取失败：重试是次级按钮而非链接（失败态要显眼可操作） */
+.h34-market .h34-panel-error {
+  gap: var(--sp-12);
+  margin-top: var(--gap-section);
+}
+
+.h34-market .h34-confirm-bar .h34-cta-row {
+  margin-left: auto;
+}
+
+/* —— 卸载确认（h37-dialog）—— */
+.h34-confirm-backdrop .h34-confirm h3 {
+  margin: 0 0 var(--sp-6);
+}
+
+/* —— 断点 —— */
+@media (max-width: 880px) {
+  .h34-market .h34-hero {
+    flex-wrap: wrap;
+  }
+
+  .h34-market .h34-hero-cta {
+    align-items: flex-start;
+    margin-left: var(--sp-64);
+  }
+
+  /* 768 双列会留孤行卡；搜索行放不下排序+按钮时换行 */
+  .h34-market .h34-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .h34-market .h34-toolbar .h34-search {
+    flex-basis: 100%;
+  }
+
+  .h34-market .h34-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  /* 顶栏只留分段控件与图标按钮 */
+  .compact-shell.h24-shell[data-market-open='true'] .h24-conversation-title {
+    display: none;
+  }
+
+  .h34-import .h34-import-label {
+    display: none;
+  }
+
+  .h37-btn.h34-import {
+    width: 30px;
+    padding: 0;
+  }
+
+  .h34-market .h34-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .h34-market .h34-toolbar .h34-search {
+    flex-basis: 100%;
+  }
+
+  .h34-market .h34-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .h34-market .h34-hero-cta,
+  .h34-market .h34-detail-actions {
+    margin-left: 0;
+  }
+
+  .h34-market .h34-kv > div {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+}

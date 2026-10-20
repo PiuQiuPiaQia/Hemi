@@ -1,0 +1,93 @@
+/* 062 · 会话交付物：对话流紧凑文件入口与右侧预览的交付物态。
+   复用 024/027 的两行预览结构与 040 通用视觉规范（token、箭头光标、焦点环
+   只在 html.kb-nav 下画）；本文件只补 062 新增形态，不另起一套面板样式。 */
+
+/* 对话入口：说明走正文，文件只是一枚 chip（R-01「不铺大卡」）。 */
+.compact-shell .h62-deliverable-entry {
+  display: flex;
+  margin: var(--sp-6) 0 var(--sp-2);
+}
+
+/* 正文里的本地文件链接：点击经宿主受控解析进右侧（与网页链接区分着色）。 */
+.compact-shell .md a.h62-local-link {
+  color: var(--g-700);
+}
+
+.compact-shell .md .h62-code-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+.compact-shell .md .h62-code-link:hover code {
+  color: var(--g-700);
+  text-decoration: underline;
+}
+
+.compact-shell .h62-preview-video {
+  display: block;
+  width: 100%;
+  max-height: 100%;
+  background: var(--n-900);
+}
+
+.compact-shell .h62-deliverable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  max-width: 280px;
+  padding: 3px var(--sp-10);
+  border: 1px solid var(--h24-line);
+  border-radius: var(--r-full);
+  background: var(--h24-canvas);
+  color: var(--n-600);
+  font-size: var(--fs-12);
+  transition: border-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+
+.compact-shell .h62-deliverable-chip:hover {
+  border-color: var(--h24-composer-focus);
+  color: var(--g-700);
+}
+
+.compact-shell .h62-deliverable-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-shell .h62-deliverable-chip small {
+  color: var(--h24-muted);
+  flex: none;
+}
+
+/* 范围外格式：同一内容区里给文件信息与系统打开（R-03），不弹错误窗。 */
+.compact-shell .h62-unsupported {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-16);
+}
+
+.compact-shell .h62-unsupported-name {
+  font-size: var(--fs-14);
+  font-weight: 500;
+  color: var(--n-700);
+  word-break: break-all;
+}
+
+.compact-shell .h62-unsupported-meta {
+  font-size: var(--fs-12);
+  color: var(--h24-muted);
+  word-break: break-all;
+}
+
+.compact-shell .h62-unsupported-note {
+  font-size: var(--fs-12);
+  color: var(--n-600);
+}

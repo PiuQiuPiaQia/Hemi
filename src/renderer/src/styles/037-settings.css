@@ -1,0 +1,472 @@
+/**
+ * 037 视觉系统 · 设置页（surfaces 稿「一个壳」：图标栏 + 设置二级栏 + 内容列）。
+ * 稿件：requirements/040-visual-system/designs/2026-10-03-surfaces。
+ * 叠在 globals.css / 037-shell.css 之后；旧 .settings-* 规则在此按需提特异度压掉。
+ * 只用 tokens.css 变量；控件一律复用 037-controls.css 的 h37-*。
+ */
+
+/* —— 外壳：沿用主窗口 compact-shell h24-shell 骨架 —— */
+.compact-shell.h37-settings-shell {
+  background: var(--bg-canvas);
+  color: var(--body);
+  font-family: var(--font);
+}
+
+.compact-shell.h37-settings-shell .h24-workspace {
+  background: var(--bg-canvas);
+}
+
+/* 宽窗：顶栏首格整格用二级栏底色（与主页会话栏同一做法，红绿灯不压分隔线；
+   覆盖 037-shell 里设置态的画布底；≤880 仍走 037-shell 的窄窗规则）。
+   设置标题在二级栏顶部，顶栏只留拖拽区与右侧动作。 */
+@media (min-width: 881px) {
+  .compact-shell.h24-shell.h37-settings-shell[data-page='settings'] .brand-row {
+    padding-left: 88px; /* sp-ok：红绿灯让位 */
+    border-right: 1px solid var(--line);
+    background: var(--bg-rail);
+  }
+
+  .compact-shell.h24-shell.h37-settings-shell .h37-settings-topbar-title {
+    display: none;
+  }
+}
+
+/* 返回钮：幽灵 30px，与顶栏其他按钮同档。 */
+.compact-shell.h37-settings-shell .bar-actions .h37-settings-close {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell.h37-settings-shell .bar-actions .h37-settings-close:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+html.kb-nav .compact-shell.h37-settings-shell .bar-actions .h37-settings-close:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* —— 二级栏：设置分页导航（224，--bg-rail）—— */
+.h37-settings-shell .settings-nav.h37-settings-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-10) var(--sp-12);
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  border-bottom: 0;
+  background: var(--bg-rail);
+  white-space: normal;
+}
+
+/* 041：日志＝导航底部辅助入口（不是第七分类）。 */
+.h37-settings-shell .h37-settings-navfoot {
+  margin-top: auto;
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--line);
+}
+
+/* 底部辅助入口（日志文件）：与导航项同高同字号、次要色——它不是导航项的直接子级，
+   下面的 > 选择器够不着，此前落成浏览器默认的 16px 按钮字 */
+.h37-settings-shell .h37-settings-navfoot > .h37-settings-navitem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--row-fs);
+  text-align: left;
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.h37-settings-shell .h37-settings-navfoot > .h37-settings-navitem:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+html.kb-nav .h37-settings-shell .h37-settings-navfoot > .h37-settings-navitem:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.h37-settings-shell .h37-settings-side-title {
+  margin: 0 var(--row-pad-x) var(--sp-8);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* 导航项：二级栏与 ≤880 抽屉共用（041 抽屉与二级栏同一套导航）。 */
+.h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-settings-navitem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  width: 100%;
+  height: var(--row-h);
+  margin: 0;
+  padding: 0 var(--row-pad-x);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--row-fs);
+  font-weight: var(--fw-regular);
+  text-align: left;
+  color: var(--body);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-settings-navitem:hover {
+  background: var(--bg-hover);
+}
+
+.h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-settings-navitem[aria-current='true'] {
+  background: var(--bg-active);
+  color: var(--ink);
+  font-weight: var(--fw-medium);
+}
+
+html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-settings-navitem:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.h37-settings-shell .h37-settings-navitem svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--faint);
+  stroke-width: 1.75;
+  transition: color var(--dur-1) linear;
+}
+
+.h37-settings-shell .h37-settings-navitem[aria-current='true'] svg {
+  color: var(--g-700);
+}
+
+/* —— 内容列 —— */
+.h37-settings-shell .h37-settings-scroll {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+/* 窄窗分页入口（041 抽屉）：宽窗隐藏「分类 · 当前页」触发钮。 */
+.h37-settings-shell .h37-settings-drawer-trigger {
+  display: none;
+}
+
+/* 文本模型区块外层保留 .settings-form-section（取证脚本的就绪标记），去掉旧分隔样式。 */
+.h37-settings-shell .settings-form-section.h37-settings-text {
+  display: block;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.h37-settings-shell .h37-settings-stack > .h37-section:first-child {
+  margin-top: 0;
+}
+
+/* 包在定位锚 div 里的分组（如 #settings-browser）：它在 div 里是 first-child，
+   会被 .h37-section:first-child 吃掉上边距，和上一组的脚注贴在一起——补回组间距。 */
+.h37-settings-shell .h37-settings-stack > :not(:first-child) > .h37-section:first-child {
+  margin-top: var(--gap-section);
+}
+
+/* 访问授权行的「撤销全部访问」：危险操作平时弱化，悬停才转红 */
+.h37-settings-shell .h37-access-revoke {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
+.h37-settings-shell .h37-access-revoke:hover:not(:disabled) {
+  background: var(--danger-50);
+  color: var(--danger);
+}
+
+/* 分组里的表单块（输入框不适合塞进 52px 行）：与行同样 14px 内边距、1px 分隔。 */
+.h37-settings-form {
+  padding: var(--sp-16);
+}
+
+.h37-group > * + .h37-settings-form {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.h37-settings-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.h37-settings-inline > .h37-input {
+  flex: 1;
+}
+
+.h37-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-top: var(--sp-12);
+}
+
+.h37-settings-actions-end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  margin-left: auto;
+}
+
+.h37-settings-test {
+  font-size: var(--fs-12);
+  line-height: 1.45;
+  color: var(--accent-text);
+}
+
+.h37-settings-test[data-ok='false'] {
+  color: var(--danger);
+}
+
+.h37-settings-label-badge {
+  margin-left: var(--sp-8);
+  font-weight: var(--fw-medium);
+}
+
+.h37-help .h37-settings-inline-link {
+  font-size: inherit;
+}
+
+.h37-section-foot.h37-settings-foot-ok {
+  color: var(--accent-text);
+}
+
+/* 行描述里的错误/授权提示：沿用 12px，只换色。 */
+.h37-row-text > .h37-error-text {
+  margin-top: var(--sp-2);
+  color: var(--danger);
+}
+
+/* 原生 select：h37-select 去了系统箭头，这里补一个 chevron。 */
+.h37-settings-select {
+  position: relative;
+  display: inline-flex;
+  width: 200px;
+}
+
+.h37-settings-select > .h37-select {
+  padding-right: var(--sp-32);
+}
+
+.h37-settings-select > svg {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.h37-settings-select > .h37-select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* 分组标题右侧并排的保存状态与徽标（语音识别：「✓ 已保存」＋「已配 Key」） */
+.h37-settings-shell .h37-settings-aside-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+/* —— 窄窗（≤880）：二级栏收起，顶栏换「分类 · 当前页」抽屉入口 —— */
+@media (max-width: 880px) {
+  .h37-settings-shell .settings-nav.h37-settings-side {
+    display: none;
+  }
+
+  .h37-settings-shell .h37-settings-drawer-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-6);
+    height: 30px;
+    padding: 0 var(--sp-8);
+    margin-left: calc(var(--sp-8) * -1);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    font: inherit;
+    font-size: var(--fs-13);
+    font-weight: var(--fw-medium);
+    color: var(--body);
+  }
+
+  .h37-settings-shell .h37-settings-drawer-trigger:hover {
+    background: var(--bg-hover);
+  }
+
+  html.kb-nav .h37-settings-shell .h37-settings-drawer-trigger:focus-visible {
+    outline: 0;
+    box-shadow: var(--focus-ring);
+  }
+
+  .h37-settings-shell .h37-settings-drawer-trigger svg {
+    width: 14px;
+    height: 14px;
+    color: var(--muted);
+  }
+}
+
+/* 041 抽屉本体：遮罩 + 左侧滑入面板（与二级栏同底色同导航）。 */
+.h37-settings-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg-scrim);
+}
+
+.h37-settings-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(272px, 85%);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-16) var(--sp-10);
+  border-right: 1px solid var(--line);
+  background: var(--bg-rail);
+  overflow-y: auto;
+  animation: h37-settings-drawer-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes h37-settings-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (max-width: 600px) {
+  .h37-settings-shell .h37-page-head {
+    flex-wrap: wrap;
+  }
+
+  .h37-settings-shell .h37-page-head > .h37-actions {
+    margin-left: 0;
+  }
+
+  .h37-settings-shell .h37-settings-stack-row {
+    flex-wrap: wrap;
+  }
+
+  .h37-settings-shell .h37-settings-stack-row > .h37-row-end {
+    flex: 1 1 100%;
+  }
+
+  .h37-settings-shell .h37-settings-stack-row .h37-settings-select {
+    flex: 1;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h37-settings-shell .h37-enter,
+  .h37-settings-drawer {
+    animation: none;
+  }
+}
+
+
+/* —— 042 访问授权（应用/文件夹两档能力） —— */
+.h37-access-row .h37-row-title { overflow-wrap: anywhere; }
+.h37-access-row { flex-wrap: wrap; }
+/* 文字列保底 12rem：窄窗（≤600 等）时操作区整体折到下一行，而不是把标题挤成一字一行。 */
+.h37-access-row .h37-row-text { flex: 1 1 12rem; }
+.h37-access-row .h37-row-end { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.h37-access-row .h37-segment { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; }
+.h37-access-row .h37-segment button { border: 0; background: transparent; padding: var(--sp-4) var(--sp-10); font-size: var(--fs-12); color: var(--muted); }
+.h37-access-row .h37-segment button[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--fw-medium); }
+.h37-access-row .h37-segment button:disabled { cursor: default; opacity: 0.6; }
+.h37-access-empty { padding: var(--sp-20) var(--pad-card); font-size: var(--fs-13); color: var(--muted); text-align: center; }
+.h37-note-text { flex: 1; min-width: 0; }
+
+/* —— 042 添加授权弹窗（add-dialog / add-dialog-folder）：分段 → 选中 → 底部确认 —— */
+.h37-access-dialog { width: min(36rem, 100%); padding: 0; display: flex; flex-direction: column; }
+.h37-access-dialog-head { display: flex; align-items: flex-start; gap: var(--sp-12); padding: var(--sp-20) var(--sp-20) var(--sp-16); border-bottom: 1px solid var(--line); }
+.h37-access-dialog-head > div { flex: 1; min-width: 0; }
+.h37-access-dialog-close { display: grid; place-items: center; flex: none; width: var(--sp-32); height: var(--sp-32); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); }
+.h37-access-dialog-close:hover { background: var(--bg-hover); color: var(--ink); }
+html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.h37-access-dialog-close svg { width: 16px; height: 16px; }
+.h37-access-dialog-body { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-16) var(--sp-20); min-height: 0; overflow-y: auto; }
+.h37-access-dialog .h37-dialog-foot { margin-top: 0; padding: var(--sp-12) var(--sp-20); border-top: 1px solid var(--line); }
+.h37-access-dialog-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--muted); }
+
+.h37-access-search { display: flex; align-items: center; gap: var(--sp-6); padding: 0 var(--sp-10); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-surface); }
+.h37-access-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.h37-access-search svg { width: 14px; height: 14px; flex: none; color: var(--faint); }
+.h37-access-search input { flex: 1; min-width: 0; padding: var(--sp-6) 0; border: 0; background: transparent; font: inherit; font-size: var(--fs-13); color: var(--ink); outline: none; }
+
+.h37-access-pick-list { border: 1px solid var(--line); border-radius: var(--r-md); height: min(18rem, 42dvh); overflow-y: auto; outline: none; }
+.h37-access-pick-row { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-8) var(--sp-12); cursor: default; }
+.h37-access-pick-row + .h37-access-pick-row { border-top: 1px solid var(--line); }
+.h37-access-pick-row:hover:not([aria-disabled='true']) { background: var(--bg-hover); }
+.h37-access-pick-row[aria-selected='true'] { background: var(--accent-soft); }
+.h37-access-pick-row[aria-disabled='true'] { opacity: 0.55; }
+.h37-access-app-icon { width: 32px; height: 32px; flex: none; }
+.h37-access-pick-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.h37-access-pick-name { font-size: var(--fs-13); font-weight: var(--fw-medium); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h37-access-pick-sub { font-size: var(--fs-12); color: var(--muted); }
+.h37-access-pick-check { width: 16px; height: 16px; flex: none; color: var(--accent-text); }
+.h37-access-pick-state { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); height: min(18rem, 42dvh); border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-13); color: var(--muted); }
+.h37-run-dot { width: var(--sp-6); height: var(--sp-6); border-radius: 50%; background: var(--g-500); flex: none; }
+
+
+
+/* —— P2 窗口外框 + 内容面板（与主窗口同一套）——
+   顶栏、图标栏、设置二级栏同一张浅灰外框，内容列是白色面板（左上圆角＋细边）；
+   图标栏在宽窗即是返回入口，右上角 × 只在窄窗（二级栏收抽屉）保留。 */
+@media (min-width: 881px) {
+  .compact-shell.h37-settings-shell .app-bar,
+  .compact-shell.h37-settings-shell .h24-workspace {
+    background: var(--bg-rail);
+  }
+
+  .compact-shell.h24-shell.h37-settings-shell[data-page='settings'] .brand-row {
+    border-right: 0;
+  }
+
+  .h37-settings-shell .settings-nav.h37-settings-side {
+    border-right: 0;
+  }
+
+  .h37-settings-shell .h37-settings-scroll {
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    border-top-left-radius: var(--r-lg);
+    background: var(--bg-canvas);
+  }
+
+  .compact-shell.h37-settings-shell .bar-actions .h37-settings-close {
+    display: none;
+  }
+}

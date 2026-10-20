@@ -1,0 +1,934 @@
+/**
+ * 037 视觉系统 · 悬浮窗与浮层（悬浮球 / 字幕窗 / 任务迷你菜单 / 交付弹窗 /
+ * 预览栏 / 历史对话框 / Dialog 基件）。只用 tokens.css 变量，不写 hex。
+ * 在 globals.css 之后加载，同选择器覆盖旧规则；旧 keyframes 不删（见报告清单）。
+ */
+
+/* 旧玻璃垫 + 玉石小球退场：核只做定位与状态缩放，球体交给 h37-orb */
+.floating-orb-shell .floating-orb-core {
+  --orb-scale: 1;
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  overflow: visible;
+  color: var(--n-0);
+  animation: none;
+  transition:
+    transform var(--dur-5) var(--ease-move),
+    filter var(--dur-5) linear,
+    opacity var(--dur-4) linear;
+}
+
+.floating-orb-shell .floating-orb-core::before {
+  content: none;
+}
+
+.floating-orb-face,
+.floating-orb-voice {
+  grid-area: 1 / 1;
+}
+
+.floating-orb-face {
+  --orb: 60px;
+}
+
+/* 空闲：4.8s 慢呼吸（h37-orb-breathe 0→+6%，即围绕中值 ±3%） */
+.floating-orb-face[data-live='true'] {
+  animation-duration: 4.8s;
+}
+
+/* 球内声波：白色 5 柱，只在聆听 / 说话时出现 */
+.floating-orb-voice {
+  position: relative;
+  z-index: 1;
+  height: 18px;
+  opacity: 0;
+  transition: opacity var(--dur-3) linear;
+}
+
+.floating-orb-voice > i {
+  background: color-mix(in srgb, var(--n-0) 92%, transparent);
+}
+
+.floating-orb-voice[data-active='false'] > i {
+  background: color-mix(in srgb, var(--n-0) 92%, transparent);
+}
+
+.floating-orb-voice[data-active='true'] {
+  opacity: 1;
+}
+
+/* —— 状态：尺寸 400ms 插值；颜色走 filter（linear）。
+   0,3,0 起步压过旧 data-active/-speaking/-pressing 的 transform/box-shadow —— */
+.floating-orb-shell .floating-orb-button .floating-orb-core {
+  transform: scale(var(--orb-scale));
+  filter: none;
+  box-shadow: none;
+}
+
+/* 聆听：放大 + 呼吸加快（无音量推送，固定节奏近似「随音量」） */
+.floating-orb-shell .floating-orb-button[data-state='listening'] .floating-orb-core {
+  --orb-scale: 1.08;
+  filter: saturate(1.12);
+}
+
+.floating-orb-button[data-state='listening'] .floating-orb-face {
+  animation-duration: 1.6s;
+}
+
+/* 思考：缩到 95%，色环 2.4s 一圈，不呼吸 */
+.floating-orb-shell .floating-orb-button[data-state='thinking'] .floating-orb-core {
+  --orb-scale: 0.95;
+}
+
+.floating-orb-button[data-state='thinking'] .floating-orb-face::before {
+  animation-duration: 2.4s;
+}
+
+/* 说话：+4% 基准，呼吸 0.9s（叠 h37-orb 的 +6% 峰值约 +9%） */
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-core {
+  --orb-scale: 1.04;
+  filter: saturate(1.08) brightness(1.03);
+}
+
+.floating-orb-button[data-state='speaking'] .floating-orb-face {
+  animation-duration: 0.9s;
+}
+
+/* 出错：褪色、停转、不呼吸 */
+.floating-orb-shell .floating-orb-button[data-state='error'] .floating-orb-core {
+  filter: saturate(0.15) brightness(1.04);
+}
+
+.floating-orb-button[data-state='error'] .floating-orb-face {
+  animation: none;
+}
+
+/* 按下：快速回弹反馈（140ms），优先于状态尺寸 */
+.floating-orb-shell .floating-orb-button[data-pressing='true'] .floating-orb-core {
+  --orb-scale: 0.94;
+  transition-duration: var(--dur-2), var(--dur-5), var(--dur-4);
+}
+
+/* —— 外圈声纹：空闲隐藏；聆听 / 说话时柔和鼠尾草环错拍呼吸 —— */
+.floating-orb-shell .floating-orb-button .floating-orb-waves {
+  transform: none;
+}
+
+.floating-orb-shell .floating-orb-button .floating-orb-wave {
+  border: 1.5px solid color-mix(in srgb, var(--g-500) 38%, transparent);
+  opacity: 0;
+  animation: none;
+  transition: opacity var(--dur-5) linear;
+}
+
+.floating-orb-shell .floating-orb-button[data-state='listening'] .floating-orb-wave,
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-wave {
+  animation: hemi-breathe 1.6s ease-in-out infinite;
+}
+
+.floating-orb-shell .floating-orb-button[data-state='listening'] .floating-orb-wave-one,
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-wave-one {
+  opacity: 0.9;
+}
+
+.floating-orb-shell .floating-orb-button[data-state='listening'] .floating-orb-wave-two,
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-wave-two {
+  opacity: 0.6;
+  animation-delay: -0.53s;
+}
+
+.floating-orb-shell .floating-orb-button[data-state='listening'] .floating-orb-wave-three,
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-wave-three {
+  opacity: 0.35;
+  animation-delay: -1.06s;
+}
+
+.floating-orb-shell .floating-orb-button[data-state='speaking'] .floating-orb-wave {
+  animation-duration: 0.9s;
+}
+
+html.kb-nav .floating-orb-button:focus-visible {
+  outline: 0;
+}
+
+html.kb-nav .floating-orb-button:focus-visible .floating-orb-core {
+  box-shadow: var(--focus-ring);
+}
+
+/* —— 任务角标：贴球右下的 10px 圆点；进行中 1.2s 呼吸，待确认琥珀 —— */
+.floating-orb-shell .task-indicator {
+  right: 18px;
+  bottom: 18px;
+  z-index: 3;
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--g-600);
+  box-shadow: 0 0 0 2px var(--n-0);
+  animation: hemi-breathe 1.2s ease-in-out infinite;
+  transition: background-color var(--dur-5) linear;
+}
+
+.floating-orb-shell .task-indicator.warning {
+  background: var(--warn);
+  animation: none;
+}
+
+.floating-orb-shell .task-indicator.error {
+  background: var(--danger);
+  animation: none;
+}
+
+/* ============================================================
+   字幕窗（440×200 透明窗，卡宽上限 300 由主进程给）
+   层级：身份牌 faint → 用户句 body → Hemi 句 ink/medium；任务行 muted 分层
+   ============================================================ */
+.floating-caption-shell .floating-caption-copy {
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding: var(--sp-10) var(--sp-16);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  color: var(--body);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  line-height: 1.6;
+  text-shadow: none;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+
+/* 自动淡出是环境性退场（非用户关闭），沿用 400ms 整卡同步，但改走 ease-in */
+.floating-caption-shell .floating-caption-copy[data-visible='false'] {
+  opacity: 0;
+  transition: opacity var(--dur-5) var(--ease-in);
+}
+
+.floating-caption-shell .floating-caption-copy span {
+  width: auto;
+  gap: var(--sp-10);
+  margin-top: 0;
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+  transition:
+    opacity var(--dur-5) var(--ease-in),
+    transform var(--dur-5) var(--ease-in);
+}
+
+.floating-caption-shell .floating-caption-copy[data-visible='false'] span {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.floating-caption-shell .floating-caption-copy span::before {
+  min-width: 28px;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--faint);
+}
+
+.floating-caption-shell .floating-caption-copy span[data-role='Hemi'],
+.floating-caption-shell .floating-caption-copy span[data-author='hemi'] {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.floating-caption-shell .floating-caption-copy span[data-role='Hemi']::before {
+  color: var(--accent-text);
+}
+
+/* 还在识别的这句、正在想：降到 muted，与定稿区分 */
+.floating-caption-shell .floating-caption-copy span[data-interim='true'],
+.floating-caption-shell .floating-caption-copy span[data-thinking='true'] {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+
+.floating-caption-shell .floating-caption-copy span[data-error='true'],
+.floating-caption-shell .floating-caption-copy span[data-error='true']::before {
+  font-weight: var(--fw-medium);
+  color: var(--danger);
+}
+
+/* 「正在想」三点：共用 hemi-breathe 错拍，不再上下跳 */
+.floating-caption-shell .caption-thinking-dots {
+  align-self: center;
+  gap: 3px;
+  margin-left: var(--sp-2);
+}
+
+.floating-caption-shell .caption-thinking-dots i {
+  width: 4px;
+  height: 4px;
+  background: var(--g-500);
+  animation: hemi-breathe 1.2s ease-in-out infinite;
+}
+
+.floating-caption-shell .caption-thinking-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.floating-caption-shell .caption-thinking-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* 任务行：细线分层，muted 12px；状态点 6px，进行中 1.2s 呼吸 */
+.floating-caption-shell .floating-caption-copy .caption-task-row {
+  align-items: baseline;
+  gap: var(--sp-8);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+
+.floating-caption-shell .caption-task-row::before {
+  min-width: 28px;
+}
+
+.floating-caption-shell .caption-task-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--g-500);
+  animation: hemi-breathe 1.2s ease-in-out infinite;
+}
+
+.floating-caption-shell .caption-task-dot[data-waiting='true'] {
+  background: var(--warn);
+  animation: none;
+}
+
+.floating-caption-shell .floating-caption-copy .caption-permission-row {
+  color: var(--warn);
+}
+
+.floating-caption-shell .floating-caption-copy .caption-task-row + .caption-permission-row {
+  margin-top: 0;
+  padding-top: var(--sp-2);
+  border-top: 0;
+}
+
+/* —— 状态药丸：空闲 faint 圆点 + muted 字；聆听/连接鼠尾草点呼吸；出错红 —— */
+.floating-caption-shell .floating-status-pill {
+  gap: var(--sp-6);
+  height: 26px;
+  padding: 0 var(--sp-10);
+  border: 0;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+  transition: opacity var(--dur-5) var(--ease-in);
+}
+
+.floating-caption-shell .floating-status-pill::before {
+  width: 6px;
+  height: 6px;
+  background: var(--faint);
+  transition: background-color var(--dur-5) linear;
+}
+
+.floating-caption-shell .floating-status-pill[data-state='listening'],
+.floating-caption-shell .floating-status-pill[data-state='requesting'] {
+  color: var(--accent-text);
+}
+
+.floating-caption-shell .floating-status-pill[data-state='listening']::before,
+.floating-caption-shell .floating-status-pill[data-state='requesting']::before {
+  background: var(--g-500);
+  animation: hemi-breathe 1.2s ease-in-out infinite;
+}
+
+.floating-caption-shell .floating-status-pill[data-state='error'] {
+  color: var(--danger);
+}
+
+.floating-caption-shell .floating-status-pill[data-state='error']::before {
+  background: var(--danger);
+}
+
+/* 窗内留 8px 让 shadow-2 不被窗口边缘裁掉（窗口尺寸与定位不变） */
+.task-popover-shell {
+  padding: var(--sp-8);
+}
+
+.task-popover-shell .hover-menu-popover {
+  padding: var(--sp-8);
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  font-family: var(--font);
+  font-size: var(--fs-13);
+  color: var(--body);
+  transform-origin: bottom center;
+  animation: hemi-pop var(--dur-3) var(--ease-out);
+}
+
+.task-popover-shell .mini-count {
+  margin: var(--sp-2) var(--sp-6) var(--sp-8);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+/* 操作：28px ghost；只有「停止」是危险色 */
+
+.task-popover-shell .task-popover-open {
+  width: 100%;
+  margin-top: var(--sp-6);
+  color: var(--accent-text);
+}
+
+/* ============================================================
+   预览栏（h24-preview*）：宽屏常驻列内容延迟 80ms 淡入；
+   <1180 覆盖层自右滑入 280ms。Tab 32px，选中 ink + accent 下划线。
+   ============================================================ */
+.compact-shell .h24-preview {
+  background: var(--bg-surface);
+  border-left: 1px solid var(--line);
+  color: var(--body);
+  animation: hemi-drill var(--dur-4) var(--ease-out);
+}
+
+@media (min-width: 1180px) {
+  .compact-shell .h24-workspace[data-preview-open='true'] .h24-preview {
+    border-left: 1px solid var(--line);
+    animation: none;
+  }
+
+  .compact-shell .h24-workspace[data-preview-open='true'] .h24-preview > * {
+    animation: hemi-fade var(--dur-3) linear var(--dur-1) backwards;
+  }
+}
+
+.compact-shell .h24-preview-strip {
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+}
+
+.compact-shell .h24-preview-rail {
+  gap: var(--sp-2);
+  min-height: 43px;
+  padding: 0 var(--sp-8);
+  align-items: stretch;
+}
+
+.compact-shell .h24-preview-tab,
+.compact-shell .h24-preview-tab.active,
+.compact-shell .h24-preview-tab:not(.active):hover {
+  position: relative;
+  align-self: center;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-preview-tab:not(.active):hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-tab.active {
+  color: var(--ink);
+}
+
+/* 选中下划线贴在 strip 底边线上 */
+.compact-shell .h24-preview-tab::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -6px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+}
+
+.compact-shell .h24-preview-tab.active::after {
+  opacity: 1;
+}
+
+.compact-shell .h24-preview-tab-select {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+}
+
+.compact-shell .h24-preview-tab.active .h24-preview-tab-select {
+  font-weight: var(--fw-medium);
+}
+
+.compact-shell .h24-preview-tab-select svg {
+  color: var(--faint);
+}
+
+.compact-shell .h24-preview-tab-close {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--faint);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-preview-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--ink);
+}
+
+/* 工具类图标按钮：统一 28px ghost */
+.compact-shell .h24-preview-add,
+.compact-shell .h24-preview-collapse,
+.compact-shell .h24-preview-tool,
+.compact-shell .h24-preview-scroll-controls button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-preview-scroll-controls button {
+  width: 24px;
+}
+
+.compact-shell .h24-preview-add:hover,
+.compact-shell .h24-preview-add[aria-expanded='true'],
+.compact-shell .h24-preview-collapse:hover,
+.compact-shell .h24-preview-tool:hover:not(:disabled),
+.compact-shell .h24-preview-scroll-controls button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-add[aria-expanded='true'] {
+  background: var(--bg-active);
+}
+
+.compact-shell .h24-preview-collapse {
+  margin: 0 var(--sp-8) 0 var(--sp-2);
+}
+
+.compact-shell .h24-preview-scroll-controls {
+  border-left: 1px solid var(--line);
+}
+
+html.kb-nav .compact-shell .h24-preview-tab-select:focus-visible,
+html.kb-nav .compact-shell .h24-preview-tab-close:focus-visible,
+html.kb-nav .compact-shell .h24-preview-add:focus-visible,
+html.kb-nav .compact-shell .h24-preview-collapse:focus-visible,
+html.kb-nav .compact-shell .h24-preview-tool:focus-visible,
+html.kb-nav .compact-shell .h24-preview-path:focus-visible,
+html.kb-nav .compact-shell .h24-preview-retry:focus-visible,
+html.kb-nav .compact-shell .h24-preview-scroll-controls button:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-sm);
+}
+
+html.kb-nav .compact-shell .h24-preview-body:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--g-200);
+}
+
+/* 「＋」下拉：h37-menu 同款 */
+.compact-shell .h24-preview-add-menu {
+  top: calc(100% + 4px);
+  right: 8px;
+  padding: var(--sp-4);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  transform-origin: top right;
+  animation: hemi-pop var(--dur-3) var(--ease-out);
+}
+
+.compact-shell .h24-preview-add-item {
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border-radius: var(--r-sm);
+  font-size: var(--row-fs);
+  color: var(--body);
+}
+
+.compact-shell .h24-preview-add-item:hover,
+html.kb-nav .compact-shell .h24-preview-add-item:focus-visible {
+  outline: 0;
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-add-item svg {
+  color: var(--faint);
+}
+
+.compact-shell .h24-preview-add-item small,
+.compact-shell .h24-preview-add-empty {
+  color: var(--faint);
+}
+
+.compact-shell .h24-preview-add-empty {
+  padding: var(--sp-8) var(--sp-10);
+}
+
+.compact-shell .h24-preview-toolbar {
+  gap: var(--sp-4);
+  min-height: 40px;
+  padding: var(--sp-4) var(--sp-8);
+  border-bottom: 1px solid var(--line);
+}
+
+.compact-shell .h24-preview-path {
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-preview-path:hover {
+  background: var(--bg-active);
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-body {
+  padding: var(--sp-24) var(--sp-24) var(--sp-48);
+}
+
+.compact-shell .h24-preview-status {
+  color: var(--muted);
+  animation: hemi-breathe 1.6s ease-in-out infinite;
+}
+
+.compact-shell .h24-preview-report-title {
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-report-summary {
+  font-size: var(--fs-13);
+  color: var(--body);
+}
+
+.compact-shell .h24-preview-report-sources h2 {
+  color: var(--ink);
+}
+
+.compact-shell .h24-preview-image {
+  border: 0;
+  box-shadow: var(--shadow-1);
+}
+
+/* 读不了 / 文件不在了：h37-note[data-tone=warn] 提示条 + 次级按钮 */
+.compact-shell .h24-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-10);
+  padding: var(--sp-12) var(--sp-16);
+}
+
+.compact-shell .h24-preview-error p {
+  font-size: var(--fs-13);
+  line-height: 1.55;
+  color: var(--warn);
+}
+
+.compact-shell .h24-preview-retry,
+.compact-shell .h24-preview-retry:hover {
+  gap: var(--sp-6);
+  padding: 0 var(--sp-10);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--ink);
+}
+
+/* 面板内轻提示：h37-toast 同款（深底白字，200ms 淡入 + 4px） */
+.compact-shell .h24-preview-toast {
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--n-900);
+  color: var(--n-0);
+  font-size: var(--fs-13);
+  box-shadow: var(--shadow-2);
+  animation: h37-toast-in var(--dur-3) var(--ease-out);
+}
+
+/* ============================================================
+   Dialog 基件（components/ui/dialog.tsx）+ 历史会话对话框
+   base-ui 用 data-starting-style / data-ending-style 驱动进出场：
+   入 200ms ease-out（+4px），出 140ms ease-in；≤600 底部弹层 280ms。
+   ============================================================ */
+.h37-dialog-overlay {
+  background: var(--bg-scrim);
+  transition: opacity var(--dur-3) linear;
+}
+
+.h37-dialog-overlay[data-starting-style],
+.h37-dialog-overlay[data-ending-style] {
+  opacity: 0;
+}
+
+.h37-dialog-overlay[data-ending-style] {
+  transition: opacity var(--dur-2) var(--ease-in);
+}
+
+.h37-dialog-popup {
+  max-height: calc(100dvh - 48px);
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  font-family: var(--font);
+  font-size: var(--fs-13);
+  color: var(--body);
+  transition:
+    opacity var(--dur-3) var(--ease-out),
+    transform var(--dur-3) var(--ease-out);
+}
+
+.h37-dialog-popup[data-starting-style],
+.h37-dialog-popup[data-ending-style] {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.h37-dialog-popup[data-ending-style] {
+  transition:
+    opacity var(--dur-2) var(--ease-in),
+    transform var(--dur-2) var(--ease-in);
+}
+
+.h37-dialog-popup .h37-dialog-title {
+  margin: 0;
+  padding-right: var(--sp-32);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.h37-dialog-popup .h37-dialog-desc {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.h37-dialog-popup [data-slot='dialog-header'] {
+  gap: var(--sp-4);
+}
+
+.h37-dialog-popup > [data-slot='dialog-close'] {
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+}
+
+.h37-dialog-popup > [data-slot='dialog-close']:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.h37-dialog-popup .h37-dialog-foot {
+  margin-top: var(--sp-4);
+}
+
+@media (max-width: 600px) {
+  .h37-dialog-popup[data-slot='dialog-content'] {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    max-width: 100%;
+    max-height: 90dvh;
+    translate: none;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: calc(var(--sp-20) + env(safe-area-inset-bottom));
+    transition: transform var(--dur-4) var(--ease-out);
+  }
+
+  .h37-dialog-popup[data-slot='dialog-content'][data-starting-style],
+  .h37-dialog-popup[data-slot='dialog-content'][data-ending-style] {
+    opacity: 1;
+    transform: translateY(100%);
+  }
+
+  .h37-dialog-popup[data-slot='dialog-content'][data-ending-style] {
+    transition: transform var(--dur-2) var(--ease-in);
+  }
+}
+
+/* —— 历史会话：行式列表（无边框卡），40px 行，悬停 bg-hover —— */
+.h37-dialog-popup.history-dialog {
+  gap: var(--sp-12);
+  font-size: var(--fs-13);
+}
+
+.history-dialog .history-error {
+  padding: var(--sp-10) var(--sp-12);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--danger-50);
+  font-size: var(--fs-13);
+  color: var(--danger);
+}
+
+.history-dialog .history-list {
+  gap: var(--gap-row);
+  margin: 0 calc(var(--sp-8) * -1);
+  padding: 0;
+}
+
+.history-dialog .history-item {
+  gap: var(--sp-4);
+  min-height: 40px;
+  padding: 0 var(--sp-6) 0 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  transition: background-color var(--dur-1) linear;
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+.history-dialog .history-item:hover,
+.history-dialog .history-item:focus-within {
+  background: var(--bg-hover);
+}
+
+.history-dialog .history-item[data-corrupt='true'] {
+  opacity: 0.55;
+}
+
+.history-dialog .history-item-main {
+  gap: var(--sp-12);
+  align-self: stretch;
+  min-height: 40px;
+  padding: 0 var(--sp-4) 0 var(--sp-10);
+  border-radius: var(--r-sm);
+}
+
+.history-dialog .history-item-main:disabled {
+  cursor: default;
+}
+
+html.kb-nav .history-dialog .history-item-main:focus-visible,
+html.kb-nav .history-dialog .history-chip-btn:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* 行内重命名输入框（2026-10-05）：与侧栏 h24-sidebar-rename 同一观感——
+   弹窗 portal 在 .compact-shell 外，样式在此重写一份。 */
+.history-dialog .history-rename {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: var(--sp-4) 0;
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--g-500),
+    0 0 0 3px var(--g-100);
+  font: inherit;
+  font-size: var(--fs-13);
+  color: var(--ink);
+}
+
+.history-dialog .history-rename:focus-visible {
+  outline: 0;
+}
+
+.history-dialog .history-item-text {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  color: var(--ink);
+}
+
+.history-dialog .history-time {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 删除：28px ghost 图标钮；二次确认转危险色文字 */
+.history-dialog .history-chip-btn {
+  flex: none;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 var(--sp-8);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--faint);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.history-dialog .history-chip-btn:hover:not(:disabled) {
+  background: var(--danger-50);
+  color: var(--danger);
+}
+
+.history-dialog .history-chip-btn:not(:has(svg)) {
+  background: var(--danger-50);
+  color: var(--danger);
+}
+
+.history-dialog .history-chip-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.history-dialog .history-empty {
+  padding: var(--sp-32) 0;
+  font-size: var(--fs-13);
+  color: var(--muted);
+}
+
+/* 宽度沿用 .compact-shell .permission-popover 的 20.5rem（同壳，不另设）。 */
+.scope-popover-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-8) 0; padding: 0; list-style: none; }
+.scope-popover-item { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); padding: var(--sp-6) var(--sp-8); border-radius: var(--r-sm); background: var(--bg-subtle); }
+.scope-popover-title { min-width: 0; font-size: var(--fs-13); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-popover-sub { font-size: var(--fs-12); color: var(--muted); white-space: nowrap; }
+.scope-popover-empty { margin: var(--sp-8) 0; font-size: var(--fs-13); color: var(--muted); line-height: 1.6; }
+.scope-popover-more { padding: var(--sp-4) var(--sp-8); font-size: var(--fs-12); color: var(--faint); }
+.scope-popover-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); border-top: 1px solid var(--line); padding-top: var(--sp-8); font-size: var(--fs-12); color: var(--muted); }
+.scope-popover-foot .text-btn { font-size: var(--fs-12); color: var(--accent-text); }

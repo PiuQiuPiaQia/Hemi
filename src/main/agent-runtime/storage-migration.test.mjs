@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { initializeRuntimeStorage, acknowledgeLegacyBranch } from './storage-migration.mjs';
+test('版本目录一次激活、原字节保留；旧队列待复核、旧执行中断且不重放；分叉不自动合并',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'h64-migrate-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,'conversations'));
+  const original=JSON.stringify({id:'c',turns:[{author:'user',text:'original'}],agentSession:{entries:[{private:'old'}]},flow:{phase:'running',activeRunId:'r',runs:{r:{closedAt:null}},tasks:{t:{phase:'running'}},pending:[{inputId:'queued',text:'do it'}]}});
+  await writeFile(path.join(root,'conversations/c.json'),original);
+  await mkdir(path.join(root,'attachments'));
+  const attachmentBytes=JSON.stringify({stagedPath:path.join(root,'attachments/image.png')});
+  await writeFile(path.join(root,'attachments/index.json'),attachmentBytes);
+  const first=await initializeRuntimeStorage({userDataDir:root});assert.equal(first.migrated,true);
+  assert.equal(JSON.parse(await readFile(path.join(first.dir,'attachments/index.json'),'utf8')).stagedPath,path.join(first.dir,'attachments/image.png'));
+  assert.equal(await readFile(path.join(root,'attachments/index.json'),'utf8'),attachmentBytes);
+  assert.equal(await readFile(path.join(root,'conversations/c.json'),'utf8'),original);
+  const next=JSON.parse(await readFile(path.join(first.dir,'conversations/c.json'),'utf8'));
+  assert.equal(next.agentSession,undefined);assert.ok(next.predecessorAgentSession);assert.equal(next.flow.pending[0].state,'needs-review');assert.equal(next.flow.runs.r.outcome,'interrupted');
+  assert.equal((await initializeRuntimeStorage({userDataDir:root})).conflict,false);
+  await writeFile(path.join(root,'conversations/c.json'),original+'\n');
+  const conflict=await initializeRuntimeStorage({userDataDir:root});assert.equal(conflict.conflict,true);
+  await acknowledgeLegacyBranch({userDataDir:root,sourceStats:conflict.sourceStats});assert.equal((await initializeRuntimeStorage({userDataDir:root})).conflict,false);
+  assert.equal(JSON.parse(await readFile(path.join(first.dir,'conversations/c.json'),'utf8')).turns[0].text,'original');
+});
+test('损坏数据或符号链接使迁移停止，不激活空库、不写源文件',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'h64-bad-migrate-'));t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(path.join(root,'conversations'));
+  await writeFile(path.join(root,'conversations/c.json'),'broken');await assert.rejects(initializeRuntimeStorage({userDataDir:root}),/旧会话损坏/);
+  assert.equal(await readFile(path.join(root,'conversations/c.json'),'utf8'),'broken');
+  await rm(path.join(root,'conversations/c.json'));await symlink('/tmp',path.join(root,'conversations/link'));await assert.rejects(initializeRuntimeStorage({userDataDir:root}),/符号链接/);
+});

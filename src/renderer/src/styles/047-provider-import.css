@@ -1,0 +1,283 @@
+/**
+ * 047 New API 站点登录导入：添加页方式选择＋站点浏览器列＋导入控制面板。
+ * 控件一律用 h37-* 共用类；这里只写本页布局。原生 WebContentsView 叠在
+ * .h47n-browser 占位上（渲染层只画边框/提示，不画站点内容）。
+ */
+
+/* —— 方式选择（两卡 radiogroup，沿 h37m-preset 的卡片口径） —— */
+.h47n-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-8);
+}
+
+.h47n-method {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  min-width: 0;
+  padding: var(--sp-12);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  font: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  color: var(--ink);
+  transition:
+    box-shadow var(--dur-2) linear,
+    background-color var(--dur-1) linear;
+}
+
+.h47n-method:hover {
+  background: var(--n-25);
+}
+
+html.kb-nav .h47n-method:focus-visible {
+  outline: 0;
+  box-shadow:
+    var(--shadow-1),
+    var(--focus-ring);
+}
+
+.h47n-method[data-on='true'] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--g-500),
+    0 0 0 3px var(--g-100);
+}
+
+.h47n-method-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.h47n-method-text > b {
+  font-weight: var(--fw-medium);
+}
+
+.h47n-method-text > span {
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+/* —— 站点浏览器 + 控制面板（宽窗并排 / 窄窗单列） —— */
+.h47n-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--sp-12);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .h47n-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.h47n-browser-col {
+  min-width: 0;
+}
+
+.h47n-browser-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-6);
+}
+
+.h47m-origin {
+  overflow: hidden;
+  font-size: var(--fs-12);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h47n-browser {
+  position: relative;
+  min-height: 440px;
+  border-radius: var(--r-md);
+  background: var(--n-25);
+  box-shadow: var(--shadow-1);
+}
+
+.h47n-browser:not([data-wide='true']) {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-12);
+}
+
+.h47n-browser-note {
+  font-size: var(--fs-12);
+  color: var(--muted);
+  text-align: center;
+}
+
+.h47n-panel {
+  min-width: 0;
+}
+
+/* 块节奏：与 pane 直挂的 .h37-section 同一口径（--gap-section）。这里因为
+   包了一层 div，内部首个 section 会命中 :first-child 兜底丢掉 margin-top，
+   由 wrapper 补齐——间距门与布局审计都会盯这条。 */
+.h47n {
+  margin-top: var(--gap-section);
+}
+
+.h47n-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+  margin-top: var(--sp-12);
+}
+
+.h47n-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.h47n-inline .h37-input[type='text'],
+.h47n-inline .h37-input:not(select) {
+  width: 96px;
+}
+
+/* —— 自动导入进度 —— */
+.h47n-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-4) 0;
+}
+
+.h47n-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-13);
+  color: var(--faint);
+}
+
+.h47n-step[data-state='active'] {
+  color: var(--ink);
+  font-weight: var(--fw-medium);
+}
+
+.h47n-step[data-state='done'] {
+  color: var(--muted);
+}
+
+.h47n-step-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.h47n-step[data-state='active'] .h47n-step-dot {
+  background: var(--g-500);
+}
+
+.h47n-step[data-state='done'] .h47n-step-dot {
+  background: var(--g-300);
+}
+
+.h47n-validation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-top: var(--sp-10);
+}
+
+.h47n-vrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  font-size: var(--fs-12);
+}
+
+.h47n-vrow[data-ok='true'] {
+  color: var(--muted);
+}
+
+.h47n-vrow[data-ok='false'] {
+  color: var(--warn);
+}
+
+.h47n-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-8);
+}
+
+.h47n-search .h37-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.h47n-ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.h47n-hint {
+  margin-bottom: var(--sp-12);
+}
+
+/* —— 提交区（选择面板底部；说明 + 主按钮，不悬浮遮挡正文） —— */
+.h47n-submit .h47n-submit-note {
+  margin: 0 var(--pad-card) var(--sp-10);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h47n-submit .h37-note {
+  margin: 0 var(--pad-card) var(--sp-10);
+}
+
+.h47n-submit .h47n-foot {
+  margin-top: 0;
+  padding: 0 var(--pad-card) var(--sp-12);
+}
+
+/* 入口（未开始）页脚说明沿 section-foot；表单行距沿 h37m-form-row。 */
+.h47n[data-phase='entry'] .h47n-foot {
+  margin-top: var(--sp-16);
+}
+
+/* 站点地址行：协议下拉（http/https）＋主机输入。下拉不定宽，主机吃满剩余。
+   h37m-field 默认纵向（多行表单用），这里改单行。 */
+.h47n-url-field {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.h47n-url-field .h47n-scheme {
+  width: auto;
+  flex: none;
+}
+
+.h47n-url-field .h37-input:not(select) {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h47n-method,
+  .h47n-method:hover {
+    transition: none;
+  }
+}

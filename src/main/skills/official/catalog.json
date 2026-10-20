@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "publisher": "Hemi",
+  "publishedAt": "2026-10-01",
+  "items": [
+    {
+      "id": "source-check",
+      "author": "Hemi",
+      "version": "1.0.0",
+      "name": "source-check",
+      "title": "资料核对",
+      "description": "核对时效性事实、原始来源和引用链；适合新闻、产品信息与资料查证。",
+      "package": "bundles/source-check-1.0.0.json",
+      "sha256": "d3f6b802a07b973b62497da02968292fa1d0678e91666d9e555714e2e6589223",
+      "files": [
+        "references/checklist.md",
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "meeting-notes",
+      "author": "Hemi",
+      "version": "1.0.0",
+      "name": "meeting-notes",
+      "title": "会议纪要",
+      "description": "将会议记录或转写整理成结论、行动项和待确认问题；适合会后纪要。",
+      "package": "bundles/meeting-notes-1.0.0.json",
+      "sha256": "13b368e525bcd0f7b8b84856a11c6899ec0e1949e74b50d2d8b57b96bc1e2a28",
+      "files": [
+        "references/template.md",
+        "SKILL.md"
+      ]
+    },
+    {
+      "id": "draft-review",
+      "author": "Hemi",
+      "version": "1.0.0",
+      "name": "draft-review",
+      "title": "文稿校对",
+      "description": "校对中文文稿的错字、语义、结构与事实表述；适合邮件、方案和报告定稿。",
+      "package": "bundles/draft-review-1.0.0.json",
+      "sha256": "6a0405dc4d45e9b3fbce89d6e054eba6558486379268e489b5539a87950b446d",
+      "files": [
+        "references/review-list.md",
+        "SKILL.md"
+      ]
+    }
+  ]
+}

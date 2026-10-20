@@ -1,0 +1,3897 @@
+{
+  "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
+  "lockfileSha256": "656d460ffcd81b2d41344b34dd6898766f5591bf492b8ef6fec6e4380d82f378",
+  "components": [
+    {
+      "name": "@base-ui/react",
+      "version": "1.7.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mui/base-ui.git",
+        "directory": "packages/react"
+      },
+      "locations": [
+        "node_modules/@base-ui/react"
+      ],
+      "modules": [
+        "node_modules/@base-ui/react/button/Button.mjs",
+        "node_modules/@base-ui/react/dialog/backdrop/DialogBackdrop.mjs",
+        "node_modules/@base-ui/react/dialog/close/DialogClose.mjs",
+        "node_modules/@base-ui/react/dialog/description/DialogDescription.mjs",
+        "node_modules/@base-ui/react/dialog/popup/DialogPopup.mjs",
+        "node_modules/@base-ui/react/dialog/portal/DialogPortal.mjs",
+        "node_modules/@base-ui/react/dialog/portal/DialogPortalContext.mjs",
+        "node_modules/@base-ui/react/dialog/root/DialogRoot.mjs",
+        "node_modules/@base-ui/react/dialog/root/DialogRootContext.mjs",
+        "node_modules/@base-ui/react/dialog/root/useDialogRoot.mjs",
+        "node_modules/@base-ui/react/dialog/root/useRenderDialogRoot.mjs",
+        "node_modules/@base-ui/react/dialog/store/DialogStore.mjs",
+        "node_modules/@base-ui/react/dialog/title/DialogTitle.mjs",
+        "node_modules/@base-ui/react/dialog/utils/stateAttributesMapping.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/components/FloatingFocusManager.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/components/FloatingPortal.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/components/FloatingRootStore.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/components/FloatingTree.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/components/FloatingTreeStore.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useClick.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useDismiss.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useFloating.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useHoverFloatingInteraction.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useHoverInteractionSharedState.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useHoverReferenceInteraction.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useHoverShared.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/hooks/useSyncedFloatingRootContext.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/middleware/arrow.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/safePolygon.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/composite.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/constants.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/createAttribute.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/createEventEmitter.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/element.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/enqueueFocus.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/event.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/getEmptyRootContext.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/markOthers.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/nodes.mjs",
+        "node_modules/@base-ui/react/floating-ui-react/utils/tabbable.mjs",
+        "node_modules/@base-ui/react/internals/clamp.mjs",
+        "node_modules/@base-ui/react/internals/composite/composite.mjs",
+        "node_modules/@base-ui/react/internals/composite/root/CompositeRootContext.mjs",
+        "node_modules/@base-ui/react/internals/constants.mjs",
+        "node_modules/@base-ui/react/internals/createBaseUIEventDetails.mjs",
+        "node_modules/@base-ui/react/internals/csp-context/CSPContext.mjs",
+        "node_modules/@base-ui/react/internals/direction-context/DirectionContext.mjs",
+        "node_modules/@base-ui/react/internals/getDisabledMountTransitionStyles.mjs",
+        "node_modules/@base-ui/react/internals/getStateAttributesProps.mjs",
+        "node_modules/@base-ui/react/internals/reason-parts.mjs",
+        "node_modules/@base-ui/react/internals/shadowDom.mjs",
+        "node_modules/@base-ui/react/internals/stateAttributesMapping.mjs",
+        "node_modules/@base-ui/react/internals/use-button/useButton.mjs",
+        "node_modules/@base-ui/react/internals/useAnchorPositioning.mjs",
+        "node_modules/@base-ui/react/internals/useAnimationsFinished.mjs",
+        "node_modules/@base-ui/react/internals/useBaseUiId.mjs",
+        "node_modules/@base-ui/react/internals/useOpenChangeComplete.mjs",
+        "node_modules/@base-ui/react/internals/useRenderElement.mjs",
+        "node_modules/@base-ui/react/internals/useTransitionStatus.mjs",
+        "node_modules/@base-ui/react/merge-props/mergeProps.mjs",
+        "node_modules/@base-ui/react/popover/backdrop/PopoverBackdrop.mjs",
+        "node_modules/@base-ui/react/popover/close/PopoverClose.mjs",
+        "node_modules/@base-ui/react/popover/popup/PopoverPopup.mjs",
+        "node_modules/@base-ui/react/popover/portal/PopoverPortal.mjs",
+        "node_modules/@base-ui/react/popover/portal/PopoverPortalContext.mjs",
+        "node_modules/@base-ui/react/popover/positioner/PopoverPositioner.mjs",
+        "node_modules/@base-ui/react/popover/positioner/PopoverPositionerContext.mjs",
+        "node_modules/@base-ui/react/popover/root/PopoverRoot.mjs",
+        "node_modules/@base-ui/react/popover/root/PopoverRootContext.mjs",
+        "node_modules/@base-ui/react/popover/store/PopoverStore.mjs",
+        "node_modules/@base-ui/react/popover/title/PopoverTitle.mjs",
+        "node_modules/@base-ui/react/popover/trigger/PopoverTrigger.mjs",
+        "node_modules/@base-ui/react/scroll-area/corner/ScrollAreaCorner.mjs",
+        "node_modules/@base-ui/react/scroll-area/root/ScrollAreaRoot.mjs",
+        "node_modules/@base-ui/react/scroll-area/root/ScrollAreaRootContext.mjs",
+        "node_modules/@base-ui/react/scroll-area/root/stateAttributes.mjs",
+        "node_modules/@base-ui/react/scroll-area/scrollbar/ScrollAreaScrollbar.mjs",
+        "node_modules/@base-ui/react/scroll-area/scrollbar/ScrollAreaScrollbarContext.mjs",
+        "node_modules/@base-ui/react/scroll-area/thumb/ScrollAreaThumb.mjs",
+        "node_modules/@base-ui/react/scroll-area/utils/getOffset.mjs",
+        "node_modules/@base-ui/react/scroll-area/viewport/ScrollAreaViewport.mjs",
+        "node_modules/@base-ui/react/scroll-area/viewport/ScrollAreaViewportContext.mjs",
+        "node_modules/@base-ui/react/toolbar/root/ToolbarRootContext.mjs",
+        "node_modules/@base-ui/react/utils/FocusGuard.mjs",
+        "node_modules/@base-ui/react/utils/InternalBackdrop.mjs",
+        "node_modules/@base-ui/react/utils/adaptiveOriginConstants.mjs",
+        "node_modules/@base-ui/react/utils/closePart.mjs",
+        "node_modules/@base-ui/react/utils/dispatchClickWithModifiers.mjs",
+        "node_modules/@base-ui/react/utils/hideMiddleware.mjs",
+        "node_modules/@base-ui/react/utils/popupStateMapping.mjs",
+        "node_modules/@base-ui/react/utils/popups/popupStoreUtils.mjs",
+        "node_modules/@base-ui/react/utils/popups/popupTriggerMap.mjs",
+        "node_modules/@base-ui/react/utils/popups/store.mjs",
+        "node_modules/@base-ui/react/utils/popups/usePopupHandleStore.mjs",
+        "node_modules/@base-ui/react/utils/popups/useTriggerFocusGuards.mjs",
+        "node_modules/@base-ui/react/utils/resolveClassName.mjs",
+        "node_modules/@base-ui/react/utils/resolveRef.mjs",
+        "node_modules/@base-ui/react/utils/resolveStyle.mjs",
+        "node_modules/@base-ui/react/utils/scrollEdges.mjs",
+        "node_modules/@base-ui/react/utils/styles.mjs",
+        "node_modules/@base-ui/react/utils/useAnchoredPopupScrollLock.mjs",
+        "node_modules/@base-ui/react/utils/useFocusableWhenDisabled.mjs",
+        "node_modules/@base-ui/react/utils/useOpenInteractionType.mjs",
+        "node_modules/@base-ui/react/utils/usePositioner.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@base-ui/react/LICENSE",
+          "sha256": "07fc1b39d69d14bc7d40482a628f47226258eb01265db68ae684944b916beb2a"
+        }
+      ]
+    },
+    {
+      "name": "@base-ui/utils",
+      "version": "0.3.2",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mui/base-ui.git",
+        "directory": "packages/utils"
+      },
+      "locations": [
+        "node_modules/@base-ui/utils"
+      ],
+      "modules": [
+        "node_modules/@base-ui/utils/addEventListener.mjs",
+        "node_modules/@base-ui/utils/empty.mjs",
+        "node_modules/@base-ui/utils/fastHooks.mjs",
+        "node_modules/@base-ui/utils/formatErrorMessage.mjs",
+        "node_modules/@base-ui/utils/getReactElementRef.mjs",
+        "node_modules/@base-ui/utils/inertValue.mjs",
+        "node_modules/@base-ui/utils/mergeCleanups.mjs",
+        "node_modules/@base-ui/utils/mergeObjects.mjs",
+        "node_modules/@base-ui/utils/owner.mjs",
+        "node_modules/@base-ui/utils/platform/engine.mjs",
+        "node_modules/@base-ui/utils/platform/env.mjs",
+        "node_modules/@base-ui/utils/platform/os.mjs",
+        "node_modules/@base-ui/utils/platform/screen-reader.mjs",
+        "node_modules/@base-ui/utils/platform/shared.mjs",
+        "node_modules/@base-ui/utils/reactVersion.mjs",
+        "node_modules/@base-ui/utils/safeReact.mjs",
+        "node_modules/@base-ui/utils/store/ReactStore.mjs",
+        "node_modules/@base-ui/utils/store/Store.mjs",
+        "node_modules/@base-ui/utils/store/useStore.mjs",
+        "node_modules/@base-ui/utils/useAnimationFrame.mjs",
+        "node_modules/@base-ui/utils/useEnhancedClickHandler.mjs",
+        "node_modules/@base-ui/utils/useId.mjs",
+        "node_modules/@base-ui/utils/useIsoLayoutEffect.mjs",
+        "node_modules/@base-ui/utils/useMergedRefs.mjs",
+        "node_modules/@base-ui/utils/useOnMount.mjs",
+        "node_modules/@base-ui/utils/useRefWithInit.mjs",
+        "node_modules/@base-ui/utils/useScrollLock.mjs",
+        "node_modules/@base-ui/utils/useStableCallback.mjs",
+        "node_modules/@base-ui/utils/useTimeout.mjs",
+        "node_modules/@base-ui/utils/useValueAsRef.mjs",
+        "node_modules/@base-ui/utils/visuallyHidden.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@base-ui/utils/LICENSE",
+          "sha256": "07fc1b39d69d14bc7d40482a628f47226258eb01265db68ae684944b916beb2a"
+        }
+      ]
+    },
+    {
+      "name": "@dagrejs/graphlib",
+      "version": "2.2.2",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/dagrejs/graphlib.git"
+      },
+      "locations": [
+        "node_modules/@dagrejs/graphlib"
+      ],
+      "modules": [
+        "node_modules/@dagrejs/graphlib/index.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/components.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/dfs.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/dijkstra-all.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/dijkstra.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/find-cycles.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/floyd-warshall.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/index.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/is-acyclic.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/postorder.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/preorder.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/prim.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/tarjan.js",
+        "node_modules/@dagrejs/graphlib/lib/alg/topsort.js",
+        "node_modules/@dagrejs/graphlib/lib/data/priority-queue.js",
+        "node_modules/@dagrejs/graphlib/lib/graph.js",
+        "node_modules/@dagrejs/graphlib/lib/index.js",
+        "node_modules/@dagrejs/graphlib/lib/json.js",
+        "node_modules/@dagrejs/graphlib/lib/version.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dagrejs/graphlib/LICENSE",
+          "sha256": "6a349742a6cb219d5a2fc8d0844f6d89a6efc62e20c664450d884fc7ff2d6015"
+        }
+      ]
+    },
+    {
+      "name": "@dnd-kit/accessibility",
+      "version": "3.1.1",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clauderic/dnd-kit.git",
+        "directory": "packages/accessibility"
+      },
+      "locations": [
+        "node_modules/@dnd-kit/accessibility"
+      ],
+      "modules": [
+        "node_modules/@dnd-kit/accessibility/dist/accessibility.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dnd-kit/accessibility/LICENSE",
+          "sha256": "537607e3f1533ad2c5b12978967f5ab27f34ffb7e626e321017a7ccca6cc24ff"
+        }
+      ]
+    },
+    {
+      "name": "@dnd-kit/core",
+      "version": "6.3.1",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clauderic/dnd-kit.git",
+        "directory": "packages/core"
+      },
+      "locations": [
+        "node_modules/@dnd-kit/core"
+      ],
+      "modules": [
+        "node_modules/@dnd-kit/core/dist/core.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dnd-kit/core/LICENSE",
+          "sha256": "537607e3f1533ad2c5b12978967f5ab27f34ffb7e626e321017a7ccca6cc24ff"
+        }
+      ]
+    },
+    {
+      "name": "@dnd-kit/modifiers",
+      "version": "9.0.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clauderic/dnd-kit.git",
+        "directory": "packages/modifiers"
+      },
+      "locations": [
+        "node_modules/@dnd-kit/modifiers"
+      ],
+      "modules": [
+        "node_modules/@dnd-kit/modifiers/dist/modifiers.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dnd-kit/modifiers/LICENSE",
+          "sha256": "537607e3f1533ad2c5b12978967f5ab27f34ffb7e626e321017a7ccca6cc24ff"
+        }
+      ]
+    },
+    {
+      "name": "@dnd-kit/sortable",
+      "version": "10.0.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clauderic/dnd-kit.git",
+        "directory": "packages/sortable"
+      },
+      "locations": [
+        "node_modules/@dnd-kit/sortable"
+      ],
+      "modules": [
+        "node_modules/@dnd-kit/sortable/dist/sortable.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dnd-kit/sortable/LICENSE",
+          "sha256": "537607e3f1533ad2c5b12978967f5ab27f34ffb7e626e321017a7ccca6cc24ff"
+        }
+      ]
+    },
+    {
+      "name": "@dnd-kit/utilities",
+      "version": "3.2.2",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clauderic/dnd-kit.git",
+        "directory": "packages/utilities"
+      },
+      "locations": [
+        "node_modules/@dnd-kit/utilities"
+      ],
+      "modules": [
+        "node_modules/@dnd-kit/utilities/dist/utilities.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@dnd-kit/utilities/LICENSE",
+          "sha256": "537607e3f1533ad2c5b12978967f5ab27f34ffb7e626e321017a7ccca6cc24ff"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/core",
+      "version": "1.8.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/floating-ui/floating-ui.git",
+        "directory": "packages/core"
+      },
+      "locations": [
+        "node_modules/@floating-ui/core"
+      ],
+      "modules": [
+        "node_modules/@floating-ui/core/dist/floating-ui.core.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@floating-ui/core/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/dom",
+      "version": "1.8.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/floating-ui/floating-ui.git",
+        "directory": "packages/dom"
+      },
+      "locations": [
+        "node_modules/@floating-ui/dom"
+      ],
+      "modules": [
+        "node_modules/@floating-ui/dom/dist/floating-ui.dom.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@floating-ui/dom/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/react-dom",
+      "version": "2.1.9",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/floating-ui/floating-ui.git",
+        "directory": "packages/react-dom"
+      },
+      "locations": [
+        "node_modules/@floating-ui/react-dom"
+      ],
+      "modules": [
+        "node_modules/@floating-ui/react-dom/dist/floating-ui.react-dom.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@floating-ui/react-dom/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/utils",
+      "version": "0.2.12",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/floating-ui/floating-ui.git",
+        "directory": "packages/utils"
+      },
+      "locations": [
+        "node_modules/@floating-ui/utils"
+      ],
+      "modules": [
+        "node_modules/@floating-ui/utils/dist/floating-ui.utils.dom.mjs",
+        "node_modules/@floating-ui/utils/dist/floating-ui.utils.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@floating-ui/utils/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/background-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/background-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/background-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/command",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/command"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/command/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/core",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/core"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/core/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/document",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/document"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/document/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/editor",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/editor"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/editor/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/form-core",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/form-core"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/form-core/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/form",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/form"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/form/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-auto-layout-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-auto-layout-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-auto-layout-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-history-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-history-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-history-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-hover-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-hover-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-hover-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-layout-core",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-core"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/chunk-3UW6BHP2.js",
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/chunk-5BT3ZR4D.js",
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/chunk-EUXUH3YW.js",
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/chunk-IKQUOAWQ.js",
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/chunk-U2XMPOSL.js",
+        "node_modules/@flowgram.ai/free-layout-core/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-layout-editor",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/dist/esm/index.js",
+        "node_modules/@flowgram.ai/free-layout-editor/index.css"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-lines-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-lines-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-lines-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/free-stack-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-stack-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/@flowgram.ai/free-stack-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/history-node-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/history-node-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/history-node-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/history",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/history"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/history/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/i18n-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/i18n-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/i18n-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/i18n",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/i18n"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/i18n/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/materials-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/materials-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/materials-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/node-core-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/node-core-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/node-core-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/node-variable-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/node-variable-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/node-variable-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/node",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/node"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/node/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/playground-react",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/playground-react"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/playground-react/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/reactive",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/reactive"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/reactive/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/redux-devtool-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/redux-devtool-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/redux-devtool-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/renderer",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/renderer"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/renderer/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/select-box-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/select-box-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/select-box-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/shortcuts-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/shortcuts-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/shortcuts-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/utils",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/utils"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/utils/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/variable-core",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/variable-core"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/variable-core/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/variable-layout",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/variable-layout"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/variable-layout/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@flowgram.ai/variable-plugin",
+      "version": "1.0.16",
+      "license": "MIT",
+      "repository": "https://github.com/bytedance/flowgram.ai",
+      "locations": [
+        "node_modules/@flowgram.ai/variable-plugin"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/variable-plugin/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "src/main/workflows/vendor/flowgram-engine/LICENSE",
+          "upstream": "https://github.com/bytedance/flowgram.ai/blob/2ee4a9d2aaf11850276b7d72eeb0ad5bed0e2948/LICENSE",
+          "sha256": "5d5b09d999c64ce152a11eb0f41ed2bb4f26d9dbfeb32ce92c785da2bdef858c"
+        }
+      ]
+    },
+    {
+      "name": "@inversifyjs/common",
+      "version": "1.4.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/inversify/monorepo.git"
+      },
+      "locations": [
+        "node_modules/@inversifyjs/common"
+      ],
+      "modules": [
+        "node_modules/@inversifyjs/common/lib/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@inversifyjs/common/LICENSE",
+          "sha256": "e7f118bca6d3c2ea16a30302f1e0062b6c7ba63bb1718a0602f969062b67ecbd"
+        }
+      ]
+    },
+    {
+      "name": "@inversifyjs/core",
+      "version": "1.3.5",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/inversify/monorepo.git"
+      },
+      "locations": [
+        "node_modules/@inversifyjs/core"
+      ],
+      "modules": [
+        "node_modules/@inversifyjs/core/lib/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@inversifyjs/core/LICENSE",
+          "sha256": "e7f118bca6d3c2ea16a30302f1e0062b6c7ba63bb1718a0602f969062b67ecbd"
+        }
+      ]
+    },
+    {
+      "name": "@inversifyjs/reflect-metadata-utils",
+      "version": "0.2.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/inversify/monorepo.git"
+      },
+      "locations": [
+        "node_modules/@inversifyjs/reflect-metadata-utils"
+      ],
+      "modules": [
+        "node_modules/@inversifyjs/reflect-metadata-utils/lib/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@inversifyjs/reflect-metadata-utils/LICENSE",
+          "sha256": "e7f118bca6d3c2ea16a30302f1e0062b6c7ba63bb1718a0602f969062b67ecbd"
+        }
+      ]
+    },
+    {
+      "name": "@phosphor/algorithm",
+      "version": "1.2.0",
+      "license": "BSD-3-Clause",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/phosphorjs/phosphor.git"
+      },
+      "locations": [
+        "node_modules/@phosphor/algorithm"
+      ],
+      "modules": [
+        "node_modules/@phosphor/algorithm/lib/array.js",
+        "node_modules/@phosphor/algorithm/lib/chain.js",
+        "node_modules/@phosphor/algorithm/lib/empty.js",
+        "node_modules/@phosphor/algorithm/lib/enumerate.js",
+        "node_modules/@phosphor/algorithm/lib/filter.js",
+        "node_modules/@phosphor/algorithm/lib/find.js",
+        "node_modules/@phosphor/algorithm/lib/index.js",
+        "node_modules/@phosphor/algorithm/lib/iter.js",
+        "node_modules/@phosphor/algorithm/lib/map.js",
+        "node_modules/@phosphor/algorithm/lib/range.js",
+        "node_modules/@phosphor/algorithm/lib/reduce.js",
+        "node_modules/@phosphor/algorithm/lib/repeat.js",
+        "node_modules/@phosphor/algorithm/lib/retro.js",
+        "node_modules/@phosphor/algorithm/lib/sort.js",
+        "node_modules/@phosphor/algorithm/lib/stride.js",
+        "node_modules/@phosphor/algorithm/lib/string.js",
+        "node_modules/@phosphor/algorithm/lib/take.js",
+        "node_modules/@phosphor/algorithm/lib/zip.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@phosphor/algorithm/LICENSE",
+          "sha256": "610faeee740575e675757d50548e98c5f74d5c740c03e4aa3cd45fbdb36815cb"
+        }
+      ]
+    },
+    {
+      "name": "@phosphor/collections",
+      "version": "1.2.0",
+      "license": "BSD-3-Clause",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/phosphorjs/phosphor.git"
+      },
+      "locations": [
+        "node_modules/@phosphor/collections"
+      ],
+      "modules": [
+        "node_modules/@phosphor/collections/lib/bplustree.js",
+        "node_modules/@phosphor/collections/lib/index.js",
+        "node_modules/@phosphor/collections/lib/linkedlist.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@phosphor/collections/LICENSE",
+          "sha256": "610faeee740575e675757d50548e98c5f74d5c740c03e4aa3cd45fbdb36815cb"
+        }
+      ]
+    },
+    {
+      "name": "@phosphor/messaging",
+      "version": "1.3.0",
+      "license": "BSD-3-Clause",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/phosphorjs/phosphor.git"
+      },
+      "locations": [
+        "node_modules/@phosphor/messaging"
+      ],
+      "modules": [
+        "node_modules/@phosphor/messaging/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@phosphor/messaging/LICENSE",
+          "sha256": "610faeee740575e675757d50548e98c5f74d5c740c03e4aa3cd45fbdb36815cb"
+        }
+      ]
+    },
+    {
+      "name": "@tanstack/react-virtual",
+      "version": "3.14.21",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TanStack/virtual.git",
+        "directory": "packages/react-virtual"
+      },
+      "locations": [
+        "node_modules/@tanstack/react-virtual"
+      ],
+      "modules": [
+        "node_modules/@tanstack/react-virtual/dist/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@tanstack/react-virtual/LICENSE",
+          "sha256": "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+        }
+      ]
+    },
+    {
+      "name": "@tanstack/virtual-core",
+      "version": "3.19.6",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TanStack/virtual.git",
+        "directory": "packages/virtual-core"
+      },
+      "locations": [
+        "node_modules/@tanstack/virtual-core"
+      ],
+      "modules": [
+        "node_modules/@tanstack/virtual-core/dist/esm/index.js",
+        "node_modules/@tanstack/virtual-core/dist/esm/ios-gesture.js",
+        "node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js",
+        "node_modules/@tanstack/virtual-core/dist/esm/scroll-classifier.js",
+        "node_modules/@tanstack/virtual-core/dist/esm/utils.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@tanstack/virtual-core/LICENSE",
+          "sha256": "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+        }
+      ]
+    },
+    {
+      "name": "@tweenjs/tween.js",
+      "version": "18.6.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/tweenjs/tween.js.git"
+      },
+      "locations": [
+        "node_modules/@tweenjs/tween.js"
+      ],
+      "modules": [
+        "node_modules/@tweenjs/tween.js/dist/tween.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@tweenjs/tween.js/LICENSE",
+          "sha256": "c95fecd88f2709bfc34e4d1f1ccc36d17048990e6ba26c283cfecdef0432936b"
+        }
+      ]
+    },
+    {
+      "name": "@ungap/structured-clone",
+      "version": "1.4.0",
+      "license": "ISC",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ungap/structured-clone.git"
+      },
+      "locations": [
+        "node_modules/@ungap/structured-clone"
+      ],
+      "modules": [
+        "node_modules/@ungap/structured-clone/esm/deserialize.js",
+        "node_modules/@ungap/structured-clone/esm/index.js",
+        "node_modules/@ungap/structured-clone/esm/serialize.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@ungap/structured-clone/LICENSE",
+          "sha256": "dc6d4961d8b6ee747231582ae9c53ce1d66bf76bc9f5a28f554c0e97210953bf"
+        }
+      ]
+    },
+    {
+      "name": "bail",
+      "version": "2.0.2",
+      "license": "MIT",
+      "repository": "wooorm/bail",
+      "locations": [
+        "node_modules/bail"
+      ],
+      "modules": [
+        "node_modules/bail/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/bail/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "bezier-js",
+      "version": "6.1.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/Pomax/bezierjs"
+      },
+      "locations": [
+        "node_modules/bezier-js"
+      ],
+      "modules": [
+        "node_modules/bezier-js/src/bezier.js",
+        "node_modules/bezier-js/src/poly-bezier.js",
+        "node_modules/bezier-js/src/utils.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/bezier-js/src/bezier.js",
+          "upstream": "https://github.com/Pomax/bezierjs/blob/a41f3e08e9724c9973eca0eb5c1304120e72fc70/src/bezier.js",
+          "sha256": "6a2743df1d922066b55f943e36e84e020ce40c3235b68d6c7817073742ecb6a1"
+        },
+        {
+          "source": "third-party/licenses/bezier-js-MIT.txt",
+          "upstream": "https://github.com/Pomax/bezierjs/blob/4e767299184ab4079dc8d7c970020103db14f431/LICENSE.md",
+          "sha256": "4fb7b04152f7b3a7c48c98c638aba80fc1f221e915d605d45d016d87d8e2cc9f"
+        }
+      ]
+    },
+    {
+      "name": "bignumber.js",
+      "version": "9.3.1",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/MikeMcl/bignumber.js.git"
+      },
+      "locations": [
+        "node_modules/bignumber.js"
+      ],
+      "modules": [
+        "node_modules/bignumber.js/bignumber.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/bignumber.js/LICENCE.md",
+          "sha256": "def75ba75d6426f1c3f02addf8e175fbe6e0d8a82e541cbdffc16d2bd8fd7d6a"
+        }
+      ]
+    },
+    {
+      "name": "ccount",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "wooorm/ccount",
+      "locations": [
+        "node_modules/ccount"
+      ],
+      "modules": [
+        "node_modules/ccount/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/ccount/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "class-variance-authority",
+      "version": "0.7.1",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/joe-bell/cva.git",
+      "locations": [
+        "node_modules/class-variance-authority"
+      ],
+      "modules": [
+        "node_modules/class-variance-authority/dist/index.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/class-variance-authority/LICENSE",
+          "sha256": "0ccbf956cffc8dcf515809433cb5242ee67c94513d46e48c261d68d0880de406"
+        }
+      ]
+    },
+    {
+      "name": "clsx",
+      "version": "1.2.1",
+      "license": "MIT",
+      "repository": "lukeed/clsx",
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/clsx",
+        "node_modules/@flowgram.ai/utils/node_modules/clsx"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/clsx/dist/clsx.m.js",
+        "node_modules/@flowgram.ai/utils/node_modules/clsx/dist/clsx.m.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@flowgram.ai/free-layout-editor/node_modules/clsx/license",
+          "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/utils/node_modules/clsx/license",
+          "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+        }
+      ]
+    },
+    {
+      "name": "clsx",
+      "version": "2.1.1",
+      "license": "MIT",
+      "repository": "lukeed/clsx",
+      "locations": [
+        "node_modules/clsx"
+      ],
+      "modules": [
+        "node_modules/clsx/dist/clsx.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/clsx/license",
+          "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+        }
+      ]
+    },
+    {
+      "name": "comma-separated-tokens",
+      "version": "2.0.3",
+      "license": "MIT",
+      "repository": "wooorm/comma-separated-tokens",
+      "locations": [
+        "node_modules/comma-separated-tokens"
+      ],
+      "modules": [
+        "node_modules/comma-separated-tokens/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/comma-separated-tokens/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "decode-named-character-reference",
+      "version": "1.3.0",
+      "license": "MIT",
+      "repository": "wooorm/decode-named-character-reference",
+      "locations": [
+        "node_modules/decode-named-character-reference"
+      ],
+      "modules": [
+        "node_modules/decode-named-character-reference/index.dom.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/decode-named-character-reference/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "devlop",
+      "version": "1.1.0",
+      "license": "MIT",
+      "repository": "wooorm/devlop",
+      "locations": [
+        "node_modules/devlop"
+      ],
+      "modules": [
+        "node_modules/devlop/lib/default.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/devlop/license",
+          "sha256": "6f296a5eccc1dc96714bb94ebaa9cac25b0a1467d74cc5263ac4d0646ab01f62"
+        }
+      ]
+    },
+    {
+      "name": "escape-string-regexp",
+      "version": "5.0.0",
+      "license": "MIT",
+      "repository": "sindresorhus/escape-string-regexp",
+      "locations": [
+        "node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp"
+      ],
+      "modules": [
+        "node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "estree-util-is-identifier-name",
+      "version": "3.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/estree-util-is-identifier-name",
+      "locations": [
+        "node_modules/estree-util-is-identifier-name"
+      ],
+      "modules": [
+        "node_modules/estree-util-is-identifier-name/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/estree-util-is-identifier-name/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "extend",
+      "version": "3.0.2",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/justmoon/node-extend.git"
+      },
+      "locations": [
+        "node_modules/extend"
+      ],
+      "modules": [
+        "node_modules/extend/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/extend/LICENSE",
+          "sha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
+        }
+      ]
+    },
+    {
+      "name": "fast-equals",
+      "version": "2.0.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/planttheidea/fast-equals.git"
+      },
+      "locations": [
+        "node_modules/fast-equals"
+      ],
+      "modules": [
+        "node_modules/fast-equals/dist/fast-equals.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/fast-equals/LICENSE",
+          "sha256": "f70545fce49626ae2659adc8a526f2355c77afa2fb8b6ca1363090db8a14ef6f"
+        }
+      ]
+    },
+    {
+      "name": "hast-util-to-jsx-runtime",
+      "version": "2.3.6",
+      "license": "MIT",
+      "repository": "syntax-tree/hast-util-to-jsx-runtime",
+      "locations": [
+        "node_modules/hast-util-to-jsx-runtime"
+      ],
+      "modules": [
+        "node_modules/hast-util-to-jsx-runtime/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/hast-util-to-jsx-runtime/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "hast-util-whitespace",
+      "version": "3.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/hast-util-whitespace",
+      "locations": [
+        "node_modules/hast-util-whitespace"
+      ],
+      "modules": [
+        "node_modules/hast-util-whitespace/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/hast-util-whitespace/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "html-url-attributes",
+      "version": "3.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/rehypejs/rehype-minify/tree/main/packages/html-url-attributes",
+      "locations": [
+        "node_modules/html-url-attributes"
+      ],
+      "modules": [
+        "node_modules/html-url-attributes/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/html-url-attributes/license",
+          "sha256": "e18cf5173e928f808f0cd208097fee8fbec9d28fc0255213938e4c559e29ff58"
+        }
+      ]
+    },
+    {
+      "name": "i18n-js",
+      "version": "4.5.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/fnando/i18n.git"
+      },
+      "locations": [
+        "node_modules/i18n-js"
+      ],
+      "modules": [
+        "node_modules/i18n-js/dist/import/I18n.js",
+        "node_modules/i18n-js/dist/import/Locales.js",
+        "node_modules/i18n-js/dist/import/MissingTranslation.js",
+        "node_modules/i18n-js/dist/import/Pluralization.js",
+        "node_modules/i18n-js/dist/import/helpers/camelCaseKeys.js",
+        "node_modules/i18n-js/dist/import/helpers/createTranslationOptions.js",
+        "node_modules/i18n-js/dist/import/helpers/expandRoundMode.js",
+        "node_modules/i18n-js/dist/import/helpers/formatNumber.js",
+        "node_modules/i18n-js/dist/import/helpers/getFullScope.js",
+        "node_modules/i18n-js/dist/import/helpers/index.js",
+        "node_modules/i18n-js/dist/import/helpers/inferType.js",
+        "node_modules/i18n-js/dist/import/helpers/interpolate.js",
+        "node_modules/i18n-js/dist/import/helpers/isSet.js",
+        "node_modules/i18n-js/dist/import/helpers/lookup.js",
+        "node_modules/i18n-js/dist/import/helpers/numberToDelimited.js",
+        "node_modules/i18n-js/dist/import/helpers/numberToHuman.js",
+        "node_modules/i18n-js/dist/import/helpers/numberToHumanSize.js",
+        "node_modules/i18n-js/dist/import/helpers/parseBigNumber.js",
+        "node_modules/i18n-js/dist/import/helpers/parseDate.js",
+        "node_modules/i18n-js/dist/import/helpers/pluralize.js",
+        "node_modules/i18n-js/dist/import/helpers/roundNumber.js",
+        "node_modules/i18n-js/dist/import/helpers/strftime.js",
+        "node_modules/i18n-js/dist/import/helpers/timeAgoInWords.js",
+        "node_modules/i18n-js/dist/import/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/i18n-js/LICENSE.md",
+          "sha256": "815e9a571bf016f7aef81713360d1727e3274557a5d731ee510ee7d64d1a2e53"
+        }
+      ]
+    },
+    {
+      "name": "inline-style-parser",
+      "version": "0.2.7",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/remarkablemark/inline-style-parser.git"
+      },
+      "locations": [
+        "node_modules/inline-style-parser"
+      ],
+      "modules": [
+        "node_modules/inline-style-parser/cjs/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/inline-style-parser/LICENSE",
+          "sha256": "395c95f20598da653ff1eb1cb9d74947c7fac689697147f1d192fd0242a0e635"
+        }
+      ]
+    },
+    {
+      "name": "inversify",
+      "version": "6.2.2",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/inversify/InversifyJS.git"
+      },
+      "locations": [
+        "node_modules/inversify"
+      ],
+      "modules": [
+        "node_modules/inversify/lib/esm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/inversify/LICENSE",
+          "sha256": "bcb17487689c15a9124a3c11995c95a74150f5c1a3350aa86ec4753510bb4795"
+        }
+      ]
+    },
+    {
+      "name": "is-plain-obj",
+      "version": "4.1.0",
+      "license": "MIT",
+      "repository": "sindresorhus/is-plain-obj",
+      "locations": [
+        "node_modules/is-plain-obj"
+      ],
+      "modules": [
+        "node_modules/is-plain-obj/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/is-plain-obj/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "lodash-es",
+      "version": "4.18.1",
+      "license": "MIT",
+      "repository": "lodash/lodash",
+      "locations": [
+        "node_modules/lodash-es"
+      ],
+      "modules": [
+        "node_modules/lodash-es/_DataView.js",
+        "node_modules/lodash-es/_Hash.js",
+        "node_modules/lodash-es/_LazyWrapper.js",
+        "node_modules/lodash-es/_ListCache.js",
+        "node_modules/lodash-es/_LodashWrapper.js",
+        "node_modules/lodash-es/_Map.js",
+        "node_modules/lodash-es/_MapCache.js",
+        "node_modules/lodash-es/_Promise.js",
+        "node_modules/lodash-es/_Set.js",
+        "node_modules/lodash-es/_SetCache.js",
+        "node_modules/lodash-es/_Stack.js",
+        "node_modules/lodash-es/_Symbol.js",
+        "node_modules/lodash-es/_Uint8Array.js",
+        "node_modules/lodash-es/_WeakMap.js",
+        "node_modules/lodash-es/_apply.js",
+        "node_modules/lodash-es/_arrayAggregator.js",
+        "node_modules/lodash-es/_arrayEach.js",
+        "node_modules/lodash-es/_arrayFilter.js",
+        "node_modules/lodash-es/_arrayIncludes.js",
+        "node_modules/lodash-es/_arrayIncludesWith.js",
+        "node_modules/lodash-es/_arrayLikeKeys.js",
+        "node_modules/lodash-es/_arrayMap.js",
+        "node_modules/lodash-es/_arrayPush.js",
+        "node_modules/lodash-es/_arraySome.js",
+        "node_modules/lodash-es/_assignMergeValue.js",
+        "node_modules/lodash-es/_assignValue.js",
+        "node_modules/lodash-es/_assocIndexOf.js",
+        "node_modules/lodash-es/_baseAggregator.js",
+        "node_modules/lodash-es/_baseAssign.js",
+        "node_modules/lodash-es/_baseAssignIn.js",
+        "node_modules/lodash-es/_baseAssignValue.js",
+        "node_modules/lodash-es/_baseClone.js",
+        "node_modules/lodash-es/_baseCreate.js",
+        "node_modules/lodash-es/_baseDifference.js",
+        "node_modules/lodash-es/_baseEach.js",
+        "node_modules/lodash-es/_baseFindIndex.js",
+        "node_modules/lodash-es/_baseFlatten.js",
+        "node_modules/lodash-es/_baseFor.js",
+        "node_modules/lodash-es/_baseForOwn.js",
+        "node_modules/lodash-es/_baseGet.js",
+        "node_modules/lodash-es/_baseGetAllKeys.js",
+        "node_modules/lodash-es/_baseGetTag.js",
+        "node_modules/lodash-es/_baseHasIn.js",
+        "node_modules/lodash-es/_baseIndexOf.js",
+        "node_modules/lodash-es/_baseIntersection.js",
+        "node_modules/lodash-es/_baseIsArguments.js",
+        "node_modules/lodash-es/_baseIsEqual.js",
+        "node_modules/lodash-es/_baseIsEqualDeep.js",
+        "node_modules/lodash-es/_baseIsMap.js",
+        "node_modules/lodash-es/_baseIsMatch.js",
+        "node_modules/lodash-es/_baseIsNaN.js",
+        "node_modules/lodash-es/_baseIsNative.js",
+        "node_modules/lodash-es/_baseIsSet.js",
+        "node_modules/lodash-es/_baseIsTypedArray.js",
+        "node_modules/lodash-es/_baseIteratee.js",
+        "node_modules/lodash-es/_baseKeys.js",
+        "node_modules/lodash-es/_baseKeysIn.js",
+        "node_modules/lodash-es/_baseLodash.js",
+        "node_modules/lodash-es/_baseMatches.js",
+        "node_modules/lodash-es/_baseMatchesProperty.js",
+        "node_modules/lodash-es/_baseMerge.js",
+        "node_modules/lodash-es/_baseMergeDeep.js",
+        "node_modules/lodash-es/_basePick.js",
+        "node_modules/lodash-es/_basePickBy.js",
+        "node_modules/lodash-es/_baseProperty.js",
+        "node_modules/lodash-es/_basePropertyDeep.js",
+        "node_modules/lodash-es/_baseRest.js",
+        "node_modules/lodash-es/_baseSet.js",
+        "node_modules/lodash-es/_baseSetToString.js",
+        "node_modules/lodash-es/_baseSlice.js",
+        "node_modules/lodash-es/_baseSome.js",
+        "node_modules/lodash-es/_baseTimes.js",
+        "node_modules/lodash-es/_baseToString.js",
+        "node_modules/lodash-es/_baseTrim.js",
+        "node_modules/lodash-es/_baseUnary.js",
+        "node_modules/lodash-es/_baseUniq.js",
+        "node_modules/lodash-es/_baseUnset.js",
+        "node_modules/lodash-es/_baseXor.js",
+        "node_modules/lodash-es/_cacheHas.js",
+        "node_modules/lodash-es/_castArrayLikeObject.js",
+        "node_modules/lodash-es/_castPath.js",
+        "node_modules/lodash-es/_cloneArrayBuffer.js",
+        "node_modules/lodash-es/_cloneBuffer.js",
+        "node_modules/lodash-es/_cloneDataView.js",
+        "node_modules/lodash-es/_cloneRegExp.js",
+        "node_modules/lodash-es/_cloneSymbol.js",
+        "node_modules/lodash-es/_cloneTypedArray.js",
+        "node_modules/lodash-es/_copyArray.js",
+        "node_modules/lodash-es/_copyObject.js",
+        "node_modules/lodash-es/_copySymbols.js",
+        "node_modules/lodash-es/_copySymbolsIn.js",
+        "node_modules/lodash-es/_coreJsData.js",
+        "node_modules/lodash-es/_createAggregator.js",
+        "node_modules/lodash-es/_createAssigner.js",
+        "node_modules/lodash-es/_createBaseEach.js",
+        "node_modules/lodash-es/_createBaseFor.js",
+        "node_modules/lodash-es/_createFind.js",
+        "node_modules/lodash-es/_createFlow.js",
+        "node_modules/lodash-es/_createSet.js",
+        "node_modules/lodash-es/_customOmitClone.js",
+        "node_modules/lodash-es/_defineProperty.js",
+        "node_modules/lodash-es/_equalArrays.js",
+        "node_modules/lodash-es/_equalByTag.js",
+        "node_modules/lodash-es/_equalObjects.js",
+        "node_modules/lodash-es/_flatRest.js",
+        "node_modules/lodash-es/_freeGlobal.js",
+        "node_modules/lodash-es/_getAllKeys.js",
+        "node_modules/lodash-es/_getAllKeysIn.js",
+        "node_modules/lodash-es/_getData.js",
+        "node_modules/lodash-es/_getFuncName.js",
+        "node_modules/lodash-es/_getMapData.js",
+        "node_modules/lodash-es/_getMatchData.js",
+        "node_modules/lodash-es/_getNative.js",
+        "node_modules/lodash-es/_getPrototype.js",
+        "node_modules/lodash-es/_getRawTag.js",
+        "node_modules/lodash-es/_getSymbols.js",
+        "node_modules/lodash-es/_getSymbolsIn.js",
+        "node_modules/lodash-es/_getTag.js",
+        "node_modules/lodash-es/_getValue.js",
+        "node_modules/lodash-es/_hasPath.js",
+        "node_modules/lodash-es/_hashClear.js",
+        "node_modules/lodash-es/_hashDelete.js",
+        "node_modules/lodash-es/_hashGet.js",
+        "node_modules/lodash-es/_hashHas.js",
+        "node_modules/lodash-es/_hashSet.js",
+        "node_modules/lodash-es/_initCloneArray.js",
+        "node_modules/lodash-es/_initCloneByTag.js",
+        "node_modules/lodash-es/_initCloneObject.js",
+        "node_modules/lodash-es/_isFlattenable.js",
+        "node_modules/lodash-es/_isIndex.js",
+        "node_modules/lodash-es/_isIterateeCall.js",
+        "node_modules/lodash-es/_isKey.js",
+        "node_modules/lodash-es/_isKeyable.js",
+        "node_modules/lodash-es/_isLaziable.js",
+        "node_modules/lodash-es/_isMasked.js",
+        "node_modules/lodash-es/_isPrototype.js",
+        "node_modules/lodash-es/_isStrictComparable.js",
+        "node_modules/lodash-es/_listCacheClear.js",
+        "node_modules/lodash-es/_listCacheDelete.js",
+        "node_modules/lodash-es/_listCacheGet.js",
+        "node_modules/lodash-es/_listCacheHas.js",
+        "node_modules/lodash-es/_listCacheSet.js",
+        "node_modules/lodash-es/_mapCacheClear.js",
+        "node_modules/lodash-es/_mapCacheDelete.js",
+        "node_modules/lodash-es/_mapCacheGet.js",
+        "node_modules/lodash-es/_mapCacheHas.js",
+        "node_modules/lodash-es/_mapCacheSet.js",
+        "node_modules/lodash-es/_mapToArray.js",
+        "node_modules/lodash-es/_matchesStrictComparable.js",
+        "node_modules/lodash-es/_memoizeCapped.js",
+        "node_modules/lodash-es/_metaMap.js",
+        "node_modules/lodash-es/_nativeCreate.js",
+        "node_modules/lodash-es/_nativeKeys.js",
+        "node_modules/lodash-es/_nativeKeysIn.js",
+        "node_modules/lodash-es/_nodeUtil.js",
+        "node_modules/lodash-es/_objectToString.js",
+        "node_modules/lodash-es/_overArg.js",
+        "node_modules/lodash-es/_overRest.js",
+        "node_modules/lodash-es/_parent.js",
+        "node_modules/lodash-es/_realNames.js",
+        "node_modules/lodash-es/_root.js",
+        "node_modules/lodash-es/_safeGet.js",
+        "node_modules/lodash-es/_setCacheAdd.js",
+        "node_modules/lodash-es/_setCacheHas.js",
+        "node_modules/lodash-es/_setToArray.js",
+        "node_modules/lodash-es/_setToString.js",
+        "node_modules/lodash-es/_shortOut.js",
+        "node_modules/lodash-es/_stackClear.js",
+        "node_modules/lodash-es/_stackDelete.js",
+        "node_modules/lodash-es/_stackGet.js",
+        "node_modules/lodash-es/_stackHas.js",
+        "node_modules/lodash-es/_stackSet.js",
+        "node_modules/lodash-es/_strictIndexOf.js",
+        "node_modules/lodash-es/_stringToPath.js",
+        "node_modules/lodash-es/_toKey.js",
+        "node_modules/lodash-es/_toSource.js",
+        "node_modules/lodash-es/_trimmedEndIndex.js",
+        "node_modules/lodash-es/_wrapperClone.js",
+        "node_modules/lodash-es/clone.js",
+        "node_modules/lodash-es/cloneDeep.js",
+        "node_modules/lodash-es/constant.js",
+        "node_modules/lodash-es/debounce.js",
+        "node_modules/lodash-es/difference.js",
+        "node_modules/lodash-es/eq.js",
+        "node_modules/lodash-es/find.js",
+        "node_modules/lodash-es/findIndex.js",
+        "node_modules/lodash-es/flatten.js",
+        "node_modules/lodash-es/flow.js",
+        "node_modules/lodash-es/get.js",
+        "node_modules/lodash-es/groupBy.js",
+        "node_modules/lodash-es/hasIn.js",
+        "node_modules/lodash-es/identity.js",
+        "node_modules/lodash-es/intersection.js",
+        "node_modules/lodash-es/isArguments.js",
+        "node_modules/lodash-es/isArray.js",
+        "node_modules/lodash-es/isArrayLike.js",
+        "node_modules/lodash-es/isArrayLikeObject.js",
+        "node_modules/lodash-es/isBuffer.js",
+        "node_modules/lodash-es/isEmpty.js",
+        "node_modules/lodash-es/isEqual.js",
+        "node_modules/lodash-es/isFunction.js",
+        "node_modules/lodash-es/isLength.js",
+        "node_modules/lodash-es/isMap.js",
+        "node_modules/lodash-es/isNil.js",
+        "node_modules/lodash-es/isObject.js",
+        "node_modules/lodash-es/isObjectLike.js",
+        "node_modules/lodash-es/isPlainObject.js",
+        "node_modules/lodash-es/isSet.js",
+        "node_modules/lodash-es/isSymbol.js",
+        "node_modules/lodash-es/isTypedArray.js",
+        "node_modules/lodash-es/keys.js",
+        "node_modules/lodash-es/keysIn.js",
+        "node_modules/lodash-es/last.js",
+        "node_modules/lodash-es/mapKeys.js",
+        "node_modules/lodash-es/mapValues.js",
+        "node_modules/lodash-es/memoize.js",
+        "node_modules/lodash-es/mergeWith.js",
+        "node_modules/lodash-es/negate.js",
+        "node_modules/lodash-es/noop.js",
+        "node_modules/lodash-es/now.js",
+        "node_modules/lodash-es/omit.js",
+        "node_modules/lodash-es/omitBy.js",
+        "node_modules/lodash-es/pick.js",
+        "node_modules/lodash-es/pickBy.js",
+        "node_modules/lodash-es/property.js",
+        "node_modules/lodash-es/some.js",
+        "node_modules/lodash-es/stubArray.js",
+        "node_modules/lodash-es/stubFalse.js",
+        "node_modules/lodash-es/throttle.js",
+        "node_modules/lodash-es/toFinite.js",
+        "node_modules/lodash-es/toInteger.js",
+        "node_modules/lodash-es/toNumber.js",
+        "node_modules/lodash-es/toPath.js",
+        "node_modules/lodash-es/toPlainObject.js",
+        "node_modules/lodash-es/toString.js",
+        "node_modules/lodash-es/uniq.js",
+        "node_modules/lodash-es/wrapperLodash.js",
+        "node_modules/lodash-es/xor.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/lodash-es/LICENSE",
+          "sha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc"
+        }
+      ]
+    },
+    {
+      "name": "lodash",
+      "version": "4.18.1",
+      "license": "MIT",
+      "repository": "lodash/lodash",
+      "locations": [
+        "node_modules/lodash"
+      ],
+      "modules": [
+        "node_modules/lodash/_DataView.js",
+        "node_modules/lodash/_Hash.js",
+        "node_modules/lodash/_ListCache.js",
+        "node_modules/lodash/_Map.js",
+        "node_modules/lodash/_MapCache.js",
+        "node_modules/lodash/_Promise.js",
+        "node_modules/lodash/_Set.js",
+        "node_modules/lodash/_SetCache.js",
+        "node_modules/lodash/_Stack.js",
+        "node_modules/lodash/_Symbol.js",
+        "node_modules/lodash/_Uint8Array.js",
+        "node_modules/lodash/_WeakMap.js",
+        "node_modules/lodash/_apply.js",
+        "node_modules/lodash/_arrayFilter.js",
+        "node_modules/lodash/_arrayIncludes.js",
+        "node_modules/lodash/_arrayIncludesWith.js",
+        "node_modules/lodash/_arrayLikeKeys.js",
+        "node_modules/lodash/_arrayMap.js",
+        "node_modules/lodash/_arrayPush.js",
+        "node_modules/lodash/_arrayReduce.js",
+        "node_modules/lodash/_arraySome.js",
+        "node_modules/lodash/_asciiToArray.js",
+        "node_modules/lodash/_asciiWords.js",
+        "node_modules/lodash/_assignMergeValue.js",
+        "node_modules/lodash/_assignValue.js",
+        "node_modules/lodash/_assocIndexOf.js",
+        "node_modules/lodash/_baseAssignValue.js",
+        "node_modules/lodash/_baseCreate.js",
+        "node_modules/lodash/_baseEach.js",
+        "node_modules/lodash/_baseFindIndex.js",
+        "node_modules/lodash/_baseFlatten.js",
+        "node_modules/lodash/_baseFor.js",
+        "node_modules/lodash/_baseForOwn.js",
+        "node_modules/lodash/_baseGet.js",
+        "node_modules/lodash/_baseGetAllKeys.js",
+        "node_modules/lodash/_baseGetTag.js",
+        "node_modules/lodash/_baseHas.js",
+        "node_modules/lodash/_baseHasIn.js",
+        "node_modules/lodash/_baseIndexOf.js",
+        "node_modules/lodash/_baseIsArguments.js",
+        "node_modules/lodash/_baseIsEqual.js",
+        "node_modules/lodash/_baseIsEqualDeep.js",
+        "node_modules/lodash/_baseIsMatch.js",
+        "node_modules/lodash/_baseIsNaN.js",
+        "node_modules/lodash/_baseIsNative.js",
+        "node_modules/lodash/_baseIsTypedArray.js",
+        "node_modules/lodash/_baseIteratee.js",
+        "node_modules/lodash/_baseKeys.js",
+        "node_modules/lodash/_baseKeysIn.js",
+        "node_modules/lodash/_baseMap.js",
+        "node_modules/lodash/_baseMatches.js",
+        "node_modules/lodash/_baseMatchesProperty.js",
+        "node_modules/lodash/_baseMerge.js",
+        "node_modules/lodash/_baseMergeDeep.js",
+        "node_modules/lodash/_baseOrderBy.js",
+        "node_modules/lodash/_baseProperty.js",
+        "node_modules/lodash/_basePropertyDeep.js",
+        "node_modules/lodash/_basePropertyOf.js",
+        "node_modules/lodash/_baseRange.js",
+        "node_modules/lodash/_baseRepeat.js",
+        "node_modules/lodash/_baseRest.js",
+        "node_modules/lodash/_baseSetToString.js",
+        "node_modules/lodash/_baseSlice.js",
+        "node_modules/lodash/_baseSortBy.js",
+        "node_modules/lodash/_baseTimes.js",
+        "node_modules/lodash/_baseToString.js",
+        "node_modules/lodash/_baseTrim.js",
+        "node_modules/lodash/_baseUnary.js",
+        "node_modules/lodash/_baseUniq.js",
+        "node_modules/lodash/_baseZipObject.js",
+        "node_modules/lodash/_cacheHas.js",
+        "node_modules/lodash/_castPath.js",
+        "node_modules/lodash/_castSlice.js",
+        "node_modules/lodash/_cloneArrayBuffer.js",
+        "node_modules/lodash/_cloneBuffer.js",
+        "node_modules/lodash/_cloneTypedArray.js",
+        "node_modules/lodash/_compareAscending.js",
+        "node_modules/lodash/_compareMultiple.js",
+        "node_modules/lodash/_copyArray.js",
+        "node_modules/lodash/_copyObject.js",
+        "node_modules/lodash/_coreJsData.js",
+        "node_modules/lodash/_createAssigner.js",
+        "node_modules/lodash/_createBaseEach.js",
+        "node_modules/lodash/_createBaseFor.js",
+        "node_modules/lodash/_createCaseFirst.js",
+        "node_modules/lodash/_createCompounder.js",
+        "node_modules/lodash/_createRange.js",
+        "node_modules/lodash/_createSet.js",
+        "node_modules/lodash/_deburrLetter.js",
+        "node_modules/lodash/_defineProperty.js",
+        "node_modules/lodash/_equalArrays.js",
+        "node_modules/lodash/_equalByTag.js",
+        "node_modules/lodash/_equalObjects.js",
+        "node_modules/lodash/_freeGlobal.js",
+        "node_modules/lodash/_getAllKeys.js",
+        "node_modules/lodash/_getMapData.js",
+        "node_modules/lodash/_getMatchData.js",
+        "node_modules/lodash/_getNative.js",
+        "node_modules/lodash/_getPrototype.js",
+        "node_modules/lodash/_getRawTag.js",
+        "node_modules/lodash/_getSymbols.js",
+        "node_modules/lodash/_getTag.js",
+        "node_modules/lodash/_getValue.js",
+        "node_modules/lodash/_hasPath.js",
+        "node_modules/lodash/_hasUnicode.js",
+        "node_modules/lodash/_hasUnicodeWord.js",
+        "node_modules/lodash/_hashClear.js",
+        "node_modules/lodash/_hashDelete.js",
+        "node_modules/lodash/_hashGet.js",
+        "node_modules/lodash/_hashHas.js",
+        "node_modules/lodash/_hashSet.js",
+        "node_modules/lodash/_initCloneObject.js",
+        "node_modules/lodash/_isFlattenable.js",
+        "node_modules/lodash/_isIndex.js",
+        "node_modules/lodash/_isIterateeCall.js",
+        "node_modules/lodash/_isKey.js",
+        "node_modules/lodash/_isKeyable.js",
+        "node_modules/lodash/_isMasked.js",
+        "node_modules/lodash/_isPrototype.js",
+        "node_modules/lodash/_isStrictComparable.js",
+        "node_modules/lodash/_listCacheClear.js",
+        "node_modules/lodash/_listCacheDelete.js",
+        "node_modules/lodash/_listCacheGet.js",
+        "node_modules/lodash/_listCacheHas.js",
+        "node_modules/lodash/_listCacheSet.js",
+        "node_modules/lodash/_mapCacheClear.js",
+        "node_modules/lodash/_mapCacheDelete.js",
+        "node_modules/lodash/_mapCacheGet.js",
+        "node_modules/lodash/_mapCacheHas.js",
+        "node_modules/lodash/_mapCacheSet.js",
+        "node_modules/lodash/_mapToArray.js",
+        "node_modules/lodash/_matchesStrictComparable.js",
+        "node_modules/lodash/_memoizeCapped.js",
+        "node_modules/lodash/_nativeCreate.js",
+        "node_modules/lodash/_nativeKeys.js",
+        "node_modules/lodash/_nativeKeysIn.js",
+        "node_modules/lodash/_nodeUtil.js",
+        "node_modules/lodash/_objectToString.js",
+        "node_modules/lodash/_overArg.js",
+        "node_modules/lodash/_overRest.js",
+        "node_modules/lodash/_root.js",
+        "node_modules/lodash/_safeGet.js",
+        "node_modules/lodash/_setCacheAdd.js",
+        "node_modules/lodash/_setCacheHas.js",
+        "node_modules/lodash/_setToArray.js",
+        "node_modules/lodash/_setToString.js",
+        "node_modules/lodash/_shortOut.js",
+        "node_modules/lodash/_stackClear.js",
+        "node_modules/lodash/_stackDelete.js",
+        "node_modules/lodash/_stackGet.js",
+        "node_modules/lodash/_stackHas.js",
+        "node_modules/lodash/_stackSet.js",
+        "node_modules/lodash/_strictIndexOf.js",
+        "node_modules/lodash/_stringToArray.js",
+        "node_modules/lodash/_stringToPath.js",
+        "node_modules/lodash/_toKey.js",
+        "node_modules/lodash/_toSource.js",
+        "node_modules/lodash/_trimmedEndIndex.js",
+        "node_modules/lodash/_unicodeToArray.js",
+        "node_modules/lodash/_unicodeWords.js",
+        "node_modules/lodash/camelCase.js",
+        "node_modules/lodash/capitalize.js",
+        "node_modules/lodash/constant.js",
+        "node_modules/lodash/deburr.js",
+        "node_modules/lodash/eq.js",
+        "node_modules/lodash/get.js",
+        "node_modules/lodash/has.js",
+        "node_modules/lodash/hasIn.js",
+        "node_modules/lodash/identity.js",
+        "node_modules/lodash/isArguments.js",
+        "node_modules/lodash/isArray.js",
+        "node_modules/lodash/isArrayLike.js",
+        "node_modules/lodash/isArrayLikeObject.js",
+        "node_modules/lodash/isBuffer.js",
+        "node_modules/lodash/isFunction.js",
+        "node_modules/lodash/isLength.js",
+        "node_modules/lodash/isObject.js",
+        "node_modules/lodash/isObjectLike.js",
+        "node_modules/lodash/isPlainObject.js",
+        "node_modules/lodash/isSymbol.js",
+        "node_modules/lodash/isTypedArray.js",
+        "node_modules/lodash/keys.js",
+        "node_modules/lodash/keysIn.js",
+        "node_modules/lodash/memoize.js",
+        "node_modules/lodash/merge.js",
+        "node_modules/lodash/noop.js",
+        "node_modules/lodash/property.js",
+        "node_modules/lodash/range.js",
+        "node_modules/lodash/repeat.js",
+        "node_modules/lodash/sortBy.js",
+        "node_modules/lodash/stubArray.js",
+        "node_modules/lodash/stubFalse.js",
+        "node_modules/lodash/toFinite.js",
+        "node_modules/lodash/toInteger.js",
+        "node_modules/lodash/toNumber.js",
+        "node_modules/lodash/toPlainObject.js",
+        "node_modules/lodash/toString.js",
+        "node_modules/lodash/uniq.js",
+        "node_modules/lodash/upperFirst.js",
+        "node_modules/lodash/words.js",
+        "node_modules/lodash/zipObject.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/lodash/LICENSE",
+          "sha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc"
+        }
+      ]
+    },
+    {
+      "name": "longest-streak",
+      "version": "3.1.0",
+      "license": "MIT",
+      "repository": "wooorm/longest-streak",
+      "locations": [
+        "node_modules/longest-streak"
+      ],
+      "modules": [
+        "node_modules/longest-streak/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/longest-streak/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ]
+    },
+    {
+      "name": "lucide-react",
+      "version": "1.31.0",
+      "license": "ISC",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/lucide-icons/lucide.git",
+        "directory": "packages/lucide-react"
+      },
+      "locations": [
+        "node_modules/lucide-react"
+      ],
+      "modules": [
+        "node_modules/lucide-react/dist/esm/Icon.mjs",
+        "node_modules/lucide-react/dist/esm/context.mjs",
+        "node_modules/lucide-react/dist/esm/createLucideIcon.mjs",
+        "node_modules/lucide-react/dist/esm/defaultAttributes.mjs",
+        "node_modules/lucide-react/dist/esm/icons/activity.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-down-to-line.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-down.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-left.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-right.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-up.mjs",
+        "node_modules/lucide-react/dist/esm/icons/at-sign.mjs",
+        "node_modules/lucide-react/dist/esm/icons/audio-lines.mjs",
+        "node_modules/lucide-react/dist/esm/icons/ban.mjs",
+        "node_modules/lucide-react/dist/esm/icons/blocks.mjs",
+        "node_modules/lucide-react/dist/esm/icons/brain.mjs",
+        "node_modules/lucide-react/dist/esm/icons/check-check.mjs",
+        "node_modules/lucide-react/dist/esm/icons/check.mjs",
+        "node_modules/lucide-react/dist/esm/icons/chevron-down.mjs",
+        "node_modules/lucide-react/dist/esm/icons/chevron-left.mjs",
+        "node_modules/lucide-react/dist/esm/icons/chevron-right.mjs",
+        "node_modules/lucide-react/dist/esm/icons/chevron-up.mjs",
+        "node_modules/lucide-react/dist/esm/icons/circle-alert.mjs",
+        "node_modules/lucide-react/dist/esm/icons/clock-3.mjs",
+        "node_modules/lucide-react/dist/esm/icons/cloud-sun.mjs",
+        "node_modules/lucide-react/dist/esm/icons/code-xml.mjs",
+        "node_modules/lucide-react/dist/esm/icons/code.mjs",
+        "node_modules/lucide-react/dist/esm/icons/copy.mjs",
+        "node_modules/lucide-react/dist/esm/icons/cpu.mjs",
+        "node_modules/lucide-react/dist/esm/icons/download.mjs",
+        "node_modules/lucide-react/dist/esm/icons/ellipsis.mjs",
+        "node_modules/lucide-react/dist/esm/icons/external-link.mjs",
+        "node_modules/lucide-react/dist/esm/icons/eye.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file-text.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file.mjs",
+        "node_modules/lucide-react/dist/esm/icons/folder-input.mjs",
+        "node_modules/lucide-react/dist/esm/icons/folder-open.mjs",
+        "node_modules/lucide-react/dist/esm/icons/folder-plus.mjs",
+        "node_modules/lucide-react/dist/esm/icons/folder.mjs",
+        "node_modules/lucide-react/dist/esm/icons/git-branch.mjs",
+        "node_modules/lucide-react/dist/esm/icons/globe.mjs",
+        "node_modules/lucide-react/dist/esm/icons/grip-vertical.mjs",
+        "node_modules/lucide-react/dist/esm/icons/hand.mjs",
+        "node_modules/lucide-react/dist/esm/icons/house.mjs",
+        "node_modules/lucide-react/dist/esm/icons/image.mjs",
+        "node_modules/lucide-react/dist/esm/icons/inbox.mjs",
+        "node_modules/lucide-react/dist/esm/icons/link-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/link.mjs",
+        "node_modules/lucide-react/dist/esm/icons/list-checks.mjs",
+        "node_modules/lucide-react/dist/esm/icons/loader-circle.mjs",
+        "node_modules/lucide-react/dist/esm/icons/loader.mjs",
+        "node_modules/lucide-react/dist/esm/icons/lock.mjs",
+        "node_modules/lucide-react/dist/esm/icons/maximize-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/maximize.mjs",
+        "node_modules/lucide-react/dist/esm/icons/menu.mjs",
+        "node_modules/lucide-react/dist/esm/icons/message-circle.mjs",
+        "node_modules/lucide-react/dist/esm/icons/message-square-plus.mjs",
+        "node_modules/lucide-react/dist/esm/icons/message-square-text.mjs",
+        "node_modules/lucide-react/dist/esm/icons/mic-off.mjs",
+        "node_modules/lucide-react/dist/esm/icons/mic.mjs",
+        "node_modules/lucide-react/dist/esm/icons/minus.mjs",
+        "node_modules/lucide-react/dist/esm/icons/monitor.mjs",
+        "node_modules/lucide-react/dist/esm/icons/package-check.mjs",
+        "node_modules/lucide-react/dist/esm/icons/panel-right-close.mjs",
+        "node_modules/lucide-react/dist/esm/icons/pencil-line.mjs",
+        "node_modules/lucide-react/dist/esm/icons/pencil.mjs",
+        "node_modules/lucide-react/dist/esm/icons/phone-off.mjs",
+        "node_modules/lucide-react/dist/esm/icons/phone.mjs",
+        "node_modules/lucide-react/dist/esm/icons/play.mjs",
+        "node_modules/lucide-react/dist/esm/icons/plus.mjs",
+        "node_modules/lucide-react/dist/esm/icons/presentation.mjs",
+        "node_modules/lucide-react/dist/esm/icons/refresh-cw.mjs",
+        "node_modules/lucide-react/dist/esm/icons/rotate-ccw.mjs",
+        "node_modules/lucide-react/dist/esm/icons/rotate-cw.mjs",
+        "node_modules/lucide-react/dist/esm/icons/save.mjs",
+        "node_modules/lucide-react/dist/esm/icons/scroll-text.mjs",
+        "node_modules/lucide-react/dist/esm/icons/search.mjs",
+        "node_modules/lucide-react/dist/esm/icons/server.mjs",
+        "node_modules/lucide-react/dist/esm/icons/settings-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/settings.mjs",
+        "node_modules/lucide-react/dist/esm/icons/shield-alert.mjs",
+        "node_modules/lucide-react/dist/esm/icons/shield-check.mjs",
+        "node_modules/lucide-react/dist/esm/icons/slash.mjs",
+        "node_modules/lucide-react/dist/esm/icons/sliders-horizontal.mjs",
+        "node_modules/lucide-react/dist/esm/icons/sparkles.mjs",
+        "node_modules/lucide-react/dist/esm/icons/square-mouse-pointer.mjs",
+        "node_modules/lucide-react/dist/esm/icons/square.mjs",
+        "node_modules/lucide-react/dist/esm/icons/star.mjs",
+        "node_modules/lucide-react/dist/esm/icons/table-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/terminal.mjs",
+        "node_modules/lucide-react/dist/esm/icons/trash-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/triangle-alert.mjs",
+        "node_modules/lucide-react/dist/esm/icons/type.mjs",
+        "node_modules/lucide-react/dist/esm/icons/undo-2.mjs",
+        "node_modules/lucide-react/dist/esm/icons/user-check.mjs",
+        "node_modules/lucide-react/dist/esm/icons/video.mjs",
+        "node_modules/lucide-react/dist/esm/icons/workflow.mjs",
+        "node_modules/lucide-react/dist/esm/icons/x.mjs",
+        "node_modules/lucide-react/dist/esm/shared/src/utils/hasA11yProp.mjs",
+        "node_modules/lucide-react/dist/esm/shared/src/utils/mergeClasses.mjs",
+        "node_modules/lucide-react/dist/esm/shared/src/utils/toCamelCase.mjs",
+        "node_modules/lucide-react/dist/esm/shared/src/utils/toKebabCase.mjs",
+        "node_modules/lucide-react/dist/esm/shared/src/utils/toPascalCase.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/lucide-react/LICENSE",
+          "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
+        }
+      ]
+    },
+    {
+      "name": "make-plural",
+      "version": "7.5.0",
+      "license": "Unicode-DFS-2016",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/eemeli/make-plural.git",
+        "directory": "packages/plurals"
+      },
+      "locations": [
+        "node_modules/make-plural"
+      ],
+      "modules": [
+        "node_modules/make-plural/plurals.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/make-plural/LICENSE",
+          "sha256": "6cd1ebfce78b5faf27d154903b11a21245f6151b01f266ecf2d88882fe6d743f"
+        }
+      ]
+    },
+    {
+      "name": "markdown-table",
+      "version": "3.0.4",
+      "license": "MIT",
+      "repository": "wooorm/markdown-table",
+      "locations": [
+        "node_modules/markdown-table"
+      ],
+      "modules": [
+        "node_modules/markdown-table/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/markdown-table/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-find-and-replace",
+      "version": "3.0.2",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-find-and-replace",
+      "locations": [
+        "node_modules/mdast-util-find-and-replace"
+      ],
+      "modules": [
+        "node_modules/mdast-util-find-and-replace/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-find-and-replace/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-from-markdown",
+      "version": "2.0.3",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-from-markdown",
+      "locations": [
+        "node_modules/mdast-util-from-markdown"
+      ],
+      "modules": [
+        "node_modules/mdast-util-from-markdown/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-from-markdown/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-autolink-literal",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm-autolink-literal",
+      "locations": [
+        "node_modules/mdast-util-gfm-autolink-literal"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm-autolink-literal/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm-autolink-literal/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-footnote",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm-footnote",
+      "locations": [
+        "node_modules/mdast-util-gfm-footnote"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm-footnote/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm-footnote/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-strikethrough",
+      "version": "2.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm-strikethrough",
+      "locations": [
+        "node_modules/mdast-util-gfm-strikethrough"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm-strikethrough/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm-strikethrough/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-table",
+      "version": "2.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm-table",
+      "locations": [
+        "node_modules/mdast-util-gfm-table"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm-table/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm-table/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-task-list-item",
+      "version": "2.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm-task-list-item",
+      "locations": [
+        "node_modules/mdast-util-gfm-task-list-item"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm-task-list-item/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm-task-list-item/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm",
+      "version": "3.1.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-gfm",
+      "locations": [
+        "node_modules/mdast-util-gfm"
+      ],
+      "modules": [
+        "node_modules/mdast-util-gfm/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-gfm/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-phrasing",
+      "version": "4.1.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-phrasing",
+      "locations": [
+        "node_modules/mdast-util-phrasing"
+      ],
+      "modules": [
+        "node_modules/mdast-util-phrasing/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-phrasing/license",
+          "sha256": "b6d1a4e1831b177acc96f22a817d4f0f4c18419355badc3125754445fc69e3a7"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-to-hast",
+      "version": "13.2.1",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-to-hast",
+      "locations": [
+        "node_modules/mdast-util-to-hast"
+      ],
+      "modules": [
+        "node_modules/mdast-util-to-hast/lib/footer.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/blockquote.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/break.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/code.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/delete.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/emphasis.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/heading.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/html.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/image-reference.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/image.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/index.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/inline-code.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/link-reference.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/link.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/list-item.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/list.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/paragraph.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/root.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/strong.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/table-cell.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/table-row.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/table.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/text.js",
+        "node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js",
+        "node_modules/mdast-util-to-hast/lib/index.js",
+        "node_modules/mdast-util-to-hast/lib/revert.js",
+        "node_modules/mdast-util-to-hast/lib/state.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-to-hast/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-to-markdown",
+      "version": "2.1.2",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-to-markdown",
+      "locations": [
+        "node_modules/mdast-util-to-markdown"
+      ],
+      "modules": [
+        "node_modules/mdast-util-to-markdown/lib/handle/blockquote.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/break.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/code.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/definition.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/emphasis.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/heading.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/html.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/image-reference.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/image.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/index.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/inline-code.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/link-reference.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/link.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/list-item.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/list.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/paragraph.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/root.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/strong.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/text.js",
+        "node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-bullet.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-fence.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-quote.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-rule.js",
+        "node_modules/mdast-util-to-markdown/lib/util/check-strong.js",
+        "node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js",
+        "node_modules/mdast-util-to-markdown/lib/util/encode-info.js",
+        "node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js",
+        "node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js",
+        "node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js",
+        "node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-to-markdown/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-to-string",
+      "version": "4.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/mdast-util-to-string",
+      "locations": [
+        "node_modules/mdast-util-to-string"
+      ],
+      "modules": [
+        "node_modules/mdast-util-to-string/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/mdast-util-to-string/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "micromark-core-commonmark",
+      "version": "2.0.3",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-core-commonmark",
+      "locations": [
+        "node_modules/micromark-core-commonmark"
+      ],
+      "modules": [
+        "node_modules/micromark-core-commonmark/lib/attention.js",
+        "node_modules/micromark-core-commonmark/lib/autolink.js",
+        "node_modules/micromark-core-commonmark/lib/blank-line.js",
+        "node_modules/micromark-core-commonmark/lib/block-quote.js",
+        "node_modules/micromark-core-commonmark/lib/character-escape.js",
+        "node_modules/micromark-core-commonmark/lib/character-reference.js",
+        "node_modules/micromark-core-commonmark/lib/code-fenced.js",
+        "node_modules/micromark-core-commonmark/lib/code-indented.js",
+        "node_modules/micromark-core-commonmark/lib/code-text.js",
+        "node_modules/micromark-core-commonmark/lib/content.js",
+        "node_modules/micromark-core-commonmark/lib/definition.js",
+        "node_modules/micromark-core-commonmark/lib/hard-break-escape.js",
+        "node_modules/micromark-core-commonmark/lib/heading-atx.js",
+        "node_modules/micromark-core-commonmark/lib/html-flow.js",
+        "node_modules/micromark-core-commonmark/lib/html-text.js",
+        "node_modules/micromark-core-commonmark/lib/label-end.js",
+        "node_modules/micromark-core-commonmark/lib/label-start-image.js",
+        "node_modules/micromark-core-commonmark/lib/label-start-link.js",
+        "node_modules/micromark-core-commonmark/lib/line-ending.js",
+        "node_modules/micromark-core-commonmark/lib/list.js",
+        "node_modules/micromark-core-commonmark/lib/setext-underline.js",
+        "node_modules/micromark-core-commonmark/lib/thematic-break.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-core-commonmark/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-autolink-literal",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm-autolink-literal",
+      "locations": [
+        "node_modules/micromark-extension-gfm-autolink-literal"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm-autolink-literal/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-footnote",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm-footnote",
+      "locations": [
+        "node_modules/micromark-extension-gfm-footnote"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm-footnote/lib/syntax.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm-footnote/license",
+          "sha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-strikethrough",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm-strikethrough",
+      "locations": [
+        "node_modules/micromark-extension-gfm-strikethrough"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm-strikethrough/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-table",
+      "version": "2.1.2",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm-table",
+      "locations": [
+        "node_modules/micromark-extension-gfm-table"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm-table/lib/edit-map.js",
+        "node_modules/micromark-extension-gfm-table/lib/infer.js",
+        "node_modules/micromark-extension-gfm-table/lib/syntax.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm-table/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-task-list-item",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm-task-list-item",
+      "locations": [
+        "node_modules/micromark-extension-gfm-task-list-item"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm-task-list-item/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm",
+      "version": "3.0.0",
+      "license": "MIT",
+      "repository": "micromark/micromark-extension-gfm",
+      "locations": [
+        "node_modules/micromark-extension-gfm"
+      ],
+      "modules": [
+        "node_modules/micromark-extension-gfm/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-extension-gfm/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-destination",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-destination",
+      "locations": [
+        "node_modules/micromark-factory-destination"
+      ],
+      "modules": [
+        "node_modules/micromark-factory-destination/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-factory-destination/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-label",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-label",
+      "locations": [
+        "node_modules/micromark-factory-label"
+      ],
+      "modules": [
+        "node_modules/micromark-factory-label/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-factory-label/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-space",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-space",
+      "locations": [
+        "node_modules/micromark-factory-space"
+      ],
+      "modules": [
+        "node_modules/micromark-factory-space/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-factory-space/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-title",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-title",
+      "locations": [
+        "node_modules/micromark-factory-title"
+      ],
+      "modules": [
+        "node_modules/micromark-factory-title/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-factory-title/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-whitespace",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-whitespace",
+      "locations": [
+        "node_modules/micromark-factory-whitespace"
+      ],
+      "modules": [
+        "node_modules/micromark-factory-whitespace/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-factory-whitespace/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-character",
+      "version": "2.1.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-character",
+      "locations": [
+        "node_modules/micromark-util-character"
+      ],
+      "modules": [
+        "node_modules/micromark-util-character/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-character/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-chunked",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-chunked",
+      "locations": [
+        "node_modules/micromark-util-chunked"
+      ],
+      "modules": [
+        "node_modules/micromark-util-chunked/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-chunked/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-classify-character",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-classify-character",
+      "locations": [
+        "node_modules/micromark-util-classify-character"
+      ],
+      "modules": [
+        "node_modules/micromark-util-classify-character/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-classify-character/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-combine-extensions",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-combine-extensions",
+      "locations": [
+        "node_modules/micromark-util-combine-extensions"
+      ],
+      "modules": [
+        "node_modules/micromark-util-combine-extensions/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-combine-extensions/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-decode-numeric-character-reference",
+      "version": "2.0.2",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-numeric-character-reference",
+      "locations": [
+        "node_modules/micromark-util-decode-numeric-character-reference"
+      ],
+      "modules": [
+        "node_modules/micromark-util-decode-numeric-character-reference/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-decode-numeric-character-reference/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-decode-string",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
+      "locations": [
+        "node_modules/micromark-util-decode-string"
+      ],
+      "modules": [
+        "node_modules/micromark-util-decode-string/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-decode-string/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-html-tag-name",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-html-tag-name",
+      "locations": [
+        "node_modules/micromark-util-html-tag-name"
+      ],
+      "modules": [
+        "node_modules/micromark-util-html-tag-name/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-html-tag-name/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-normalize-identifier",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-normalize-identifier",
+      "locations": [
+        "node_modules/micromark-util-normalize-identifier"
+      ],
+      "modules": [
+        "node_modules/micromark-util-normalize-identifier/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-normalize-identifier/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-resolve-all",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-resolve-all",
+      "locations": [
+        "node_modules/micromark-util-resolve-all"
+      ],
+      "modules": [
+        "node_modules/micromark-util-resolve-all/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-resolve-all/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-sanitize-uri",
+      "version": "2.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-sanitize-uri",
+      "locations": [
+        "node_modules/micromark-util-sanitize-uri"
+      ],
+      "modules": [
+        "node_modules/micromark-util-sanitize-uri/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-sanitize-uri/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-subtokenize",
+      "version": "2.1.0",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-subtokenize",
+      "locations": [
+        "node_modules/micromark-util-subtokenize"
+      ],
+      "modules": [
+        "node_modules/micromark-util-subtokenize/index.js",
+        "node_modules/micromark-util-subtokenize/lib/splice-buffer.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark-util-subtokenize/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark",
+      "version": "4.0.2",
+      "license": "MIT",
+      "repository": "https://github.com/micromark/micromark/tree/main/packages/micromark",
+      "locations": [
+        "node_modules/micromark"
+      ],
+      "modules": [
+        "node_modules/micromark/lib/constructs.js",
+        "node_modules/micromark/lib/create-tokenizer.js",
+        "node_modules/micromark/lib/initialize/content.js",
+        "node_modules/micromark/lib/initialize/document.js",
+        "node_modules/micromark/lib/initialize/flow.js",
+        "node_modules/micromark/lib/initialize/text.js",
+        "node_modules/micromark/lib/parse.js",
+        "node_modules/micromark/lib/postprocess.js",
+        "node_modules/micromark/lib/preprocess.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/micromark/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "nanoid",
+      "version": "5.1.16",
+      "license": "MIT",
+      "repository": "ai/nanoid",
+      "locations": [
+        "node_modules/@flowgram.ai/core/node_modules/nanoid",
+        "node_modules/@flowgram.ai/document/node_modules/nanoid",
+        "node_modules/@flowgram.ai/form/node_modules/nanoid",
+        "node_modules/@flowgram.ai/free-layout-core/node_modules/nanoid",
+        "node_modules/@flowgram.ai/history/node_modules/nanoid",
+        "node_modules/@flowgram.ai/node/node_modules/nanoid",
+        "node_modules/@flowgram.ai/variable-core/node_modules/nanoid"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/core/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/core/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/document/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/document/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/form/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/form/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/free-layout-core/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/free-layout-core/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/history/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/history/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/node/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/node/node_modules/nanoid/url-alphabet/index.js",
+        "node_modules/@flowgram.ai/variable-core/node_modules/nanoid/index.browser.js",
+        "node_modules/@flowgram.ai/variable-core/node_modules/nanoid/url-alphabet/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@flowgram.ai/core/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/document/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/form/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/free-layout-core/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/history/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/node/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        },
+        {
+          "source": "node_modules/@flowgram.ai/variable-core/node_modules/nanoid/LICENSE",
+          "sha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        }
+      ]
+    },
+    {
+      "name": "property-information",
+      "version": "7.2.0",
+      "license": "MIT",
+      "repository": "wooorm/property-information",
+      "locations": [
+        "node_modules/property-information"
+      ],
+      "modules": [
+        "node_modules/property-information/index.js",
+        "node_modules/property-information/lib/aria.js",
+        "node_modules/property-information/lib/find.js",
+        "node_modules/property-information/lib/hast-to-react.js",
+        "node_modules/property-information/lib/html.js",
+        "node_modules/property-information/lib/normalize.js",
+        "node_modules/property-information/lib/svg.js",
+        "node_modules/property-information/lib/util/case-insensitive-transform.js",
+        "node_modules/property-information/lib/util/case-sensitive-transform.js",
+        "node_modules/property-information/lib/util/create.js",
+        "node_modules/property-information/lib/util/defined-info.js",
+        "node_modules/property-information/lib/util/info.js",
+        "node_modules/property-information/lib/util/merge.js",
+        "node_modules/property-information/lib/util/schema.js",
+        "node_modules/property-information/lib/util/types.js",
+        "node_modules/property-information/lib/xlink.js",
+        "node_modules/property-information/lib/xml.js",
+        "node_modules/property-information/lib/xmlns.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/property-information/license",
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        }
+      ]
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.6",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/facebook/react.git",
+        "directory": "packages/react-dom"
+      },
+      "locations": [
+        "node_modules/react-dom"
+      ],
+      "modules": [
+        "node_modules/react-dom/cjs/react-dom-client.production.js",
+        "node_modules/react-dom/cjs/react-dom.production.js",
+        "node_modules/react-dom/client.js",
+        "node_modules/react-dom/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/react-dom/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "react-markdown",
+      "version": "10.1.0",
+      "license": "MIT",
+      "repository": "remarkjs/react-markdown",
+      "locations": [
+        "node_modules/react-markdown"
+      ],
+      "modules": [
+        "node_modules/react-markdown/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/react-markdown/license",
+          "sha256": "f6196c64e144f9a6fa9154c3a80bc8b89615a9567934b83a8951879f06ba2aef"
+        }
+      ]
+    },
+    {
+      "name": "react",
+      "version": "19.2.6",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/facebook/react.git",
+        "directory": "packages/react"
+      },
+      "locations": [
+        "node_modules/react"
+      ],
+      "modules": [
+        "node_modules/react/cjs/react-jsx-runtime.production.js",
+        "node_modules/react/cjs/react.production.js",
+        "node_modules/react/index.js",
+        "node_modules/react/jsx-runtime.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/react/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "reflect-metadata",
+      "version": "0.2.2",
+      "license": "Apache-2.0",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/rbuckton/reflect-metadata.git"
+      },
+      "locations": [
+        "node_modules/reflect-metadata"
+      ],
+      "modules": [
+        "node_modules/reflect-metadata/Reflect.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/reflect-metadata/LICENSE",
+          "sha256": "c5217b0544ea9c91d010863582d6f6b35ec50e4146c34dee085ddcec5dd92def"
+        }
+      ]
+    },
+    {
+      "name": "remark-gfm",
+      "version": "4.0.1",
+      "license": "MIT",
+      "repository": "remarkjs/remark-gfm",
+      "locations": [
+        "node_modules/remark-gfm"
+      ],
+      "modules": [
+        "node_modules/remark-gfm/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/remark-gfm/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "remark-parse",
+      "version": "11.0.0",
+      "license": "MIT",
+      "repository": "https://github.com/remarkjs/remark/tree/main/packages/remark-parse",
+      "locations": [
+        "node_modules/remark-parse"
+      ],
+      "modules": [
+        "node_modules/remark-parse/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/remark-parse/license",
+          "sha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+        }
+      ]
+    },
+    {
+      "name": "remark-rehype",
+      "version": "11.1.2",
+      "license": "MIT",
+      "repository": "remarkjs/remark-rehype",
+      "locations": [
+        "node_modules/remark-rehype"
+      ],
+      "modules": [
+        "node_modules/remark-rehype/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/remark-rehype/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "rxjs",
+      "version": "7.8.2",
+      "license": "Apache-2.0",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/reactivex/rxjs.git"
+      },
+      "locations": [
+        "node_modules/rxjs"
+      ],
+      "modules": [
+        "node_modules/rxjs/dist/esm5/internal/BehaviorSubject.js",
+        "node_modules/rxjs/dist/esm5/internal/NotificationFactories.js",
+        "node_modules/rxjs/dist/esm5/internal/Observable.js",
+        "node_modules/rxjs/dist/esm5/internal/Scheduler.js",
+        "node_modules/rxjs/dist/esm5/internal/Subject.js",
+        "node_modules/rxjs/dist/esm5/internal/Subscriber.js",
+        "node_modules/rxjs/dist/esm5/internal/Subscription.js",
+        "node_modules/rxjs/dist/esm5/internal/config.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/combineLatest.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/concat.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/empty.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/from.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/innerFrom.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/merge.js",
+        "node_modules/rxjs/dist/esm5/internal/observable/of.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/OperatorSubscriber.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/concatAll.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/debounceTime.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/distinctUntilChanged.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/filter.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/map.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/mergeAll.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/mergeInternals.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/mergeMap.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/observeOn.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/share.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/skip.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/startWith.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/subscribeOn.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/switchMap.js",
+        "node_modules/rxjs/dist/esm5/internal/operators/tap.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduleArray.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduleAsyncIterable.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduleIterable.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduleObservable.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/schedulePromise.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduleReadableStreamLike.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduled/scheduled.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/Action.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/AnimationFrameAction.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/AnimationFrameScheduler.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/AsyncAction.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/AsyncScheduler.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/animationFrame.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/animationFrameProvider.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/async.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/dateTimestampProvider.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/intervalProvider.js",
+        "node_modules/rxjs/dist/esm5/internal/scheduler/timeoutProvider.js",
+        "node_modules/rxjs/dist/esm5/internal/symbol/iterator.js",
+        "node_modules/rxjs/dist/esm5/internal/symbol/observable.js",
+        "node_modules/rxjs/dist/esm5/internal/util/ObjectUnsubscribedError.js",
+        "node_modules/rxjs/dist/esm5/internal/util/UnsubscriptionError.js",
+        "node_modules/rxjs/dist/esm5/internal/util/args.js",
+        "node_modules/rxjs/dist/esm5/internal/util/argsArgArrayOrObject.js",
+        "node_modules/rxjs/dist/esm5/internal/util/arrRemove.js",
+        "node_modules/rxjs/dist/esm5/internal/util/createErrorClass.js",
+        "node_modules/rxjs/dist/esm5/internal/util/createObject.js",
+        "node_modules/rxjs/dist/esm5/internal/util/errorContext.js",
+        "node_modules/rxjs/dist/esm5/internal/util/executeSchedule.js",
+        "node_modules/rxjs/dist/esm5/internal/util/identity.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isArrayLike.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isAsyncIterable.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isFunction.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isInteropObservable.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isIterable.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isPromise.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isReadableStreamLike.js",
+        "node_modules/rxjs/dist/esm5/internal/util/isScheduler.js",
+        "node_modules/rxjs/dist/esm5/internal/util/lift.js",
+        "node_modules/rxjs/dist/esm5/internal/util/mapOneOrManyArgs.js",
+        "node_modules/rxjs/dist/esm5/internal/util/noop.js",
+        "node_modules/rxjs/dist/esm5/internal/util/pipe.js",
+        "node_modules/rxjs/dist/esm5/internal/util/reportUnhandledError.js",
+        "node_modules/rxjs/dist/esm5/internal/util/throwUnobservableError.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/rxjs/LICENSE.txt",
+          "sha256": "81c407ac717813b0e3795402960e04003c7bba8ba59b621624707028531c9ade"
+        }
+      ]
+    },
+    {
+      "name": "scheduler",
+      "version": "0.27.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/facebook/react.git",
+        "directory": "packages/scheduler"
+      },
+      "locations": [
+        "node_modules/scheduler"
+      ],
+      "modules": [
+        "node_modules/scheduler/cjs/scheduler.production.js",
+        "node_modules/scheduler/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/scheduler/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "shadcn",
+      "version": "4.18.0",
+      "license": "MIT",
+      "repository": "https://github.com/shadcn-ui/ui",
+      "locations": [
+        "src/renderer/src/vendor"
+      ],
+      "modules": [
+        "src/renderer/src/vendor/shadcn-tailwind.css"
+      ],
+      "stylesheets": [
+        {
+          "source": "src/renderer/src/vendor/shadcn-tailwind.css",
+          "sha256": "bc7d83425702955b4cb67cb14ede9d603f9d912376d57a2d81d661094d2a782a"
+        }
+      ],
+      "notices": [
+        {
+          "source": "third-party/licenses/shadcn-MIT.txt",
+          "upstream": "https://registry.npmjs.org/shadcn/-/shadcn-4.18.0.tgz",
+          "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f"
+        }
+      ]
+    },
+    {
+      "name": "space-separated-tokens",
+      "version": "2.0.2",
+      "license": "MIT",
+      "repository": "wooorm/space-separated-tokens",
+      "locations": [
+        "node_modules/space-separated-tokens"
+      ],
+      "modules": [
+        "node_modules/space-separated-tokens/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/space-separated-tokens/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "style-to-js",
+      "version": "1.1.21",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/remarkablemark/style-to-js.git"
+      },
+      "locations": [
+        "node_modules/style-to-js"
+      ],
+      "modules": [
+        "node_modules/style-to-js/cjs/index.js",
+        "node_modules/style-to-js/cjs/utilities.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/style-to-js/LICENSE",
+          "sha256": "bbb380e5c1a717079378d6ea4d33c8a5a81655d4612b749f882e34e46712aab5"
+        }
+      ]
+    },
+    {
+      "name": "style-to-object",
+      "version": "1.0.14",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/remarkablemark/style-to-object.git"
+      },
+      "locations": [
+        "node_modules/style-to-object"
+      ],
+      "modules": [
+        "node_modules/style-to-object/cjs/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/style-to-object/LICENSE",
+          "sha256": "896c9fd6b5fc48ac31800b9d29a6e3ffcb0c2d534ed077ebfa5c2fa388cc38b7"
+        }
+      ]
+    },
+    {
+      "name": "styled-components",
+      "version": "6.6.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/styled-components/styled-components.git"
+      },
+      "locations": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/styled-components"
+      ],
+      "modules": [
+        "node_modules/@flowgram.ai/free-layout-editor/node_modules/styled-components/dist/styled-components.browser.esm.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@flowgram.ai/free-layout-editor/node_modules/styled-components/LICENSE",
+          "sha256": "5b893305a717230e5b0024ff5ca3eec1dc05ba600c9b140730488d97ce56f1e6"
+        }
+      ]
+    },
+    {
+      "name": "stylis",
+      "version": "4.3.6",
+      "license": "MIT",
+      "repository": "https://github.com/thysultan/stylis.js",
+      "locations": [
+        "node_modules/stylis"
+      ],
+      "modules": [
+        "node_modules/stylis/src/Enum.js",
+        "node_modules/stylis/src/Middleware.js",
+        "node_modules/stylis/src/Parser.js",
+        "node_modules/stylis/src/Prefixer.js",
+        "node_modules/stylis/src/Serializer.js",
+        "node_modules/stylis/src/Tokenizer.js",
+        "node_modules/stylis/src/Utility.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/stylis/LICENSE",
+          "sha256": "88c579c6ee44b41137a21321190d177982e5b17d4fa1b83a4a2e3ea325a8fc9a"
+        }
+      ]
+    },
+    {
+      "name": "tailwind-merge",
+      "version": "3.6.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/dcastil/tailwind-merge.git"
+      },
+      "locations": [
+        "node_modules/tailwind-merge"
+      ],
+      "modules": [
+        "node_modules/tailwind-merge/dist/bundle-mjs.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/tailwind-merge/LICENSE.md",
+          "sha256": "d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5"
+        }
+      ]
+    },
+    {
+      "name": "tailwindcss",
+      "version": "4.2.1",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/tailwindlabs/tailwindcss.git",
+        "directory": "packages/tailwindcss"
+      },
+      "locations": [
+        "node_modules/tailwindcss"
+      ],
+      "modules": [
+        "node_modules/tailwindcss/index.css"
+      ],
+      "stylesheets": [
+        {
+          "source": "node_modules/tailwindcss/index.css",
+          "sha256": "415a5f01208fe877d36ee8421b2135a766f258374f817a8a0a41c478c4009391"
+        }
+      ],
+      "notices": [
+        {
+          "source": "node_modules/tailwindcss/LICENSE",
+          "sha256": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985"
+        }
+      ]
+    },
+    {
+      "name": "trim-lines",
+      "version": "3.0.1",
+      "license": "MIT",
+      "repository": "wooorm/trim-lines",
+      "locations": [
+        "node_modules/trim-lines"
+      ],
+      "modules": [
+        "node_modules/trim-lines/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/trim-lines/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ]
+    },
+    {
+      "name": "trough",
+      "version": "2.2.0",
+      "license": "MIT",
+      "repository": "wooorm/trough",
+      "locations": [
+        "node_modules/trough"
+      ],
+      "modules": [
+        "node_modules/trough/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/trough/license",
+          "sha256": "6c03fd41cfd7c92d8aa8a2fa521b94b2683f059123281dcf921ddea9216b6254"
+        }
+      ]
+    },
+    {
+      "name": "tslib",
+      "version": "2.8.1",
+      "license": "0BSD",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/Microsoft/tslib.git"
+      },
+      "locations": [
+        "node_modules/tslib"
+      ],
+      "modules": [
+        "node_modules/tslib/tslib.es6.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/tslib/LICENSE.txt",
+          "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+        }
+      ]
+    },
+    {
+      "name": "tw-animate-css",
+      "version": "1.4.0",
+      "license": "MIT",
+      "repository": "Wombosvideo/tw-animate-css",
+      "locations": [
+        "node_modules/tw-animate-css"
+      ],
+      "modules": [
+        "node_modules/tw-animate-css/dist/tw-animate.css"
+      ],
+      "stylesheets": [
+        {
+          "source": "node_modules/tw-animate-css/dist/tw-animate.css",
+          "sha256": "6035b41301945cd65eb233b4653965e3c235338faae51b0f55676d591daaef23"
+        }
+      ],
+      "notices": [
+        {
+          "source": "node_modules/tw-animate-css/LICENSE",
+          "sha256": "039184dfa0a822397b3f45a435b5b1e538721587fbade96b9fa80f86cb354109"
+        }
+      ]
+    },
+    {
+      "name": "unified",
+      "version": "11.0.5",
+      "license": "MIT",
+      "repository": "unifiedjs/unified",
+      "locations": [
+        "node_modules/unified"
+      ],
+      "modules": [
+        "node_modules/unified/lib/callable-instance.js",
+        "node_modules/unified/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unified/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-is",
+      "version": "6.0.1",
+      "license": "MIT",
+      "repository": "syntax-tree/unist-util-is",
+      "locations": [
+        "node_modules/unist-util-is"
+      ],
+      "modules": [
+        "node_modules/unist-util-is/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unist-util-is/license",
+          "sha256": "82974dbf2639d13edab95c32ed9cb6c0867ede272cd2e07ce47ce8548fe55c05"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-position",
+      "version": "5.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/unist-util-position",
+      "locations": [
+        "node_modules/unist-util-position"
+      ],
+      "modules": [
+        "node_modules/unist-util-position/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unist-util-position/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-stringify-position",
+      "version": "4.0.0",
+      "license": "MIT",
+      "repository": "syntax-tree/unist-util-stringify-position",
+      "locations": [
+        "node_modules/unist-util-stringify-position"
+      ],
+      "modules": [
+        "node_modules/unist-util-stringify-position/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unist-util-stringify-position/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-visit-parents",
+      "version": "6.0.2",
+      "license": "MIT",
+      "repository": "syntax-tree/unist-util-visit-parents",
+      "locations": [
+        "node_modules/unist-util-visit-parents"
+      ],
+      "modules": [
+        "node_modules/unist-util-visit-parents/lib/color.js",
+        "node_modules/unist-util-visit-parents/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unist-util-visit-parents/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-visit",
+      "version": "5.1.0",
+      "license": "MIT",
+      "repository": "syntax-tree/unist-util-visit",
+      "locations": [
+        "node_modules/unist-util-visit"
+      ],
+      "modules": [
+        "node_modules/unist-util-visit/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unist-util-visit/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "use-sync-external-store",
+      "version": "1.6.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/facebook/react.git",
+        "directory": "packages/use-sync-external-store"
+      },
+      "locations": [
+        "node_modules/use-sync-external-store"
+      ],
+      "modules": [
+        "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js",
+        "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js",
+        "node_modules/use-sync-external-store/shim/index.js",
+        "node_modules/use-sync-external-store/shim/with-selector.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/use-sync-external-store/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "vfile-message",
+      "version": "4.0.3",
+      "license": "MIT",
+      "repository": "vfile/vfile-message",
+      "locations": [
+        "node_modules/vfile-message"
+      ],
+      "modules": [
+        "node_modules/vfile-message/lib/index.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/vfile-message/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "vfile",
+      "version": "6.0.3",
+      "license": "MIT",
+      "repository": "vfile/vfile",
+      "locations": [
+        "node_modules/vfile"
+      ],
+      "modules": [
+        "node_modules/vfile/lib/index.js",
+        "node_modules/vfile/lib/minpath.browser.js",
+        "node_modules/vfile/lib/minproc.browser.js",
+        "node_modules/vfile/lib/minurl.browser.js",
+        "node_modules/vfile/lib/minurl.shared.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/vfile/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+        }
+      ]
+    }
+  ]
+}

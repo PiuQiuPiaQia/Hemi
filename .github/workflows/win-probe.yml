@@ -1,0 +1,70 @@
+# Windows 适配探针（043 B0／首发 Windows 包前置）：windows-latest 真机上
+# 全量单测 → 渲染构建 → 源码实例冒烟 → nsis 打包 → 打包体自检与冒烟。
+# 不发布任何产物；workflow_dispatch 手动触发，绿了才把同套步骤接进 release.yml。
+name: Windows probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  win-probe:
+    name: windows-latest · 单测/构建/打包/冒烟
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 043 R-20 起测试入口跨平台（node 自己枚举 *.test.mjs）；单测里若有
+      # darwin 假设，这里是第一道暴露面。
+      - run: npm test
+
+      - run: npm run build
+
+      - name: 源码实例冒烟（未打包主进程 + vite 产物）
+        run: npx cross-env HEMI_SMOKE_TEST=1 electron .
+        timeout-minutes: 6
+
+      # targets 落 package.json build.win.target（26.x CLI 逗号列表解析雷）。
+      - name: 打包 nsis x64（不发布）
+        run: npx electron-builder --win --publish never
+
+      - name: 打包体自检
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem release | Select-Object Name, Length
+          $appDir = 'release/win-unpacked/resources/app'
+          foreach ($f in @("$appDir/package.json", "$appDir/src/shared/ipc-channels.mjs")) {
+            if (-not (Test-Path $f)) { throw "打包缺文件: $f（023 雷）" }
+          }
+          $pkg = Get-Content "$appDir/package.json" | ConvertFrom-Json
+          $root = Get-Content package.json | ConvertFrom-Json
+          if ($pkg.version -ne $root.version) { throw "包内版本 $($pkg.version) ≠ $($root.version)" }
+          if (-not (Get-ChildItem release -Filter '*.exe' | Where-Object Name -notmatch 'unpacked')) {
+            throw '没找到 nsis 安装包 exe'
+          }
+          # win 应用内更新的清单（与 release.yml win job 同断言）。
+          if (-not (Test-Path 'release/latest.yml')) { throw '打包没产出 latest.yml（win 更新清单）' }
+
+      - name: 打包体冒烟（win-unpacked 真跑）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:HEMI_SMOKE_TEST = '1'
+          $env:HEMI_USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'hemi-win-smoke-ud'
+          # GUI 子系统 exe 在 PowerShell 里 `&` 调用立即返回不等待——必须
+          # Start-Process -Wait 才能拿到真实退出码（win 探针第 3 轮钓出）。
+          $proc = Start-Process -FilePath 'release/win-unpacked/Hemi.exe' -PassThru
+          if (-not $proc.WaitForExit(300000)) { $proc.Kill($true); throw '冒烟 5 分钟未退出' }
+          if ($proc.ExitCode -ne 0) { throw "打包体冒烟退出码 $($proc.ExitCode)" }
+        timeout-minutes: 7

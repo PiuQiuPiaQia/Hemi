@@ -1,0 +1,149 @@
+{
+  "name": "hemi-desktop",
+  "productName": "Hemi",
+  "version": "0.9.0",
+  "license": "MIT",
+  "private": true,
+  "description": "Hemi 桌面语音行动助手。",
+  "type": "module",
+  "main": "src/main/index.mjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:renderer": "node scripts/dev-renderer.mjs",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "smoke": "npm run build && cross-env HEMI_SMOKE_TEST=1 electron .",
+    "build:renderer": "vite build",
+    "build:skill-market": "node scripts/build-skill-market.mjs",
+    "build:icons": "node scripts/generate-app-icons.mjs",
+    "build": "npm run typecheck && npm run build:renderer",
+    "release": "node scripts/release.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "start": "electron .",
+    "postinstall": "node scripts/clean-appledouble.mjs",
+    "pack": "npm run build && electron-builder --dir --publish never",
+    "dist:mac": "npm run build && electron-builder --publish never"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@trycua/cua-driver": "0.32.0",
+    "electron-updater": "6.8.10",
+    "pi-memory": "^0.4.2",
+    "uiohook-napi": "^1.5.5",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@base-ui/react": "1.7.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/modifiers": "^9.0.0",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@flowgram.ai/free-layout-editor": "1.0.16",
+    "@tailwindcss/postcss": "4.2.1",
+    "@tanstack/react-virtual": "3.14.21",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/stats.js": "0.17.4",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "6.0.2",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "concurrently": "10.0.6",
+    "cross-env": "10.1.0",
+    "electron": "44.0.0",
+    "electron-builder": "26.15.3",
+    "lucide-react": "1.31.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "11.0.0",
+    "stats.js": "0.17.0",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.2.1",
+    "tw-animate-css": "1.4.0",
+    "typescript": "5.9.3",
+    "unified": "11.0.5",
+    "vite": "8.0.16",
+    "wait-on": "9.1.0"
+  },
+  "build": {
+    "appId": "ai.hemi.desktop",
+    "productName": "Hemi",
+    "asar": false,
+    "beforePack": "scripts/before-pack-licenses.cjs",
+    "afterPack": "scripts/after-pack-clean.cjs",
+    "directories": {
+      "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "PiuQiuPiaQia",
+      "repo": "Hemi",
+      "releaseType": "release"
+    },
+    "files": [
+      "dist-renderer/**/*",
+      "src/main/**/*",
+      "src/preload/**/*",
+      "src/shared/**/*",
+      "build/icon.png",
+      "LICENSE*",
+      "THIRD-PARTY-NOTICES.md",
+      "third-party/**/*",
+      "!src/main/**/*.test.mjs",
+      "!src/shared/**/*.test.mjs",
+      "!**/._*",
+      "package.json",
+      "!**/node_modules/**/*.map",
+      "!**/node_modules/@earendil-works/pi-coding-agent/docs/**"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/electron/dist/LICENSE",
+        "to": "licenses/Electron-LICENSE.txt"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSES.chromium.html",
+        "to": "licenses/LICENSES.chromium.html"
+      },
+      {
+        "from": "extensions/chrome-extension",
+        "to": "chrome-extension",
+        "filter": [
+          "**/*",
+          "!._*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Hemi 需要使用麦克风，将你的语音实时转写为文字。"
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "Hemi-${version}-setup.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "asarUnpack": [
+      "**/node_modules/@earendil-works/**"
+    ]
+  }
+}

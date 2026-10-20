@@ -1,0 +1,170 @@
+{
+  "scope": "Selected third-party source and notice provenance; not a complete native dependency audit",
+  "components": [
+    {
+      "packages": [
+        "@trycua/cua-driver@0.32.0",
+        "@trycua/cua-driver-darwin-arm64@0.32.0"
+      ],
+      "license": "MIT AND MPL-2.0 (compatibility runtime)",
+      "sourceCommit": "58aba84b5b83d77e7e2b0f006547699eb594e50d",
+      "source": "https://github.com/trycua/cua/tree/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver",
+      "archive": "https://codeload.github.com/trycua/cua/tar.gz/58aba84b5b83d77e7e2b0f006547699eb594e50d",
+      "modifiedByHemi": false,
+      "buildScript": {
+        "url": "https://raw.githubusercontent.com/trycua/cua/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/scripts/build-node-runtime.mjs",
+        "sha256": "db02ec1345edbf6090f0093ddae3bd41d624d2984af58bcdce3a66cfcad373dc",
+        "bytes": 8072
+      }
+    },
+    {
+      "packages": [
+        "@ubjs/core@0.31.0-3"
+      ],
+      "license": "MPL-2.0",
+      "sourceCommit": "49bc59194d183a05855ed4104c18eb92fb465e02",
+      "source": "https://github.com/jhugman/uniffi-bindgen-react-native/tree/49bc59194d183a05855ed4104c18eb92fb465e02/typescript",
+      "archive": "https://codeload.github.com/jhugman/uniffi-bindgen-react-native/tar.gz/49bc59194d183a05855ed4104c18eb92fb465e02",
+      "modifiedByHemi": false
+    },
+    {
+      "packages": [
+        "@ubjs/node@0.31.0-3",
+        "@ubjs/node-darwin-arm64@0.31.0-3",
+        "uniffi-bindgen-react-native@0.31.0-3 (Cua build input)"
+      ],
+      "license": "MPL-2.0",
+      "sourceCommit": "dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449",
+      "source": "https://github.com/jhugman/uniffi-bindgen-react-native/tree/dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449/runtimes/napi",
+      "archive": "https://codeload.github.com/jhugman/uniffi-bindgen-react-native/tar.gz/dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449",
+      "modifiedByHemi": false,
+      "cuaBuildInputIntegrity": "sha512-br7giBJRr/j00rdMXhOZGMGuDWMAVUcxC9O3lco0KRqzEAxUz00+gegPW5tKamvKbrnj7NB682XUCYrcagtxFA=="
+    },
+    {
+      "packages": [
+        "bezier-js@6.1.4"
+      ],
+      "license": "MIT",
+      "modifiedByHemi": false,
+      "sourceCommit": "a41f3e08e9724c9973eca0eb5c1304120e72fc70",
+      "licenseCommit": "4e767299184ab4079dc8d7c970020103db14f431",
+      "sourceTree": "109457761d12267520afb359e1ab604c2f594c4e",
+      "licenseRevisionSourceTree": "109457761d12267520afb359e1ab604c2f594c4e",
+      "licenseUrl": "https://raw.githubusercontent.com/Pomax/bezierjs/4e767299184ab4079dc8d7c970020103db14f431/LICENSE.md",
+      "licenseSha256": "4fb7b04152f7b3a7c48c98c638aba80fc1f221e915d605d45d016d87d8e2cc9f",
+      "note": "Later upstream license addition; src tree identical to the npm publication commit."
+    },
+    {
+      "packages": [
+        "@earendil-works/pi-agent-core@1.3.0",
+        "@earendil-works/pi-ai@1.3.0",
+        "@earendil-works/pi-codemode@1.3.0",
+        "@earendil-works/pi-coding-agent@1.3.0",
+        "@earendil-works/pi-mcp@1.3.0",
+        "@earendil-works/pi-telemetry@1.3.0",
+        "@earendil-works/pi-tui@1.3.0"
+      ],
+      "license": "MIT",
+      "sourceCommit": "71023aec1546d6d677a65669c5665c0927ce0dd0",
+      "source": "https://github.com/earendil-works/pi/tree/71023aec1546d6d677a65669c5665c0927ce0dd0",
+      "licenseUrl": "https://raw.githubusercontent.com/earendil-works/pi/71023aec1546d6d677a65669c5665c0927ce0dd0/LICENSE",
+      "licenseSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+      "modifiedByHemi": false
+    },
+    {
+      "packages": [
+        "shadcn@4.18.0 (vendored stylesheet only)"
+      ],
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/shadcn/-/shadcn-4.18.0.tgz",
+      "npmIntegrity": "sha512-tUFZgkYmfVNQVm3xX7lhSzOvDsp+O14ac5dwgXIr5mIsr79ISueb/Mu+ZtWMz0DH6v77u4eYyvbQ9TTMpSn3aw==",
+      "modifiedByHemi": false,
+      "stylesheet": {
+        "source": "dist/tailwind.css",
+        "path": "src/renderer/src/vendor/shadcn-tailwind.css",
+        "sha256": "bc7d83425702955b4cb67cb14ede9d603f9d912376d57a2d81d661094d2a782a"
+      },
+      "licenseFile": {
+        "source": "LICENSE.md",
+        "path": "third-party/licenses/shadcn-MIT.txt",
+        "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f"
+      }
+    }
+  ],
+  "verifiedSourceFiles": {
+    "cua-LICENSE.md": {
+      "url": "https://raw.githubusercontent.com/trycua/cua/58aba84b5b83d77e7e2b0f006547699eb594e50d/LICENSE.md",
+      "sha256": "c0779290c1d4783169aa3dbfb55feb505e563ef8a004bbf55298ceffcfbda8d9",
+      "bytes": 1069
+    },
+    "cua-build-node-runtime.mjs": {
+      "url": "https://raw.githubusercontent.com/trycua/cua/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/scripts/build-node-runtime.mjs",
+      "sha256": "db02ec1345edbf6090f0093ddae3bd41d624d2984af58bcdce3a66cfcad373dc",
+      "bytes": 8072
+    },
+    "cua-package.json": {
+      "url": "https://raw.githubusercontent.com/trycua/cua/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/typescript/package.json",
+      "sha256": "c108ba306294558b0424a83870a84072c323b1cc1b1b63110a3eff987820a9fd",
+      "bytes": 1803
+    },
+    "ubjs-core-package.json": {
+      "url": "https://raw.githubusercontent.com/jhugman/uniffi-bindgen-react-native/49bc59194d183a05855ed4104c18eb92fb465e02/typescript/package.json",
+      "sha256": "1c0ed45d2dc102ded7a39c2110d3ff30873663ec7fc9b28e3decc5b725fcbe0f",
+      "bytes": 1365
+    },
+    "ubjs-core-LICENSE": {
+      "url": "https://raw.githubusercontent.com/jhugman/uniffi-bindgen-react-native/49bc59194d183a05855ed4104c18eb92fb465e02/LICENSE",
+      "sha256": "d1cc4c0ada218e8a336dc8c3d8bb7d5b1c8dedfa31f5b25c9ea1759d21b8b62d",
+      "bytes": 192
+    },
+    "ubjs-node-package.json": {
+      "url": "https://raw.githubusercontent.com/jhugman/uniffi-bindgen-react-native/dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449/runtimes/napi/package.json",
+      "sha256": "24a6ca5f9a3fb45b76cde69f1873103d79e2304392e8f98a09fda4e44168190d",
+      "bytes": 2009
+    },
+    "ubjs-node-LICENSE": {
+      "url": "https://raw.githubusercontent.com/jhugman/uniffi-bindgen-react-native/dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449/LICENSE",
+      "sha256": "d1cc4c0ada218e8a336dc8c3d8bb7d5b1c8dedfa31f5b25c9ea1759d21b8b62d",
+      "bytes": 192
+    },
+    "bezier-README.md": {
+      "url": "https://raw.githubusercontent.com/Pomax/bezierjs/a41f3e08e9724c9973eca0eb5c1304120e72fc70/README.md",
+      "sha256": "a484d83c36be812892ec44ec1575b31ffb7fc7cca5bf730c5c4eb4b12e6b3e63",
+      "bytes": 3067
+    },
+    "MPL-2.0.txt": {
+      "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+      "bytes": 16726
+    },
+    "Cua-Rust-NOTICES.md": {
+      "url": "https://raw.githubusercontent.com/trycua/cua/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/rust/THIRD_PARTY_NOTICES.md",
+      "sha256": "3268421fe758ec53bc11a2644aac1451a397027c508c199e86745636bb5499db"
+    },
+    "Pi-MIT.txt": {
+      "url": "https://raw.githubusercontent.com/earendil-works/pi/71023aec1546d6d677a65669c5665c0927ce0dd0/LICENSE",
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+      "bytes": 1069
+    }
+  },
+  "anonymousArchiveChecks": [
+    {
+      "url": "https://codeload.github.com/trycua/cua/tar.gz/58aba84b5b83d77e7e2b0f006547699eb594e50d",
+      "bytes": 202685846,
+      "sha256": "d54e14ebdf0f0b26d32aabe777190c7ddc3acd02c3702327d6d3a018921b1c86",
+      "anonymous": true
+    },
+    {
+      "url": "https://codeload.github.com/jhugman/uniffi-bindgen-react-native/tar.gz/49bc59194d183a05855ed4104c18eb92fb465e02",
+      "bytes": 459511,
+      "sha256": "7d5eefa49ace07f2bff5dcc4cea9d78db0934fd432b05100942ba8bb6c1322b5",
+      "anonymous": true
+    },
+    {
+      "url": "https://codeload.github.com/jhugman/uniffi-bindgen-react-native/tar.gz/dcb5c4ab2350d57f6d26f5fa81a99c77ed86d449",
+      "bytes": 465120,
+      "sha256": "d5084bb2064d0784f27023f96325af5e5d81477da21d8cdeb9b61d68065fe78f",
+      "anonymous": true
+    }
+  ]
+}

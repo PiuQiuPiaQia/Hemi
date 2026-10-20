@@ -1,0 +1,5 @@
+.compact-shell .h24-main[hidden] { display: none; }
+
+/* 037：技能中心（市场 / 内置 / 已安装 / 详情 / 添加前确认）的样式已整体迁到
+   src/renderer/src/styles/037-skills.css（随 styles/index.css 在 globals.css 之后加载，
+   只用 tokens.css 变量）。这里只留与外壳显隐相关的一条，避免两处同名规则互相覆盖。 */

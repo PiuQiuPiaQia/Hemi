@@ -1,0 +1,28 @@
+# 070 凭据扫描配置（PR 门禁与发布前核对共用）。
+#
+# 原则：在 gitleaks 默认规则上做**按形状**的放行，不整目录排除——需求目录、
+# fixtures、测试里出现真实形状的密钥照样要报。放行只覆盖三类已逐项归因的假阳性：
+#   1. 视觉验收产物里的「文件名 → 内容哈希」清单（source-reference / source-manifest /
+#      evidence JSON），键是文件名、值是 8～64 位十六进制哈希；
+#   2. NewAPI 导入测试里的令牌「名称」字段 tokenName（是标签不是凭据）；
+#   3. 自述为示例的占位 Key（sk-example-…、以 example/placeholder 开头的值）。
+# 新增放行必须在 requirements/070 的记录里登记来源结论。
+
+title = "Hemi gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "逐项归因的假阳性（按值形状放行）"
+regexTarget = "match"
+regexes = [
+  # 1. 文件名 → 哈希 清单条目：tokens.css": "9f2c…"（gitleaks 的 match 从关键词 token/access
+  #    等处起算，前面的引号不一定在 match 里，所以不要求开头引号；值须是 8～64 位十六进制）
+  '''[\w@./+-]+\.(?:css|mjs|cjs|js|jsx|ts|tsx|json|md|html|svg|png)"\s*:\s*"[A-Fa-f0-9]{8,64}"''',
+  # 2. 令牌名称字段（NewAPI 导入意图里的 tokenName 是显示名）
+  '''tokenName\s*:\s*['"][^'"]{1,64}['"]''',
+  # 3. 自述示例值
+  '''sk-example-[A-Za-z0-9_-]{8,}''',
+  '''(?i)['"`](?:example|placeholder|dummy|fake)[-_][A-Za-z0-9_-]{4,}['"`]''',
+]

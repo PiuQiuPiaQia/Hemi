@@ -1,0 +1,91 @@
+# 070 · PR 检查：外部贡献的常规门禁（不依赖任何 secrets、不触发发布）。
+#
+# 范围与边界（070 R-10）：
+# - 安装 → 全量单测 → 构建（含 typecheck）→ 原生桌面口径门禁 → 间距门禁 → 凭据扫描。
+# - 凭据扫描两道：gitleaks git 扫**本次新增提交范围**（防「先提交秘密再删除」——dir 模式
+#   只看最终树会漏，独立两提交探针实证过）；gitleaks dir 扫最终工作树。旧内部历史的已知
+#   告警在 070 预检查/复核记录逐项归因、随单根提交公开策略处置，不在每个 PR 翻旧账。
+# - 放行规则只按值形状放行（.gitleaks.toml），不整目录排除；新增放行须在
+#   requirements/070 登记来源结论。
+# - 与 Release（v* tag 触发、contents:write）完全分离；这里只有 contents:read。
+# - 本门禁覆盖 macOS；Windows 发布验证由 win-probe／release workflow 另行执行。
+name: PR checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: macOS · 单测/构建/门禁
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 800+ 单测不依赖模型 Key（AGENTS.md 自动化底座）；check-native 随 npm test 跑。
+      - run: npm test
+
+      - name: 前端第三方声明与实际 bundle 一致
+        run: node scripts/generate-renderer-notices.mjs --check
+
+      - run: npm run build
+
+      - name: 间距 token 门禁
+        run: node scripts/check-spacing.mjs
+
+  gitleaks:
+    name: 凭据扫描（工作树＋新增提交）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 全历史：PR 基线分支与 push 区间起点都要在场
+          fetch-depth: 0
+
+      # 正常 push／PR 扫新增提交；首次推送或重建历史后旧基线不存在时扫描全部历史。
+      - name: 计算扫描区间
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          # 从事件文件读取，避免 Actions 的 env 输出暴露重建历史前的提交身份。
+          EVENT_BEFORE="$(jq -r '.before // ""' "$GITHUB_EVENT_PATH")"
+          if [ -n "${BASE_REF}" ]; then
+            RANGE="origin/${BASE_REF}..HEAD"
+          elif [[ "${EVENT_BEFORE}" =~ ^[0-9a-fA-F]{40}$ ]] && git cat-file -e "${EVENT_BEFORE}^{commit}" 2>/dev/null; then
+            RANGE="${EVENT_BEFORE}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          echo "RANGE=${RANGE}" >> "$GITHUB_ENV"
+          echo "scan range: ${RANGE}"
+
+      # 版本与本地验证一致（8.30.1）；升级时同步重验 .gitleaks.toml 的放行语义。
+      - name: gitleaks git（新增提交历史，--redact 不落明文）
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            git /repo --config /repo/.gitleaks.toml --redact --no-banner \
+            --log-opts="${RANGE}" --exit-code 1
+
+      # 双保险：最终树也扫一遍（区间扫描看提交 diff，树扫描看最终状态，两者覆盖面不同）
+      - name: gitleaks dir（工作树）
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            dir /repo --config /repo/.gitleaks.toml --redact --no-banner --exit-code 1

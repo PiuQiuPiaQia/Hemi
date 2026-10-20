@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hemi 自动化任务窗口</title>
+  <link rel="icon" type="image/png" href="icons/icon-32.png" />
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #f2f8f4, #e6f0ea);
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      color: #20352c;
+    }
+    .card {
+      max-width: 420px;
+      padding: 28px 30px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.85);
+      box-shadow: 0 8px 30px rgba(32, 53, 44, 0.08);
+    }
+    h1 { font-size: 18px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+    .brand-icon {
+      width: 24px; height: 24px; flex: none;
+    }
+    p { font-size: 13px; line-height: 1.7; color: #43584e; margin: 6px 0; }
+    small { color: #7c8c83; font-size: 11px; line-height: 1.6; display: block; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><img class="brand-icon" src="icons/icon-48.png" width="24" height="24" alt="" />Hemi 自动化任务窗口</h1>
+    <p>这个窗口是赫敏专门用来执行浏览器任务的常驻工作台：任务标签页会在这里打开、操作和关闭。</p>
+    <p>它不会抢你的前台焦点，拖到屏幕角落即可。任务结束后只清掉任务标签页，这个窗口会留着复用。</p>
+    <small>关掉这个窗口没有关系，下次任务会自动重建。日常使用中请勿在这个窗口里手动输入账号密码以外的重要操作。</small>
+  </div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+/* dev 调试浮层：portal 到 body，完全脱离顶栏／内容布局，鼠标穿透。
+   右下角（2026-10-19 用户裁决：原顶栏下方右上角挡 066 方式菜单等下拉件）。 */
+.h65-perf {
+  position: fixed;
+  bottom: var(--sp-8);
+  right: var(--sp-8);
+  z-index: 9999; /* dev HUD 独立调试层，不参与业务层级。 */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--bg-canvas);
+  box-shadow: var(--shadow-1);
+  color: var(--muted);
+  font: var(--fs-12) / 1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.h65-perf-graph {
+  position: relative;
+  width: 80px; /* stats.js 原生 canvas 的 CSS 尺寸，保留像素比。 */
+  height: var(--sp-48);
+  flex: none;
+  pointer-events: none;
+}
+
+.h65-perf-graph canvas {
+  display: block;
+}
+
+.h65-perf-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-canvas);
+  color: var(--muted);
+}
+
+.h65-perf-timings,
+.h65-perf-counts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.h65-perf-timings {
+  min-width: 13ch;
+}
+
+.h65-perf-counts {
+  min-width: 8ch;
+}
+
+.h65-perf b {
+  color: var(--ink);
+  font-weight: var(--fw-medium);
+}
+
+@media (max-width: 600px) {
+  .h65-perf-timings,
+  .h65-perf-heap {
+    display: none;
+  }
+
+  .h65-perf {
+    gap: var(--sp-4);
+  }
+
+  .h65-perf-counts {
+    min-width: 0;
+  }
+}

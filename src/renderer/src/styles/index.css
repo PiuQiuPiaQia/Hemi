@@ -1,0 +1,24 @@
+/**
+ * 037 视觉系统 · 分面样式入口。必须在 globals.css 之后加载（同选择器按顺序覆盖旧规则），
+ * 由 main.tsx / fixtures-main.tsx 紧随 globals.css 引入。
+ * 顺序：共用层（orb / controls）→ 外壳 → 各页面。各页面文件只写本页布局，控件用 h37-* 共用类。
+ */
+@import './037-orb.css';
+@import './037-controls.css';
+@import './040-popovers.css';
+@import './037-shell.css';
+@import './037-chat.css';
+@import './037-composer.css';
+@import './037-task.css';
+@import './037-settings.css';
+@import './037-model.css';
+@import './047-provider-import.css';
+@import './048-thinking-usage.css';
+@import './050-result.css';
+@import './056-tools.css';
+@import './064-runtime.css';
+@import './037-memory.css';
+@import './037-skills.css';
+@import './037-onboarding.css';
+@import './037-overlays.css';
+@import './062-deliverables.css';

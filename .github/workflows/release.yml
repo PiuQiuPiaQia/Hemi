@@ -1,0 +1,168 @@
+# 044 · 生产发布：推 v* tag 触发，打包 dmg 安装包 + zip 更新包并发布到
+# GitHub Releases（electron-builder 生成 latest-mac.yml 更新清单一并上传）。
+#
+# 前置（repo Settings → Secrets and variables → Actions）：
+# - GITHUB_TOKEN：内置，无需配置（contents:write 权限已在下方声明）。
+# - HEMI_UPDATE_TOKEN：可选。仅 contents:read 的 fine-grained PAT（只授权本仓库）——
+#   私有仓更新检查必需；repo 转公开后可不配（应用内更新匿名可达）。
+# - 签名：默认不签（与本机手工打包一致）。将来配 CSC_LINK / CSC_KEY_PASSWORD
+#   及 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 后 electron-builder
+#   自动启用 Developer ID 签名与公证，无需改本文件。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-mac:
+    name: macOS arm64 · 安装包与更新清单
+    runs-on: macos-15
+    env:
+      HEMI_UPDATE_TOKEN: ${{ secrets.HEMI_UPDATE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 版本一致（tag 必须等于 package.json version）
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
+
+      - run: npm ci
+
+      # 800+ 单测不依赖模型 Key（AGENTS.md 自动化底座），CI 上全量跑一遍。
+      - run: npm test
+
+      - run: npm run build
+
+      # targets 在 package.json build.mac.target（dmg+zip）；26.x CLI 的
+      # 「--mac dmg,zip」会被当单个 target 名解析报 Unknown target（本地实测）。
+      # 只打包不发布：electron-builder 的双 target publisher 会竞争建 release
+      # （历史上撞出同 tag 双对象，v0.5.2 一轮更是 422 already_exists 直接砸死
+      # 进程）——发布统一走下面 gh 的单 publisher。
+      - name: 打包（dmg + zip + latest-mac.yml，不发布）
+        run: npx electron-builder --mac --publish never
+
+      - name: 产物自检
+        run: |
+          set -euo pipefail
+          ls -la release/
+          test -f release/latest-mac.yml
+          ls release/*.dmg release/*-mac.zip >/dev/null
+          # AGENTS.md 口径：产物内 ._ * 垃圾必须为 0。
+          GARBAGE=$(find release/mac-arm64/Hemi.app -name '._*' | wc -l | tr -d ' ')
+          test "$GARBAGE" = "0"
+
+      - name: 建 release 并上挂资产（单 publisher，创建后 win job 只往上挂）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.dmg release/*-mac.zip release/*.blockmap release/latest-mac.yml \
+            --title "Hemi ${GITHUB_REF_NAME#v}" \
+            --notes "macOS dmg/zip 与更新清单；Windows 安装包与 latest.yml 由后续 job 上挂。应用内更新 mac 与 Windows 均支持。" \
+            --latest
+
+      - name: 表观体积（exFAT/du 口径失真，产物体积按字节加总）
+        run: |
+          BYTES=$(find release/mac-arm64/Hemi.app -type f -exec stat -f %z {} + | awk '{s+=$1} END{print s}')
+          echo "app apparent size: $BYTES bytes ($((BYTES / 1024 / 1024)) MB)"
+
+  # 0.5.2 起 Windows nsis x64 同 tag 出包（与 mac 同版本）。needs mac：mac job
+  # 的 gh release create 已建好 release 对象，win 用 gh release upload 只往上挂
+  # 资产——全程单 publisher，无 electron-builder 双 publisher 竞争建 release 的
+  # 老毛病（同 tag 双对象／422 砸死进程）。
+  # win 应用内更新（2026-10-12 起）：nsis target 产出 latest.yml（win 的更新
+  # 清单）一并上挂；主进程更新桥按平台吃它，安装走 NSIS 静默更新。打包与
+  # 冒烟步骤与 win-probe workflow 同套（探针是它的手动触发版本）。
+  release-win:
+    name: Windows x64 · nsis 安装包
+    runs-on: windows-latest
+    needs: release-mac
+    # 2026-10-20 双平台恢复（v0.9.0）：上轮 13 项 win 失败已全部适配（deny 分隔符
+    # 归一＋win 系统根表＋file:// 盘符还原＋六处 fixture 平台风味），另修 resolveStrict
+    # 未配置误报损坏（win 冒烟唯一挂项）与原子写 rename 的杀毒瞬时占用（EPERM 重试）；
+    # win-probe 全绿后撤门闩。verify-release 的 --mac-only 旗标保留但不再使用。
+    timeout-minutes: 45
+    env:
+      # 与 mac job 同源：afterPack 写进包内 resources/update-token.txt——
+      # 私有仓下 win 端内更新同样靠它过 api.github.com 鉴权。
+      HEMI_UPDATE_TOKEN: ${{ secrets.HEMI_UPDATE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # test a = b 是 bash 语法，windows runner 默认 pwsh 跑不动（v0.5.2 首撞）。
+      - name: 版本一致（tag 必须等于 package.json version）
+        shell: bash
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: 源码实例冒烟（未打包主进程 + vite 产物）
+        run: npx cross-env HEMI_SMOKE_TEST=1 electron .
+        timeout-minutes: 6
+
+      # targets 落 package.json build.win.target（26.x CLI 逗号列表解析雷）。
+      - name: 打包 nsis x64（不发布——资产走 gh 统一上挂）
+        run: npx electron-builder --win --publish never
+
+      - name: 打包体自检与冒烟
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem release | Select-Object Name, Length
+          # latest.yml 是 win 应用内更新的清单（nsis target 产出），缺了更新链路断粮。
+          if (-not (Test-Path 'release/latest.yml')) { throw '打包没产出 latest.yml（win 更新清单）' }
+          $appDir = 'release/win-unpacked/resources/app'
+          foreach ($f in @("$appDir/package.json", "$appDir/src/shared/ipc-channels.mjs")) {
+            if (-not (Test-Path $f)) { throw "打包缺文件: $f（023 雷）" }
+          }
+          $pkg = Get-Content "$appDir/package.json" | ConvertFrom-Json
+          $root = Get-Content package.json | ConvertFrom-Json
+          if ($pkg.version -ne $root.version) { throw "包内版本 $($pkg.version) ≠ $($root.version)" }
+          $env:HEMI_SMOKE_TEST = '1'
+          $env:HEMI_USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'hemi-win-smoke-ud'
+          # GUI 子系统 exe 在 PowerShell 里 `&` 调用立即返回不等待——必须
+          # Start-Process -Wait 才能拿到真实退出码（win 探针第 3 轮钓出）。
+          $proc = Start-Process -FilePath 'release/win-unpacked/Hemi.exe' -PassThru
+          if (-not $proc.WaitForExit(300000)) { $proc.Kill($true); throw '冒烟 5 分钟未退出' }
+          if ($proc.ExitCode -ne 0) { throw "打包体冒烟退出码 $($proc.ExitCode)" }
+
+      - name: 上挂安装包到 release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # @() 强制数组：单个匹配时 Get-ChildItem 返回标量 FileInfo，
+          # `+=` 会撞 op_Addition 不存在（v0.5.2 首撞）。
+          $assets = @(Get-ChildItem release -Filter '*.exe' | Where-Object Name -notmatch 'unpacked')
+          $assets += @(Get-ChildItem release -Filter '*.exe.blockmap')
+          $assets += @(Get-ChildItem release -Filter 'latest.yml')
+          if (-not $assets) { throw 'release/ 下没找到安装包' }
+          gh release upload $env:GITHUB_REF_NAME @($assets.FullName) --clobber

@@ -1,0 +1,269 @@
+/**
+ * 056 · 主 agent 工具调用（对话流内折叠行）。
+ * 与 048 思考折叠头同一族：13 号 muted、悬停底色、左移 6 光学对齐正文；
+ * 层级只靠字号与灰度，不新增颜色（失败步骤用既有 --danger）。
+ */
+
+.compact-shell .h56-tools {
+  margin-bottom: var(--sp-6);
+}
+
+.compact-shell .h56-tools-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  max-width: 100%;
+  overflow: hidden;
+  height: 24px;
+  margin-left: -6px; /* sp-ok：与 048 思考折叠头同款光学对齐偏移 */
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-sm);
+  cursor: var(--cursor-arrow);
+  color: var(--muted);
+  font-size: var(--fs-13);
+}
+
+.compact-shell .h56-tools-head:not(:disabled):hover,
+.compact-shell .h56-tools[data-open='true'] .h56-tools-head {
+  background: var(--bg-hover);
+}
+
+.compact-shell .h56-tools-head:disabled {
+  cursor: default;
+}
+
+.compact-shell .h56-tools-head .h37-spinner,
+.compact-shell .h56-tools-chev {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.compact-shell .h56-tools[data-open='true'] .h56-tools-chev {
+  transform: rotate(90deg);
+}
+
+.compact-shell .h56-tools-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-shell .h56-tools-count {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .h56-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-4) 0 0;
+  padding: 0 0 0 var(--sp-12);
+  border-left: 2px solid var(--line);
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .h56-tools-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.compact-shell .h56-tools-list li > svg,
+.compact-shell .h56-tools-list li > .h37-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.compact-shell .h56-tools-list li[data-state='error'] > svg {
+  color: var(--danger);
+}
+
+.compact-shell .h56-tools-list li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 056：角色模型失效提示（设置 → 模型 → 角色模型）。 */
+.h56-role-warn {
+  color: var(--danger);
+}
+
+/* 056：模型路由弹窗（设置卡与对话模型菜单共用）。沿 h37-dialog 基座，宽度放到 560 装下行内下拉。 */
+@media (min-width: 601px) {
+  .h56-route-dialog {
+    width: min(560px, 100%);
+  }
+}
+
+/* ≤600 底部弹层：内容区不得把弹层撑出视口（行内下拉换到标签下方由 h37-row 自身处理）。 */
+.h56-route-dialog,
+.h56-route-dialog .h37-group {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.h56-route-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+}
+
+.h56-route-head h3 {
+  margin: 0;
+}
+
+.h56-route-dialog > p {
+  margin-top: var(--sp-6);
+  color: var(--muted);
+}
+
+.h56-route-group {
+  margin-top: var(--sp-12);
+}
+
+.h56-route-label {
+  margin: var(--sp-16) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+.h56-route-label + .h56-route-group {
+  margin-top: var(--gap-head);
+}
+
+.h56-route-empty {
+  margin-top: var(--sp-16);
+}
+
+.h56-route-status {
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+/* 056：设置页「模型路由」卡里的配置摘要（一行一角色，次要信息）。 */
+.h56-route-summary {
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+/* 056：模型菜单里「自动路由」行＋行尾配置齿轮（两个并排按钮，菜单项不嵌套按钮）。 */
+.h56-route-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.h56-route-item > .h37-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.h56-route-gear {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--sp-24);
+  height: var(--sp-24);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: var(--cursor-arrow);
+}
+
+html.kb-nav .h56-route-gear:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.h56-route-gear:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.h56-route-gear svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 056 编排模式：小派活一行（与工具折叠行同族；角色名用正文色加重，完成勾用 faint）。 */
+.compact-shell .h56-delegation-role {
+  font-weight: var(--fw-semibold);
+  color: var(--body);
+}
+
+.compact-shell .h56-delegation-done {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+.compact-shell .h56-delegation-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.compact-shell .h56-delegation-tag,
+.compact-shell .h56-delegation-meta {
+  color: var(--faint);
+}
+
+.compact-shell .h56-delegation[data-state='failed'] .h56-delegation-meta {
+  color: var(--danger);
+}
+
+.compact-shell .h56-delegation-fail {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--danger);
+}
+
+/* 057 AC-28：主动停止是用户动作——中性方形标记，不吃失败红。 */
+.compact-shell .h56-delegation-stop-mark {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+.compact-shell .h56-delegation-stop {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+}
+
+.compact-shell .h56-delegation-stop:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
+}
+
+.compact-shell .h56-delegation-stop svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* 旧任务（055 及以前）回看：结果区挂在任务行下方，与正文左缘对齐。 */
+.compact-shell .h56-delegation-result {
+  margin: var(--sp-4) 0 var(--sp-12);
+}

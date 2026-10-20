@@ -1,0 +1,484 @@
+/**
+ * 037 视觉系统 · 主窗口外壳（图标栏 / 会话栏 / 顶栏）。
+ * 稿件：requirements/040-visual-system/designs/2026-10-03-main-window。
+ * 叠在 globals.css 旧规则之后，同选择器按顺序取胜；只用 tokens.css 变量。
+ *
+ * 结构要点：顶栏首格（红绿灯区）横跨图标栏 + 会话栏，整格会话栏底色、不画底线；
+ * 图标栏从顶栏下方开始，红绿灯不压任何分隔线。
+ */
+
+/* —— 顶栏 —— */
+.compact-shell.h24-shell .app-bar {
+  padding: 0 var(--sp-16) 0 0;
+  border-bottom: 0;
+  background: var(--bg-canvas);
+}
+
+/* 红绿灯区（x 22–74）宽于 48px 图标栏：顶栏首格不再按两列拼色——那样第三颗灯正压在
+   图标栏分隔线上。首格整格用会话栏底色、内部无竖线，图标栏从顶栏下方开始；
+   首格右缘的竖线与会话栏右边线连成一条。 */
+.compact-shell.h24-shell .brand-row {
+  padding-left: 88px; /* sp-ok：红绿灯让位 */
+  border-right: 1px solid var(--line);
+  background: var(--bg-rail);
+}
+
+/* 没有会话栏的页（技能市场 / 窄窗）：首格与顶栏同为画布底，红绿灯落在整条顶栏上 */
+.compact-shell.h24-shell[data-market-open='true'] .brand-row,
+.compact-shell.h24-shell[data-page='settings'] .brand-row {
+  padding-left: 0;
+  border-right: 0;
+  background: var(--bg-canvas);
+}
+
+.compact-shell.h24-shell .app-bar-title {
+  justify-content: flex-start;
+  gap: var(--sp-12);
+  padding-left: var(--sp-24);
+}
+
+/* 技能市场首格只有图标栏宽（48px），标题要让开红绿灯（右缘 74px）再留 18px */
+.compact-shell.h24-shell[data-market-open='true'] .app-bar-title {
+  padding-left: 44px; /* sp-ok：红绿灯让位 */
+}
+
+.compact-shell.h24-shell .h24-conversation-title {
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.compact-shell.h24-shell .h37-topbar-meta {
+  flex: none;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.compact-shell.h24-shell .bar-actions {
+  gap: var(--sp-4);
+}
+
+/* 顶栏按钮：幽灵「开始通话」；通话中且通话条收起时换成可点回的状态 chip。 */
+.compact-shell .h24-call-nav {
+  height: 30px;
+  gap: var(--sp-6);
+  padding: 0 var(--sp-10);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--body);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-call-nav:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.compact-shell .h24-call-nav:disabled {
+  color: var(--faint);
+}
+
+.compact-shell .h24-call-nav[data-calling='true'] {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.compact-shell .h24-call-nav[data-calling='true']:hover:not(:disabled) {
+  background: var(--g-100);
+  color: var(--accent-text);
+}
+
+html.kb-nav .compact-shell .h24-call-nav:focus-visible,
+html.kb-nav .compact-shell .h24-nav-toggle:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* 066 · 顶栏「打开工作区目录」split 按钮：主钮用默认方式立即打开，窄箭头
+   展开方式菜单（选中即成为新默认）。与 icon-btn 28px 基线同高、共边贴合。
+   层级抬到 10000：dev 实例的 065 性能 HUD（fixed, z:9999）挂在顶栏右下角，
+   恰好落在向下展开的菜单区域——菜单与按钮组都要压过它（HUD pointer-events
+   穿透，但白底会挡住菜单的视线）。 */
+.compact-shell .h65-open-group {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  z-index: 10000;
+}
+
+.compact-shell .h65-open-main {
+  width: 28px;
+  border-radius: var(--r-md) 0 0 var(--r-md);
+}
+
+.compact-shell .h65-open-more {
+  width: 18px;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+
+.compact-shell .h65-open-group .icon-btn + .icon-btn {
+  margin-left: -1px;
+}
+
+html.kb-nav .compact-shell .h65-open-main:focus-visible,
+html.kb-nav .compact-shell .h65-open-more:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* —— 图标栏 —— */
+.compact-shell .h24-navrail {
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0 var(--sp-12);
+  /* 与会话栏同底、不画分隔线（globals 旧规则带 1px 线，须显式归零） */
+  border-right: 0;
+  background: var(--bg-navrail);
+}
+
+.compact-shell .h24-navrail-item {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear,
+    box-shadow var(--dur-1) linear;
+}
+
+.compact-shell .h24-navrail-item:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+/* 选中＝与会话栏选中同一层浅底，不再是白卡 + 阴影（旁边「新建对话」已是白卡，两张并排太重） */
+.compact-shell .h24-navrail-item[data-current='true'],
+.compact-shell .h24-navrail-item[data-current='true']:hover {
+  background: var(--bg-active);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* —— 会话栏 —— */
+.compact-shell .h24-sidebar {
+  gap: 0;
+  padding: var(--sp-8) var(--sp-10) var(--sp-12);
+  border-right: 1px solid var(--line);
+  background: var(--bg-rail);
+}
+
+/* 新建对话＝列表行（P0：白卡＋阴影在侧栏里分量过重）：与会话行同高同字号同悬停底，
+   只靠图标与墨色文字区分，不加粗。 */
+.compact-shell .h24-sidebar-new {
+  display: flex;
+  flex: none; /* 侧栏是 flex 列：会话多时列表溢出，不钉死会被一起压扁到约 22px */
+  align-items: center;
+  width: 100%;
+  gap: var(--row-gap);
+  height: var(--row-h-lg);
+  padding: 0 var(--row-pad-x);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: var(--row-fs);
+  font-weight: var(--fw-regular);
+  transition: background-color var(--dur-1) linear;
+}
+
+.compact-shell .h24-sidebar-new:hover {
+  background: var(--bg-hover);
+  border-color: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+/* 行内图标：细线、次要色，悬停才回墨色——2px 墨色线图标比 13px 文字重一截 */
+.compact-shell .h24-sidebar-new > svg {
+  flex: none;
+  color: var(--muted);
+  stroke-width: var(--row-icon-stroke);
+  transition: color var(--dur-1) linear;
+}
+
+.compact-shell .h24-sidebar-new:hover > svg {
+  color: var(--ink);
+}
+
+html.kb-nav .compact-shell .h24-sidebar-new:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.compact-shell .h24-sidebar-new kbd {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--faint);
+}
+
+.compact-shell .h24-sidebar-heading {
+  padding: var(--sp-16) var(--row-pad-x) var(--sp-6);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.compact-shell .h24-sidebar-more {
+  padding: 0 var(--sp-4);
+  margin-right: calc(var(--sp-4) * -1);
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  font-weight: var(--fw-regular);
+  transition: color var(--dur-1) linear;
+}
+
+.compact-shell .h24-sidebar-more:hover {
+  color: var(--ink);
+}
+
+.compact-shell .h24-sidebar-nav {
+  gap: 0;
+}
+
+/* P1 时间分组：每组＝分组标题＋若干行（组间距由标题上内边距承担） */
+.compact-shell .h24-sidebar-group {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+.compact-shell .h24-sidebar-note {
+  padding: var(--sp-6) var(--row-pad-x);
+  color: var(--faint);
+}
+
+.compact-shell .h24-sidebar-item {
+  gap: 0;
+  height: var(--row-h);
+  padding: 0;
+  border-radius: var(--r-sm);
+  transition: background-color var(--dur-1) linear;
+}
+
+.compact-shell .h24-sidebar-item:hover {
+  background: var(--bg-hover);
+}
+
+.compact-shell .h24-sidebar-item[data-current='true'] {
+  background: var(--bg-active);
+}
+
+.compact-shell .h24-sidebar-open {
+  height: var(--row-h);
+  gap: var(--row-gap);
+  padding: 0 var(--row-pad-x);
+  border-radius: var(--r-sm);
+  font-size: var(--row-fs);
+  color: var(--body);
+}
+
+.compact-shell .h24-sidebar-item[data-current='true'] .h24-sidebar-open {
+  color: var(--ink);
+}
+
+html.kb-nav .compact-shell .h24-sidebar-open:focus-visible,
+html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.compact-shell .h24-sidebar-rename {
+  height: 28px;
+  margin: 0 var(--sp-2);
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--g-500),
+    0 0 0 3px var(--g-100);
+  font-size: var(--fs-13);
+}
+
+.compact-shell .h24-sidebar-rename:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px var(--g-500),
+    0 0 0 3px var(--g-100);
+}
+
+.compact-shell .h24-sidebar-item[data-dragging='true'] {
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  opacity: 1;
+}
+
+/* 新会话行：首次出现 200ms 展开 + 浅绿底 1.4s 褪去（动效稿「列表增删」）。 */
+.compact-shell .h24-sidebar-item[data-fresh='true'] {
+  animation:
+    hemi-fade-up var(--dur-3) var(--ease-out),
+    hemi-flash 1.4s linear;
+}
+
+/* —— 窄窗：会话栏收抽屉，抽屉钮挪到顶栏标题前 —— */
+.compact-shell .h24-nav-toggle {
+  width: 30px;
+  height: 30px;
+  margin-left: calc(var(--sp-8) * -1);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+}
+
+@media (max-width: 880px) {
+  .compact-shell.h24-shell .app-bar {
+    grid-template-columns: var(--h24-navrail-w) minmax(0, 1fr) auto;
+  }
+
+  .compact-shell.h24-shell .brand-row {
+    padding-left: 0;
+    border-right: 0;
+    background: var(--bg-canvas);
+  }
+
+  /* 红绿灯约占窗口左 72px：标题列从 84px 起排，不被压住。 */
+  .compact-shell.h24-shell .app-bar-title {
+    padding-left: 36px; /* sp-ok：红绿灯让位 */
+  }
+
+  .compact-shell.h24-shell .h24-conversation-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .compact-shell .h24-sidebar {
+    background: var(--bg-rail);
+    border-right: 0;
+    box-shadow: var(--shadow-2);
+    transition:
+      transform var(--dur-4) var(--ease-out),
+      visibility 0s linear var(--dur-4);
+  }
+
+  .compact-shell .h24-workspace[data-nav-open='true'] .h24-sidebar {
+    transition: transform var(--dur-4) var(--ease-out);
+  }
+
+  .compact-shell .h24-workspace[data-nav-open='true'] .h24-backdrop {
+    background: var(--bg-scrim);
+    animation: hemi-fade var(--dur-3) linear;
+  }
+}
+
+@media (max-width: 600px) {
+  .compact-shell.h24-shell .h37-topbar-meta {
+    display: none;
+  }
+
+  .compact-shell.h24-shell .h24-call-nav .h37-call-nav-label {
+    display: none;
+  }
+}
+
+/* 快捷键提示只在悬停时出现（常驻会让这一行像表单项） */
+.compact-shell .h24-sidebar-new:hover kbd,
+html.kb-nav .compact-shell .h24-sidebar-new:focus-visible kbd {
+  opacity: 1;
+}
+
+/* —— P2 窗口外框 + 内容面板（对标 Codex desktop）——
+   顶栏、图标栏、会话栏是同一张浅灰外框，主区是压在外框上的白色面板：左上圆角，
+   顶边与左边一条细线。侧栏收抽屉（≤880）时主区铺满，不画面板边。
+   技能市场与设置页另有布局，不套这一层。 */
+.compact-shell.h24-shell[data-market-open='false'] .app-bar {
+  background: var(--bg-rail);
+}
+
+.compact-shell.h24-shell[data-market-open='false'] .brand-row {
+  border-right: 0;
+}
+
+.compact-shell .h24-sidebar {
+  border-right: 0;
+}
+
+@media (min-width: 881px) {
+  .compact-shell.h24-shell[data-market-open='false'] .h24-workspace {
+    background: var(--bg-rail);
+  }
+
+  .compact-shell.h24-shell[data-market-open='false'] .h24-main {
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    border-top-left-radius: var(--r-lg);
+    background: var(--bg-canvas);
+  }
+}
+
+@media (min-width: 1180px) {
+  .compact-shell.h24-shell[data-market-open='false'] .h24-workspace[data-preview-open='true'] .h24-preview {
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* 会话行状态：标题优先截断，图标保持可见；同一组件用于「查看全部」。 */
+.conversation-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--sp-16);
+  height: var(--sp-16);
+  color: var(--muted);
+}
+.conversation-status svg {
+  width: calc(var(--sp-12) + var(--sp-2));
+  height: calc(var(--sp-12) + var(--sp-2));
+}
+.conversation-unread-dot {
+  width: var(--sp-6);
+  height: var(--sp-6);
+  border-radius: var(--r-full);
+  background: var(--conversation-unread);
+}
+.conversation-status-spinner {
+  display: inline-flex;
+  animation: conversation-status-spin 1.2s steps(8) infinite;
+}
+.conversation-status-spinner svg { stroke-width: var(--row-icon-stroke); }
+.conversation-status-spinner svg > :nth-child(2) { opacity: .85; }
+.conversation-status-spinner svg > :nth-child(3) { opacity: .7; }
+.conversation-status-spinner svg > :nth-child(4) { opacity: .55; }
+.conversation-status-spinner svg > :nth-child(5) { opacity: .4; }
+.conversation-status-spinner svg > :nth-child(6) { opacity: .3; }
+.conversation-status-spinner svg > :nth-child(7) { opacity: .2; }
+.conversation-status-spinner svg > :nth-child(8) { opacity: .15; }
+@keyframes conversation-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .conversation-status-spinner { animation: none; }
+}
