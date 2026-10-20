@@ -42,6 +42,9 @@ jobs:
 
       - run: npm ci
 
+      - name: 原生依赖许可与对应源码
+        run: node scripts/verify-release-materials.mjs
+
       # 800+ 单测不依赖模型 Key（AGENTS.md 自动化底座），CI 上全量跑一遍。
       - run: npm test
 
@@ -64,6 +67,8 @@ jobs:
           # AGENTS.md 口径：产物内 ._ * 垃圾必须为 0。
           GARBAGE=$(find release/mac-arm64/Hemi.app -name '._*' | wc -l | tr -d ' ')
           test "$GARBAGE" = "0"
+          node scripts/verify-distribution-licenses.mjs release/mac-arm64/Hemi.app release/licenses-macos.json
+          cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
 
       - name: 建 release 并上挂资产（单 publisher，创建后 win job 只往上挂）
         env:
@@ -73,9 +78,10 @@ jobs:
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
             release/*.dmg release/*-mac.zip release/*.blockmap release/latest-mac.yml \
+            release/uiohook-napi-1.5.5-source.tar.gz release/licenses-macos.json \
             --title "Hemi ${GITHUB_REF_NAME#v}" \
-            --notes "macOS dmg/zip 与更新清单；Windows 安装包与 latest.yml 由后续 job 上挂。应用内更新 mac 与 Windows 均支持。" \
-            --latest
+            --notes-file docs/release-notes.md \
+            --draft
 
       - name: 表观体积（exFAT/du 口径失真，产物体积按字节加总）
         run: |
@@ -118,6 +124,9 @@ jobs:
 
       - run: npm ci
 
+      - name: 原生依赖许可与对应源码
+        run: node scripts/verify-release-materials.mjs
+
       - run: npm test
 
       - run: npm run build
@@ -144,6 +153,8 @@ jobs:
           $pkg = Get-Content "$appDir/package.json" | ConvertFrom-Json
           $root = Get-Content package.json | ConvertFrom-Json
           if ($pkg.version -ne $root.version) { throw "包内版本 $($pkg.version) ≠ $($root.version)" }
+          node scripts/verify-distribution-licenses.mjs release/win-unpacked release/licenses-windows.json
+          if ($LASTEXITCODE -ne 0) { throw '安装包许可核验失败' }
           $env:HEMI_SMOKE_TEST = '1'
           $env:HEMI_USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'hemi-win-smoke-ud'
           # GUI 子系统 exe 在 PowerShell 里 `&` 调用立即返回不等待——必须
@@ -164,5 +175,9 @@ jobs:
           $assets = @(Get-ChildItem release -Filter '*.exe' | Where-Object Name -notmatch 'unpacked')
           $assets += @(Get-ChildItem release -Filter '*.exe.blockmap')
           $assets += @(Get-ChildItem release -Filter 'latest.yml')
+          $assets += @(Get-ChildItem release -Filter 'licenses-windows.json')
           if (-not $assets) { throw 'release/ 下没找到安装包' }
           gh release upload $env:GITHUB_REF_NAME @($assets.FullName) --clobber
+          if ($LASTEXITCODE -ne 0) { throw '资产上传失败' }
+          gh release edit $env:GITHUB_REF_NAME --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw '发布失败' }

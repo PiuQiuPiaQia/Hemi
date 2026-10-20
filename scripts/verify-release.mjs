@@ -53,7 +53,7 @@ const explicitTag = args.find((arg) => /^v/.test(arg));
 const tag = explicitTag ?? `v${pkg.version}`;
 
 /** 必备产物（blockmap 缺失降级为警告——差量更新关闭时无功能影响）。 */
-const REQUIRED_ASSETS = ['.dmg', '-mac.zip', 'latest-mac.yml', '-setup.exe', 'latest.yml'];
+const REQUIRED_ASSETS = ['.dmg', '-mac.zip', 'latest-mac.yml', '-setup.exe', 'latest.yml', 'uiohook-napi-1.5.5-source.tar.gz', 'licenses-macos.json', 'licenses-windows.json'];
 /** 完整 release 的判别特征：更新清单在这，更新桥 pickRelease 同口径。 */
 const MANIFEST = 'latest-mac.yml';
 /** win 的更新清单（2026-10-12 起 win 应用内更新上线，nsis target 产出）。 */
@@ -181,7 +181,7 @@ ok(`非草稿 · ${release.assets.length} 资产 · ${release.html_url}`);
 // ── 3. 资产与更新清单核验（latest-mac.yml + latest.yml） ─────────────────
 step('资产与更新清单核验（latest-mac.yml + latest.yml）');
 for (const suffix of REQUIRED_ASSETS) {
-  if (macOnly && (suffix === '-setup.exe' || suffix === WIN_MANIFEST)) continue;
+  if (macOnly && (suffix === '-setup.exe' || suffix === WIN_MANIFEST || suffix === 'licenses-windows.json')) continue;
   if (!release.assets.some((a) => a.name.endsWith(suffix))) fail(`缺 ${suffix} 产物`);
 }
 for (const blockmap of release.assets.filter((a) => a.name.endsWith('.blockmap'))) ok(`blockmap ${blockmap.name} 在场`);
@@ -241,6 +241,20 @@ const zipAsset = release.assets.find((a) => a.name.endsWith('-mac.zip'));
 const cacheDir = IS_WIN
   ? path.join(os.homedir(), 'AppData', 'Local', 'hemi-release-verify', tag)
   : path.join(os.homedir(), 'Library', 'Caches', 'hemi-release-verify', tag);
+mkdirSync(cacheDir, { recursive: true });
+const sourceAsset = release.assets.find((a) => a.name === 'uiohook-napi-1.5.5-source.tar.gz');
+const sourcePath = path.join(cacheDir, sourceAsset.name);
+downloadAsset(sourceAsset.id, sourcePath);
+if (!readFileSync(sourcePath).equals(readFileSync(path.join(repoRoot, 'third-party', sourceAsset.name)))) fail('Release 对应源码与已验证归档不一致');
+ok('Release 对应源码归档字节一致');
+for (const name of ['licenses-macos.json', ...(macOnly ? [] : ['licenses-windows.json'])]) {
+  const asset = release.assets.find((a) => a.name === name);
+  const reportPath = path.join(cacheDir, name);
+  downloadAsset(asset.id, reportPath);
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  if (report.appVersion !== tag.slice(1) || !Array.isArray(report.errors) || report.errors.length) fail(`${name} 验收失败`);
+  ok(`${name} 无许可分发错误`);
+}
 const zipPath = path.join(cacheDir, zipAsset.name);
 const appPath = path.join(cacheDir, 'Hemi.app');
 if (!fresh && existsSync(zipPath) && statSync(zipPath).size === zipAsset.size) {
@@ -293,14 +307,17 @@ const appPkgPath = path.join(appPath, 'Contents', 'Resources', 'app');
 const appPkg = JSON.parse(readFileSync(path.join(appPkgPath, 'package.json'), 'utf8'));
 if (appPkg.version !== tag.slice(1)) fail(`包内 version ${appPkg.version} ≠ ${tag.slice(1)}`);
 ok(`包内 version ${appPkg.version}`);
+run(process.execPath, ['scripts/verify-release-materials.mjs']);
+run(process.execPath, ['scripts/verify-distribution-licenses.mjs', appPath, path.join(cacheDir, 'licenses-macos-verified.json')]);
+ok('包内原生依赖许可与对应源码在场且字节一致');
 // 023 雷：build.files 漏 src/shared = 主进程 ESM 加载即抛错，应用「打不开」。
 if (!existsSync(path.join(appPkgPath, 'src', 'shared', 'ipc-channels.mjs'))) fail('包内缺 src/shared/ipc-channels.mjs（023 雷）');
 ok('src/shared/ipc-channels.mjs 在场');
 // 私有仓更新 token（repo 转公开后撤 secret 即匿名形态，缺场降级为提示）。
 if (existsSync(path.join(appPath, 'Contents', 'Resources', 'update-token.txt'))) {
-  ok('update-token.txt 在场（私有仓更新形态）');
+  fail('公开安装包不应包含 update-token.txt');
 } else {
-  warn('包内无 update-token.txt（repo 已转公开的匿名形态？私有仓下端内更新会 404）');
+  ok('公开仓匿名更新形态，无内置 update token');
 }
 // ._* 垃圾计数用 node 遍历（原 bash find 在 win 上不可依赖）。
 function countAppleDouble(dir) {

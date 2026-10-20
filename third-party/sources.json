@@ -89,6 +89,36 @@
         "path": "third-party/licenses/shadcn-MIT.txt",
         "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f"
       }
+    },
+    {
+      "packages": [
+        "uiohook-napi@1.5.5"
+      ],
+      "license": "MIT (wrapper) AND LGPL-3.0-or-later (libuiohook)",
+      "sourceCommit": "44e0d868ac6fedd2a68c7f8ad8163c73a3f36fc3",
+      "libuiohookCommit": "f259ff37e81125f6f91ebac5439e7cde1e78b296",
+      "source": "https://registry.npmjs.org/uiohook-napi/-/uiohook-napi-1.5.5.tgz",
+      "npmIntegrity": "sha512-oSlTdnECw2GBfsJPTbBQBeE4v/EXP0EZmX6BJq5nzH/JgFaBE8JpFwEA/kLhiEP7HxQw28FViWiYgdIZzWuuJQ==",
+      "modifiedByHemi": false,
+      "note": "Published library sources already contain the wrapper upstream patch. Source-only archive and relinking instructions accompany the release."
+    },
+    {
+      "packages": [
+        "quickjs-wasi@3.6.2"
+      ],
+      "sourceCommit": "5a7a0eeda87c99542f8cf3095b6d61ecfa755977",
+      "quickjsNgCommit": "6d46d07d04041b40f4f49eaa7fdebe44c314c699",
+      "source": "https://github.com/vercel-labs/quickjs-wasi/tree/5a7a0eeda87c99542f8cf3095b6d61ecfa755977",
+      "modifiedByHemi": false
+    },
+    {
+      "packages": [
+        "@silvia-odwyer/photon-node@0.3.4"
+      ],
+      "sourceCommit": "685f5b155b36c5611c08ca678bb78ddbab3edbac",
+      "source": "https://github.com/silvia-odwyer/photon/tree/685f5b155b36c5611c08ca678bb78ddbab3edbac",
+      "license": "Apache-2.0 and embedded component licenses",
+      "modifiedByHemi": false
     }
   ],
   "verifiedSourceFiles": {

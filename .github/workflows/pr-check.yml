@@ -38,6 +38,9 @@ jobs:
 
       - run: npm ci
 
+      - name: 原生依赖许可与对应源码
+        run: node scripts/verify-release-materials.mjs
+
       # 800+ 单测不依赖模型 Key（AGENTS.md 自动化底座）；check-native 随 npm test 跑。
       - run: npm test
 

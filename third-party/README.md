@@ -15,7 +15,7 @@ Hemi uses the upstream npm packages without modifying their contents. Cua's comp
 
 The identical npm version does not imply an identical source commit: `@ubjs/core` and `@ubjs/node` were published separately. The revisions above were checked against npm `gitHead` metadata and the source manifests.
 
-Cua's [build-node-runtime.mjs](https://github.com/trycua/cua/blob/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/scripts/build-node-runtime.mjs) applies the Electron-compatible buffer transformations to its pinned source. Its source version and integrity also match the lockfile at that Cua revision. Hemi has not reproduced these native builds or audited all embedded Rust/C dependencies.
+Cua's [build-node-runtime.mjs](https://github.com/trycua/cua/blob/58aba84b5b83d77e7e2b0f006547699eb594e50d/libs/cua-driver/scripts/build-node-runtime.mjs) applies the Electron-compatible buffer transformations to its pinned source. Its source version and integrity also match the lockfile at that Cua revision. Hemi distributes the upstream native binaries; it does not claim bit-for-bit native build reproducibility.
 
 The MPL-covered source remains available under MPL-2.0. Recipients may obtain and modify it under those terms. Copies of the [MPL full text](licenses/MPL-2.0.txt), [UBRN notice](licenses/UBRN-NOTICE.txt), [Cua MIT license](licenses/Cua-MIT.txt), and [original compatibility-runtime notice](licenses/Cua-node-runtime-NOTICE.md) accompany this record. Exact source URLs and retrieved-file hashes are in [sources.json](sources.json).
 
@@ -27,13 +27,23 @@ The upstream [Rust third-party notices](licenses/Cua-Rust-NOTICES.md) also accom
 
 For `bezier-js@6.1.4`, the [full MIT license](licenses/bezier-js-MIT.txt) comes from upstream commit `4e767299184ab4079dc8d7c970020103db14f431`. Its `src` tree is identical to the npm publication commit `a41f3e08e9724c9973eca0eb5c1304120e72fc70`; the original source header is also retained. Tree IDs and the original license hash are recorded in sources.json.
 
-The renderer inventory does not cover native libraries, Electron/Chromium, or the full main-process dependency tree. The existing libuiohook reconstruction work is still outstanding; this record does not close that item.
+The renderer inventory does not cover native libraries, Electron/Chromium, or the full main-process dependency tree.
+
+## libuiohook and embedded native components
+
+[uiohook-relink.md](uiohook-relink.md) provides the LGPL notice, corresponding source archive, rebuilding and replacement steps, and the macOS arm64 relinking/load verification. The archive is included inside the application and as a separate Release asset. It preserves the exact npm publication's patched sources; the diagnostic verification modification is not shipped.
+
+[native-components.json](native-components.json) and [Native-Rust-NOTICES.txt](licenses/Native-Rust-NOTICES.txt) retain the source archives, checksums, licenses and copyright notices for the Cua, UBRN and Photon Rust dependency sources. The input lockfiles are retained in `native-locks/`. This is a conservative source inventory, including build/dev dependencies and other platforms, rather than an exact linker SBOM. Actual macOS arm64 and Windows x64 binary source paths were also checked and missing versions added. Cua's compatibility runtime resolves some dependencies without `--locked`, so its workspace lockfile alone is not treated as proof of the binary's full dependency graph.
+
+The exact published source archive for every listed MPL crate is linked in the component record. Cua/UBRN's own covered source and patches are linked above. Original notices for embedded C libraries in QuickJS-WASI and the Inter font used by Cua also accompany the app. Mbed TLS components offered under Apache-2.0 or GPL use the Apache-2.0 option.
+
+`release-materials.json` pins the notice/source files and npm versions. `node scripts/verify-release-materials.mjs` rejects missing or changed materials and dependency version drift; packaging and CI run it before distribution.
 
 ## Electron and packaged native files
 
 The build copies `node_modules/electron/dist/LICENSE` and `LICENSES.chromium.html` unchanged to `Resources/licenses` on macOS and `resources/licenses` on Windows. They follow the installed Electron version rather than a separately maintained copy.
 
-Run `node scripts/verify-distribution-licenses.mjs <unpacked-app> <report.json>` after packaging. The report must be outside the application. It verifies shipped notice bytes against build inputs and inventories native addons, shared libraries, WASM and executable binaries under the packaged app's node_modules, including prebuilds for other platforms. Electron's framework notices are checked separately. This records distribution contents; embedded native dependencies and LGPL relinking remain separate review items.
+Run `node scripts/verify-distribution-licenses.mjs <unpacked-app> <report.json>` after packaging. The report must be outside the application. It verifies shipped notice/source bytes against build inputs, rejects unregistered native package versions, and inventories native addons, shared libraries, WASM and executable binaries under the packaged app's node_modules, including prebuilds for other platforms. Electron's framework notices are checked separately. The macOS and Windows distribution reports accompany each Release.
 
 ## Pi 1.3.0
 

@@ -1,0 +1,149 @@
+{
+  "scope": "Source/notice distribution materials for Hemi native dependencies; update with dependency changes. Electron/Chromium notices follow the installed Electron build.",
+  "npmVersions": {
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
+    "@silvia-odwyer/photon-node": "0.3.4",
+    "@trycua/cua-driver": "0.32.0",
+    "@trycua/cua-driver-darwin-arm64": "0.32.0",
+    "@trycua/cua-driver-darwin-x64": "0.32.0",
+    "@trycua/cua-driver-linux-arm64-gnu": "0.32.0",
+    "@trycua/cua-driver-linux-x64-gnu": "0.32.0",
+    "@trycua/cua-driver-win32-arm64-msvc": "0.32.0",
+    "@trycua/cua-driver-win32-x64-msvc": "0.32.0",
+    "@ubjs/core": "0.31.0-3",
+    "@ubjs/node": "0.31.0-3",
+    "@ubjs/node-darwin-arm64": "0.31.0-3",
+    "@ubjs/node-darwin-x64": "0.31.0-3",
+    "@ubjs/node-linux-arm64-gnu": "0.31.0-3",
+    "@ubjs/node-linux-arm64-musl": "0.31.0-3",
+    "@ubjs/node-linux-x64-gnu": "0.31.0-3",
+    "@ubjs/node-linux-x64-musl": "0.31.0-3",
+    "@ubjs/node-win32-arm64-msvc": "0.31.0-3",
+    "@ubjs/node-win32-x64-msvc": "0.31.0-3",
+    "quickjs-wasi": "3.6.2",
+    "uiohook-napi": "1.5.5"
+  },
+  "files": [
+    {
+      "path": "third-party/README.md",
+      "bytes": 6932,
+      "sha256": "67d9030b6297b383e5328af40bbbf8ec99b236aa30c0bd51de69e0b06b1ba8bb"
+    },
+    {
+      "path": "third-party/licenses/Cua-MIT.txt",
+      "bytes": 1069,
+      "sha256": "c0779290c1d4783169aa3dbfb55feb505e563ef8a004bbf55298ceffcfbda8d9"
+    },
+    {
+      "path": "third-party/licenses/Cua-Rust-NOTICES.md",
+      "bytes": 3307,
+      "sha256": "3268421fe758ec53bc11a2644aac1451a397027c508c199e86745636bb5499db"
+    },
+    {
+      "path": "third-party/licenses/Cua-node-runtime-NOTICE.md",
+      "bytes": 531,
+      "sha256": "66a466cc022b4bf4a41f678e4d31d9b82098cc55cc364d6e9295366dfd02cef2"
+    },
+    {
+      "path": "third-party/licenses/GPL-3.0.txt",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "third-party/licenses/Inter-OFL.txt",
+      "bytes": 4380,
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+    },
+    {
+      "path": "third-party/licenses/LGPL-3.0.txt",
+      "bytes": 7652,
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
+    },
+    {
+      "path": "third-party/licenses/MPL-2.0.txt",
+      "bytes": 16726,
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    },
+    {
+      "path": "third-party/licenses/Native-Rust-NOTICES.txt",
+      "bytes": 1495258,
+      "sha256": "72be316f9d410d9686acd91244311bd5e992e186e35b2d0f36ee531eee2855cd"
+    },
+    {
+      "path": "third-party/licenses/Pi-MIT.txt",
+      "bytes": 1069,
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+    },
+    {
+      "path": "third-party/licenses/QuickJS-native-NOTICES.txt",
+      "bytes": 127094,
+      "sha256": "0c9348d1dc1bb042c8ab18c15aa2f8da24d18ebfec67bcaa7644277522baee9a"
+    },
+    {
+      "path": "third-party/licenses/Rust-APACHE.txt",
+      "bytes": 9723,
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "path": "third-party/licenses/Rust-MIT.txt",
+      "bytes": 1068,
+      "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+    },
+    {
+      "path": "third-party/licenses/UBRN-NOTICE.txt",
+      "bytes": 192,
+      "sha256": "d1cc4c0ada218e8a336dc8c3d8bb7d5b1c8dedfa31f5b25c9ea1759d21b8b62d"
+    },
+    {
+      "path": "third-party/licenses/WASI-libc-NOTICES.txt",
+      "bytes": 39752,
+      "sha256": "c5ce20b7c7278f796307837a4060db6b75843a0c41661c7d32c8268117d02714"
+    },
+    {
+      "path": "third-party/licenses/bezier-js-MIT.txt",
+      "bytes": 1049,
+      "sha256": "4fb7b04152f7b3a7c48c98c638aba80fc1f221e915d605d45d016d87d8e2cc9f"
+    },
+    {
+      "path": "third-party/licenses/shadcn-MIT.txt",
+      "bytes": 1063,
+      "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f"
+    },
+    {
+      "path": "third-party/native-components.json",
+      "bytes": 677759,
+      "sha256": "ed429452760523cac74360e94fb075b289d17f146d3b001d6960a2b61ccfc0d1"
+    },
+    {
+      "path": "third-party/native-locks/cua-Cargo.lock",
+      "bytes": 159520,
+      "sha256": "a4066608b2355af2d9e10891f41aaac3c3c9f3069c7139ea896d806e780aeee0"
+    },
+    {
+      "path": "third-party/native-locks/photon-Cargo.lock",
+      "bytes": 32602,
+      "sha256": "aa3e9c86b0380b8cd5cb768985f7e270aab01a5b35c24cbfa8533fa74343318f"
+    },
+    {
+      "path": "third-party/native-locks/ubrn-Cargo.lock",
+      "bytes": 67359,
+      "sha256": "925e26f606cd906f74675c14687bbe4561844a86c935a4db77dd089a83449316"
+    },
+    {
+      "path": "third-party/sources.json",
+      "bytes": 9486,
+      "sha256": "e4dec8692ac41735f9692c67a993f39690de487806a20f34f5028c355579fd1b"
+    },
+    {
+      "path": "third-party/uiohook-napi-1.5.5-source.tar.gz",
+      "bytes": 113959,
+      "sha256": "f0edcc22681fd930eb17217e70f4e178fb0fa8d85f5d8d8fb5e44da9becdd137"
+    },
+    {
+      "path": "third-party/uiohook-relink.md",
+      "bytes": 3578,
+      "sha256": "dacfd71eaf2401179b7d23c0e21c8049543e1fb777bb494efc40eb851d078868"
+    }
+  ]
+}

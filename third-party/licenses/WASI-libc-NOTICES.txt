@@ -1,0 +1,768 @@
+LICENSE-APACHE-LLVM
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+
+--- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions
+of this Software are embedded into an Object form of such source code, you
+may redistribute such embedded portions in such Object form without complying
+with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with
+software that is licensed under the GPLv2 ("Combined Software") and if a
+court of competent jurisdiction determines that the patent provision (Section
+3), the indemnity provision (Section 9) or other Section of the License
+conflicts with the conditions of the GPLv2, you may retroactively and
+prospectively choose to deem waived or otherwise exclude such Section(s) of
+the License, but only in their entirety and only with respect to the Combined
+Software.
+
+
+
+LICENSE-APACHE
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+LICENSE-MIT
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+libc-bottom-half/cloudlibc/LICENSE
+Copyright (c) 2015-2017 Nuxi (https://nuxi.nl/) and contributors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
+
+
+fts/musl-fts/COPYING
+Copyright (c) 1989, 1993
+   The Regents of the University of California.  All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. Neither the name of the University nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
+
+
+dlmalloc/src/malloc.c
+/* -----------------------------------------------------------------------
+History:
+    v2.8.6 Wed Aug 29 06:57:58 2012  Doug Lea
+      * fix bad comparison in dlposix_memalign
+      * don't reuse adjusted asize in sys_alloc
+      * add LOCK_AT_FORK -- thanks to Kirill Artamonov for the suggestion
+      * reduce compiler warnings -- thanks to all who reported/suggested these
+
+    v2.8.5 Sun May 22 10:26:02 2011  Doug Lea  (dl at gee)
+      * Always perform unlink checks unless INSECURE
+      * Add posix_memalign.
+      * Improve realloc to expand in more cases; expose realloc_in_place.
+        Thanks to Peter Buhr for the suggestion.
+      * Add footprint_limit, inspect_all, bulk_free. Thanks
+        to Barry Hayes and others for the suggestions.
+      * Internal refactorings to avoid calls while holding locks
+      * Use non-reentrant locks by default. Thanks to Roland McGrath
+        for the suggestion.
+      * Small fixes to mspace_destroy, reset_on_error.
+      * Various configuration extensions/changes. Thanks
+         to all who contributed these.
+
+    V2.8.4a Thu Apr 28 14:39:43 2011 (dl at gee.cs.oswego.edu)
+      * Update Creative Commons URL
+
+    V2.8.4 Wed May 27 09:56:23 2009  Doug Lea  (dl at gee)
+      * Use zeros instead of prev foot for is_mmapped
+      * Add mspace_track_large_chunks; thanks to Jean Brouwers
+      * Fix set_inuse in internal_realloc; thanks to Jean Brouwers
+      * Fix insufficient sys_alloc padding when using 16byte alignment
+      * Fix bad error check in mspace_footprint
+      * Adaptations for ptmalloc; thanks to Wolfram Gloger.
+      * Reentrant spin locks; thanks to Earl Chew and others
+      * Win32 improvements; thanks to Niall Douglas and Earl Chew
+      * Add NO_SEGMENT_TRAVERSAL and MAX_RELEASE_CHECK_RATE options
+      * Extension hook in malloc_state
+      * Various small adjustments to reduce warnings on some compilers
+      * Various configuration extensions/changes for more platforms. Thanks
+         to all who contributed these.
+
+    V2.8.3 Thu Sep 22 11:16:32 2005  Doug Lea  (dl at gee)
+      * Add max_footprint functions
+      * Ensure all appropriate literals are size_t
+      * Fix conditional compilation problem for some #define settings
+      * Avoid concatenating segments with the one provided
+        in create_mspace_with_base
+      * Rename some variables to avoid compiler shadowing warnings
+      * Use explicit lock initialization.
+      * Better handling of sbrk interference.
+      * Simplify and fix segment insertion, trimming and mspace_destroy
+      * Reinstate REALLOC_ZERO_BYTES_FREES option from 2.7.x
+      * Thanks especially to Dennis Flanagan for help on these.
+
+    V2.8.2 Sun Jun 12 16:01:10 2005  Doug Lea  (dl at gee)
+      * Fix memalign brace error.
+
+    V2.8.1 Wed Jun  8 16:11:46 2005  Doug Lea  (dl at gee)
+      * Fix improper #endif nesting in C++
+      * Add explicit casts needed for C++
+
+    V2.8.0 Mon May 30 14:09:02 2005  Doug Lea  (dl at gee)
+      * Use trees for large bins
+      * Support mspaces
+      * Use segments to unify sbrk-based and mmap-based system allocation,
+        removing need for emulation on most platforms without sbrk.
+      * Default safety checks
+      * Optional footer checks. Thanks to William Robertson for the idea.
+      * Internal code refactoring
+      * Incorporate suggestions and platform-specific changes.
+        Thanks to Dennis Flanagan, Colin Plumb, Niall Douglas,
+        Aaron Bachmann,  Emery Berger, and others.
+      * Speed up non-fastbin processing enough to remove fastbins.
+      * Remove useless cfree() to avoid conflicts with other apps.
+      * Remove internal memcpy, memset. Compilers handle builtins better.
+      * Remove some options that no one ever used and rename others.
+
+    V2.7.2 Sat Aug 17 09:07:30 2002  Doug Lea  (dl at gee)
+      * Fix malloc_state bitmap array misdeclaration
+
+    V2.7.1 Thu Jul 25 10:58:03 2002  Doug Lea  (dl at gee)
+      * Allow tuning of FIRST_SORTED_BIN_SIZE
+      * Use PTR_UINT as type for all ptr->int casts. Thanks to John Belmonte.
+      * Better detection and support for non-contiguousness of MORECORE.
+        Thanks to Andreas Mueller, Conal Walsh, and Wolfram Gloger
+      * Bypass most of malloc if no frees. Thanks To Emery Berger.
+      * Fix freeing of old top non-contiguous chunk im sysmalloc.
+      * Raised default trim and map thresholds to 256K.
+      * Fix mmap-related #defines. Thanks to Lubos Lunak.
+      * Fix copy macros; added LACKS_FCNTL_H. Thanks to Neal Walfield.
+      * Branch-free bin calculation
+      * Default trim and mmap thresholds now 256K.
+
+    V2.7.0 Sun Mar 11 14:14:06 2001  Doug Lea  (dl at gee)
+      * Introduce independent_comalloc and independent_calloc.
+        Thanks to Michael Pachos for motivation and help.
+      * Make optional .h file available
+      * Allow > 2GB requests on 32bit systems.
+      * new WIN32 sbrk, mmap, munmap, lock code from <Walter@GeNeSys-e.de>.
+        Thanks also to Andreas Mueller <a.mueller at paradatec.de>,
+        and Anonymous.
+      * Allow override of MALLOC_ALIGNMENT (Thanks to Ruud Waij for
+        helping test this.)
+      * memalign: check alignment arg
+      * realloc: don't try to shift chunks backwards, since this
+        leads to  more fragmentation in some programs and doesn't
+        seem to help in any others.
+      * Collect all cases in malloc requiring system memory into sysmalloc
+      * Use mmap as backup to sbrk
+      * Place all internal state in malloc_state
+      * Introduce fastbins (although similar to 2.5.1)
+      * Many minor tunings and cosmetic improvements
+      * Introduce USE_PUBLIC_MALLOC_WRAPPERS, USE_MALLOC_LOCK
+      * Introduce MALLOC_FAILURE_ACTION, MORECORE_CONTIGUOUS
+        Thanks to Tony E. Bennett <tbennett@nvidia.com> and others.
+      * Include errno.h to support default failure action.
+
+    V2.6.6 Sun Dec  5 07:42:19 1999  Doug Lea  (dl at gee)
+      * return null for negative arguments
+      * Added Several WIN32 cleanups from Martin C. Fong <mcfong at yahoo.com>
+         * Add 'LACKS_SYS_PARAM_H' for those systems without 'sys/param.h'
+          (e.g. WIN32 platforms)
+         * Cleanup header file inclusion for WIN32 platforms
+         * Cleanup code to avoid Microsoft Visual C++ compiler complaints
+         * Add 'USE_DL_PREFIX' to quickly allow co-existence with existing
+           memory allocation routines
+         * Set 'malloc_getpagesize' for WIN32 platforms (needs more work)
+         * Use 'assert' rather than 'ASSERT' in WIN32 code to conform to
+           usage of 'assert' in non-WIN32 code
+         * Improve WIN32 'sbrk()' emulation's 'findRegion()' routine to
+           avoid infinite loop
+      * Always call 'fREe()' rather than 'free()'
+
+    V2.6.5 Wed Jun 17 15:57:31 1998  Doug Lea  (dl at gee)
+      * Fixed ordering problem with boundary-stamping
+
+    V2.6.3 Sun May 19 08:17:58 1996  Doug Lea  (dl at gee)
+      * Added pvalloc, as recommended by H.J. Liu
+      * Added 64bit pointer support mainly from Wolfram Gloger
+      * Added anonymously donated WIN32 sbrk emulation
+      * Malloc, calloc, getpagesize: add optimizations from Raymond Nijssen
+      * malloc_extend_top: fix mask error that caused wastage after
+        foreign sbrks
+      * Add linux mremap support code from HJ Liu
+
+    V2.6.2 Tue Dec  5 06:52:55 1995  Doug Lea  (dl at gee)
+      * Integrated most documentation with the code.
+      * Add support for mmap, with help from
+        Wolfram Gloger (Gloger@lrz.uni-muenchen.de).
+      * Use last_remainder in more cases.
+      * Pack bins using idea from  colin@nyx10.cs.du.edu
+      * Use ordered bins instead of best-fit threshhold
+      * Eliminate block-local decls to simplify tracing and debugging.
+      * Support another case of realloc via move into top
+      * Fix error occuring when initial sbrk_base not word-aligned.
+      * Rely on page size for units instead of SBRK_UNIT to
+        avoid surprises about sbrk alignment conventions.
+      * Add mallinfo, mallopt. Thanks to Raymond Nijssen
+        (raymond@es.ele.tue.nl) for the suggestion.
+      * Add `pad' argument to malloc_trim and top_pad mallopt parameter.
+      * More precautions for cases where other routines call sbrk,
+        courtesy of Wolfram Gloger (Gloger@lrz.uni-muenchen.de).
+      * Added macros etc., allowing use in linux libc from
+        H.J. Lu (hjl@gnu.ai.mit.edu)
+      * Inverted this history list
+
+    V2.6.1 Sat Dec  2 14:10:57 1995  Doug Lea  (dl at gee)
+      * Re-tuned and fixed to behave more nicely with V2.6.0 changes.
+      * Removed all preallocation code since under current scheme
+        the work required to undo bad preallocations exceeds
+        the work saved in good cases for most test programs.
+      * No longer use return list or unconsolidated bins since
+        no scheme using them consistently outperforms those that don't
+        given above changes.
+      * Use best fit for very large chunks to prevent some worst-cases.
+      * Added some support for debugging
+
+    V2.6.0 Sat Nov  4 07:05:23 1995  Doug Lea  (dl at gee)
+      * Removed footers when chunks are in use. Thanks to
+        Paul Wilson (wilson@cs.texas.edu) for the suggestion.
+
+    V2.5.4 Wed Nov  1 07:54:51 1995  Doug Lea  (dl at gee)
+      * Added malloc_trim, with help from Wolfram Gloger
+        (wmglo@Dent.MED.Uni-Muenchen.DE).
+
+    V2.5.3 Tue Apr 26 10:16:01 1994  Doug Lea  (dl at g)
+
+    V2.5.2 Tue Apr  5 16:20:40 1994  Doug Lea  (dl at g)
+      * realloc: try to expand in both directions
+      * malloc: swap order of clean-bin strategy;
+      * realloc: only conditionally expand backwards
+      * Try not to scavenge used bins
+      * Use bin counts as a guide to preallocation
+      * Occasionally bin return list chunks in first scan
+      * Add a few optimizations from colin@nyx10.cs.du.edu
+
+    V2.5.1 Sat Aug 14 15:40:43 1993  Doug Lea  (dl at g)
+      * faster bin computation & slightly different binning
+      * merged all consolidations to one part of malloc proper
+         (eliminating old malloc_find_space & malloc_clean_bin)
+      * Scan 2 returns chunks (not just 1)
+      * Propagate failure in realloc if malloc returns 0
+      * Add stuff to allow compilation on non-ANSI compilers
+          from kpv@research.att.com
+
+    V2.5 Sat Aug  7 07:41:59 1993  Doug Lea  (dl at g.oswego.edu)
+      * removed potential for odd address access in prev_chunk
+      * removed dependency on getpagesize.h
+      * misc cosmetics and a bit more internal documentation
+      * anticosmetics: mangled names in macros to evade debugger strangeness
+      * tested on sparc, hp-700, dec-mips, rs6000
+          with gcc & native cc (hp, dec only) allowing
+          Detlefs & Zorn comparison study (in SIGPLAN Notices.)
+
+    Trial version Fri Aug 28 13:14:29 1992  Doug Lea  (dl at g.oswego.edu)
+      * Based loosely on libg++-1.2X malloc. (It retains some of the overall
+         structure of old version,  but most details differ.)
+
+*/
+
+emmalloc/emmalloc.c
+/*
+ * Copyright 2018 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ *
+ * Simple minimalistic but efficient sbrk()-based malloc/free that works in
+ * singlethreaded and multithreaded builds.
+ *
+ * Assumptions:
+ *
+ *  - sbrk() is used to claim new memory (sbrk handles geometric/linear
+ *  - overallocation growth)
+ *  - sbrk() can be used by other code outside emmalloc.
+ *  - sbrk() is very fast in most cases (internal wasm call).
+ *  - sbrk() returns pointers with an alignment of alignof(max_align_t)
+ *
+ * Invariants:
+ *
+ *  - Per-allocation header overhead is 8 bytes, smallest allocated payload
+ *    amount is 8 bytes, and a multiple of 4 bytes.
+ *  - Acquired memory blocks are subdivided into disjoint regions that lie
+ *    next to each other.
+ *  - A region is either in used or free.
+ *    Used regions may be adjacent, and a used and unused region
+ *    may be adjacent, but not two unused ones - they would be
+ *    merged.
+ *  - Memory allocation takes constant time, unless the alloc needs to sbrk()
+ *    or memory is very close to being exhausted.
+ *
+ * Debugging:
+ *
+ *  - If not NDEBUG, runtime assert()s are in use.
+ *  - If EMMALLOC_MEMVALIDATE is defined, a large amount of extra checks are done.
+ *  - If EMMALLOC_VERBOSE is defined, a lot of operations are logged
+ *    out, in addition to EMMALLOC_MEMVALIDATE.
+ *  - Debugging and logging directly uses console.log via uses EM_ASM, not
+ *    printf etc., to minimize any risk of debugging or logging depending on
+ *    malloc.
+ */

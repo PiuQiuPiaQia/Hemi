@@ -14,6 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 // 仓库路径含中文卷名（闪迪SSD），URL.pathname 会百分号编码——必须 fileURLToPath。
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -69,6 +70,15 @@ if (existingTag) {
   process.exit(1);
 }
 
+// Releases may be prepared in an isolated, detached worktree. Publish its
+// tested commit to main explicitly; never infer the destination from HEAD.
+run('git', ['fetch', 'origin', 'main']);
+run('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD']);
+if (run('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`])) {
+  throw new Error(`Remote tag ${tag} already exists`);
+}
+run('node', ['scripts/verify-release-materials.mjs']);
+
 // 2. 本地门禁：单测 + typecheck + vite 构建 + 间距门禁 + 原生口径门禁。
 const gates = skipTests
   ? [[npmCommand, ['run', 'typecheck']], [npmCommand, ['run', 'build']], ['node', ['scripts/check-spacing.mjs']], ['node', ['scripts/check-native.mjs']]]
@@ -82,14 +92,28 @@ console.log('门禁全过。');
 
 // 3. bump + commit + tag + push。
 writeFileSync(pkgPath, `${JSON.stringify({ ...pkg, version: nextVersion }, null, 2)}\n`);
-run('git', ['add', 'package.json']);
+const lockPath = `${repoRoot}package-lock.json`;
+const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+lock.version = nextVersion;
+lock.packages[''].version = nextVersion;
+const lockBytes = `${JSON.stringify(lock, null, 2)}\n`;
+writeFileSync(lockPath, lockBytes);
+// Only package metadata changes here; the dependency graph and bundle module
+// inventory are identical. Keep its lock digest synchronized without a rebuild.
+const manifestPath = 'src/renderer/public/licenses/renderer-components.json';
+const manifest = JSON.parse(readFileSync(`${repoRoot}${manifestPath}`, 'utf8'));
+manifest.lockfileSha256 = createHash('sha256').update(lockBytes).digest('hex');
+const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+writeFileSync(`${repoRoot}${manifestPath}`, manifestBytes);
+writeFileSync(`${repoRoot}dist-renderer/licenses/renderer-components.json`, manifestBytes);
+run('git', ['add', 'package.json', 'package-lock.json', manifestPath]);
 run('git', ['commit', '-m', `release: ${tag}`]);
 // 必须附注标签：轻量标签在部分推送路径会被静默漏掉（v0.4.0 实测：tag 没上去、CI 没触发）。
 run('git', ['tag', '-a', tag, '-m', tag]);
 // 显式推当版 tag——旧写法 `--follow-tags` 会把本地所有未推的附注标签一起带上去：
 // v0.6.3 实撞：残留的 v0.6.1 旧 tag 被一并推走，触发了一条旧版发版流水线
 // （抢建 release/抢写 latest-mac.yml，须手动取消＋删 tag）。
-run('git', ['push', 'origin', 'HEAD', `refs/tags/${tag}`]);
+run('git', ['push', '--atomic', 'origin', 'HEAD:refs/heads/main', `refs/tags/${tag}`]);
 
 console.log(`
 已发版 ${tag}，已推送。CI 正在构建：

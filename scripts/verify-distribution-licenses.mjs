@@ -33,10 +33,15 @@ compare('THIRD-PARTY-NOTICES.md', 'app/THIRD-PARTY-NOTICES.md');
 compare('src/main/workflows/vendor/flowgram-engine/LICENSE', 'app/src/main/workflows/vendor/flowgram-engine/LICENSE');
 compare('third-party/sources.json', 'app/third-party/sources.json');
 compare('node_modules/@earendil-works/pi-mcp/LICENSES/modelcontextprotocol-typescript-sdk.txt', 'app/node_modules/@earendil-works/pi-mcp/LICENSES/modelcontextprotocol-typescript-sdk.txt');
-for (const name of fs.readdirSync(path.join(root, 'third-party/licenses')).sort()) {
-  if (name.startsWith('._')) continue;
-  if (fs.statSync(path.join(root, 'third-party/licenses', name)).isFile()) compare(`third-party/licenses/${name}`, `app/third-party/licenses/${name}`);
+function compareTree(dir) {
+  for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+    if (entry.name.startsWith('._')) continue;
+    const file = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) compareTree(file);
+    else if (entry.isFile()) compare(file, `app/${file}`);
+  }
 }
+compareTree('third-party');
 for (const name of ['renderer-components.json', 'renderer-third-party.txt', 'conversation-virtualization.txt']) {
   compare(`src/renderer/public/licenses/${name}`, `app/dist-renderer/licenses/${name}`);
 }
@@ -48,6 +53,8 @@ if (fs.existsSync(rendererFile)) {
   for (const item of renderer.components) if (item.reviewRequired) errors.push(`Unresolved renderer notice: ${item.name}@${item.version}`);
 }
 const nativeFiles = [], owners = new Map();
+const materials = JSON.parse(fs.readFileSync(path.join(root, 'third-party/release-materials.json'), 'utf8'));
+const coveredOwners = new Set(Object.entries(materials.npmVersions).map(([name, version]) => `${name}@${version}`));
 function ownerOf(file) {
   for (let dir = path.dirname(file); dir.startsWith(`${code}${path.sep}`); dir = path.dirname(dir)) {
     const manifest = path.join(dir, 'package.json');
@@ -56,6 +63,7 @@ function ownerOf(file) {
     if (!pkg.name || !pkg.version) continue;
     const key = relative(dir);
     if (!owners.has(key)) {
+      if (!coveredOwners.has(`${pkg.name}@${pkg.version}`)) errors.push(`Native owner needs license review: ${pkg.name}@${pkg.version}`);
       const files = fs.readdirSync(dir).filter(name => /^(licen[cs]e|notice|copying)([.-]|$)/i.test(name) && fs.statSync(path.join(dir, name)).isFile());
       owners.set(key, { path: key, name: pkg.name, version: pkg.version, license: pkg.license ?? null, notices: files.sort().map(name => ({ path: relative(path.join(dir, name)), sha256: sha256(fs.readFileSync(path.join(dir, name))) })) });
     }
@@ -93,7 +101,7 @@ const report = {
   notices, rendererComponents: renderer?.components.length ?? 0,
   nativeOwners: [...owners.values()].sort((a, b) => a.path.localeCompare(b.path)),
   nativeFiles: nativeFiles.sort((a, b) => a.path.localeCompare(b.path)),
-  remainingReview: ['libuiohook corresponding source and relinking materials (deferred)', 'Embedded native dependency inventories and their license obligations'],
+  nativeNoticeRecord: 'third-party/native-components.json (conservative source inventory, including build/dev and other platform dependencies; not an exact linker SBOM)',
   errors,
 };
 fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });

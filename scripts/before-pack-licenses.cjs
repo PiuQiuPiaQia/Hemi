@@ -3,10 +3,11 @@
 // notices before extraResources runs; missing sources must stop packaging.
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { Arch } = require('builder-util');
 
 module.exports = async function beforePack(context) {
+  execFileSync(process.execPath, [path.join(__dirname, 'verify-release-materials.mjs')], { stdio: 'inherit' });
   const electronRoot = path.dirname(require.resolve('electron/package.json'));
   const version = require(path.join(electronRoot, 'package.json')).version;
   const targetVersion = context.packager.config.electronVersion ?? version;
