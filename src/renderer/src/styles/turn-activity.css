@@ -23,7 +23,7 @@
   color: var(--ink);
 }
 
-.compact-shell .turn-activity-head:focus-visible {
+html.kb-nav .compact-shell .turn-activity-head:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
