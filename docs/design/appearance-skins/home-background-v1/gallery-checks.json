@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-21T00:53:14.801Z",
+  "revision": "signature-lettering",
+  "click": true,
+  "arrow": true,
+  "errors": [],
+  "responsive": [
+    {
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "width": 980,
+      "overflow": false
+    },
+    {
+      "width": 560,
+      "overflow": false
+    },
+    {
+      "width": 375,
+      "overflow": false
+    }
+  ]
+}

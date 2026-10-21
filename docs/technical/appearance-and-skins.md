@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本与日期 | 1.0，2026-10-21（Asia/Shanghai） |
+| 版本与日期 | 1.1，2026-10-21（Asia/Shanghai） |
 | 状态 | 技术设计，待实现 |
 | 产品依据 | [人物主题与换肤需求](../requirements/appearance-and-skins.md) |
 | 物料依据 | [人物物料包 v1](../design/appearance-skins/v1/README.md) |
@@ -12,6 +12,8 @@
 采用主进程统一管理外观、语义 CSS 变量驱动页面的方案。六款皮肤共用组件与布局；人物属于皮肤资源，侧栏背景不参与排版。首版仅浅色，不增加人物背景开关，不调整模型、语音或任务配置。
 
 本文给出模块、接口、启动顺序、并发与错误处理和测试拆分。拟新增文件和接口以代码样式标出；可点击的源码链接指向已有实现。
+
+冷启动演出和整体场景已按用户澄清扩展，见[冷启动与背景技术补充](appearance-startup-and-background.md)。该补充增加启动舞台、真实 UI 交接和场景资源；下文普通主题提交与多窗口规则继续适用。
 
 ## 1 架构选择与现有约束
 
@@ -190,7 +192,7 @@ rename 成功是提交点。之后目录 flush 若平台不支持或失败，只
 2. 在 loadURL/loadFile 前登记窗口及 mode，准备内存 bootstrap；保持当前 show=false。
 3. preload 先安装 changed listener 和缓存，再同步取最新 bootstrap，通过 contextBridge 暴露 getter。后续事件先更新缓存，再通知页面订阅者。
 4. HTML head 中先加载无依赖的外部经典脚本 `appearance-bootstrap.js`，再加载生成的主题 CSS，最后是现有主模块。脚本设置 data-skin、data-color-mode、data-window、背景和 theme-color，并衔接 preload 缓存。
-5. CSS/运行时初次应用完成后，renderer 报告当前 session/revision。主窗口只有在 ready-to-show 与最新主题回执均满足后，才按原有条件显示；其他窗口首次 showInactive 也必须通过相同检查。
+5. CSS/运行时初次应用完成后，renderer 报告当前 session/revision。带演出的主窗在 ready-to-show 与 BOOT_VISUAL_READY 后可显示同主题启动舞台，APP_READY 另行控制真实界面交接；无演出时等待最新主题回执。其他窗口首次 showInactive 保留最新主题检查，详见启动补充状态机。
 6. 回执若过期，发送最新快照并等待对应版本，不显示旧主题。主题加载错误应显示同背景下可重试的错误态并记录原因，不能无期限静默等待或用错误皮肤蒙混通过。
 
 首帧主题脚本不依赖 React、主包、远程网络或任意内联脚本权限。主题 CSS 与几何 CSS 的选择器和加载顺序须经过构建验证，不能在主包导入 tokens.css 后被覆盖。HTML reload 时也重新获取最新内存状态；应用内容在主题就绪前不绘制，背景保持当前主题。
@@ -283,6 +285,8 @@ Flowgram 独立 root 继承 html 的 CSS 变量，必要的 JS theme 参数显�
 | T-05 入口/浮层/背景 | 六卡/无开关、键盘焦点、点外、错误、50 条会话全部列表操作 | AC-01 至 07 |
 | T-06 全页迁移 | Portal 已开、两种工作流加载顺序、状态/草稿/通话/任务/授权保留 | AC-11 至 14 |
 | T-07 性能与平台 | 至少 30 次切换 P95、监听/内存趋势、资源失败、Windows/macOS 实机 | AC-15 至 17 |
+| T-08 影片与场景 | 首尾帧、人物动作、前景遮挡、UI 开口、常驻背景和宽窄窗构图 | AC-18、20、22 |
+| T-09 启动交接 | 双就绪信号、实际 DOM 展开、跳过、错误回退、资源释放与跨平台播放 | AC-18 至 22 |
 
 逻辑模块用 Node 测试注入 IO/时钟，但真实 IPC 和 Electron 窗口另做集成验证，不能只以 mock 通过为完成。首帧需要录制/捕获实际可见帧，单张最终截图不足以排除闪色。
 

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Hemi · 晴海蓝启动动效预演</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f6f6f5;color:#252b34;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{width:min(1100px,calc(100% - 40px));margin:30px auto}header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px}h1{font-size:18px;font-weight:600;margin:0}header span{font-size:12px;color:#777f8a}.player{border:1px solid #dce4ee;border-radius:14px;overflow:hidden;background:#e8effb;box-shadow:0 8px 32px #263e6510}.stage{position:relative;width:100%;aspect-ratio:3/2;overflow:hidden;isolation:isolate;perspective:1800px;background:#edf2fb}.scene{position:absolute;inset:0;background:radial-gradient(ellipse at 80% 30%,#fbfdff 0,transparent 45%),linear-gradient(145deg,#e1eafb,#f5f8fe 50%,#bdd4f5)}.scene::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,#b5cef13b,transparent 35%);border:1px solid #ffffff60}.sun{position:absolute;left:55%;top:8%;width:34%;aspect-ratio:1;border-radius:50%;background:#ffffff8c;box-shadow:0 0 90px 60px #ffffff35}.horizon{position:absolute;left:-20%;top:70%;width:145%;height:50%;border:1px solid #ffffffb0;border-radius:50%;transform:rotate(-8deg);background:linear-gradient(#abc9ed26,#ecf4fd00)}.horizon.second{top:79%;left:-25%;transform:rotate(7deg);background:none;border-color:#6f9ad02b}.wordmark{position:absolute;left:8%;top:17%;color:#294974;transform-origin:left center}.eyebrow{display:flex;align-items:center;gap:10px;font-size:clamp(9px,1.2vw,15px);letter-spacing:.19em}.eyebrow img{width:24px;height:24px;opacity:.65}.wordmark h2{font-size:clamp(48px,10vw,142px);font-weight:500;line-height:1;margin:25px 0 17px;letter-spacing:-.075em}.wordmark p{font-size:clamp(13px,1.6vw,23px);font-weight:400;letter-spacing:.07em;margin:0;color:#536f96}.wordmark small{display:block;margin-top:17px;font-size:clamp(9px,1vw,13px);letter-spacing:.12em;color:#7289a7}.orbit{position:absolute;left:4%;top:55%;width:64%;height:24%;border:1px solid #ffffffb8;border-radius:50%;transform:rotate(-15deg);box-shadow:0 0 40px #fff8,inset 0 0 26px #ffffff36}.orbit::after{content:"";position:absolute;width:8px;height:8px;border-radius:50%;background:#fff;left:18%;top:7%;box-shadow:0 0 16px #fff}.character{position:absolute;height:104%;width:auto;right:-2%;bottom:-12%;filter:drop-shadow(-12px 16px 22px #496b9d20);transform-origin:65% 70%;user-select:none;pointer-events:none}.app-surface{position:absolute;inset:0;transform-origin:0 0;will-change:transform,opacity;overflow:hidden;background:#edf2fb}.app-surface img{display:block;width:100%;height:100%;object-fit:fill}.sheen{position:absolute;inset:-30%;background:linear-gradient(112deg,transparent 38%,#fff7 48%,#fff0 58%);pointer-events:none;mix-blend-mode:screen}.spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px #fff;pointer-events:none}.spark:nth-of-type(1){left:12%;top:64%}.spark:nth-of-type(2){left:47%;top:20%}.spark:nth-of-type(3){left:86%;top:18%}.spark:nth-of-type(4){left:39%;top:80%}.spark:nth-of-type(5){left:75%;top:74%}.controls{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#fff;border-top:1px solid #e2e7ef;flex-wrap:wrap}button{min-height:34px;padding:6px 13px;border:1px solid #d9e0eb;border-radius:8px;background:#fff;color:#385f9f;font:inherit;font-size:12px;cursor:pointer}button:hover{background:#edf3ff}button:focus-visible,input:focus-visible{outline:2px solid #385f9f;outline-offset:3px}button:disabled{opacity:.4;cursor:default}input[type=range]{flex:1;min-width:100px;accent-color:#385f9f}output{font:12px ui-monospace,monospace;color:#718096;min-width:72px}.phase{font-size:12px;color:#536f96;min-width:72px}.note{font-size:12px;color:#7c828b;line-height:1.75;margin:14px 2px}.capture main{width:100%;margin:0}.capture header,.capture .controls,.capture .note{display:none}.capture .player{border:0;border-radius:0;box-shadow:none}.capture .stage{width:100vw;height:100vh;aspect-ratio:auto}@media(max-width:600px){main{width:calc(100% - 20px);margin:18px auto}header{display:block}header span{display:block;margin-top:7px}.controls{padding:10px;gap:8px}.phase{display:none}.eyebrow img{width:16px;height:16px}.wordmark h2{margin:16px 0 12px}.wordmark small{margin-top:9px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1>晴海蓝 · 启动动效预演</h1><span>6 秒 / 静态立绘与界面运镜 / 无声</span></header>
+    <div class="player">
+      <div class="stage" role="img" aria-label="晴海蓝主题启动动效：人物入场，Hemi 界面从透视窗口展开到完整工作界面">
+        <div class="scene"><div class="sun"></div><div class="horizon"></div><div class="horizon second"></div></div>
+        <div class="wordmark"><div class="eyebrow"><img src="../v1/classic.svg" alt="">HEMI / APPEARANCE 01</div><h2>Hemi.</h2><p>晴海蓝</p><small>让灵感，轻轻展开。</small></div>
+        <div class="orbit"></div>
+        <div class="app-surface"><img src="../../../requirements/assets/appearance-and-skins/sidebar-full-list.png" alt="Hemi 晴海蓝界面，含长会话列表与侧栏人物背景"><div class="sheen"></div></div>
+        <img class="character" src="../v1/masters/cafe-blue.png" alt="" draggable="false">
+        <div class="particles"><i class="spark"></i><i class="spark"></i><i class="spark"></i><i class="spark"></i><i class="spark"></i></div>
+      </div>
+      <div class="controls"><button id="play" type="button">暂停</button><button id="replay" type="button">重播</button><input id="progress" type="range" min="0" max="6000" step="10" value="0" aria-label="动效进度，毫秒"><output id="time">0.0 / 6.0s</output><span class="phase" aria-live="polite"></span><button id="skip" type="button">跳过片头</button></div>
+    </div>
+    <p class="note">这是启动节奏预演：人物使用现有透明立绘，界面使用 Hemi 实际 fixture 截图。可查看人物入场、窗口透视展开与最终交接；人物关节动作、正式场景视频和真实启动接入待后续制作。空格播放 / 暂停，Esc 跳过。<a href="../home-background-v1/index.html" style="color:#385f9f">查看新版主页背景：右侧人物，左侧主题文字</a>。</p>
+  </main>
+  <script>
+    const $=s=>document.querySelector(s),duration=6000,capture=new URLSearchParams(location.search).has('capture');
+    if(capture)document.body.classList.add('capture');
+    const scene=$('.scene'),wordmark=$('.wordmark'),actor=$('.character'),surface=$('.app-surface'),orbit=$('.orbit'),sheen=$('.sheen'),particles=$('.particles'),progress=$('#progress'),play=$('#play'),phase=$('.phase');
+    const clamp=x=>Math.max(0,Math.min(1,x)),mix=(a,b,p)=>a+(b-a)*p,smooth=x=>{x=clamp(x);return x*x*(3-2*x)},out=x=>1-Math.pow(1-clamp(x),3);
+    let time=0,playing=false,start=0,raf=0,lastPhase='';
+    function renderAt(ms){
+      time=Math.max(0,Math.min(duration,ms));const t=time/1000,entry=out(t/1.15),arrival=out((t-1.15)/1.3),expand=smooth((t-3.25)/1.75),leave=smooth((t-4.05)/.9),title=smooth((t-1.15)/1.15),glide=clamp((t-2.45)/.8);
+      scene.style.opacity=1-expand;wordmark.style.opacity=1-title;wordmark.style.transform=`translateY(${-18*title}px)`;
+      actor.style.opacity=entry*(1-leave);actor.style.transform=`translate(${mix(22,0,entry)+mix(0,20,leave)}%,${mix(9,0,entry)-Math.sin(Math.PI*clamp((t-1.2)/3.6))*.7}%) rotate(${mix(2.5,0,entry)+mix(0,1.5,leave)}deg) scale(${mix(1.025,1,entry)+leave*.025})`;
+      const scale=mix(mix(.57,.64,glide),1,expand),x=mix(mix(5.5,7,glide),0,expand),y=mix(mix(26,20.5,glide),0,expand);
+      surface.style.opacity=arrival;surface.style.transform=`translate3d(${x}%,${y+mix(4,0,arrival)}%,0) rotateX(${mix(4,0,expand)}deg) rotateY(${mix(-12,0,expand)}deg) rotateZ(${mix(-5,0,expand)}deg) scale(${scale})`;surface.style.borderRadius=`${mix(18,0,expand)}px`;surface.style.boxShadow=`0 ${mix(22,0,expand)}px ${mix(70,0,expand)}px rgba(38,70,118,${mix(.24,0,expand)})`;
+      orbit.style.opacity=(1-expand)*arrival*.65;orbit.style.transform=`translateY(${mix(18,-8,arrival)}px) rotate(${mix(-15,-8,clamp(t/6))}deg) scale(${mix(.85,1.05,clamp(t/5))})`;
+      const sweep=clamp((t-1.55)/1.6);sheen.style.transform=`translateX(${mix(-70,85,sweep)}%)`;sheen.style.opacity=(1-expand)*Math.sin(Math.PI*sweep)*.55;
+      particles.style.opacity=entry*(1-expand)*.6;particles.style.transform=`translateY(${-t*4}px)`;
+      progress.value=time;$('#time').textContent=`${(time/1000).toFixed(1)} / 6.0s`;const p=t<1.15?'人物入场':t<3.25?'界面浮现':t<5?'界面展开':'工作界面';if(p!==lastPhase){phase.textContent=p;lastPhase=p;}$('#skip').disabled=time>=duration;
+      return {time,phase:p,playing,appOpacity:arrival,appScale:scale,actorOpacity:entry*(1-leave)};
+    }
+    function stop(){playing=false;cancelAnimationFrame(raf);play.textContent=time>=duration?'播放':'继续';}
+    function frame(now){if(!playing)return;renderAt(now-start);if(time>=duration){stop();return;}raf=requestAnimationFrame(frame);}
+    function resume(){if(time>=duration)renderAt(0);playing=true;play.textContent='暂停';start=performance.now()-time;cancelAnimationFrame(raf);raf=requestAnimationFrame(frame);}
+    play.onclick=()=>playing?stop():resume();$('#replay').onclick=()=>{stop();renderAt(0);resume();};$('#skip').onclick=()=>{stop();renderAt(duration);play.textContent='播放';};progress.oninput=()=>{stop();renderAt(Number(progress.value));};
+    document.addEventListener('keydown',event=>{if(event.code==='Escape'){$('#skip').click();}else if(event.code==='Space'&&event.target.tagName!=='INPUT'&&event.target.tagName!=='BUTTON'){event.preventDefault();play.click();}});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden&&playing)stop();});
+    window.preview={seek(ms){stop();return renderAt(ms);},play:resume,pause:stop,getState(){return renderAt(time);},duration};
+    window.previewReady=Promise.all([...document.images].map(img=>img.decode())).then(()=>{renderAt(0);if(!capture){if(matchMedia('(prefers-reduced-motion: reduce)').matches){renderAt(duration);stop();}else resume();}return true;});
+  </script>
+</body>
+</html>

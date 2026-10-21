@@ -1,0 +1,277 @@
+{
+  "date": "2026-10-21T00:32:39.262Z",
+  "commit": "13284129bc199d23d33b45bbb5c90af9711e8067",
+  "worktree": "includes scoped preview changes plus unrelated existing changes; no production code changed by this preview",
+  "environment": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "155.0.8059.85"
+  },
+  "commands": [
+    "node tmp/render-startup-motion-preview.mjs --frames",
+    "ffmpeg libx264 CRF18 30fps yuv420p +faststart",
+    "ffprobe -show_streams -show_format",
+    "Chrome HTMLVideoElement: load metadata and advance playback"
+  ],
+  "checks": {
+    "images": [
+      {
+        "src": "../v1/classic.svg",
+        "loaded": true,
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "src": "../../../requirements/assets/appearance-and-skins/sidebar-full-list.png",
+        "loaded": true,
+        "width": 2880,
+        "height": 1920
+      },
+      {
+        "src": "../v1/masters/cafe-blue.png",
+        "loaded": true,
+        "width": 1135,
+        "height": 1386
+      }
+    ],
+    "keyframes": [
+      {
+        "ms": 0,
+        "state": {
+          "time": 0,
+          "phase": "人物入场",
+          "playing": false,
+          "appOpacity": 0,
+          "appScale": 0.57,
+          "actorOpacity": 0
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-0000.png"
+      },
+      {
+        "ms": 800,
+        "state": {
+          "time": 800,
+          "phase": "人物入场",
+          "playing": false,
+          "appOpacity": 0,
+          "appScale": 0.57,
+          "actorOpacity": 0.9718089915344785
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-0800.png"
+      },
+      {
+        "ms": 2200,
+        "state": {
+          "time": 2200,
+          "phase": "界面浮现",
+          "playing": false,
+          "appOpacity": 0.9928880291306327,
+          "appScale": 0.57,
+          "actorOpacity": 1
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-2200.png"
+      },
+      {
+        "ms": 3600,
+        "state": {
+          "time": 3600,
+          "phase": "界面展开",
+          "playing": false,
+          "appOpacity": 1,
+          "appScale": 0.67744,
+          "actorOpacity": 1
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-3600.png"
+      },
+      {
+        "ms": 4300,
+        "state": {
+          "time": 4300,
+          "phase": "界面展开",
+          "playing": false,
+          "appOpacity": 1,
+          "appScale": 0.87328,
+          "actorOpacity": 0.8113854595336076
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-4300.png"
+      },
+      {
+        "ms": 5000,
+        "state": {
+          "time": 5000,
+          "phase": "工作界面",
+          "playing": false,
+          "appOpacity": 1,
+          "appScale": 1,
+          "actorOpacity": 0
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-5000.png"
+      },
+      {
+        "ms": 6000,
+        "state": {
+          "time": 6000,
+          "phase": "工作界面",
+          "playing": false,
+          "appOpacity": 1,
+          "appScale": 1,
+          "actorOpacity": 0
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v1/frame-6000.png"
+      }
+    ],
+    "video": {
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "profile": "High",
+          "codec_type": "video",
+          "codec_tag_string": "avc1",
+          "codec_tag": "0x31637661",
+          "mime_codec_string": "avc1.640028",
+          "width": 1440,
+          "height": 960,
+          "coded_width": 1440,
+          "coded_height": 960,
+          "has_b_frames": 2,
+          "pix_fmt": "yuv420p",
+          "level": 40,
+          "chroma_location": "left",
+          "field_order": "progressive",
+          "is_avc": "true",
+          "nal_length_size": "4",
+          "id": "0x1",
+          "r_frame_rate": "30/1",
+          "avg_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 92160,
+          "duration": "6.000000",
+          "bit_rate": "4571596",
+          "bits_per_raw_sample": "8",
+          "nb_frames": "180",
+          "extradata_size": 46,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "und",
+            "handler_name": "VideoHandler",
+            "encoder": "Lavc62.28.101 libx264"
+          }
+        }
+      ],
+      "format": {
+        "filename": "/Volumes/闪迪SSD/Projects/Hemi/docs/design/appearance-skins/motion-preview-v1/hemi-blue-startup-preview-v1.mp4",
+        "nb_streams": 1,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "6.000000",
+        "size": "3431692",
+        "bit_rate": "4575589",
+        "probe_score": 100,
+        "tags": {
+          "major_brand": "isom",
+          "minor_version": "512",
+          "compatible_brands": "isomiso2avc1mp41",
+          "encoder": "Lavf62.12.101"
+        }
+      }
+    },
+    "skip": true,
+    "replay": true,
+    "spacePause": true,
+    "scrub": true,
+    "escape": true,
+    "responsive": [
+      {
+        "width": 1440,
+        "scrollWidth": 1440,
+        "controlsVisible": true
+      },
+      {
+        "width": 980,
+        "scrollWidth": 980,
+        "controlsVisible": true
+      },
+      {
+        "width": 560,
+        "scrollWidth": 560,
+        "controlsVisible": true
+      },
+      {
+        "width": 375,
+        "scrollWidth": 375,
+        "controlsVisible": true
+      }
+    ],
+    "reducedMotion": {
+      "time": 6000,
+      "phase": "工作界面",
+      "playing": false,
+      "appOpacity": 1,
+      "appScale": 1,
+      "actorOpacity": 0
+    },
+    "encodedVideoPlayback": {
+      "metadata": {
+        "duration": 6,
+        "width": 1440,
+        "height": 960
+      },
+      "playback": {
+        "advanced": true,
+        "currentTime": 0.715837,
+        "paused": false,
+        "error": null
+      }
+    }
+  },
+  "errors": [],
+  "failedRequests": [],
+  "sources": [
+    {
+      "file": "docs/design/appearance-skins/v1/masters/cafe-blue.png",
+      "sha256": "9731518b3e1a165b928cfe02d3503977a29d7a05ae7b21205c08481ed476cb9c"
+    },
+    {
+      "file": "docs/design/appearance-skins/v1/classic.svg",
+      "sha256": "e61c5a95097dca33176ab43f933a9583ec423872c9562a3565890f8c1c336e52"
+    },
+    {
+      "file": "docs/requirements/assets/appearance-and-skins/sidebar-full-list.png",
+      "sha256": "3874a603f2e7b8d8b28c52b4fdb7d2a3dc4973a6cfb584124dbfa98cfa1380be"
+    }
+  ],
+  "gaps": [
+    "Static character cutout; no body/face animation",
+    "Screenshot texture; no live AppSurface or real boot integration",
+    "Final state uses approved sidebar background fixture; new full-window scene awaits material",
+    "Silent engineering motion preview only; no production lifecycle/performance validation"
+  ]
+}

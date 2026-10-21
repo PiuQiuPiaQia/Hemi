@@ -32,7 +32,8 @@
         "statusDanger": "#b4483d"
       },
       "assets": {},
-      "watermark": null
+      "watermark": null,
+      "backgroundCopy": null
     },
     {
       "id": "cafe-blue",
@@ -117,7 +118,13 @@
           ]
         }
       },
-      "watermark": "fixed-to-sidebar-not-scroll-content"
+      "watermark": "fixed-to-sidebar-not-scroll-content",
+      "backgroundCopy": {
+        "headline": "Smile",
+        "subline": "DeepSeek",
+        "source": "../../../requirements/assets/appearance-and-skins/references/blue.jpg",
+        "role": "decorative-theme-copy-not-model-selection"
+      }
     },
     {
       "id": "cafe-purple",
@@ -202,7 +209,13 @@
           ]
         }
       },
-      "watermark": "fixed-to-sidebar-not-scroll-content"
+      "watermark": "fixed-to-sidebar-not-scroll-content",
+      "backgroundCopy": {
+        "headline": "Sister",
+        "subline": "GPT",
+        "source": "../../../requirements/assets/appearance-and-skins/references/purple.jpg",
+        "role": "decorative-theme-copy-not-model-selection"
+      }
     },
     {
       "id": "cafe-orange",
@@ -287,7 +300,13 @@
           ]
         }
       },
-      "watermark": "fixed-to-sidebar-not-scroll-content"
+      "watermark": "fixed-to-sidebar-not-scroll-content",
+      "backgroundCopy": {
+        "headline": "Suspended",
+        "subline": "Claude",
+        "source": "../../../requirements/assets/appearance-and-skins/references/orange.jpg",
+        "role": "decorative-theme-copy-not-model-selection"
+      }
     },
     {
       "id": "cafe-gold",
@@ -372,7 +391,13 @@
           ]
         }
       },
-      "watermark": "fixed-to-sidebar-not-scroll-content"
+      "watermark": "fixed-to-sidebar-not-scroll-content",
+      "backgroundCopy": {
+        "headline": "Sweet",
+        "subline": "Grok",
+        "source": "../../../requirements/assets/appearance-and-skins/references/gold.jpg",
+        "role": "decorative-theme-copy-not-model-selection"
+      }
     },
     {
       "id": "cafe-red",
@@ -457,7 +482,13 @@
           ]
         }
       },
-      "watermark": "fixed-to-sidebar-not-scroll-content"
+      "watermark": "fixed-to-sidebar-not-scroll-content",
+      "backgroundCopy": {
+        "headline": "Stupid",
+        "subline": "Doubao",
+        "source": "../../../requirements/assets/appearance-and-skins/references/red.jpg",
+        "role": "decorative-theme-copy-not-model-selection"
+      }
     }
   ]
 }

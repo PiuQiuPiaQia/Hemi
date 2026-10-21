@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hemi · 冷启动与主页动效预演</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f6f6f5;color:#252b34;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{width:min(1200px,calc(100% - 32px));margin:22px auto}header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}h1{font-size:17px;font-weight:600;margin:0}header span{font-size:12px;color:#788294}.player{border:1px solid #dce4f0;border-radius:12px;overflow:hidden;background:#edf2fb}.stage{width:100%;aspect-ratio:3/2;overflow:hidden;position:relative}iframe{position:absolute;width:1440px;height:960px;border:0;transform-origin:0 0;pointer-events:none}.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px;background:#fff;border-top:1px solid #e0e7f0}button{min-height:33px;padding:6px 11px;font:inherit;font-size:12px;border:1px solid #dce4f0;border-radius:7px;color:#385f9f;background:#fff;cursor:pointer}button:hover,button[aria-pressed=true]{background:#edf3ff}button:focus-visible,input:focus-visible{outline:2px solid #385f9f;outline-offset:3px}button:disabled{opacity:.4;cursor:default}input{flex:1;min-width:100px;accent-color:#385f9f}output{font:12px ui-monospace,monospace;color:#7b8798;min-width:70px}p{font-size:12px;color:#788294;line-height:1.8}.status{font-size:12px;color:#607899;min-width:82px}a{color:#385f9f}.capture main{width:100%;margin:0}.capture header,.capture .controls,.capture p{display:none}.capture .player{border:0;border-radius:0}.capture .stage{width:100vw;height:100vh;aspect-ratio:auto}@media(max-width:600px){header{display:block}header span{display:block;margin-top:7px}main{width:calc(100% - 20px);margin:14px auto}.status{display:none}}
+  </style>
+</head>
+<body>
+<main>
+  <header><h1>晴海蓝 · 两段动效预演</h1><span>冷启动 → 主页轻动效 → 会话阅读</span></header>
+  <div class="player"><div class="stage"><iframe id="scene" title="Hemi 只读动画场景" tabindex="-1"></iframe></div><div class="controls"><button id="boot" type="button">重播冷启动</button><button id="idle" type="button">主页轻动效</button><button id="conversation" type="button">会话阅读</button><button id="toggle" type="button">暂停</button><input id="progress" type="range" min="0" max="6000" step="10" value="0" aria-label="动效进度，毫秒"><output>0.0 / 6.0s</output><span class="status" aria-live="polite">准备画面</span><button id="skip" type="button">跳过片头</button></div></div>
+  <p>此预演包含题字显现、线条写入、界面透视展开、主页立绘轻浮动与缓慢光效。人物暂用静态立绘，尚不含眨眼、挥手和发丝关节动画。场景是 Hemi 实际界面的只读快照，预览按钮仅用于切换展示状态，尚未接入真实应用。<a href="README.md">制作范围与素材缺口</a>。</p>
+</main>
+<script>
+  const $=s=>document.querySelector(s),frame=$('#scene'),params=new URLSearchParams(location.search),capture=params.has('capture');if(capture)document.body.classList.add('capture');
+  const requests=new Map();let requestId=0,currentScene='',loaded=false,pendingReady=null,current={mode:'boot',time:0,playing:false},resolveInitial;
+  window.previewReady=new Promise(resolve=>resolveInitial=resolve);
+  function fit(){frame.style.transform=`scale($('.stage').clientWidth/1440)`;}new ResizeObserver(fit).observe($('.stage'));fit();
+  function reflect(state){current=state;for(const id of ['boot','idle','conversation'])$('#'+id).setAttribute('aria-pressed',String(state.mode===id));const total=state.mode==='boot'?6000:9000;$('#progress').max=total;$('#progress').value=state.mode==='boot'?state.time:state.time%9000;$('output').textContent=`${(Number($('#progress').value)/1000).toFixed(1)} / ${total/1000}.0s`;$('.status').textContent=state.mode==='boot'?'冷启动预演':state.mode==='idle'?'主页轻动效':'静态阅读';$('#toggle').textContent=state.playing?'暂停':'播放';$('#toggle').disabled=state.mode==='conversation';$('#progress').disabled=state.mode==='conversation';$('#skip').disabled=state.mode!=='boot';}
+  addEventListener('message',event=>{if(event.source!==frame.contentWindow)return;const data=event.data;if(data?.type==='hemi-motion-ready'){loaded=true;reflect(data.state);pendingReady?.();pendingReady=null;}if(data?.type==='hemi-motion-state'){reflect(data.state);if(requests.has(data.requestId)){requests.get(data.requestId)(data.state);requests.delete(data.requestId);}}if(data?.type==='hemi-motion-error')$('.status').textContent='场景加载失败';});
+  function loadScene(scene){if(currentScene===scene&&loaded)return Promise.resolve();loaded=false;currentScene=scene;return new Promise(resolve=>{pendingReady=resolve;frame.src=`scene-${scene}.html`;});}
+  function command(action,rest={}){return new Promise(resolve=>{const id=++requestId;requests.set(id,resolve);frame.contentWindow.postMessage({type:'hemi-motion-command',requestId:id,action,...rest},'*');});}
+  async function setMode(mode,autoplay=true){await loadScene(mode==='conversation'?'conversation':'welcome');return command('mode',{mode,autoplay});}
+  $('#boot').onclick=()=>setMode('boot');$('#idle').onclick=()=>setMode('idle');$('#conversation').onclick=()=>setMode('conversation',false);$('#toggle').onclick=()=>command(current.playing?'pause':'play');$('#skip').onclick=()=>command('skip');$('#progress').oninput=()=>command('seek',{mode:current.mode,time:Number($('#progress').value)});
+  document.addEventListener('keydown',event=>{if(event.code==='Escape')command('skip');if(event.code==='Space'&&!['INPUT','BUTTON'].includes(event.target.tagName)){event.preventDefault();$('#toggle').click();}});document.addEventListener('visibilitychange',()=>{if(document.hidden&&loaded)command('pause');});
+  window.preview={async seek(ms,mode='boot'){await loadScene(mode==='conversation'?'conversation':'welcome');return command('seek',{mode,time:ms});},setMode,play:()=>command('play'),pause:()=>command('pause'),getState:()=>({...current}),duration:6000};
+  (async()=>{const requested=params.get('mode')||'boot';const initial=matchMedia('(prefers-reduced-motion: reduce)').matches&&requested==='boot'?'idle':requested;await setMode(initial,!capture);resolveInitial(true);})();
+</script>
+</body>
+</html>

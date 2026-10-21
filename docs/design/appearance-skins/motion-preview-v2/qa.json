@@ -1,0 +1,242 @@
+{
+  "date": "2026-10-21T01:09:22.165Z",
+  "commit": "d6b83a837ee18699755f630a6ca0bd13a4a98bd6",
+  "environment": {
+    "node": "v22.22.3",
+    "browser": "155.0.8059.85",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "commands": [
+    "node tmp/render-home-background.mjs --motion-scenes",
+    "node tmp/render-theme-motion-v2.mjs --video",
+    "Chrome real-time automatic handoff and HTMLVideoElement playback"
+  ],
+  "scope": "Offline read-only DOM snapshots and authored animation; no production app or services changed",
+  "checks": {
+    "frames": [
+      {
+        "ms": 800,
+        "mode": "boot",
+        "state": {
+          "mode": "boot",
+          "time": 800,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/boot-800.png"
+      },
+      {
+        "ms": 2200,
+        "mode": "boot",
+        "state": {
+          "mode": "boot",
+          "time": 2200,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/boot-2200.png"
+      },
+      {
+        "ms": 4100,
+        "mode": "boot",
+        "state": {
+          "mode": "boot",
+          "time": 4100,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/boot-4100.png"
+      },
+      {
+        "ms": 6000,
+        "mode": "boot",
+        "state": {
+          "mode": "boot",
+          "time": 6000,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/boot-6000.png"
+      },
+      {
+        "ms": 2250,
+        "mode": "idle",
+        "state": {
+          "mode": "idle",
+          "time": 2250,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/idle-2250.png"
+      },
+      {
+        "ms": 6750,
+        "mode": "idle",
+        "state": {
+          "mode": "idle",
+          "time": 6750,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "welcome"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/idle-6750.png"
+      },
+      {
+        "ms": 0,
+        "mode": "conversation",
+        "state": {
+          "mode": "conversation",
+          "time": 0,
+          "playing": false,
+          "reducedMotion": false,
+          "scene": "conversation"
+        },
+        "file": "/Volumes/闪迪SSD/Projects/Hemi/output/theme-preview/motion-v2/conversation-0.png"
+      }
+    ],
+    "bootEndMatchesIdleStart": true,
+    "video": {
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "profile": "High",
+          "codec_type": "video",
+          "codec_tag_string": "avc1",
+          "codec_tag": "0x31637661",
+          "mime_codec_string": "avc1.640028",
+          "width": 1440,
+          "height": 960,
+          "coded_width": 1440,
+          "coded_height": 960,
+          "has_b_frames": 2,
+          "pix_fmt": "yuv420p",
+          "level": 40,
+          "chroma_location": "left",
+          "field_order": "progressive",
+          "is_avc": "true",
+          "nal_length_size": "4",
+          "id": "0x1",
+          "r_frame_rate": "30/1",
+          "avg_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 230400,
+          "duration": "15.000000",
+          "bit_rate": "1893919",
+          "bits_per_raw_sample": "8",
+          "nb_frames": "450",
+          "extradata_size": 46,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          },
+          "tags": {
+            "language": "und",
+            "handler_name": "VideoHandler",
+            "encoder": "Lavc62.28.101 libx264"
+          }
+        }
+      ],
+      "format": {
+        "filename": "/Volumes/闪迪SSD/Projects/Hemi/docs/design/appearance-skins/motion-preview-v2/hemi-blue-startup-and-idle-v2.mp4",
+        "nb_streams": 1,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "15.000000",
+        "size": "3555682",
+        "bit_rate": "1896363",
+        "probe_score": 100,
+        "tags": {
+          "major_brand": "isom",
+          "minor_version": "512",
+          "compatible_brands": "isomiso2avc1mp41",
+          "encoder": "Lavf62.12.101"
+        }
+      }
+    },
+    "idleButton": true,
+    "readingStatic": true,
+    "skipToIdle": true,
+    "responsive": [
+      {
+        "width": 1440,
+        "overflow": false
+      },
+      {
+        "width": 980,
+        "overflow": false
+      },
+      {
+        "width": 560,
+        "overflow": false
+      },
+      {
+        "width": 375,
+        "overflow": false
+      }
+    ],
+    "reducedMotion": {
+      "mode": "idle",
+      "time": 0,
+      "playing": false,
+      "reducedMotion": true,
+      "scene": "welcome"
+    },
+    "automaticHandoff": {
+      "mode": "idle",
+      "time": 83.29999999999927,
+      "playing": true,
+      "reducedMotion": false,
+      "scene": "welcome"
+    },
+    "encodedVideoPlayback": {
+      "metadata": {
+        "duration": 15,
+        "width": 1440,
+        "height": 960
+      },
+      "playback": {
+        "advanced": true,
+        "currentTime": 0.761805,
+        "error": null
+      }
+    }
+  },
+  "errors": [],
+  "requests": [],
+  "gaps": [
+    "No eye, hair, facial or arm animation asset exists; actor is a static PNG with transforms",
+    "No real application startup, readiness, IPC, focus or live interaction verified",
+    "Ambient performance budget and all target Electron platforms remain untested",
+    "CSS snapshot made from current fixture; internal DOM is deliberately inert"
+  ]
+}
