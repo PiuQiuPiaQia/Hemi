@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Hemi Dev</title>
+  <!-- dev 变体母版：与 build/icon.svg 同构，仅换底色并加 DEV 徽标，
+       目的只是让开发实例的 Dock 图标和打包版一眼可分。 -->
+  <path fill="#C0642A" d="M286 48H738C891 48 976 133 976 286V738C976 891 891 976 738 976H286C133 976 48 891 48 738V286C48 133 133 48 286 48Z"/>
+  <g fill="#FAFAF7">
+    <rect x="272" y="256" width="112" height="512" rx="22"/>
+    <rect x="640" y="256" width="112" height="512" rx="22"/>
+    <path d="M368 474C452 450 572 506 656 482V550C572 574 452 518 368 542Z"/>
+  </g>
+  <rect x="300" y="800" width="424" height="128" rx="64" fill="#2A1508" opacity="0.82"/>
+  <text x="512" y="890" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="92" font-weight="700" letter-spacing="10" fill="#FAFAF7">DEV</text>
+</svg>

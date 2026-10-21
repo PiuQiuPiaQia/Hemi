@@ -48,12 +48,14 @@ export function prepareDevRuntime({
   chmodSync(nativeExecutable, statSync(executable).mode);
 
   const infoPath = path.join(bundle, 'Contents', 'Info.plist');
+  // dev 用独立图标（build/icon-dev.icns）：Dock 里必须和装好的打包版一眼可分，
+  // 否则两个同名 Hemi 并存时分不清点哪个。图标文件名也带 -dev，避免与品牌资源同名。
   const expected = {
     ...sourceInfo,
     CFBundleDisplayName: productName,
     CFBundleName: productName,
     CFBundleExecutable: sourceInfo.CFBundleExecutable,
-    CFBundleIconFile: `${productName}.icns`,
+    CFBundleIconFile: `${productName}-dev.icns`,
   };
   if (!isDeepStrictEqual(readPlist(infoPath), expected)) {
     const temporary = `${infoPath}.tmp`;
@@ -63,7 +65,7 @@ export function prepareDevRuntime({
   }
 
   const icon = path.join(bundle, 'Contents', 'Resources', expected.CFBundleIconFile);
-  const sourceIcon = path.join(projectRoot, 'build/icon.icns');
+  const sourceIcon = path.join(projectRoot, 'build/icon-dev.icns');
   if (!existsSync(icon) || !readFileSync(icon).equals(readFileSync(sourceIcon))) {
     copyFileSync(sourceIcon, icon);
     changed = true;

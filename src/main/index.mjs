@@ -1,7 +1,7 @@
 import { app, Menu, nativeImage, powerMonitor, protocol, session } from 'electron';
 import path from 'node:path';
 
-import { appIconPath } from './paths.mjs';
+import { appIconPath, devAppIconPath } from './paths.mjs';
 
 import { registerAllIpcHandlers } from './ipc/index.mjs';
 import { initializeStableSafeStorageIdentity } from './lib/config-store.mjs';
@@ -182,11 +182,11 @@ app.whenReady().then(async () => {
     // 常驻 Dock（用户 2026-09-20：收起/隐藏主窗口后也要能从 Dock 找回应用）。
     // 启动先拉回常规应用；真正的隐患是悬浮窗的 setVisibleOnAllWorkspaces(
     // { visibleOnFullScreen }) 会把应用翻回辅助应用（Dock 图标消失），那边在
-    // showOnAllWorkspacesKeepingDock 里各自重申，这里只管启动时刻。dev 随后设
-    // 品牌图标（打包后图标来自 bundle 本身）。
+    // showOnAllWorkspacesKeepingDock 里各自重申，这里只管启动时刻。dev 随后换成
+    // dev 专用图标（打包后图标来自 bundle 本身，且 dev bundle 也指 icon-dev）。
     await app.dock.show();
     if (!app.isPackaged) {
-      const icon = nativeImage.createFromPath(appIconPath);
+      const icon = nativeImage.createFromPath(devAppIconPath);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
   }

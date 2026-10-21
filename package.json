@@ -17,6 +17,7 @@
     "build:renderer": "vite build",
     "build:skill-market": "node scripts/build-skill-market.mjs",
     "build:icons": "node scripts/generate-app-icons.mjs",
+    "build:icon-dev": "node scripts/generate-dev-icon.mjs",
     "build": "npm run typecheck && npm run build:renderer",
     "release": "node scripts/release.mjs",
     "verify:release": "node scripts/verify-release.mjs",
