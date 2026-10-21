@@ -14,7 +14,11 @@ third-party/licenses/Playwright-LICENSE -text
 third-party/licenses/Pptx-embedded-NOTICES.txt -text
 package-lock.json text eol=lf
 src/renderer/public/licenses/** text eol=lf
-# 生成后逐字节比对（npm run build 的 prebuild → generate-appearance --check）。
+# 生成后逐字节比对（skin-registry 测试与 prebuild 的 generate-appearance --check）。
 # Windows checkout 默认 autocrlf 会把 CRLF 写进来，比对必挂（2026-10-21 v0.2.0
-# win job 实测：mac 绿、win 挂在 prebuild）。
+# win job 实测：mac 绿、win 挂在 prebuild；v0.2.2 又挂在 appearance-bootstrap.js）。
 src/renderer/public/appearance-colors.css text eol=lf
+src/renderer/public/appearance-bootstrap.js text eol=lf
+src/shared/appearance/skins.d.mts text eol=lf
+src/renderer/src/appearance/assets.ts text eol=lf
+src/renderer/src/assets/skins/manifest.json text eol=lf

@@ -16,13 +16,15 @@ export function findHeadlessExecutable({
     return env.HEMI_BROWSER_EXECUTABLE;
   }
   const names = ['Google Chrome', 'Microsoft Edge', 'Chromium', 'Brave Browser', 'Google Chrome Canary'];
+  // Join with the target platform's rules: a win32 test run must not turn macOS paths into backslashes.
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
   const candidates = platform === 'darwin'
-    ? ['/Applications', path.join(home, 'Applications')].flatMap(root => names.map(name => path.join(root, `${name}.app`, 'Contents', 'MacOS', name)))
+    ? ['/Applications', join(home, 'Applications')].flatMap(root => names.map(name => join(root, `${name}.app`, 'Contents', 'MacOS', name)))
     : platform === 'win32'
       ? [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA].filter(Boolean).flatMap(root => [
-        path.win32.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.win32.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        path.win32.join(root, 'Chromium', 'Application', 'chrome.exe'),
+        join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        join(root, 'Chromium', 'Application', 'chrome.exe'),
       ])
       : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/opt/google/chrome/chrome', '/usr/bin/microsoft-edge'];
   const executable = [...candidates, bundled].filter(Boolean).find(exists);
