@@ -125,7 +125,57 @@ app.whenReady().then(async () => {
       await sleep(150);
       contents = getProviderImportService().testBrowserContents();
     }
-    // 768 是既有单列响应式入口，站点 View 足宽；保持真实 renderer 上报的 bounds。
+    // 内容区宽度决定站点布局；拉宽经过旧的 900px 窗口断点也不能把站点挤没。
+    const originalContents = contents;
+    await contents.executeJavaScript('document.body.dataset.resizeProbe = "preserved"');
+    for (const width of [1440, 980, 901, 900, 768, 560, 980]) {
+      appState.mainWindow.setSize(width, 1100);
+      const contentWidth = appState.mainWindow.getContentSize()[0];
+      const ready = await waitFor(`(() => {
+        const browser = document.querySelector('.h47n-browser');
+        const container = document.querySelector('.h47n');
+        if (!browser || !container || innerWidth !== ${contentWidth}) return false;
+        const visible = container.getBoundingClientRect().width >= 480;
+        return (browser.dataset.wide === 'true') === visible
+          && (!visible || browser.getBoundingClientRect().width >= 480);
+      })()`, `站点缩放到 ${width}px`, 5000);
+      const visible = await exec(`document.querySelector('.h47n').getBoundingClientRect().width >= 480`);
+      let aligned = false;
+      let bounds;
+      let nativeBounds;
+      for (let i = 0; i < 20 && !aligned; i += 1) {
+        bounds = await exec(`(() => {
+          const r = document.querySelector('.h47n-browser').getBoundingClientRect();
+          return { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+        })()`);
+        nativeBounds = appState.mainWindow.contentView.children.find((child) => child.webContents === contents)?.getBounds();
+        aligned = getProviderImportService().testBrowserVisible() === visible && nativeBounds
+          && (visible ? Object.keys(bounds).every((key) => Math.abs(nativeBounds[key] - bounds[key]) <= 1)
+            : nativeBounds.width === 0 && nativeBounds.height === 0);
+        if (!aligned) await sleep(100);
+      }
+      // 多等数帧，抓住滚动条宽度变化导致的反复显隐，而非碰巧采到一次正确状态。
+      const visibilitySamples = [];
+      for (let i = 0; i < 4; i += 1) {
+        await sleep(100);
+        visibilitySamples.push(getProviderImportService().testBrowserVisible());
+      }
+      check(`${width}px 窗口站点显隐稳定且原生边界正确`, ready && aligned
+        && visibilitySamples.every((sample) => sample === visible) && (width === 560 || visible),
+        JSON.stringify({ contentWidth, visible, bounds, nativeBounds, visibilitySamples }));
+    }
+    check('缩放复用站点会话与页面状态', getProviderImportService().testBrowserContents() === originalContents
+      && await contents.executeJavaScript('document.body.dataset.resizeProbe === "preserved"'));
+    // 真正不足 480px 时隐藏，恢复到恰好 480px 时必须重新显示同一原生页面。
+    for (const width of [440, 480]) {
+      await exec(`document.querySelector('.h47n').style.width = '${width}px'`);
+      const visible = width >= 480;
+      const ready = await waitFor(`(document.querySelector('.h47n-browser')?.dataset.wide === 'true') === ${visible}`, `容器 ${width}px`, 5000);
+      for (let i = 0; i < 20 && getProviderImportService().testBrowserVisible() !== visible; i += 1) await sleep(100);
+      check(`${width}px 容器原生站点${visible ? '恢复' : '隐藏'}`, ready && getProviderImportService().testBrowserVisible() === visible
+        && getProviderImportService().testBrowserContents() === originalContents);
+    }
+    await exec(`document.querySelector('.h47n').style.removeProperty('width')`);
     appState.mainWindow.setSize(768, 1100);
     for (let i = 0; i < 30 && !getProviderImportService().testBrowserVisible(); i += 1) await sleep(100);
     check('站点原生 View 在真实窗口可见', getProviderImportService().testBrowserVisible());
@@ -173,6 +223,44 @@ app.whenReady().then(async () => {
     const preview = await waitFor(`Boolean(document.body.textContent.includes('将生成'))`, '预览（将生成）', 15000);
     check('选择自动同步出预览', preview);
 
+    // 单列布局在常见窗口高度下需要滚到操作区，原生站点不能浮在控件或顶栏上。
+    appState.mainWindow.setSize(980, 680);
+    await exec(`document.querySelector('.h47n-submit').scrollIntoView({ block: 'end' })`);
+    await sleep(400);
+    const scrollLayout = await exec(`(() => {
+      const r = document.querySelector('.h47n-browser').getBoundingClientRect();
+      const scroll = document.querySelector('.h37-settings-scroll').getBoundingClientRect();
+      const button = [...document.querySelectorAll('.h47n-submit button')].find((item) => item.textContent.includes('创建 Key 并导入')).getBoundingClientRect();
+      return { browserBottom: r.bottom, scrollTop: scroll.top, scrollBottom: scroll.bottom, buttonTop: button.top };
+    })()`);
+    const scrolledBounds = appState.mainWindow.contentView.children.find((child) => child.webContents === contents)?.getBounds();
+    const siteVisible = getProviderImportService().testBrowserVisible();
+    check('滚到导入按钮后站点不遮挡控件或顶栏', !siteVisible || (scrolledBounds
+      && scrolledBounds.y >= scrollLayout.scrollTop
+      && scrolledBounds.y + scrolledBounds.height <= Math.min(scrollLayout.browserBottom, scrollLayout.scrollBottom, scrollLayout.buttonTop) + 1),
+    JSON.stringify({ ...scrollLayout, siteVisible, scrolledBounds }));
+    await fs.writeFile(path.join(screenshots, `import-scroll-${entryLabel}.png`), (await appState.mainWindow.capturePage()).toPNG());
+    await exec(`(() => {
+      const browser = document.querySelector('.h47n-browser');
+      browser.scrollIntoView({ block: 'start' });
+      document.querySelector('.h37-settings-scroll').scrollTop += 100;
+    })()`);
+    await sleep(400);
+    const clippedLayout = await exec(`(() => {
+      const r = document.querySelector('.h47n-browser').getBoundingClientRect();
+      const scroll = document.querySelector('.h37-settings-scroll').getBoundingClientRect();
+      return { top: Math.max(r.top, scroll.top), bottom: Math.min(r.bottom, scroll.bottom), height: r.height };
+    })()`);
+    const clippedBounds = appState.mainWindow.contentView.children.find((child) => child.webContents === contents)?.getBounds();
+    check('滚回站点后复用页面并裁剪到内容区', getProviderImportService().testBrowserVisible()
+      && getProviderImportService().testBrowserContents() === originalContents
+      && clippedBounds && Math.abs(clippedBounds.y - clippedLayout.top) <= 1
+      && Math.abs(clippedBounds.y + clippedBounds.height - clippedLayout.bottom) <= 1
+      && clippedBounds.height < clippedLayout.height,
+    JSON.stringify({ clippedLayout, clippedBounds }));
+    await exec(`document.querySelector('.h47n-submit').scrollIntoView({ block: 'end' })`);
+    await sleep(200);
+
     // 6. 点「创建 Key 并导入」→ 等回执
     await waitFor(`Boolean([...document.querySelectorAll('button')].some((b) => b.textContent.includes('创建 Key 并导入') && !b.disabled))`, '提交按钮可用', 15000);
     check('点创建 Key 并导入', await clickByText('创建 Key 并导入', 'document.querySelector(".h47n-submit")'));
@@ -183,7 +271,8 @@ app.whenReady().then(async () => {
 
     // 7. 完成 → 回目录
     check('点完成', await clickByText('完成'));
-    const backToDirectory = await waitFor(`Boolean(document.body.textContent.includes('添加供应商') && !document.body.textContent.includes('配置方式'))`, '回供应商目录', 15000);
+    const backToDirectory = await waitFor(`Boolean(document.querySelector('[data-h37-model-view="overview"]')
+      && [...document.querySelectorAll('button')].some((button) => button.textContent.includes('添加供应商') && !button.disabled))`, '回供应商目录', 15000);
     check('回到供应商目录', backToDirectory);
 
     // 8. 再次添加（用户实测坑）：终态不得被收养成旧回执，必须能开新一轮并完成。

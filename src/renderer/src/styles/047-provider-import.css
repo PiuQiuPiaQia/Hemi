@@ -64,16 +64,23 @@ html.kb-nav .h47n-method:focus-visible {
 }
 
 /* —— 站点浏览器 + 控制面板（宽窗并排 / 窄窗单列） —— */
+/* 保留滚动条位置，避免临界宽度下站点显隐改变页面高度、滚动条再反过来挤窄站点。 */
+:is(.h37-settings-scroll, .onboarding-shell):has(.h47n) {
+  scrollbar-gutter: stable;
+}
+
 .h47n-flow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-12);
   align-items: start;
 }
 
-@media (max-width: 900px) {
+/* 按导入内容区而非窗口宽度判断：站点至少 480 + 面板 360 + 间距 12。
+   设置页内容列有宽度上限，窗口再宽也不能据此强行挤成两列。 */
+@container provider-import (min-width: 852px) {
   .h47n-flow {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 360px;
   }
 }
 
@@ -127,6 +134,7 @@ html.kb-nav .h47n-method:focus-visible {
    包了一层 div，内部首个 section 会命中 :first-child 兜底丢掉 margin-top，
    由 wrapper 补齐——间距门与布局审计都会盯这条。 */
 .h47n {
+  container: provider-import / inline-size;
   margin-top: var(--gap-section);
 }
 

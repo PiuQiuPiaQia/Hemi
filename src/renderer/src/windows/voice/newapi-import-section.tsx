@@ -157,16 +157,24 @@ export function NewApiImportView({
       const el = browserRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
+      // 原生 View 不受 DOM 滚动容器裁剪；单列时滚到下方操作区，必须裁到
+      // 内容区内，完全滚出后隐藏，否则站点会盖住顶栏和模型选择控件。
+      const scrollRect = el.closest('.h37-scroll, .onboarding-shell')?.getBoundingClientRect();
+      const left = Math.max(0, rect.left, scrollRect?.left ?? 0);
+      const top = Math.max(0, rect.top, scrollRect?.top ?? 0);
+      const right = Math.min(window.innerWidth, rect.right, scrollRect?.right ?? window.innerWidth);
+      const bottom = Math.min(window.innerHeight, rect.bottom, scrollRect?.bottom ?? window.innerHeight);
+      const inView = right > left && bottom > top;
       layoutGen.current += 1;
       void bridge?.setProviderImportViewport?.({
         operationId: current.operationId,
-        bounds: {
-          x: Math.max(0, Math.round(rect.left)),
-          y: Math.max(0, Math.round(rect.top)),
-          width: Math.max(0, Math.round(rect.width)),
-          height: Math.max(0, Math.round(rect.height)),
-        },
-        visible,
+        bounds: inView ? {
+          x: Math.round(left),
+          y: Math.round(top),
+          width: Math.round(right - left),
+          height: Math.round(bottom - top),
+        } : { x: 0, y: 0, width: 0, height: 0 },
+        visible: inView,
         layoutGeneration: layoutGen.current,
       }).catch(() => undefined);
     },
@@ -903,8 +911,10 @@ function useContainerWide(ref: RefObject<HTMLDivElement | null>, active: boolean
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver !== 'function') return;
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect?.width ?? threshold;
+    const observer = new ResizeObserver(() => {
+      // 与上报给原生 View 的 bounds 使用同一宽度；窄窗提示会增加 padding，
+      // 用 contentRect 会少算这部分，回到阈值宽度时仍卡在隐藏状态。
+      const width = el.getBoundingClientRect().width;
       setWide(width >= threshold);
     });
     observer.observe(el);

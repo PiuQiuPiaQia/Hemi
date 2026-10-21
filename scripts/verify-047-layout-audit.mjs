@@ -29,6 +29,12 @@ const AUDIT_SCRIPT = () => {
   if (doc.scrollWidth > doc.clientWidth + 1) {
     issues.push(`横向溢出：scrollWidth=${doc.scrollWidth} > clientWidth=${doc.clientWidth}`);
   }
+  const container = document.querySelector('.h47n');
+  const browser = document.querySelector('.h47n-browser');
+  if (container && browser && container.getBoundingClientRect().width >= 480
+    && (browser.getBoundingClientRect().width < 480 || browser.dataset.wide !== 'true')) {
+    issues.push('导入内容区足宽，站点页面却被两列布局挤窄或隐藏');
+  }
   const targets = document.querySelectorAll('.h47n *');
   for (const el of targets) {
     const rect = el.getBoundingClientRect();
@@ -72,6 +78,26 @@ try {
       await page.close();
     }
   }
+
+  // 同一窗口内验证嵌入容器的断点与窄→宽恢复，不能只检查页面没有横向溢出。
+  const resizePage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  await resizePage.goto(`${BASE}/fixtures.html?scene=settings-import-login`, { waitUntil: 'networkidle' });
+  for (const width of [440, 480, 720, 851, 852, 1040, 440, 480]) {
+    await resizePage.locator('.h47n').evaluate((el, value) => { el.style.width = `${value}px`; }, width);
+    const ok = await resizePage.waitForFunction((value) => {
+      const browser = document.querySelector('.h47n-browser');
+      const panel = document.querySelector('.h47n-panel');
+      const rect = browser.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const visible = browser.dataset.wide === 'true';
+      const sideBySide = panelRect.left >= rect.right;
+      return visible === (value >= 480) && sideBySide === (value >= 852)
+        && (value < 480 || rect.width >= 480);
+    }, width, { timeout: 3000 }).then(() => true, () => false);
+    if (!ok) failed += 1;
+    console.log(`${ok ? '✓' : '✗'} 导入容器 ${width}px（可见性 / 单双列 / 缩放恢复）`);
+  }
+  await resizePage.close();
 
   // 块节奏断言（2026-10-08 用户裁决的规范）：pane 内相邻块间距＝--gap-section(32)，
   // 卡内标题↔内容＝--gap-head(8)。覆盖 047 页面与存量供应商页（基线参照）。
