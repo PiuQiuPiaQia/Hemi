@@ -11,6 +11,13 @@
  *  - 任务快照投影只保留展示／恢复必需字段（正文大段留在任务档案，预览 200 字）。
  */
 
+const MAX_ERROR_DETAIL_CHARS = 16_000;
+function boundedErrorDetail(error) {
+  const text = String(error?.message ?? error);
+  return text.length <= MAX_ERROR_DETAIL_CHARS ? text
+    : `${text.slice(0, MAX_ERROR_DETAIL_CHARS)}\n…（错误详情过长，已截断；完整记录见应用日志）`;
+}
+
 /**
  * @param {object} options
  * @param {string} options.runId
@@ -122,7 +129,9 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
     return [...facts, {
       type: 'part-appended',
       runId,
-      part: { partId, kind: 'notice', level: error ? 'error' : 'info', text: error ? String(error?.message ?? error).slice(0, 300) : '本任务已停止。' },
+      part: { partId, kind: 'notice', level: error ? 'error' : 'info', text: error
+        ? boundedErrorDetail(error)
+        : '本任务已停止。' },
       ...gen(),
     }];
   }

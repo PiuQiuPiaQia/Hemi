@@ -1,6 +1,6 @@
 import { modelPolicyView } from '@shared/model-policy-view.mjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Cpu, Settings2, Sparkles, Star } from 'lucide-react'
+import { ChevronDown, Cpu, Settings2, Sparkles } from 'lucide-react'
 
 import type { ModelEntryView, ModelProfilesDirectory, ModelProviderView } from '@/shared/types'
 import { Menu, MenuGroup, MenuSearch } from '@/components/menu'
@@ -219,14 +219,8 @@ export function ModelSelectorChip({
                       }}
                       tabIndex={-1}
                     >
-                      <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                      <span style={{ flex: 1 }}>
                         {model.model || '未填型号'}
-                        {model.isDefault ? (
-                          <Star
-                            style={{ width: 10, height: 10, fill: 'var(--warn)', color: 'var(--warn)' }}
-                            aria-label="默认模型"
-                          />
-                        ) : null}
                       </span>
                       <span style={{ fontSize: 'var(--fs-12)', color: 'var(--muted)' }}>{provider.name}</span>
                       {!provider.hasApiKey ? (

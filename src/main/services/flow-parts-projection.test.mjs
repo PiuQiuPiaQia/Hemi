@@ -94,6 +94,15 @@ test('思考收口后正文另起 part；finish 失败补 notice、成功不加'
   assert.match(notice[0].part.text, /模型超时/);
 });
 
+test('错误详情保留超过旧 300 字限制的诊断，超长响应明确标记截断', () => {
+  const projector = createRunPartProjector({ runId: 'detail' });
+  const diagnostic = `Connection error. ${'上游故障'.repeat(200)}END_OF_DIAGNOSTIC`;
+  assert.equal(projector.finish({ error: new Error(diagnostic) })[0].part.text, diagnostic);
+  const bounded = projector.finish({ error: new Error('x'.repeat(20_000)) })[0].part.text;
+  assert.ok(bounded.length < 17_000);
+  assert.match(bounded, /已截断；完整记录见应用日志/);
+});
+
 test('projection 事实可被归约层应用：时间线成段、内容替换幂等', async () => {
   const { applyFlowFact, createFlowSnapshot } = await import('../../shared/conversation-flow.mjs');
   let snapshot = createFlowSnapshot({ conversationId: 'c' });

@@ -200,8 +200,8 @@ export function normalizeRoleModels(raw, legacyAutoRouting = null) {
   return Object.keys(out).length ? out : null;
 }
 
-/** 供应商 → 渲染层视图（无 Key 材料；模型条目带 modelKey 与默认标记）。 */
-export function providerView(provider, defaultModelId) {
+/** 供应商 → 渲染层视图（无 Key 材料；模型条目带 modelKey）。 */
+export function providerView(provider) {
   return {
     id: provider.id,
     name: provider.name,
@@ -217,7 +217,6 @@ export function providerView(provider, defaultModelId) {
       thinkingLevel: model.thinkingLevel,
       supportsVision: model.supportsVision,
       visionModel: model.visionModel,
-      isDefault: `${provider.id}/${model.id}` === defaultModelId,
     })),
   };
 }
@@ -330,7 +329,6 @@ export function createProfileStore({
                 name: `${PLACEHOLDER_PROVIDER_NAME}（目录损坏，只读）`,
                 models: [{ id: 'm1', model: '' }],
               }),
-              null,
             ),
           ],
         };
@@ -346,7 +344,7 @@ export function createProfileStore({
         visionModelKey: directory.visionModelKey ?? null,
         corrupt: false,
         envOverride: envOverrideActive(env),
-        providers: directory.providers.map((provider) => providerView(provider, directory.defaultModelId)),
+        providers: directory.providers.map(providerView),
       };
     },
 
@@ -606,7 +604,7 @@ export function createProfileStore({
               providers: existingReceipt.providerIds
                 .map((id) => directory.providers.find((item) => item.id === id))
                 .filter(Boolean)
-                .map((provider) => providerView(provider, directory.defaultModelId)),
+                .map(providerView),
             };
           }
           throw new Error('同一导入操作的提交计划变了，不能覆盖已导入的配置');
@@ -679,7 +677,7 @@ export function createProfileStore({
         });
         return {
           receipt,
-          providers: nextProviders.map((provider) => providerView(provider, defaultModelId)),
+          providers: nextProviders.map(providerView),
         };
       });
     },

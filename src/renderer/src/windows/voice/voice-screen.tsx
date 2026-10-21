@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { AttachmentCard } from './attachment-card';
 import { RunActivity } from './run-activity';
+import { TurnErrorNotice } from './turn-error-notice';
 import {
   ArrowDown,
   Check,
@@ -169,6 +170,8 @@ type VoiceScreenProps = {
   onToggleCall: () => void;
   /** 模型失败后的重试。 */
   onRetryTurn: () => void;
+  retryTurnBusy?: boolean;
+  retryTurnBlocked?: string;
   /** 024：文字输入（草稿归 VoicePage，这里只透传编辑与提交）。 */
   textDraft: string;
   onTextDraftChange: (next: string) => void;
@@ -360,6 +363,8 @@ export function VoiceScreen({
   repairHint,
   onToggleCall,
   onRetryTurn,
+  retryTurnBusy = false,
+  retryTurnBlocked,
   textDraft,
   onTextDraftChange,
   onTextSend,
@@ -585,6 +590,7 @@ export function VoiceScreen({
   // 026 R-09：同任务的连续阶段简报收成一条进展时间线（只动视觉密度）。
   const transcriptEntries = useMemo(() => groupStageBriefs(visibleTranscripts), [visibleTranscripts]);
   const replyCopies = useMemo(() => replyCopyTargets(visibleTranscripts), [visibleTranscripts]);
+  const latestError = transcripts.at(-1)?.kind === 'error' ? transcripts.at(-1) : null;
 
   /** 060 S2（R-07/R-09）：统一有序渲染——已删除「回合中途任务卡沉底、用户插话提上、
    *  收口后恢复原位」的按作者/出生时间重分区（该规则会让运行中与完成后顺序不一致）。
@@ -661,6 +667,9 @@ export function VoiceScreen({
           renderText={renderReplyTextWithLinks}
           renderTask={renderTaskCall}
           onOpenDeliverable={openDeliverablePreview}
+          onRetry={item.id === latestError?.id ? onRetryTurn : undefined}
+          retryBusy={retryTurnBusy || textModelBusy}
+          retryBlocked={retryTurnBlocked}
         />
       )}{copyText ? <ReplyCopyActions text={copyText} /> : null}</div>;
   }
@@ -819,7 +828,9 @@ export function VoiceScreen({
         .map((task) => task.taskId as string),
     [taskState],
   );
-  const isError = turnPhase === 'error' || sessionState === 'error';
+  // Model failures live at their timeline position, including after a restart.
+  // Keep the composer notice for speech/pre-dispatch failures only.
+  const isError = sessionState === 'error' || (turnPhase === 'error' && !latestError && !textModelBusy);
   const errorCopy = sessionState === 'error'
     ? errorMessage || '语音服务中断了，可以稍后再试'
     : turnError || '这次没接上，再试一次';
@@ -1133,14 +1144,8 @@ export function VoiceScreen({
             ) : null}
 
             {isError ? (
-              <div className="h24-turn-error" role="alert">
-                <span className="h24-turn-error-text">{errorCopy}</span>
-                {turnPhase === 'error' ? (
-                  <button type="button" className="btn-retry" onClick={onRetryTurn}>
-                    <RotateCcw className="size-3.5" />
-                    重试
-                  </button>
-                ) : null}
+              <div className="h24-turn-error">
+                <TurnErrorNotice message={errorCopy} speech={sessionState === 'error'} />
               </div>
             ) : null}
 
@@ -1690,6 +1695,9 @@ function ChatTurnItem({
   renderText,
   renderTask,
   onOpenDeliverable,
+  onRetry,
+  retryBusy,
+  retryBlocked,
 }: {
   item: TranscriptItem;
   /** 056：回复段里的 task 调用原地渲染子 agent 一行。 */
@@ -1698,6 +1706,9 @@ function ChatTurnItem({
   renderText?: (text: string) => ReactNode;
   /** 062：交付文件入口点击 → 右侧预览。 */
   onOpenDeliverable?: (artifactId: string, name: string) => void;
+  onRetry?: () => void;
+  retryBusy?: boolean;
+  retryBlocked?: string;
   /** 连续 Hemi 消息的续条：不重复头像行（受理/简报/终态各自入流时合并）。 */
   continuation?: boolean;
   /** 037：一段 Hemi 输出的首条（data-lead）。 */
@@ -1866,12 +1877,7 @@ function ChatTurnItem({
         data-continuation={continuation ? 'true' : undefined}
         data-lead={lead ? 'true' : undefined}
       >
-        <span className="h24-reply-failed" role="status">
-          这轮没答上来
-        </span>
-        <div className="chat-copy assistant-copy">
-          <Markdown text={item.text} />
-        </div>
+        <TurnErrorNotice message={item.text} onRetry={onRetry} busy={retryBusy} blocked={onRetry ? retryBlocked : undefined} />
       </article>
     );
   }

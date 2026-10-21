@@ -46,7 +46,7 @@ import { copyTextViaBridge } from '@/lib/use-clipboard-copy';
 /**
  * 037 模型页 v2（文本 tab）：「看图」即时保存 → 供应商摘要行 → 下钻供应商详情 / 添加供应商。
  * 数据流沿用 031 v2 IPC（listModelProfiles / saveModelProfile 整体提交 / removeModelProfile /
- * setDefaultModelProfile / testModelProfile / setThinkingLevel）；Key 只写不读。
+ * testModelProfile / setThinkingLevel）；Key 只写不读。
  * 外层 settings-screen 把本组件放在 <form> 里：按钮一律 type=button，输入框回车在根节点拦住。
  */
 
@@ -882,8 +882,6 @@ function OverviewView({
   onAdd: () => void;
 }) {
   const { directory, readOnly, mutate, statuses } = ctl;
-  const current = findDefaultModel(directory);
-
   // 056（2026-10-14 用户裁决）：「正在使用」只剩看图模型——对话模型在输入区选（具体模型或
   // 自动路由），思考强度在输入区拨；看图模型单独配置（目录的 visionModelKey），不再挂在
   // 某个模型条目上。
@@ -971,7 +969,6 @@ function OverviewView({
             </div>
           ) : null}
           {directory.providers.map((provider) => {
-            const inUse = current?.provider.id === provider.id;
             const host = hostOf(provider.baseUrl);
             return (
               <button
@@ -980,7 +977,7 @@ function OverviewView({
                 className={`h37-row h37m-provider-row${flashId === provider.id ? ' h37-enter h37-flash' : ''}`}
                 onClick={() => onOpen(provider.id)}
               >
-                <span className="h37-tile" data-tone={inUse ? 'g' : undefined} aria-hidden>
+                <span className="h37-tile" aria-hidden>
                   {providerTile(provider.name, provider.baseUrl)}
                 </span>
                 <span className="h37-row-text">
@@ -1005,7 +1002,6 @@ function OverviewView({
 
 function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProviderView }) {
   const { directory, readOnly, mutate, saveProvider } = ctl;
-  const current = findDefaultModel(directory);
   const preset = matchPreset(provider.baseUrl);
   const status = ctl.statuses[provider.id];
   const [nameDraft, setNameDraft] = useState(provider.name);
@@ -1188,7 +1184,6 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
       },
     );
 
-  const chatHere = current?.provider.id === provider.id ? current : null;
   const usedCount = provider.models.filter((model) => modelUsage(directory, model)).length;
   const onlyProvider = directory.providers.length <= 1;
   const suggestions = (preset?.models ?? [])
@@ -1235,7 +1230,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
         模型
       </button>
       <div className="h37-page-head h37m-head">
-        <span className="h37-tile h37m-tile-lg" data-tone={chatHere ? 'g' : undefined} aria-hidden>
+        <span className="h37-tile h37m-tile-lg" aria-hidden>
           {providerTile(provider.name, provider.baseUrl)}
         </span>
         <div className="h37m-head-text">
@@ -1394,8 +1389,6 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
                       onClick={() => patchAndSave(model.modelKey, { supportsVision: !model.supportsVision })}
                     />
                   </span>
-                  {/* 041 用户裁决：设默认只留「正在使用」的下拉——行内不再放「设为主脑模型」按钮
-                      （与顶部下拉、菜单项三处重复）；行内只保留用量 badge。 */}
                   {usage ? (
                     <span className="h37-badge" data-tone="ok">
                       看图模型
@@ -1824,7 +1817,6 @@ function AddProviderView({
     if (ordered.length === 0) return setError('至少配一个模型（填型号 ID）。');
     setError(null);
     setSubmitting(true);
-    const hadDefault = Boolean(findDefaultModel(directory));
     const models = ordered.map((id) => draftModelEntry('', id, guessVision(preset, id)));
     const input: SaveInput = {
       ...providerSaveInput({ id: '', name, baseUrl, api, models }, { apiKey: key || KEYLESS_PLACEHOLDER_KEY }),
@@ -1834,10 +1826,6 @@ function AddProviderView({
     const failure = await ctl.mutate(null, async () => {
       const result = await ctl.saveProvider(input);
       providerId = result.providerId;
-      if (!hadDefault && result.modelKeys[0]) {
-        const made = await window.hemiVoice.setDefaultModelProfile(result.modelKeys[0]);
-        if (!made?.ok) throw new Error('供应商已添加，但没能设为主脑模型');
-      }
     });
     setSubmitting(false);
     if (failure) {
@@ -2075,7 +2063,7 @@ function AddProviderView({
               )}
             </div>
             <div className="h37-section-foot">
-              能看图的型号自动标出；添加后第一个型号会成为主脑模型（如果你还没有的话）。
+              能看图的型号自动标出；对话中可随时切换模型。
             </div>
           </section>
 

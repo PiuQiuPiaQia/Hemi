@@ -1328,8 +1328,8 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
         keyStoredSecurely: true,
         updatedAt: now - 86_400_000,
         models: [
-          { id: 'm-chat', modelKey: 'mp-deep/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '', isDefault: true },
-          { id: 'm-reasoner', modelKey: 'mp-deep/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'intermediate', supportsVision: false, visionModel: '', isDefault: false },
+          { id: 'm-chat', modelKey: 'mp-deep/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '' },
+          { id: 'm-reasoner', modelKey: 'mp-deep/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'intermediate', supportsVision: false, visionModel: '' },
         ],
       },
     ],
@@ -1796,7 +1796,6 @@ function stubModelV2(
     thinkingLevel: 'default',
     supportsVision: false,
     visionModel: '',
-    isDefault: false,
     ...extra,
   });
   const provider = (id: string, name: string, baseUrl: string, hasApiKey: boolean, models: ReturnType<typeof entry>[]) => ({
@@ -1817,7 +1816,7 @@ function stubModelV2(
     ...directoryOverrides,
     providers: [
       provider('mp-qwen', '通义千问', 'https://dashscope.aliyuncs.com/compatible-mode/v1', true, [
-        entry('m-max', 'qwen-max', { isDefault: true }),
+        entry('m-max', 'qwen-max'),
         entry('m-vl', 'qwen-vl-max', { supportsVision: true }),
       ]),
       provider('mp-deep', 'DeepSeek', 'https://api.deepseek.com/v1', true, [
@@ -3892,8 +3891,8 @@ const scenes: Record<string, () => React.ReactElement> = {
               id: 'mp-a', name: 'DeepSeek 日常', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
               hasApiKey: true, keyStoredSecurely: true, updatedAt: now - 86_400_000,
               models: [
-                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '', isDefault: true },
-                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '', isDefault: false },
+                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '' },
+                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '' },
               ],
             },
           ],
@@ -4692,16 +4691,16 @@ const scenes: Record<string, () => React.ReactElement> = {
               id: 'mp-deep', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
               hasApiKey: true, keyStoredSecurely: true, updatedAt: now - 86_400_000,
               models: [
-                { id: 'm-chat', modelKey: 'mp-deep/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '', isDefault: true },
-                { id: 'm-reasoner', modelKey: 'mp-deep/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '', isDefault: false },
-                { id: 'm-coder', modelKey: 'mp-deep/m-coder', model: 'deepseek-coder', thinkingLevel: 'off', supportsVision: false, visionModel: '', isDefault: false },
+                { id: 'm-chat', modelKey: 'mp-deep/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '' },
+                { id: 'm-reasoner', modelKey: 'mp-deep/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '' },
+                { id: 'm-coder', modelKey: 'mp-deep/m-coder', model: 'deepseek-coder', thinkingLevel: 'off', supportsVision: false, visionModel: '' },
               ],
             },
             {
               id: 'mp-local', name: '本地模型', baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions',
               hasApiKey: false, keyStoredSecurely: false, updatedAt: now - 3_600_000,
               models: [
-                { id: 'm-qwen', modelKey: 'mp-local/m-qwen', model: 'qwen3:14b', thinkingLevel: 'off', supportsVision: false, visionModel: '', isDefault: false },
+                { id: 'm-qwen', modelKey: 'mp-local/m-qwen', model: 'qwen3:14b', thinkingLevel: 'off', supportsVision: false, visionModel: '' },
               ],
             },
           ],
@@ -4984,8 +4983,8 @@ const scenes: Record<string, () => React.ReactElement> = {
               id: 'mp-a', name: 'DeepSeek 日常', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
               hasApiKey: true, keyStoredSecurely: true, updatedAt: now - 86_400_000,
               models: [
-                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '', isDefault: true },
-                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '', isDefault: false },
+                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '' },
+                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '' },
               ],
             },
           ],
@@ -5013,8 +5012,8 @@ const scenes: Record<string, () => React.ReactElement> = {
               id: 'mp-a', name: 'DeepSeek 日常', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
               hasApiKey: true, keyStoredSecurely: true, updatedAt: now - 86_400_000,
               models: [
-                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '', isDefault: true },
-                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '', isDefault: false },
+                { id: 'm-chat', modelKey: 'mp-a/m-chat', model: 'deepseek-chat', thinkingLevel: 'default', supportsVision: false, visionModel: '' },
+                { id: 'm-reasoner', modelKey: 'mp-a/m-reasoner', model: 'deepseek-reasoner', thinkingLevel: 'high', supportsVision: true, visionModel: '' },
               ],
             },
           ],

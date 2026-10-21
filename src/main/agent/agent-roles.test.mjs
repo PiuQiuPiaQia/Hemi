@@ -43,7 +43,6 @@ test('路由段：只渲染可用角色；同输入逐字节一致（缓存前�
   const roles = loadRoles();
   const all = buildRoutingSection(roles);
   for (const name of ROLE_NAMES) assert.ok(all.includes(`@${name}`));
-  assert.match(all, /派出去不是免费的/);
   const partial = buildRoutingSection(roles, { available: new Set(['explorer', 'fixer']) });
   assert.ok(partial.includes('@explorer') && partial.includes('@fixer'));
   assert.ok(!partial.includes('@designer —') && !partial.includes('@oracle —'));

@@ -1471,7 +1471,6 @@ export type ModelEntryView = {
   thinkingLevel: ThinkingLevel;
   supportsVision: boolean;
   visionModel: string;
-  isDefault: boolean;
 };
 
 /** 046：供应商线协议——OpenAI 兼容（chat/completions）或 Anthropic 原生（/v1/messages）。 */

@@ -14,8 +14,8 @@ import { InterimTranscript } from '@/windows/voice/lib/interim-guard';
 import {
   historyFromTurns,
   rewindToMessage,
-  supersedeTrailingErrors,
 } from '@/windows/voice/lib/message-edit';
+import { retryInput } from '@/windows/voice/lib/turn-retry';
 import { cleanTitleSource } from '@/windows/voice/lib/conversation-format';
 import { contextWindow } from '@/windows/voice/lib/context-window';
 import { createPrimarySpeakerFilter } from '@/windows/voice/lib/primary-speaker';
@@ -342,9 +342,8 @@ export default function Home() {
     setSpeechDraftText(speechHistoryRef.current.slice(speechAcceptedCountRef.current).map(entry => entry.text).join('\n'));
     setSpeechDeliveries(current => current.filter(input => !delivered.some(done => done.inputId === input.inputId)));
   }, [flowSnapshot, conversationId, speechDeliveries]);
-  const lastMessagesRef = useRef<Array<{ role: string; content: string }>>([]);
-  /** 024：最近一次回合的输入来源（重试沿用失败回合的来源——文字重试不出声）。 */
-  const lastInputSourceRef = useRef<InputSource>('voice');
+  const retryingRef = useRef<string | null>(null);
+  const [retryingConversation, setRetryingConversation] = useState<string | null>(null);
   /** 024：文字草稿（收起/设置往返保留；新建/切换/删除当前会话清空；不跨重启）。 */
   const [composerDraft] = useState(createComposerDraft);
   const [queueEdit, setQueueEdit] = useState<{ conversationId: string; inputId: string; revision: number } | null>(null);
@@ -1170,7 +1169,6 @@ export default function Home() {
     speechAcceptedCountRef.current = 0;
     setSpeechDraftText('');
     setSpeechDeliveries([]);
-    lastMessagesRef.current = [];
     const epoch = viewEpochRef.current;
     void window.hemiVoice?.getConversationTurn?.(session.id).then((snapshot) => {
       if (epoch === viewEpochRef.current && conversationIdRef.current === session.id) adoptConversationTurn(snapshot);
@@ -1207,8 +1205,6 @@ export default function Home() {
 
   const [attachError, setAttachError] = useState('');
   const attachErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 最近一次提交携带的附件（失败重试按原身份重发）。 */
-  const lastAttachmentIdsRef = useRef<string[]>([]);
   /** 057 S3-2：同一份冻结视图（重试随消息进 flow 用户项）。 */
   const lastAttachmentViewsRef = useRef<MessageAttachmentView[]>([]);
   // 028 二批：`@` 引用芯片（草稿态；发送冻结进消息）。
@@ -1899,14 +1895,15 @@ export default function Home() {
   /** 060：此函数只提交并等待受理；模型结果由 flow／turnState 订阅接收。 */
   const runTurn = useCallback(async (
     messages: Array<{ role: string; content: string }>, inputSource: InputSource = 'voice',
-    attachmentIds: string[] = [], opts: { voiceMode?: ListenMode; onAccepted?: (receipt: Extract<ChatTurnReceipt, { ok: true }>) => void; onRejected?: () => void } = {},
+    attachmentIds: string[] = [], opts: { voiceMode?: ListenMode; attachmentViews?: MessageAttachmentView[];
+      references?: MessageReferenceView[]; skills?: SkillSelectionView[];
+      onAccepted?: (receipt: Extract<ChatTurnReceipt, { ok: true }>) => void; onRejected?: () => void } = {},
   ) => {
     const bridge = window.hemiVoice;
     if (!bridge || workspaceMissingRef.current) { opts.onRejected?.(); return; }
     const turnId = ++turnCounterRef.current;
     const requestId = `request-${createTranscriptId()}`;
     const epoch = viewEpochRef.current;
-    lastInputSourceRef.current = inputSource;
     if (!conversationIdRef.current) {
       conversationIdRef.current = createConversationId();
       setConversationId(conversationIdRef.current);
@@ -1917,12 +1914,12 @@ export default function Home() {
     const id = conversationIdRef.current;
     // 063：引用视图整份随载荷（身份＋展示快照）——主进程 sanitize 有界净化；
     // 只送身份字段会让行内标签的 token 匹配与队列/历史回显丢名称。
-    const references = lastReferencesRef.current.map((item) => ({ ...item }));
+    const references = (opts.references ?? lastReferencesRef.current).map((item) => ({ ...item }));
     try {
       const receipt = await bridge.submitChatTurn({
         turnId, requestId, messages, conversationId: id, inputSource, attachmentIds,
-        attachmentViews: lastAttachmentViewsRef.current, references,
-        skills: lastSkillsRef.current,
+        attachmentViews: opts.attachmentViews ?? lastAttachmentViewsRef.current, references,
+        skills: opts.skills ?? lastSkillsRef.current,
         profileId: conversationProfileRef.current, workspaceId: conversationWorkspaceRef.current,
         ...(inputSource === 'voice' && opts.voiceMode ? { voiceMode: opts.voiceMode } : {}),
       });
@@ -1958,7 +1955,6 @@ export default function Home() {
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
     messages.push({ role: 'user', content: unsent.map((entry) => entry.text).join('\n') });
-    lastMessagesRef.current = messages;
     lastSubmitCountRef.current = boundary;
     lastAttachmentViewsRef.current = [];
     lastReferencesRef.current = [];
@@ -1997,7 +1993,6 @@ export default function Home() {
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
     messages.push({ role: 'user', content: '继续' });
-    lastMessagesRef.current = messages;
     lastAttachmentViewsRef.current = [];
     lastReferencesRef.current = [];
     lastSkillsRef.current = [];
@@ -2006,20 +2001,26 @@ export default function Home() {
   }, [runTurn]);
 
   const handleRetryTurn = useCallback(() => {
-    if (!window.hemiVoice || !modelReadyRef.current) return;
-    if (!lastMessagesRef.current.length) return;
-    // 重试替代旧失败留痕：结尾 error 回合收走（剪除键随重试自己的存档传主进程，
-    // 防宿主回写复活），新失败另留新痕——一次交互只保一条最新错误。
-    const superseded = supersedeTrailingErrors(transcriptsRef.current);
-    if (superseded) {
-      for (const key of superseded.cutKeys) cutKeysRef.current.add(key);
-
-      logChain(`retry 收走旧失败留痕 ${superseded.cutCount} 条`);
+    const cid = conversationIdRef.current;
+    if (!cid || retryingRef.current === cid || flowRunActiveRef.current) return;
+    if (!window.hemiVoice || !modelReadyRef.current || workspaceMissingRef.current) {
+      flashAttachError(workspaceMissingRef.current ? '请先选择可用的工作区，再重试。' : '请先配置可用的模型，再重试。');
+      return;
     }
-    logChain('retry → 模型');
-    // 028：失败重试按原身份重发同一批附件（主进程已冻结归属，不重复登记）。
-    void runTurn(lastMessagesRef.current, lastInputSourceRef.current, lastAttachmentIdsRef.current);
-  }, [runTurn]);
+    const input = retryInput(transcriptsRef.current, flowSnapshotRef.current);
+    if (!input) { flashAttachError('没有找到这轮的原始输入，请重新发送消息。'); return; }
+    // 只从本会话持久化事实取原输入；草稿、其他会话及旧的临时缓存不参与重试。
+    const messages = contextWindow(historyFromTurns(transcriptsRef.current)).map(entry => ({
+      role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
+    }));
+    messages.push({ role: 'user', content: input.text });
+    retryingRef.current = cid;
+    setRetryingConversation(cid);
+    logChain('retry → 模型（从会话恢复原输入）');
+    void runTurn(messages, input.inputSource, input.attachmentIds, input).finally(() => {
+      if (retryingRef.current === cid) { retryingRef.current = null; setRetryingConversation(null); }
+    });
+  }, [runTurn, flashAttachError]);
 
   /**
    * 024：文字发送——不经过 ASR 定稿入口，直接汇入同一模型回合；同步校验与
@@ -2069,7 +2070,6 @@ export default function Home() {
     // 历史回看与重试共用同一 attachmentId；受理在主进程 markSent 后撤下草稿区。
     const sentAttachments = draftAttachments;
     const attachmentIds = sentAttachments.map((item) => item.attachmentId);
-    lastAttachmentIdsRef.current = attachmentIds;
     lastAttachmentViewsRef.current = sentAttachments;
     const sentReferences = draftReferences;
     lastReferencesRef.current = sentReferences;
@@ -2082,7 +2082,6 @@ export default function Home() {
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
     messages.push({ role: 'user', content: text });
-    lastMessagesRef.current = messages;
     void runTurn(messages, 'text', attachmentIds, {
       onAccepted: () => { if (composerDraft.accept(version)) setDiscussContext(null); },
     }).finally(() => submittingDraftsRef.current.delete(version));
@@ -2124,7 +2123,6 @@ export default function Home() {
         role: entry.author === 'hemi' ? 'assistant' : 'user',
         content: entry.text,
       }));
-      lastMessagesRef.current = messages;
       logChain(`edit rewind → 模型「${text.slice(0, 24)}」（撤回 ${rewind.cutCount} 条）`);
       // 剪除先于新回合落档（2026-10-14 真机钓出）：回卷存档走防抖 effect 时，
       // chat 会先于剪除到达主进程——主 agent 跑在旧档上、迟到的剪再把它整回合杀掉
@@ -2786,7 +2784,6 @@ export default function Home() {
     speechAcceptedCountRef.current = 0;
     setSpeechDraftText('');
     setSpeechDeliveries([]);
-    lastMessagesRef.current = [];
     detachTurn();
     stopTtsPlayback();
     turnPhaseRef.current = 'idle';
@@ -3832,6 +3829,8 @@ export default function Home() {
         repairHint={repairHint}
         onToggleCall={handleToggleCall}
         onRetryTurn={handleRetryTurn}
+        retryTurnBusy={retryingConversation === conversationId}
+        retryTurnBlocked={workspaceMissing ? '请先选择可用的工作区。' : !(modelForm.hasApiKey && modelForm.model.trim()) ? '请先配置可用的模型。' : undefined}
         textDraft={draft}
         onTextDraftChange={setDraft}
         onTextSend={handleSubmitText}

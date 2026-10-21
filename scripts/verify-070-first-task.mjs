@@ -120,8 +120,8 @@ app.whenReady().then(async () => {
     let previousProvider, previousModel;
     if (expectedHistory) {
       const profiles = await handler(IPC.llm.listModelProfiles)({}, {});
-      previousProvider = profiles.providers.find(provider => provider.models.some(model => model.isDefault));
-      previousModel = previousProvider?.models.find(model => model.isDefault);
+      previousProvider = profiles.providers.find(provider => provider.models.some(model => model.modelKey === profiles.defaultModelId));
+      previousModel = previousProvider?.models.find(model => model.modelKey === profiles.defaultModelId);
       if (previousProvider?.name !== 'Mock 站' || !previousProvider.baseUrl.startsWith('http://127.0.0.1:') || previousModel?.model !== 'mock-1') {
         throw new Error('跨版本复验仅允许复用本脚本创建的隔离 Mock 配置');
       }

@@ -208,20 +208,18 @@ export function thinkingLabel(level: ThinkingLevel): string {
 
 export type ModelRef = { provider: ModelProviderView; model: ModelEntryView };
 
-/** 默认（对话）模型：defaultModelId 优先，其次 isDefault 标记，最后第一个。 */
+/** 初始化与兜底用的模型：defaultModelId 优先，否则取第一个。 */
 export function findDefaultModel(directory: ModelProfilesDirectory | null): ModelRef | null {
   if (!directory) return null;
   let first: ModelRef | null = null;
-  let flagged: ModelRef | null = null;
   for (const provider of directory.providers) {
     for (const model of provider.models) {
       const ref = { provider, model };
       if (directory.defaultModelId && model.modelKey === directory.defaultModelId) return ref;
-      if (!flagged && model.isDefault) flagged = ref;
       if (!first) first = ref;
     }
   }
-  return flagged ?? first;
+  return first;
 }
 
 
@@ -259,7 +257,6 @@ export function draftModelEntry(providerId: string, model: string, vision = fals
     thinkingLevel: 'default',
     supportsVision: vision,
     visionModel: '',
-    isDefault: false,
   };
 }
 

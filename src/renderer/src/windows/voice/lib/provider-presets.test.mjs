@@ -20,7 +20,6 @@ const entry = (id, model, extra = {}, providerId = 'p1') => ({
   thinkingLevel: 'default',
   supportsVision: false,
   visionModel: '',
-  isDefault: false,
   ...extra,
 });
 
@@ -36,7 +35,7 @@ const directory = () => ({
       keyStoredSecurely: true,
       updatedAt: 0,
       models: [
-        entry('m-max', 'qwen-max', { isDefault: true, visionModel: 'qwen-vl-max' }),
+        entry('m-max', 'qwen-max', { visionModel: 'qwen-vl-max' }),
         entry('m-vl', 'qwen-vl-max', { supportsVision: true }),
         entry('m-plus', 'qwen-plus'),
       ],
@@ -82,12 +81,15 @@ test('hostOf / matchPreset / providerTile / isLocalEndpoint', () => {
   assert.equal(isLocalEndpoint('https://api.openai.com/v1'), false);
 });
 
-test('findDefaultModel：defaultModelId 优先，回落 isDefault 与第一个', () => {
+test('findDefaultModel：初始化/兜底按目录模型键选择，无有效引用时取第一个', () => {
   const dir = directory();
+  dir.defaultModelId = 'p2/m-glm';
+  assert.equal(findDefaultModel(dir)?.model.model, 'glm-4.5');
+  dir.defaultModelId = 'gone/missing';
   assert.equal(findDefaultModel(dir)?.model.model, 'qwen-max');
   dir.defaultModelId = null;
-  dir.providers[0].models[0].isDefault = false;
   assert.equal(findDefaultModel(dir)?.model.model, 'qwen-max');
+  assert.equal(findDefaultModel({ ...dir, providers: [] }), null);
   assert.equal(findDefaultModel(null), null);
 });
 

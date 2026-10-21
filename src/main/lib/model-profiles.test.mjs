@@ -232,6 +232,9 @@ test('空目录首组创建即默认并回读生效', async () => {
   list = await store.list();
   assert.equal(list.providers.length, 1);
   assert.equal(list.defaultModelId, saved.modelKeys[0], '首组保存即默认');
+  assert.deepEqual(Object.keys(list.providers[0].models[0]).sort(), [
+    'id', 'model', 'modelKey', 'supportsVision', 'thinkingLevel', 'visionModel',
+  ], '渲染层模型条目只含配置字段，初始化/兜底引用由目录维护');
   const resolved = await store.resolve({});
   assert.equal(resolved.model, 'model-1');
   assert.equal(resolved.apiKey, 'key-1');
