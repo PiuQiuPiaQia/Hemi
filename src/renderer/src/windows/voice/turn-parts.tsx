@@ -12,7 +12,7 @@ import { WorkflowCard } from '@/windows/voice/workflow-card';
  * 056 · 回合内容按到达顺序从上往下展示（2026-10-14 用户反馈：对话流应照接口返回的
  * 先后排，而不是思考、工具、正文各自堆一处）。思考段＝折叠头，正文段＝Markdown，
  * 工具组＝两段文字之间连续的调用。流式与档案回看共用；`live` 时最后一段思考按
- * 进行中显示。正文的证据脚注等后处理由调用方经 renderText 接管。
+ * 进行中显示，正文也只在尾段显示流式光标。正文的证据脚注等后处理由调用方经 renderText 接管。
  */
 export function TurnParts({
   parts,
@@ -89,7 +89,7 @@ export function TurnParts({
           return <TranscriptPartState key={key} id={key}><WorkflowCard card={part.card} /></TranscriptPartState>;
         }
         return (
-          <div key={key} className={`chat-copy assistant-copy${live ? ' streaming-copy' : ''}`}>
+          <div key={key} className={`chat-copy assistant-copy${live && index === parts.length - 1 ? ' streaming-copy' : ''}`}>
             {renderText ? renderText(part.text, index) : <Markdown text={part.text} />}
           </div>
         );

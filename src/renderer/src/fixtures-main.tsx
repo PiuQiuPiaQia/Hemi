@@ -1714,7 +1714,7 @@ const settingsProps = {
   onSaveAsrKey: async () => {},
 } as unknown as Parameters<typeof SettingsScreen>[0];
 
-/** 032：五屏引导的 fixtures 桩（全回调注入，无桥依赖；场景按需覆盖）。 */
+/** 首启 fixtures；模型页复用供应商组件，读取 fixtures 的模型目录桥。 */
 function onboardingScreen(overrides: Partial<Parameters<typeof SetupScreen>[0]> = {}) {
   return (
     <SetupScreen
@@ -1728,16 +1728,11 @@ function onboardingScreen(overrides: Partial<Parameters<typeof SetupScreen>[0]> 
       asrKeyDraft=""
       onAsrKeyChange={() => {}}
       modelSaved={false}
-      modelDraft={{ api: 'openai-completions', baseUrl: '', model: '', apiKey: '' }}
-      onModelFieldChange={() => {}}
-      modelEditingSavedGroup={false}
       errorMessage=""
       onRequestMicrophone={() => {}}
       onAdvance={() => {}}
       onSaveAsrKey={() => {}}
-      onSaveModel={() => {}}
       onComplete={() => {}}
-      onTestModel={async () => ({ ok: true, latencyMs: 120, resolvedModel: 'example-chat' })}
       onOpenExternal={() => {}}
       onOpenMicrophoneSettings={() => {}}
       {...overrides}
@@ -5283,31 +5278,12 @@ const scenes: Record<string, () => React.ReactElement> = {
   'onboarding-welcome': () => onboardingScreen(),
   'onboarding-permission': () => onboardingScreen({ step: 'microphone' }),
   'onboarding-permission-denied': () =>
-    onboardingScreen({ step: 'microphone', permissionChoice: 'skipped' }),
+    onboardingScreen({ step: 'microphone', microphonePermission: 'denied', permissionChoice: 'skipped' }),
   'onboarding-asr': () => onboardingScreen({ step: 'asr' }),
   'onboarding-asr-saved': () =>
     onboardingScreen({ step: 'asr', asrSaved: true, asrKeySuffix: '6G9Q' }),
-  'onboarding-model': () =>
-    onboardingScreen({
-      step: 'model',
-      modelDraft: {
-        api: 'openai-completions',
-        baseUrl: 'https://api.example.com/v1',
-        model: 'example-chat',
-        apiKey: 'sample-key-for-prototype',
-      },
-    }),
-  // 051：协议选择（Anthropic 原生选中态；多状态只在 1440 档加拍）。
-  'onboarding-model-anthropic': () =>
-    onboardingScreen({
-      step: 'model',
-      modelDraft: {
-        api: 'anthropic-messages',
-        baseUrl: 'https://api.anthropic.com',
-        model: 'claude-sonnet-4-5',
-        apiKey: 'sample-key-for-prototype',
-      },
-    }),
+  'onboarding-model': () => onboardingScreen({ step: 'model' }),
+  'onboarding-capabilities': () => onboardingScreen({ step: 'capabilities', modelSaved: true }),
   'onboarding-complete': () => onboardingScreen({ step: 'done', modelSaved: true }),
   // 032：主界面修复条（完成后配置出错的就近修复，不回首启）。
   'onboarding-repair': () => (

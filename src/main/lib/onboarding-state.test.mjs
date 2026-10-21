@@ -5,6 +5,7 @@ import {
   alignStep,
   createOnboardingStore,
   ONBOARDING_STEPS,
+  ONBOARDING_VERSION,
 } from './onboarding-state.mjs';
 
 function memoryFs(initial = {}) {
@@ -46,7 +47,7 @@ function storeFor(fs, { asr = false, model = false } = {}) {
 /** 播种「上一段生命周期留下的进行中状态」。 */
 function seedInProgress(fs, step = 'welcome', permissionChoice = 'pending') {
   fs.files.set('/ud/onboarding.json', JSON.stringify({
-    version: 1,
+    version: ONBOARDING_VERSION,
     phase: 'in_progress',
     step,
     permissionChoice,
@@ -79,134 +80,114 @@ test('第二段生命周期（同一文件、Key 已存）：仍是进行中，�
   assert.equal(state.asrSaved, true);
 });
 
-test('advance：顺序前进与硬门槛；跳步/缺配置被拒', async () => {
+test('新用户先接模型；未配置模型不能进入能力页或绕过步骤完成', async () => {
   const fs = memoryFs();
   const store = storeFor(fs);
-
-  let result = await store.advance({ to: 'microphone' });
-  assert.equal(result.ok, true);
-  assert.equal(result.state.step, 'microphone');
-
-  // 麦克风 → 语音服务：必须先做权限选择。
-  result = await store.advance({ to: 'asr' });
-  assert.equal(result.ok, false);
-  assert.match(result.message, /允许麦克风|稍后开启/);
-  result = await store.advance({ to: 'asr', permissionChoice: 'granted' });
-  assert.equal(result.ok, true);
-  assert.equal(result.state.permissionChoice, 'granted');
-
-  // 语音服务 → 模型：ASR Key 未持久保存则被拒。
-  result = await store.advance({ to: 'model' });
-  assert.equal(result.ok, false);
-  assert.match(result.message, /语音服务/);
-
-  // 跳步直达完成同样被拒。
-  result = await store.advance({ to: 'done' });
-  assert.equal(result.ok, false);
+  assert.equal((await store.advance({ to: 'microphone' })).ok, false);
+  assert.equal((await store.advance({ to: 'model' })).ok, true);
+  const blocked = await store.advance({ to: 'capabilities' });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.message, /模型/);
+  assert.equal((await store.complete()).ok, false);
+  assert.equal(JSON.parse(fs.files.get('/ud/onboarding.json')).phase, 'in_progress');
 });
 
-test('advance/complete：两项配置齐备才能走到完成（模型步由保存动作推进）', async () => {
+test('只有模型也能完成：不授麦克风，不填写 ASR，重启后仍直接使用', async () => {
   const fs = memoryFs();
-  seedInProgress(fs, 'welcome');
-  const store = storeFor(fs, { asr: true, model: false });
-  await store.advance({ to: 'microphone' });
-  await store.advance({ to: 'asr', permissionChoice: 'skipped' });
-  let result = await store.advance({ to: 'model' });
-  assert.equal(result.ok, true, 'ASR 已存，进模型步不卡');
-
-  // 模型步保存完成后（defaultModelComplete 翻真）才能进完成屏。
-  const fs2 = memoryFs({ '/ud/onboarding.json': fs.files.get('/ud/onboarding.json') });
-  const store2 = storeFor(fs2, { asr: true, model: true });
-  result = await store2.getState();
-  assert.equal(result.step, 'model', '配置对齐只退不进，停在模型步');
-  result = await store2.advance({ to: 'done' });
-  assert.equal(result.ok, true);
-
-  // 完成屏「开始使用」：双门槛复核后写 complete；幂等。
-  result = await store2.complete();
-  assert.equal(result.ok, true);
-  assert.equal(result.state.phase, 'complete');
-  result = await store2.complete();
-  assert.equal(result.ok, true, '重复完成幂等');
-  const persisted = JSON.parse(fs2.files.get('/ud/onboarding.json'));
+  const store = storeFor(fs, { model: true, asr: false });
+  await store.advance({ to: 'model' });
+  assert.equal((await store.advance({ to: 'capabilities' })).ok, true);
+  assert.equal((await store.advance({ to: 'done' })).ok, true);
+  assert.equal((await store.complete()).ok, true);
+  assert.equal(store.isInProgress(), false);
+  assert.equal((await store.complete()).ok, true, '完成幂等');
+  const persisted = JSON.parse(fs.files.get('/ud/onboarding.json'));
   assert.equal(persisted.phase, 'complete');
-  assert.equal(persisted.completedAt != null, true);
+  assert.equal(persisted.version, ONBOARDING_VERSION);
+  assert.ok(persisted.completedAt);
+  const restarted = await storeFor(fs, { model: true }).getState();
+  assert.equal(restarted.phase, 'complete');
+  assert.equal(restarted.asrSaved, false);
 });
 
-test('complete：缺任一配置被拒，不写完成', async () => {
+test('可选语音能进入、跳过并返回；未授麦克风不能误标已完成权限', async () => {
   const fs = memoryFs();
-  seedInProgress(fs, 'model', 'granted');
-  const store = storeFor(fs, { asr: true, model: false });
+  const store = storeFor(fs, { model: true });
+  await store.advance({ to: 'model' });
+  await store.advance({ to: 'capabilities' });
+  assert.equal((await store.advance({ to: 'microphone' })).ok, true);
+  assert.equal((await store.advance({ to: 'asr' })).ok, false);
+  const skipped = await store.advance({ to: 'capabilities', permissionChoice: 'skipped' });
+  assert.equal(skipped.ok, true);
+  assert.equal(skipped.state.permissionChoice, 'skipped');
+  await store.advance({ to: 'microphone' });
+  assert.equal((await store.advance({ to: 'asr', permissionChoice: 'granted' })).ok, true);
+  const after = await store.advance({ to: 'capabilities' });
+  assert.equal(after.ok, true, '语音密钥未填仍可返回文字路径');
+  assert.equal(after.state.asrSaved, false);
+  assert.equal((await store.advance({ to: 'done' })).ok, true);
+  assert.equal((await store.complete()).ok, true);
+});
+
+test('进行中仅模型缺失会退步；ASR 缺失不会把已选择的步骤打回', async () => {
+  const fs = memoryFs();
+  seedInProgress(fs, 'capabilities', 'granted');
+  assert.equal((await storeFor(fs, { model: true, asr: false }).getState()).step, 'capabilities');
+  assert.equal((await storeFor(fs, { model: false, asr: true }).getState()).step, 'model');
+});
+
+test('模型在完成前被删：拒绝完成，重新读取回到模型页', async () => {
+  const fs = memoryFs();
+  seedInProgress(fs, 'done');
+  const store = storeFor(fs, { model: false });
   const result = await store.complete();
   assert.equal(result.ok, false);
   assert.match(result.message, /模型/);
-  const persisted = JSON.parse(fs.files.get('/ud/onboarding.json'));
-  assert.equal(persisted.phase, 'in_progress');
+  assert.equal((await store.getState()).step, 'model');
 });
 
-test('配置对齐：进行中配置被删只退步；完成态不回退', async () => {
-  // 已走到 model 步、双配置齐备。
-  const fs = memoryFs();
-  seedInProgress(fs, 'welcome');
-  const store = storeFor(fs, { asr: true, model: true });
-  await store.advance({ to: 'microphone' });
-  await store.advance({ to: 'asr', permissionChoice: 'granted' });
-  await store.advance({ to: 'model' });
-  // 模型组被清掉 → 退回模型步；ASR Key 再被删 → 退回语音服务步。
-  let state = await createOnboardingStore({
-    filePath: '/ud/onboarding.json',
-    readFile: fs.readFile,
-    writeFile: fs.writeFile,
-    rename: fs.rename,
-    mkdir: fs.mkdir,
-    hasPersistedAsrKey: async () => true,
-    defaultModelComplete: async () => false,
-  }).getState();
-  assert.equal(state.step, 'model');
-  state = await createOnboardingStore({
-    filePath: '/ud/onboarding.json',
-    readFile: fs.readFile,
-    writeFile: fs.writeFile,
-    rename: fs.rename,
-    mkdir: fs.mkdir,
-    hasPersistedAsrKey: async () => false,
-    defaultModelComplete: async () => false,
-  }).getState();
-  assert.equal(state.step, 'asr');
-
-  // 完成后的用户配置失效：phase 保持 complete，不回引导。
-  const done = memoryFs({
-    '/ud/onboarding.json': JSON.stringify({ version: 1, phase: 'complete', step: 'done', permissionChoice: 'granted', updatedAt: 1, completedAt: 2 }),
-  });
-  const after = await storeFor(done, { asr: false, model: false }).getState();
-  assert.equal(after.phase, 'complete');
-  assert.equal(after.step, 'done');
+test('完成后配置失效不再回引导，包括旧版完成状态', async () => {
+  for (const version of [1, ONBOARDING_VERSION]) {
+    const fs = memoryFs({ '/ud/onboarding.json': JSON.stringify({ version, phase: 'complete', step: 'done', completedAt: 42 }) });
+    const state = await storeFor(fs).getState();
+    assert.equal(state.phase, 'complete');
+    assert.equal(state.step, 'done');
+    assert.equal(state.modelComplete, false);
+  }
 });
 
-test('后退与返回：允许任意后退，已存配置不丢、权限选择保留', async () => {
+test('旧版尚未完成的语音/模型/完成步骤接回模型页，保留已有配置与权限选择', async () => {
+  for (const step of ['microphone', 'asr', 'model', 'done']) {
+    const fs = memoryFs({ '/ud/onboarding.json': JSON.stringify({ version: 1, phase: 'in_progress', step, permissionChoice: 'granted' }) });
+    const state = await storeFor(fs, { model: true, asr: true }).getState();
+    assert.equal(state.step, 'model');
+    assert.equal(state.version, ONBOARDING_VERSION);
+    assert.equal(state.permissionChoice, 'granted');
+    assert.equal(state.asrSaved, true);
+    assert.equal(state.modelComplete, true);
+  }
+});
+
+test('后退保留配置与权限选择，新的可选能力页支持重启续接', async () => {
   const fs = memoryFs();
-  seedInProgress(fs, 'welcome');
-  const store = storeFor(fs, { asr: true, model: true });
-  await store.advance({ to: 'microphone' });
-  await store.advance({ to: 'asr', permissionChoice: 'granted' });
-  await store.advance({ to: 'model' });
-  const back = await store.advance({ to: 'microphone' });
+  seedInProgress(fs, 'capabilities', 'skipped');
+  const store = storeFor(fs, { model: true, asr: true });
+  assert.equal((await store.getState()).step, 'capabilities');
+  const back = await store.advance({ to: 'model' });
   assert.equal(back.ok, true);
-  assert.equal(back.state.step, 'microphone');
-  assert.equal(back.state.permissionChoice, 'granted', '后退不清权限选择');
-  // 回到麦克风步后再前进：门槛按已存配置放行。
-  const forward = await store.advance({ to: 'asr', permissionChoice: 'granted' });
-  assert.equal(forward.ok, true);
+  assert.equal(back.state.permissionChoice, 'skipped');
+  assert.equal(back.state.asrSaved, true);
+  assert.equal((await store.advance({ to: 'welcome' })).ok, true);
+  assert.equal((await store.advance({ to: 'done' })).ok, false, '欢迎页不能绕过流程');
 });
 
-test('alignStep（纯函数）：只退不进、complete 不动', () => {
-  const base = { version: 1, phase: 'in_progress', step: 'model', permissionChoice: 'granted', updatedAt: 1, completedAt: null };
-  assert.equal(alignStep(base, { asrSaved: true, modelComplete: false }).step, 'model');
-  assert.equal(alignStep(base, { asrSaved: false, modelComplete: false }).step, 'asr');
-  assert.equal(alignStep(base, { asrSaved: false, modelComplete: true }).step, 'asr', '模型虽全，ASR 缺仍退语音步');
-  const done = { ...base, phase: 'complete', step: 'done' };
-  assert.equal(alignStep(done, { asrSaved: false, modelComplete: false }).step, 'done');
-  assert.deepEqual(ONBOARDING_STEPS, ['welcome', 'microphone', 'asr', 'model', 'done']);
+test('alignStep 只按模型门槛回退，完整配置不自动替用户前进', () => {
+  const base = { version: ONBOARDING_VERSION, phase: 'in_progress', step: 'done' };
+  assert.equal(alignStep(base, { modelComplete: false, asrSaved: true }).step, 'model');
+  assert.equal(alignStep(base, { modelComplete: true, asrSaved: false }).step, 'done');
+  assert.equal(alignStep({ ...base, step: 'model' }, { modelComplete: true }).step, 'model');
+  assert.equal(alignStep({ ...base, phase: 'complete' }, { modelComplete: false }).step, 'done');
+  assert.deepEqual(ONBOARDING_STEPS, ['welcome', 'model', 'capabilities', 'microphone', 'asr', 'done']);
 });
 
 test('损坏的 onboarding.json 按无状态重建；并发初始化单飞', async () => {

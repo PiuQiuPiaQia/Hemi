@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import Stats from 'stats.js';
 import type { WindowActivityView } from '@shared/protocol';
@@ -18,11 +18,56 @@ const initial: Sample = {
   fps: null, p95Ms: null, maxMs: null, longFrames: null, heapMb: null, paused: false, failed: false,
 };
 const formatMs = (value: number | null) => value === null ? '—' : value.toFixed(1);
+type Position = { left: number; top: number };
+type Drag = Position & { pointerId: number; x: number; y: number; width: number; height: number };
+const constrain = (left: number, top: number, width: number, height: number): Position => ({
+  left: Math.max(0, Math.min(left, window.innerWidth - width)),
+  top: Math.max(0, Math.min(top, window.innerHeight - height)),
+});
+const directions: Record<string, readonly [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
-/** 仅由 DEV 条件加载。每帧采样留在闭包，每秒只刷新这个独立组件。 */
+/** 仅由 DEV 条件加载。每帧采样留在闭包，每秒刷新这个独立组件；拖动只更新位置。 */
 export default function DevPerformanceMonitor() {
+  const panelRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<Drag | null>(null);
+  const [position, setPosition] = useState<Position | null>(null);
   const [sample, setSample] = useState<Sample>(initial);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const keepVisible = () => {
+      const { width, height } = panel.getBoundingClientRect();
+      // 数值宽度、响应式布局或窗口大小变化后，仍可抓到拖动手柄。
+      setPosition(current => {
+        if (!current) return current;
+        const next = constrain(current.left, current.top, width, height);
+        return next.left === current.left && next.top === current.top ? current : next;
+      });
+      if (dragRef.current) {
+        dragRef.current.width = width;
+        dragRef.current.height = height;
+      }
+    };
+    const observer = new ResizeObserver(keepVisible);
+    observer.observe(panel);
+    window.addEventListener('resize', keepVisible);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', keepVisible);
+    };
+  }, []);
+
+  const endDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.type === 'pointerup') {
+      setPosition(constrain(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y, drag.width, drag.height));
+    }
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
 
   useEffect(() => {
     const host = graphRef.current;
@@ -139,7 +184,9 @@ export default function DevPerformanceMonitor() {
 
   return createPortal(
     <div
+      ref={panelRef}
       className="h65-perf"
+      style={position ? { ...position, right: 'auto', bottom: 'auto' } : undefined}
       data-dev-performance
       data-fps={sample.fps ?? ''}
       data-frame-max={sample.maxMs ?? ''}
@@ -148,10 +195,40 @@ export default function DevPerformanceMonitor() {
       aria-label="开发性能监控"
       title="开发模式 · FPS 为 rAF 回调频率估算，非 GPU 实际呈现帧率；P95／MAX 为最近一秒帧间隔；长帧为本次面板挂载期间超过 50ms 的原生长动画帧累计数；JS 为近似堆内存。隐藏或最小化时暂停采样；— 表示尚无数据或 API 不支持。"
     >
-      <div className="h65-perf-graph" role="img" aria-label={sample.failed ? '监控不可用' : sample.paused ? '已暂停' : `${sample.fps ?? '—'} FPS`}>
-        <div ref={graphRef} />
-        {sample.failed || sample.paused ? <span className="h65-perf-status">{sample.failed ? '监控不可用' : '已暂停'}</span> : null}
-      </div>
+      <button
+        type="button"
+        className="h65-perf-graph"
+        aria-label="移动性能监控"
+        title="按住 FPS 图拖动；聚焦后可用方向键移动"
+        onPointerDown={event => {
+          if (!event.isPrimary || event.button !== 0 || !panelRef.current) return;
+          const rect = panelRef.current.getBoundingClientRect();
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        }}
+        onPointerMove={event => {
+          const drag = dragRef.current;
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          setPosition(constrain(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y, drag.width, drag.height));
+        }}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
+        onKeyDown={event => {
+          const direction = directions[event.key];
+          if (!direction || !panelRef.current) return;
+          event.preventDefault();
+          const rect = panelRef.current.getBoundingClientRect();
+          const step = event.shiftKey ? 32 : 8;
+          setPosition(constrain(rect.left + direction[0] * step, rect.top + direction[1] * step, rect.width, rect.height));
+        }}
+      >
+        <div role="img" aria-label={sample.failed ? '监控不可用' : sample.paused ? '已暂停' : `${sample.fps ?? '—'} FPS`}>
+          <div ref={graphRef} />
+          {sample.failed || sample.paused ? <span className="h65-perf-status">{sample.failed ? '监控不可用' : '已暂停'}</span> : null}
+        </div>
+      </button>
       <div className="h65-perf-timings">
         <span>P95 <b>{formatMs(sample.p95Ms)}</b> ms</span>
         <span>MAX <b>{formatMs(sample.maxMs)}</b> ms</span>

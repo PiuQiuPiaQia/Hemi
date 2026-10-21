@@ -253,6 +253,28 @@ test('pingTextModel：200 返回服务端模型名（别名现形），请求为
   assert.equal(result.sample, '');
 });
 
+test('首启工具连接测试：两种协议均要求返回匹配的工具与参数，不执行工具', async () => {
+  for (const api of ['openai-completions', 'anthropic-messages']) {
+    let request;
+    const anthropic = api === 'anthropic-messages';
+    const options = { api, baseUrl: 'https://example.com/v1', apiKey: 'test', model: 'test', requireTools: true };
+    const fetchImpl = async (_url, init) => {
+      request = JSON.parse(init.body);
+      return { ok: true, json: async () => anthropic
+        ? { content: [{ type: 'tool_use', name: 'hemi_connection_check', input: { ok: true } }] }
+        : { choices: [{ message: { tool_calls: [{ function: { name: 'hemi_connection_check', arguments: '{"ok":true}' } }] } }] } };
+    };
+    assert.equal((await pingTextModel({ ...options, fetchImpl })).ok, true);
+    assert.equal(request.tools.length, 1);
+    assert.equal(anthropic ? request.tools[0].input_schema.required[0] : request.tools[0].function.parameters.required[0], 'ok');
+    for (const response of [{}, { choices: [{ message: { content: 'ok' } }] }, { content: [{ type: 'text', text: 'ok' }] },
+      { choices: [{ message: { tool_calls: [{ function: { name: 'hemi_connection_check', arguments: '{"ok":false}' } }] } }] },
+      { content: [{ type: 'tool_use', name: 'wrong_tool', input: { ok: true } }] }]) {
+      await assert.rejects(pingTextModel({ ...options, fetchImpl: async () => ({ ok: true, json: async () => response }) }), /有效的工具调用/);
+    }
+  }
+});
+
 test('pingTextModel：401/404/网络错归一化，缺配置直接拒绝', async () => {
   await assert.rejects(
     pingTextModel({

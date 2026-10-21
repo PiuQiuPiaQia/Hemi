@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "date": "2026-10-21",
+  "scope": "standalone source-material catalog; not production Hemi theme behavior",
+  "environment": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "155.0.8059.85"
+  },
+  "viewport": {
+    "width": 1400,
+    "height": 1200,
+    "scale": 2
+  },
+  "images": 30,
+  "dimensions": {
+    ".card": {
+      "width": 172,
+      "height": 100
+    },
+    ".avatar": {
+      "width": 40,
+      "height": 40
+    },
+    ".rail": {
+      "width": 224,
+      "height": 420
+    }
+  },
+  "selectionPreview": true,
+  "noHorizontalOverflowAtWidths": [
+    1400,
+    980,
+    560,
+    375
+  ],
+  "errors": [],
+  "commit": "e556f9844e2d3e50c0c789ed2a29c22d08ba6b27",
+  "workingTree": "includes unrelated parallel changes; check covers standalone material preview"
+}

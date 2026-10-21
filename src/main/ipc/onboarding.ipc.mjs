@@ -11,9 +11,9 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 
 /**
  * 032 冷启动引导 IPC：主进程是引导进度的唯一权威，渲染层只拿快照与
- * 提交前进/完成意图。两项硬门槛在这里按真实存储判定：
- * - 语音服务：doubao-asr.json 有可解密的密文 Key（环境变量/内存态不算）；
- * - 主脑模型：031 目录默认组的三项（接口地址、型号、加密保存的 Key）完整。
+ * 提交前进/完成意图。模型完整性按真实存储判定；语音配置只报告状态：
+ * - 可选语音：doubao-asr.json 有可解密的密文 Key（环境变量/内存态不算）；
+ * - 必需模型：目录默认组的接口地址、型号、加密保存的 Key 完整。
  */
 
 const onboardingLog = createLogger('onboarding');

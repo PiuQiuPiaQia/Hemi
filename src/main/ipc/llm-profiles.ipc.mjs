@@ -88,6 +88,7 @@ export function registerLlmProfilesIpc() {
       model: pick(payload?.model, hasKey ? model.model : ''),
       // 051：协议显式传入优先（首启引导草稿），否则回退该组已存协议。
       api: pick(payload?.api, hasKey ? model.api ?? 'openai-completions' : 'openai-completions'),
+      requireTools: payload?.requireTools === true,
     };
     if (!base.baseUrl || !base.apiKey || !base.model) {
       return { ok: false, error: '请先填完接口地址、模型名称和 API Key。', errorKind: 'missing' };

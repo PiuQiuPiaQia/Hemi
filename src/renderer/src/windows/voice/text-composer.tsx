@@ -464,12 +464,25 @@ export function TextComposer({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      el.style.height = 'auto';
-      el.style.height = `${Math.max(MIN_HEIGHT, Math.min(el.scrollHeight, MAX_HEIGHT))}px`;
+    let lastWidth = -1;
+    let frame: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? el.clientWidth;
+      if (width === lastWidth) return;
+      lastWidth = width;
+      // 高度由自身内容更新；观察器只响应宽度，且不在观察器回调中触发布局写入。
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        el.style.height = 'auto';
+        el.style.height = `${Math.max(MIN_HEIGHT, Math.min(el.scrollHeight, MAX_HEIGHT))}px`;
+      });
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
 
   const applyCaret = (position: number) => {

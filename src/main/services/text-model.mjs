@@ -157,6 +157,7 @@ async function pingTextModelRaw({
   apiKey,
   model,
   api = 'openai-completions',
+  requireTools = false,
   timeoutMs,
   fetchImpl = fetch,
 }) {
@@ -188,9 +189,10 @@ async function pingTextModelRaw({
       // max_tokens 给小值控成本即可；推理模型把它花在思考上、正文为空也算探活成功。
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 16,
+        messages: [{ role: 'user', content: requireTools ? 'Call hemi_connection_check with ok=true. This is a connection test; do not perform any other action.' : 'ping' }],
+        max_tokens: requireTools ? 256 : 16,
         stream: false,
+        ...(requireTools ? connectionTestTools(anthropic) : {}),
       }),
     });
     if (response.ok) {
@@ -214,6 +216,7 @@ async function pingTextModelRaw({
   }
 
   const latencyMs = Date.now() - startedAt;
+  if (requireTools) validateConnectionTool(data, anthropic);
   const resolvedModel = typeof data?.model === 'string' && data.model ? data.model : model;
   const rawContent = anthropic
     ? Array.isArray(data?.content)
@@ -227,6 +230,23 @@ async function pingTextModelRaw({
     resolvedModel,
     sample: typeof rawContent === 'string' ? rawContent.trim().slice(0, 60) : '',
   };
+}
+
+/** 无副作用的工具握手：只检查模型返回，绝不执行工具。 */
+function connectionTestTools(anthropic) {
+  const schema = { type: 'object', properties: { ok: { type: 'boolean', enum: [true] } }, required: ['ok'], additionalProperties: false };
+  const name = 'hemi_connection_check';
+  return anthropic
+    ? { tools: [{ name, description: 'Confirm the connection test.', input_schema: schema }], tool_choice: { type: 'tool', name } }
+    : { tools: [{ type: 'function', function: { name, description: 'Confirm the connection test.', parameters: schema } }], tool_choice: { type: 'function', function: { name } } };
+}
+
+function validateConnectionTool(data, anthropic) {
+  const calls = anthropic ? data?.content?.filter?.(item => item.type === 'tool_use') : data?.choices?.[0]?.message?.tool_calls;
+  const call = Array.isArray(calls) ? calls.find(item => (anthropic ? item.name : item.function?.name) === 'hemi_connection_check') : null;
+  let args = null;
+  try { args = anthropic ? call?.input : JSON.parse(call?.function?.arguments); } catch { /* Invalid tool arguments are a failed test. */ }
+  if (!call || args?.ok !== true) throw new Error('模型没有返回有效的工具调用。请检查模型和接口是否支持工具，或换一个模型后重试。');
 }
 
 /**

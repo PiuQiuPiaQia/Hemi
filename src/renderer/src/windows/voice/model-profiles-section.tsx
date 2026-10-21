@@ -14,6 +14,7 @@ import type {
   RoleModelSlot,
   RoleModelsView,
   ModelEntryView,
+  ModelProviderApi,
   ModelProfilesDirectory,
   ModelProviderView,
   ModelTestResult,
@@ -1565,21 +1566,33 @@ function ModelSub({ model, test }: { model: ModelEntryView; test: ProviderStatus
  * 047 添加页外框：统一入口先选配置方式（New API 站点登录 / 手动配置），
  * 两份草稿各自保留；站点方式已创建 Key 后锁定切换（先完成或取消）。
  */
-function AddProviderScreen({
+export type ProviderSetupController = Omit<Controller, 'saveState' | 'statuses' | 'testProvider'>;
+
+export function AddProviderScreen({
   ctl,
   initial,
   onAdded,
+  embedded = false,
+  onBusyChange,
 }: {
-  ctl: Controller;
+  ctl: ProviderSetupController;
   initial: FixtureState['add'] | null;
   onAdded: (providerId: string) => void;
+  embedded?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [method, setMethod] = useState<'newapi' | 'manual'>('newapi');
   const [switchNote, setSwitchNote] = useState<string | null>(null);
   const lockRef = useRef<ImportLock>({ locked: false, reason: '' });
+  const [childBusy, setChildBusy] = useState(false);
+  const reportBusy = useCallback((busy: boolean) => {
+    setChildBusy(busy);
+    onBusyChange?.(busy);
+  }, [onBusyChange]);
 
   const choose = (next: 'newapi' | 'manual') => {
     if (next === method) return;
+    if (childBusy) return;
     if (lockRef.current.locked) {
       setSwitchNote(lockRef.current.reason);
       return;
@@ -1590,7 +1603,7 @@ function AddProviderScreen({
 
   return (
     <>
-      <button
+      {embedded ? null : <><button
         type="button"
         className="h37-back"
         onClick={() => {
@@ -1609,13 +1622,14 @@ function AddProviderScreen({
           <h2>添加供应商</h2>
           <p>从 New API 站点登录获取，或手动粘贴 Key 配置；两种方式最后进同一个供应商列表。</p>
         </div>
-      </div>
+      </div></>}
 
       <section className="h37-section">
         <div className="h47n-methods" role="radiogroup" aria-label="配置方式">
           <button
             type="button"
             role="radio"
+            disabled={childBusy}
             aria-checked={method === 'newapi'}
             className="h47n-method"
             data-on={method === 'newapi' ? 'true' : undefined}
@@ -1626,12 +1640,13 @@ function AddProviderScreen({
             </span>
             <span className="h47n-method-text">
               <b>New API 站点登录</b>
-              <span>在应用内登录站点，Hemi 创建专属 Key 并自动配置</span>
+              <span>登录站点，自动创建 Key 并导入模型</span>
             </span>
           </button>
           <button
             type="button"
             role="radio"
+            disabled={childBusy}
             aria-checked={method === 'manual'}
             className="h47n-method"
             data-on={method === 'manual' ? 'true' : undefined}
@@ -1642,7 +1657,7 @@ function AddProviderScreen({
             </span>
             <span className="h47n-method-text">
               <b>手动配置</b>
-              <span>已有 Key 的话直接粘贴，沿用现有流程</span>
+              <span>粘贴 API Key，选择要使用的模型</span>
             </span>
           </button>
         </div>
@@ -1654,7 +1669,7 @@ function AddProviderScreen({
       </section>
 
       {method === 'manual' ? (
-        <AddProviderView ctl={ctl} initial={initial} onAdded={onAdded} embedded />
+        <AddProviderView ctl={ctl} initial={initial} onAdded={onAdded} onBusyChange={reportBusy} embedded />
       ) : (
         <NewApiImportView
           onExit={ctl.back}
@@ -1663,6 +1678,7 @@ function AddProviderScreen({
             navigateFlash(providerIds);
           }}
           lockRef={lockRef}
+          onBusyChange={reportBusy}
         />
       )}
     </>
@@ -1678,12 +1694,14 @@ function AddProviderView({
   initial,
   onAdded,
   embedded = false,
+  onBusyChange,
 }: {
-  ctl: Controller;
+  ctl: ProviderSetupController;
   initial: FixtureState['add'] | null;
   onAdded: (providerId: string) => void;
   /** 047：嵌入 AddProviderScreen 时由外框出返回/标题（方式选择页）。 */
   embedded?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { directory } = ctl;
   const existingNames = directory.providers.map((provider) => provider.name);
@@ -1693,6 +1711,7 @@ function AddProviderView({
   const [baseUrl, setBaseUrl] = useState(initialPreset?.baseUrl ?? '');
   const [editingUrl, setEditingUrl] = useState(initialPreset?.id === 'custom');
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '');
+  const [api, setApi] = useState<ModelProviderApi>('openai-completions');
   const [test, setTest] = useState<ProviderStatus | null>(initial?.status ?? null);
   const [extras, setExtras] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>(
@@ -1724,6 +1743,10 @@ function AddProviderView({
   const [error, setError] = useState<string | null>(null);
   const [linkNote, setLinkNote] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    onBusyChange?.(submitting);
+    return () => onBusyChange?.(false);
+  }, [submitting, onBusyChange]);
   const skipFirstTest = useRef(Boolean(initial?.status));
   const generation = useRef(0);
   const slowTest = useDelayed(test?.state === 'testing');
@@ -1762,7 +1785,7 @@ function AddProviderView({
     const timer = window.setTimeout(() => {
       setTest({ state: 'testing' });
       window.hemiVoice
-        .testModelProfile({ baseUrl: url, apiKey: key, model: probeModel })
+        .testModelProfile({ baseUrl: url, apiKey: key, model: probeModel, api })
         .then((result) => {
           if (gen !== generation.current) return;
           setTest(result.ok ? { state: 'ok', latencyMs: result.latencyMs } : { state: 'fail', error: testError(result) });
@@ -1772,7 +1795,7 @@ function AddProviderView({
         });
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [presetId, apiKey, baseUrl, keyless, probeModel]);
+  }, [presetId, apiKey, baseUrl, keyless, probeModel, api]);
 
   const toggle = (id: string) => {
     setError(null);
@@ -1804,8 +1827,7 @@ function AddProviderView({
     const hadDefault = Boolean(findDefaultModel(directory));
     const models = ordered.map((id) => draftModelEntry('', id, guessVision(preset, id)));
     const input: SaveInput = {
-      // 046 类型收口：添加页还没有线协议选择，先按文档缺省值落 openai-completions。
-      ...providerSaveInput({ id: '', name, baseUrl, api: 'openai-completions', models }, { apiKey: key || KEYLESS_PLACEHOLDER_KEY }),
+      ...providerSaveInput({ id: '', name, baseUrl, api, models }, { apiKey: key || KEYLESS_PLACEHOLDER_KEY }),
       id: undefined,
     };
     let providerId = '';
@@ -1893,6 +1915,15 @@ function AddProviderView({
               ) : null}
             </div>
             <div className="h37-group">
+              <div className="h37-row h37m-form-row">
+                <label className="h37m-lbl" htmlFor="h37m-add-api">接口协议</label>
+                <span className="h37m-field">
+                  <select id="h37m-add-api" className="h37-input" value={api} onChange={(event) => setApi(event.target.value as ModelProviderApi)}>
+                    <option value="openai-completions">OpenAI 兼容</option>
+                    <option value="anthropic-messages">Anthropic 原生</option>
+                  </select>
+                </span>
+              </div>
               {preset.id === 'custom' ? (
                 <div className="h37-row h37m-form-row">
                   <label className="h37m-lbl" htmlFor="h37m-add-name">

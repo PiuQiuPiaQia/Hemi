@@ -5,7 +5,7 @@ import http from 'node:http';
 
 export const TEST_USER = { username: 'demo', password: 'hemi-test-pass', id: 7 };
 
-export function startMockSite({ port = 0, host = '127.0.0.1' } = {}) {
+export function startMockSite({ port = 0, host = '127.0.0.1', inferenceHandler = null } = {}) {
   const state = {
     tokens: [],
     nextId: 100,
@@ -215,12 +215,16 @@ export function startMockSite({ port = 0, host = '127.0.0.1' } = {}) {
         if (state.fault === 'probe-hang') await new Promise(() => {}); // 强杀演练：验证挂住，进程被杀
         const body = JSON.parse(await readBody(req) || '{}');
         if (!visible.includes(body.model)) return json(res, { error: { message: '无可用渠道' } }, 404);
+        if (inferenceHandler) return inferenceHandler({ body, req, res, api: 'openai-completions' });
+        if (body.tools?.some(tool => tool.function?.name === 'hemi_connection_check')) return json(res, { model: body.model, choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'mock-check', type: 'function', function: { name: 'hemi_connection_check', arguments: '{"ok":true}' } }] }, finish_reason: 'tool_calls' }] });
         return json(res, { object: 'chat.completion', model: body.model, choices: [{ index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop' }] });
       }
       if (req.method === 'POST' && path === '/v1/messages') {
         if (state.fault === 'probe-anthropic') return json(res, { type: 'error', error: { message: 'overloaded' } }, 500);
         const body = JSON.parse(await readBody(req) || '{}');
         if (!visible.includes(body.model)) return json(res, { type: 'error', error: { message: '无可用渠道' } }, 404);
+        if (inferenceHandler) return inferenceHandler({ body, req, res, api: 'anthropic-messages' });
+        if (body.tools?.some(tool => tool.name === 'hemi_connection_check')) return json(res, { model: body.model, content: [{ type: 'tool_use', id: 'mock-check', name: 'hemi_connection_check', input: { ok: true } }], stop_reason: 'tool_use' });
         return json(res, { id: 'msg_mock', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: 'pong' }], stop_reason: 'end_turn' });
       }
       return json(res, { success: false }, 404);

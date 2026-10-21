@@ -60,6 +60,7 @@ export function NewApiImportView({
   onImported,
   lockRef,
   fixtureState,
+  onBusyChange,
 }: {
   /** 回供应商列表（未创建 Key 时＝离开；已创建时按钮隐藏，只能完成/取消）。 */
   onExit: () => void;
@@ -69,6 +70,8 @@ export function NewApiImportView({
   lockRef: { current: ImportLock };
   /** fixtures 注入的假状态（不经 IPC）。 */
   fixtureState?: ProviderImportState | null;
+  /** 首启等外层导航不能在创建令牌/保存过程中离开。 */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const bridge = window.hemiVoice;
   const [initialFixtureOp] = useState<ProviderImportState | null>(() => fixtureState ?? importFixtureState ?? null);
@@ -78,6 +81,10 @@ export function NewApiImportView({
   const [pending, setPending] = useState<ProviderImportPendingItem[]>([]);
   const [cmdError, setCmdError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange?.(busy || Boolean(op && !op.can.back));
+    return () => onBusyChange?.(false);
+  }, [busy, op, onBusyChange]);
   const [group, setGroup] = useState('');
   const [picked, setPicked] = useState<Record<string, ModelProviderApi>>({});
   const [modelQuery, setModelQuery] = useState('');
@@ -171,7 +178,7 @@ export function NewApiImportView({
     return !['success', 'cancelled', 'cleanup-pending'].includes(op.phase);
   }, [op]);
 
-  const containerWide = useContainerWide(browserRef);
+  const containerWide = useContainerWide(browserRef, browserWanted);
 
   useEffect(() => {
     if (!op || initialFixtureOp) return;
@@ -467,7 +474,7 @@ export function NewApiImportView({
                   <div className="h37-row">
                     <span className="h37-row-text">
                       <b>
-                        <Hand className="h47n-ico" aria-hidden /> 在左侧页面完成登录
+                        <Hand className="h47n-ico" aria-hidden /> 在站点页面完成登录
                       </b>
                       <span className="h37m-sub">账号密码会加密记在本机，下次自动补齐；由你点击登录，验证码和二次验证仍由你完成。</span>
                     </span>
@@ -891,7 +898,7 @@ export function NewApiImportView({
 }
 
 /** 占位容器 ≥ 阈值才显示原生站点页面（窄窗隐藏，不重建会话）。 */
-function useContainerWide(ref: RefObject<HTMLDivElement | null>, threshold = 480) {
+function useContainerWide(ref: RefObject<HTMLDivElement | null>, active: boolean, threshold = 480) {
   const [wide, setWide] = useState(true);
   useEffect(() => {
     const el = ref.current;
@@ -902,6 +909,6 @@ function useContainerWide(ref: RefObject<HTMLDivElement | null>, threshold = 480
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref, threshold]);
+  }, [ref, active, threshold]);
   return wide;
 }

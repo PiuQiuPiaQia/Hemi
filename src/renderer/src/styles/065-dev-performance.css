@@ -1,5 +1,5 @@
-/* dev 调试浮层：portal 到 body，完全脱离顶栏／内容布局，鼠标穿透。
-   右下角（2026-10-19 用户裁决：原顶栏下方右上角挡 066 方式菜单等下拉件）。 */
+/* dev 调试浮层：portal 到 body，完全脱离顶栏／内容布局。
+   默认右下角；FPS 图是拖动手柄，其余区域保持鼠标穿透。 */
 .h65-perf {
   position: fixed;
   bottom: var(--sp-8);
@@ -24,6 +24,25 @@
   width: 80px; /* stats.js 原生 canvas 的 CSS 尺寸，保留像素比。 */
   height: var(--sp-48);
   flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+
+.h65-perf-graph:active {
+  cursor: grabbing;
+}
+
+html.kb-nav .h65-perf-graph:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.h65-perf-graph > * {
   pointer-events: none;
 }
 

@@ -6,6 +6,7 @@
 import { app, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { completeOnboardingUi } from './lib/complete-onboarding-ui.mjs';
 
 const { startMockSite, TEST_USER } = await import('./mock-newapi-site.mjs');
 const { initializeStableSafeStorageIdentity } = await import('../src/main/lib/config-store.mjs');
@@ -50,7 +51,7 @@ const clickByText = async (text, scope = 'document') => {
       const label = (node.textContent ?? '') + ' '
         + (node.getAttribute('aria-label') ?? '') + ' '
         + (node.getAttribute('title') ?? '');
-      return label.includes(${JSON.stringify(text)}) && !node.disabled;
+      return label.includes(${JSON.stringify(text)}) && !node.disabled && node.getClientRects().length > 0;
     });
     if (!target) return 'missing';
     target.click();
@@ -98,21 +99,9 @@ app.whenReady().then(async () => {
 
     // 隔离目录首启也从真实 UI 完成引导，不预写 ready/onboarding 状态。
     if (await exec(`Boolean(document.querySelector('.onboarding-page'))`)) {
-      check('首启开始设置', await clickByText('开始设置'));
-      await waitFor(`Boolean(document.querySelector('[data-step="microphone"]'))`, '麦克风步骤');
-      await clickByText('稍后开启');
-      await clickByText('继续');
-      await waitFor(`Boolean(document.querySelector('#onboarding-asr-key'))`, '语音服务表单');
-      await setNativeValue('#onboarding-asr-key', 'isolated-offline-asr-test-key');
-      check('首启保存语音配置', await clickByText('保存并继续'));
-      await waitFor(`Boolean(document.querySelector('#onboarding-model-url'))`, '模型表单');
-      await setNativeValue('#onboarding-model-url', `${site.origin}/v1`);
-      await setNativeValue('#onboarding-model-name', 'mock-gpt-5.2');
-      await setNativeValue('#onboarding-model-key', 'isolated-offline-model-test-key');
-      check('首启保存模型配置', await clickByText('保存并继续'));
-      await waitFor(`Boolean(document.querySelector('[data-step="done"]'))`, '引导完成屏');
-      check('首启开始使用', await clickByText('开始使用'));
-      await waitFor(`!document.querySelector('.onboarding-page')`, '进入应用');
+      site.state.tokens.push({ id: 1, key: 'bootstrap-test', revoked: false });
+      await completeOnboardingUi({ exec, baseUrl: `${site.origin}/v1`, model: 'mock-gpt-5.2', apiKey: 'sk-bootstrap-test' });
+      check('首启从真实 UI 接模型并跳过语音', true);
     }
 
     // 1. 打开设置 → 模型与路由（设置可能已默认落在模型页——点击或验证在页均可）
@@ -186,7 +175,7 @@ app.whenReady().then(async () => {
 
     // 6. 点「创建 Key 并导入」→ 等回执
     await waitFor(`Boolean([...document.querySelectorAll('button')].some((b) => b.textContent.includes('创建 Key 并导入') && !b.disabled))`, '提交按钮可用', 15000);
-    check('点创建 Key 并导入', await clickByText('创建 Key 并导入'));
+    check('点创建 Key 并导入', await clickByText('创建 Key 并导入', 'document.querySelector(".h47n-submit")'));
     const success = await waitFor(`Boolean(document.body.textContent.includes('已导入') || document.body.textContent.includes('没完成'))`, '回执', 90000);
     const failed = await exec(`Boolean(document.body.textContent.includes('没完成'))`);
     check('UI 显示导入成功回执', success && failed !== true);
@@ -232,7 +221,7 @@ app.whenReady().then(async () => {
     })()`)) === 'clicked');
     await waitFor(`Boolean(document.body.textContent.includes('将生成'))`, '二轮预览', 15000);
     await waitFor(`Boolean([...document.querySelectorAll('button')].some((b) => b.textContent.includes('创建 Key 并导入') && !b.disabled))`, '二轮提交按钮', 15000);
-    check('二轮点创建 Key 并导入', await clickByText('创建 Key 并导入'));
+    check('二轮点创建 Key 并导入', await clickByText('创建 Key 并导入', 'document.querySelector(".h47n-submit")'));
     const success2 = await waitFor(`Boolean(document.body.textContent.includes('已导入') || document.body.textContent.includes('没完成'))`, '二轮回执', 90000);
     check('二轮导入成功', success2 && (await exec(`Boolean(!document.body.textContent.includes('没完成'))`)) === true);
     check('两轮共创建两条令牌', site.state.createCalls === 2, `createCalls=${site.state.createCalls}`);

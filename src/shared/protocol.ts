@@ -1534,10 +1534,10 @@ export type ModelProviderSaveInput = {
   }>;
 };
 
-/** 032：五屏引导的步骤 id（与主进程 ONBOARDING_STEPS 同序）。 */
-export type OnboardingStep = 'welcome' | 'microphone' | 'asr' | 'model' | 'done';
+/** 首启四步主流程，microphone/asr 为可选能力子页。 */
+export type OnboardingStep = 'welcome' | 'model' | 'capabilities' | 'microphone' | 'asr' | 'done';
 
-/** 032：引导快照（主进程权威；两项配置的满足情况按真实存储实时判定）。 */
+/** 引导快照（主进程权威；模型为必需配置，语音为可选配置）。 */
 export type OnboardingState = {
   version: number;
   phase: 'in_progress' | 'complete';
@@ -2051,6 +2051,8 @@ export type HemiVoiceBridge = {
    */
   testModelProfile: (payload: {
     modelKey?: string;
+    /** 首启验证工具调用响应；不会执行模型返回的工具。 */
+    requireTools?: boolean;
     /** 051：线协议（首启引导草稿显式传入；缺省回退该组已存协议）。 */
     api?: ModelProviderApi;
     baseUrl?: string;

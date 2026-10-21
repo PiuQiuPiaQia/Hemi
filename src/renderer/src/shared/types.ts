@@ -52,6 +52,8 @@ export type TranscriptItem = {
   /** 060：纯投影的渲染身份，供真机全结构校验；不由客户端生成正式消息。 */
   flow?: { runId: string; itemId: string; inputId?: string; partIds: string[] };
   live?: boolean;
+  /** 当前运行的最后一段展示内容；与整轮仍在运行的 live 分开，防止旧段落出现光标。 */
+  streaming?: boolean;
   id: string;
   text: string;
   createdAt: number;

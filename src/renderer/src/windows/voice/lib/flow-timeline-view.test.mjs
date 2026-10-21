@@ -2,7 +2,7 @@
 // 覆盖完整历史、编辑回卷、实时续聊、任务／工具与交付。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectFlowTimeline } from './flow-timeline-view.ts';
+import { createFlowTimelineProjector, projectFlowTimeline } from './flow-timeline-view.ts';
 import { normalizeFlowHistory } from '../../../../../main/services/flow-bootstrap.mjs';
 import { applyFlowFact } from '../../../../../shared/conversation-flow.mjs';
 
@@ -13,6 +13,40 @@ const snapshot = (timeline, tasks = {}) => ({
 });
 // 旧损坏材料须先经过生产恢复归一化；renderer 不再承担整表历史兜底。
 const recoveredView = (flow, turns) => projectFlowTimeline(normalizeFlowHistory(flow, turns).snapshot, turns);
+
+test('流式展示只跟随当前助手尾段，派单切段与并入输入后的旧行立即收走光标资格', () => {
+  const project = createFlowTimelineProjector();
+  const first = { itemId: 'first', kind: 'assistant', runId: 'r', parts: [
+    { partId: 'p1', kind: 'text', content: '先核对。' },
+  ] };
+  const running = { ...snapshot([first]), activeRunId: 'r', runs: { r: { startedAt: 1 } } };
+  assert.equal(project(running).transcripts[0].streaming, true);
+
+  const delegated = { ...first, parts: [...first.parts,
+    { partId: 'd', kind: 'delegation', toolCallId: 'call', status: 'running' },
+  ] };
+  const dispatch = project({ ...running, timeline: [delegated] }).transcripts;
+  assert.equal(dispatch[0].live, true, '运行未结束，整轮复制与停止状态仍保留');
+  assert.equal(dispatch[0].streaming, false, '正在派单时前面的正文不再流式展示');
+
+  const resumed = { ...delegated, parts: [...delegated.parts,
+    { partId: 'p2', kind: 'text', content: '收到结果，继续。' },
+  ] };
+  const rows = project({ ...running, timeline: [resumed] }).transcripts;
+  assert.deepEqual(rows.filter(row => row.live && row.streaming).map(row => row.text), ['收到结果，继续。']);
+
+  const next = { itemId: 'next', kind: 'assistant', runId: 'r', afterInputId: 'merged', parts: [
+    { partId: 'p3', kind: 'text', content: '处理补充要求。' },
+  ] };
+  const extended = { ...running, timeline: [resumed, next] };
+  const appended = project(extended).transcripts;
+  assert.equal(appended[2].streaming, false, '即便旧 item 引用不变，缓存也要刷新旧尾行');
+  assert.deepEqual(appended.filter(row => row.live && row.streaming).map(row => row.text), ['处理补充要求。']);
+  for (const outcome of ['completed', 'stopped', 'failed']) {
+    const closed = project({ ...extended, activeRunId: null, runs: { r: { startedAt: 1, closedAt: 9, outcome } } }).transcripts;
+    assert.equal(closed.filter(row => row.live && row.streaming).length, 0, `${outcome} 收口后没有流式段`);
+  }
+});
 
 test('编辑已载入会话第一条：新代 flow 立即替换旧代档案，回卷空窗也不复活旧分支', () => {
   const turns = [

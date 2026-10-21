@@ -4,7 +4,7 @@
  * 控件叠 h37-btn / h37-input-lg / h37-badge / h37-orb 共用类。只用 tokens.css 变量。
  */
 
-/* —— 画布与裸顶栏：左「← 返回」，右 5 段进度 —— */
+/* —— 画布与裸顶栏：左「← 返回」，右 4 段进度 —— */
 .setup-shell.onboarding-page {
   background: var(--bg-canvas);
 }
@@ -65,6 +65,85 @@
 .setup-shell .onboarding-scene {
   max-width: 440px;
   animation: hemi-drill var(--dur-4) var(--ease-out);
+}
+
+.setup-shell .onboarding-scene[data-wide='true'] {
+  max-width: 1040px;
+}
+
+.onboarding-model-panel,
+.onboarding-capabilities {
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--gap-section);
+}
+
+.onboarding-model-panel > .h37-section:first-child {
+  margin-top: 0;
+}
+
+.onboarding-model-fields {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-head);
+  min-width: 0;
+  max-width: 440px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.onboarding-model-fields > label {
+  font-size: var(--fs-13);
+  color: var(--body);
+}
+
+.onboarding-vision-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-top: var(--sp-16);
+}
+
+.onboarding-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.onboarding-capability {
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  padding: var(--sp-16);
+}
+
+.onboarding-capability summary {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.onboarding-capability summary span {
+  display: block;
+  margin-top: var(--sp-4);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+
+.onboarding-capability .h37-section {
+  margin-top: var(--gap-section);
+}
+
+.setup-shell .onboarding-mic-settings {
+  margin-top: var(--sp-16);
+}
+
+.setup-shell .onboarding-actions[data-row='true'] {
+  flex-wrap: wrap;
 }
 
 .setup-shell .onboarding-scene[data-dir='back'] {

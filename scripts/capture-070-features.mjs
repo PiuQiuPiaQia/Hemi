@@ -16,6 +16,7 @@ import { state } from '../src/main/state.mjs';
 import { disposeTaskManager } from '../src/main/ipc/task.ipc.mjs';
 import { getAgentRuntime } from '../src/main/ipc/llm.ipc.mjs';
 import { startMockSite, TEST_USER } from './mock-newapi-site.mjs';
+import { completeOnboardingUi } from './lib/complete-onboarding-ui.mjs';
 
 if (!process.env.HEMI_USER_DATA_DIR) throw Error('必须指定隔离 HEMI_USER_DATA_DIR');
 app.setName('hemi');
@@ -77,6 +78,12 @@ app.whenReady().then(async () => {
     server = http.createServer(async (req, res) => {
       let raw = ''; for await (const piece of req) raw += piece;
       const body = raw ? JSON.parse(raw) : {};
+      if (body.stream !== true) {
+        const handshake = body.tools?.some(tool => tool.function?.name === 'hemi_connection_check');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ model: body.model, choices: [{ message: handshake ? { role: 'assistant', tool_calls: [{ id: 'demo-check', type: 'function', function: { name: 'hemi_connection_check', arguments: '{"ok":true}' } }] } : { role: 'assistant', content: 'pong' } }] }));
+        return;
+      }
       const messages = body.messages ?? [];
       evidence.requests.push({ model: body.model, toolNames: (body.tools ?? []).map(t => t.function?.name), memoryPresent: JSON.stringify(messages).includes('先给结论') });
       const start = messages.findLastIndex(m => m.role === 'user');
@@ -99,17 +106,7 @@ app.whenReady().then(async () => {
     state.mainWindow.show();
     state.mainWindow.webContents.on('console-message', event => { if (event.level === 'error') evidence.errors.push(event.message); });
     await wait('!!document.querySelector(".onboarding-page")', '首次引导');
-    await click('开始设置');
-    await wait('document.querySelector(".onboarding-page")?.dataset.step==="microphone"', '麦克风步骤');
-    await sleep(400);
-    if (await exec('[...document.querySelectorAll("button")].some(e=>e.textContent.includes("稍后开启"))')) await click('稍后开启');
-    await click('继续');
-    await wait('!!document.querySelector("#onboarding-asr-key")', '语音配置');
-    await input('#onboarding-asr-key', 'hemi-demo-not-a-real-voice-key'); await click('保存并继续');
-    await wait('!!document.querySelector("#onboarding-model-url")', '模型配置');
-    await input('#onboarding-model-url', modelUrl); await input('#onboarding-model-name', 'demo-quality'); await input('#onboarding-model-key', 'hemi-demo-not-a-real-model-key'); await click('保存并继续');
-    await wait('document.querySelector(".onboarding-page")?.dataset.step==="done"', '配置完成'); await click('开始使用');
-    await wait('!document.querySelector(".onboarding-page")', '真实应用主页');
+    await completeOnboardingUi({ exec, baseUrl: modelUrl, model: 'demo-quality', apiKey: 'hemi-demo-not-a-real-model-key' });
     const saved = await exec(`window.hemiVoice.saveModelProfile(${j({ name: '演示模型服务', baseUrl: modelUrl, apiKey: 'hemi-demo-not-a-real-model-key', makeDefault: true, models: [{ id: 'quality', model: 'demo-quality', supportsVision: true }, { id: 'fast', model: 'demo-fast' }, { id: 'reasoning', model: 'demo-reasoning', supportsVision: true }] })})`);
     check('经设置 IPC 保存演示模型', saved.ok);
     for (const [slot, model] of Object.entries({ main: saved.modelKeys[0], explorer: saved.modelKeys[1], oracle: saved.modelKeys[2], fixer: saved.modelKeys[0], designer: saved.modelKeys[2], fallback: saved.modelKeys[1] })) await exec(`window.hemiVoice.saveRoleModel(${j({ [slot]: model })})`);
@@ -143,7 +140,7 @@ app.whenReady().then(async () => {
     await wait('!![...document.querySelectorAll(".h37-chip")].find(e=>e.textContent.includes("mock-gpt-5.2"))', '型号候选');
     await click('mock-gpt-5.2', 'document.querySelector(".h47n")');
     await wait('[...document.querySelectorAll("button")].some(e=>e.textContent.includes("创建 Key 并导入")&&!e.disabled)', '导入就绪');
-    await click('创建 Key 并导入');
+    await click('创建 Key 并导入', 'document.querySelector(".h47n-submit")');
     await wait('document.querySelector(".h47n")?.dataset.phase==="success"', '真实导入成功', 50000);
     check('本机 New API 实际创建 Key 一次', site.state.createCalls === 1);
     await shot('feature-newapi'); await click('完成');

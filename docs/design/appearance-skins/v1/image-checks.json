@@ -1,0 +1,105 @@
+{
+  "scope": "read-only image metadata and local material preview; no production theme implementation",
+  "files": [
+    {
+      "path": "masters/cafe-blue.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1135,
+        1386
+      ]
+    },
+    {
+      "path": "portraits/cafe-blue.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "path": "masters/cafe-purple.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1197,
+        1314
+      ]
+    },
+    {
+      "path": "portraits/cafe-purple.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "path": "masters/cafe-orange.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1060,
+        1484
+      ]
+    },
+    {
+      "path": "portraits/cafe-orange.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "path": "masters/cafe-gold.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1114,
+        1412
+      ]
+    },
+    {
+      "path": "portraits/cafe-gold.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "path": "masters/cafe-red.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1110,
+        1417
+      ]
+    },
+    {
+      "path": "portraits/cafe-red.png",
+      "rgba": true,
+      "hasTransparentBackground": true,
+      "substantialNearOpaqueSubject": true,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    }
+  ]
+}

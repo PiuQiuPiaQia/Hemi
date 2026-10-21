@@ -32,6 +32,8 @@ export function projectFlowTimeline(
   const usable = turns.filter((turn) => !turn.withdrawn);
   const timeline = snapshot.timeline ?? [];
   const runs = snapshot.runs ?? {};
+  const tailItems = new Map<string, (typeof timeline)[number]>();
+  for (const item of timeline) if (item.kind === 'assistant') tailItems.set(item.runId, item);
   const byId = new Map(usable.map((turn) => [turn.id, turn]));
   const callCounts = new Map<string, number>();
   for (const item of timeline) for (const part of item.kind === 'assistant' ? item.parts : []) {
@@ -78,7 +80,8 @@ export function projectFlowTimeline(
     // Dedupe is ordered across the whole timeline even on a cache hit.
     const filteredParts = item.kind === 'assistant' ? deliverableFiltered(item.parts) : [];
     const archived = byId.get(item.kind === 'user' ? item.id : String((item as { legacyTurnId?: string }).legacyTurnId ?? ''));
-    const dependencies: unknown[] = [item, run, archived, ...filteredParts];
+    const isTailItem = tailItems.get(item.runId) === item;
+    const dependencies: unknown[] = [item, run, archived, isTailItem, ...filteredParts];
     for (const part of filteredParts) if (part.kind === 'delegation') {
       dependencies.push(callCounts.get(String(part.toolCallId ?? '')), snapshot.tasks[String(part.taskId ?? '')], ...(callSources.get(String(part.toolCallId ?? '')) ?? []));
     }
@@ -149,6 +152,7 @@ export function projectFlowTimeline(
         ...(notice && first.level === 'error' ? { kind: 'error' as const } : {}),
         ...(parts?.length ? { parts } : {}),
         ...(!run.closedAt && !run.legacy ? { live: true } : {}),
+        streaming: !run.closedAt && !run.legacy && isTailItem && segment.parts.at(-1) === item.parts.at(-1),
         ...(run.outcome === 'stopped' ? { replyStatus: 'stopped' as const } : {}),
         ...(legacy.legacyThinking ? { thinking: legacy.legacyThinking } : {}),
         ...(run.usage || legacy.legacyUsage ? { usage: (run.usage ?? legacy.legacyUsage) as TranscriptItem['usage'] } : {}),

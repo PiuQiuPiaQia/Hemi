@@ -42,7 +42,6 @@ import {
   type InputSource,
   type ListenMode,
   type MicrophonePermissionStatus,
-  type ModelEntryView,
   type ModelProviderView,
   type OnboardingState,
   type OnboardingStep,
@@ -68,7 +67,7 @@ import {
   type UsageRecord,
   type TurnPart,
 } from '@/shared/types';
-import { SetupScreen, type OnboardingModelDraft } from '@/windows/voice/setup-screen';
+import { SetupScreen } from '@/windows/voice/setup-screen';
 import { createLogger } from '@/shared/log';
 import { buildInputHistory } from '@/windows/voice/lib/input-history';
 import { VoiceScreen } from '@/windows/voice/voice-screen';
@@ -168,22 +167,8 @@ export default function Home() {
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [microphonePermission, setMicrophonePermission] =
     useState<MicrophonePermissionStatus>('not-determined');
-  // 032 五屏引导的草稿与编辑对象（语音 Key 与模型三项；跨步骤保留）。
+  // 可选语音服务草稿；模型接入由与设置共用的组件管理。
   const [asrKeyDraft, setAsrKeyDraft] = useState('');
-  const [onboardingModelDraft, setOnboardingModelDraft] = useState<OnboardingModelDraft>({
-    api: 'openai-completions',
-    baseUrl: '',
-    model: '',
-    apiKey: '',
-  });
-  /** 进行中重进时编辑既有默认组（provider 视图；null＝目录为空，首存新建）。 */
-  const [onboardingEditingGroup, setOnboardingEditingGroup] = useState<{
-    id: string;
-    name: string;
-    defaultModelId: string | null;
-    models: ModelEntryView[];
-    hasApiKey: boolean;
-  } | null>(null);
   // 032：主界面就近修复条（语音服务/麦克风问题；模型缺失走输入区既有提示）。
   const [repairHint, setRepairHint] = useState<{
     key: 'asr' | 'microphone';
@@ -2330,9 +2315,15 @@ export default function Home() {
   );
 
   const startAudioCapture = useCallback((stream: MediaStream) => {
+    const startedAt = performance.now();
+    const mark = (stage: string) => voiceLog.info(`采集启动：${stage}（${Math.round(performance.now() - startedAt)}ms）`);
+    mark('创建 AudioContext');
     const audioContext = new AudioContext();
+    mark('AudioContext 就绪；创建 analyser');
     const analyser = audioContext.createAnalyser();
+    mark('创建麦克风源');
     const source = audioContext.createMediaStreamSource(stream);
+    mark('创建采集处理器');
     const processor = audioContext.createScriptProcessor(
       CAPTURE_BUFFER_SIZE,
       1,
@@ -2362,8 +2353,11 @@ export default function Home() {
     // 直接证据，只有这里的请求/上报差异 + 主进程日志可对照——如实记录，不
     // 宣称「回声已消除」。
     const captureTrack = stream.getAudioTracks()[0];
+    mark('读取麦克风 settings');
     const trackSettings = captureTrack?.getSettings?.() ?? {};
+    mark('读取麦克风 capabilities');
     const trackCapabilities = captureTrack?.getCapabilities?.() ?? {};
+    mark('音频节点与设备信息已就绪');
     const chromiumVersion =
       /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? '未知';
     const audioDiagnostics = {
@@ -2585,6 +2579,7 @@ export default function Home() {
       }
 
       const result = await window.hemiVoice.startAsr(mode);
+      logChain(`接通⑤：收到语音服务启动回执 ok=${result.ok}`);
       if (!result.ok) {
         stream?.getTracks().forEach((track) => track.stop());
         if (duplexModeRef.current) {
@@ -2941,59 +2936,30 @@ export default function Home() {
     }
   }, []);
 
-  /** 进入模型步前预填草稿：进行中重进＝编辑既有默认组；目录为空＝首存新建。 */
-  const prepareOnboardingModelDraft = useCallback(async () => {
-    const bridge = window.hemiVoice;
-    if (!bridge) return;
-    try {
-      const directory = await bridge.listModelProfiles();
-      const provider = directory.providers.find((item) =>
-        item.models.some((model) => model.modelKey === directory.defaultModelId),
-      ) ?? null;
-      if (!provider) {
-        setOnboardingEditingGroup(null);
-        return; // 目录为空：草稿保持空白，保存时新建
-      }
-      const defaultModel =
-        provider.models.find((model) => model.modelKey === directory.defaultModelId)
-        ?? provider.models[0];
-      setOnboardingEditingGroup({
-        id: provider.id,
-        name: provider.name,
-        defaultModelId: directory.defaultModelId,
-        models: provider.models,
-        hasApiKey: provider.hasApiKey,
-      });
-      setOnboardingModelDraft((current) => ({
-        ...current,
-        api: provider.api === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions',
-        baseUrl: provider.baseUrl,
-        model: defaultModel.model,
-        apiKey: '',
-      }));
-    } catch {
-      /* 目录暂不可读：按新建处理，保存时按空目录首建 */
-    }
-  }, []);
-
   /** 032 前进/后退：主进程按步骤校验硬门槛，失败原因就地展示。 */
   const handleOnboardingAdvance = useCallback(
     async (to: OnboardingStep, permissionChoice?: 'granted' | 'skipped') => {
       const bridge = window.hemiVoice;
       if (!bridge) return;
+      setSavingConfig(true);
       setSetupError('');
-      const result = await bridge.advanceOnboarding({ to, permissionChoice });
-      if (!result?.ok) {
-        setSetupError(result?.message ?? '这一步没能继续，请重试。');
-        return;
+      try {
+        const result = await bridge.advanceOnboarding({ to, permissionChoice });
+        if (!result?.ok) {
+          setSetupError(result?.message ?? '这一步没能继续，请重试。');
+          return;
+        }
+        setOnboarding(result.state);
+      } catch (error) {
+        setSetupError(messageFromError(error, '这一步没能继续，请重试。'));
+      } finally {
+        setSavingConfig(false);
       }
-      setOnboarding(result.state);
-      if (result.state.step === 'model') void prepareOnboardingModelDraft();
     },
-    [prepareOnboardingModelDraft],
+    [],
   );
 
-  /** 032 第 3 屏：保存语音服务密钥（asr:save-config）→ 主进程复核持久成功才推进。 */
+  /** 可选语音页：保存密钥并回读核验，然后返回能力页。 */
   const handleSaveAsrKey = useCallback(async () => {
     const bridge = window.hemiVoice;
     const key = asrKeyDraft.trim();
@@ -3021,98 +2987,21 @@ export default function Home() {
         hasApiKey: true,
         keyStoredSecurely: true,
       });
-      const advanced = await bridge.advanceOnboarding({ to: 'model' });
+      const advanced = await bridge.advanceOnboarding({ to: 'capabilities' });
       if (!advanced?.ok) {
-        setSetupError(advanced?.message ?? '密钥已保存，但没能进入下一步，请重试。');
+        setSetupError(advanced?.message ?? '密钥已保存，但没能返回能力设置，请重试。');
         return;
       }
       setOnboarding(advanced.state);
       setAsrKeyDraft('');
-      void prepareOnboardingModelDraft();
     } catch (error) {
       setSetupError(messageFromError(error, '密钥保存失败，请重试。'));
     } finally {
       setSavingConfig(false);
     }
-  }, [asrKeyDraft, configForm, prepareOnboardingModelDraft, updateConfigForm]);
+  }, [asrKeyDraft, configForm, updateConfigForm]);
 
-  /**
-   * 032 第 4 屏：保存为 031 配置组并设为默认（用户裁决：首启保存的分组一律
-   * 默认）；回读核验默认组就是刚保存的组且三项完整，再进完成屏。
-   */
-  const handleSaveOnboardingModel = useCallback(async () => {
-    const bridge = window.hemiVoice;
-    if (!bridge) return;
-    const draft = onboardingModelDraft;
-    const baseUrl = draft.baseUrl.trim();
-    const model = draft.model.trim();
-    const apiKey = draft.apiKey.trim();
-    if (!baseUrl || !model || (!apiKey && !(onboardingEditingGroup?.hasApiKey))) {
-      setSetupError('请先填完接口地址、模型名称和 API Key。');
-      return;
-    }
-    setSavingConfig(true);
-    setSetupError('');
-    try {
-      const editing = onboardingEditingGroup;
-      // 编辑既有默认组时保留该组其余模型（默认模型条目按草稿改写）。
-      const models = editing
-        ? editing.models.map((entry) =>
-            entry.modelKey === editing.defaultModelId
-              ? { id: entry.id, model, thinkingLevel: entry.thinkingLevel, supportsVision: entry.supportsVision, visionModel: entry.visionModel }
-              : { id: entry.id, model: entry.model, thinkingLevel: entry.thinkingLevel, supportsVision: entry.supportsVision, visionModel: entry.visionModel },
-          )
-        : [{ model }];
-      const saved = await bridge.saveModelProfile({
-        ...(editing ? { id: editing.id, name: editing.name } : { name: '主脑模型' }),
-        api: draft.api,
-        baseUrl,
-        ...(apiKey ? { apiKey } : {}),
-        models,
-        makeDefault: true,
-      });
-      // 回读核验：默认组＝刚保存的组，且接口地址/型号/已加密 Key 完整。
-      const directory = await bridge.listModelProfiles();
-      const provider = directory.providers.find((item) => item.id === saved.providerId) ?? null;
-      const defaultModel = provider?.models.find((entry) => entry.modelKey === directory.defaultModelId) ?? null;
-      const verified = Boolean(
-        provider
-          && defaultModel
-          && defaultModel.modelKey === directory.defaultModelId
-          && provider.baseUrl.trim()
-          && defaultModel.model.trim()
-          && provider.keyStoredSecurely,
-      );
-      if (!verified || !provider) {
-        setSetupError('配置保存了，但没有成为生效的默认模型，请重试一次。');
-        return;
-      }
-      setOnboardingEditingGroup((current) =>
-        current
-          ? { ...current, models: provider.models, defaultModelId: directory.defaultModelId, hasApiKey: provider.hasApiKey }
-          : {
-              id: provider.id,
-              name: provider.name,
-              defaultModelId: directory.defaultModelId,
-              models: provider.models,
-              hasApiKey: provider.hasApiKey,
-            },
-      );
-      const advanced = await bridge.advanceOnboarding({ to: 'done' });
-      if (!advanced?.ok) {
-        setSetupError(advanced?.message ?? '配置已保存，但没能进入下一步，请重试。');
-        return;
-      }
-      setOnboarding(advanced.state);
-      setOnboardingModelDraft((current) => ({ ...current, apiKey: '' }));
-    } catch (error) {
-      setSetupError(messageFromError(error, '模型配置保存失败，输入仍保留，请重试。'));
-    } finally {
-      setSavingConfig(false);
-    }
-  }, [onboardingEditingGroup, onboardingModelDraft]);
-
-  /** 032 完成屏「开始使用」：主进程复核双门槛后写完成版本；恢复主界面就绪态。 */
+  /** 完成屏「开始使用」：主进程复核默认模型后写完成版本并刷新主界面。 */
   const handleCompleteOnboarding = useCallback(async () => {
     const bridge = window.hemiVoice;
     if (!bridge) return;
@@ -3146,19 +3035,6 @@ export default function Home() {
       setSavingConfig(false);
     }
   }, [reloadModelProfiles]);
-
-  /** 032 测试连接：读当前未保存表单发真实请求（不落盘；结果由组件按序号丢弃过时回执）。 */
-  const handleTestOnboardingModel = useCallback(async (draft: OnboardingModelDraft) => {
-    const bridge = window.hemiVoice;
-    if (!bridge) return { ok: false, error: '测试调用不可用。' };
-    return bridge.testModelProfile({
-      ...(onboardingEditingGroup?.defaultModelId ? { modelKey: onboardingEditingGroup.defaultModelId } : {}),
-      api: draft.api,
-      baseUrl: draft.baseUrl.trim() || undefined,
-      model: draft.model.trim() || undefined,
-      apiKey: draft.apiKey.trim() || undefined,
-    });
-  }, [onboardingEditingGroup]);
 
   /**
    * 032 设置保存解耦：模型组由 031 ModelProfilesSection 独立保存，这里的
@@ -3818,18 +3694,11 @@ export default function Home() {
         asrKeyDraft={asrKeyDraft}
         onAsrKeyChange={setAsrKeyDraft}
         modelSaved={onboarding.modelComplete}
-        modelDraft={onboardingModelDraft}
-        onModelFieldChange={(patch) =>
-          setOnboardingModelDraft((current) => ({ ...current, ...patch }))
-        }
-        modelEditingSavedGroup={Boolean(onboardingEditingGroup?.hasApiKey)}
         errorMessage={setupError}
         onRequestMicrophone={() => void handleRequestMicrophone()}
-        onAdvance={(to, permissionChoice) => void handleOnboardingAdvance(to, permissionChoice)}
+        onAdvance={handleOnboardingAdvance}
         onSaveAsrKey={() => void handleSaveAsrKey()}
-        onSaveModel={() => void handleSaveOnboardingModel()}
         onComplete={() => void handleCompleteOnboarding()}
-        onTestModel={handleTestOnboardingModel}
         onOpenExternal={(url) => void window.hemiVoice?.openExternal(url)}
         onOpenMicrophoneSettings={() => void window.hemiVoice?.openMicrophoneSettings()}
       />

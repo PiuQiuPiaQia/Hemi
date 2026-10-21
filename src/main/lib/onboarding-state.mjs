@@ -3,7 +3,7 @@
 // 状态存 userData/onboarding.json（临时文件 + rename 原子写；进程内单飞初始化）。
 // 只存非敏感值（version/phase/step/permissionChoice/时间戳）——Key、URL、模型
 // 配置一律以各自的存储为权威，这里按需读取判定：
-// - 语音服务门槛＝doubao-asr.json 存在可解密的密文 Key（环境变量/仅内存态不算）；
+// - 语音服务为可选能力，快照报告密钥是否已保存，但不阻塞文字使用；
 // - 模型门槛＝031 配置组目录存在默认组，且接口地址、型号与已加密保存的 Key 完整
 //   （依赖注入的 defaultModelComplete 由 IPC 层用目录视图实现，环境覆盖不参与）。
 //
@@ -13,9 +13,17 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export const ONBOARDING_VERSION = 1;
-/** 五屏：欢迎 → 麦克风 → 语音服务 → 文本模型 → 完成。 */
-export const ONBOARDING_STEPS = ['welcome', 'microphone', 'asr', 'model', 'done'];
+export const ONBOARDING_VERSION = 2;
+/** 主流程：欢迎 → 模型 → 可选能力 → 完成；麦克风/ASR 是可选能力的子页。 */
+export const ONBOARDING_STEPS = ['welcome', 'model', 'capabilities', 'microphone', 'asr', 'done'];
+const NEXT_STEPS = {
+  welcome: ['model'],
+  model: ['welcome', 'capabilities'],
+  capabilities: ['model', 'microphone', 'done'],
+  microphone: ['capabilities', 'asr'],
+  asr: ['microphone', 'capabilities'],
+  done: ['capabilities'],
+};
 const PERMISSION_CHOICES = ['pending', 'granted', 'skipped'];
 
 export function stepIndexOf(step) {
@@ -24,9 +32,11 @@ export function stepIndexOf(step) {
 
 function normalizeSnapshot(raw) {
   const phase = raw?.phase === 'complete' ? 'complete' : 'in_progress';
-  const step = ONBOARDING_STEPS.includes(raw?.step)
+  let step = ONBOARDING_STEPS.includes(raw?.step)
     ? raw.step
     : (phase === 'complete' ? 'done' : 'welcome');
+  // 旧引导尚未完成时先接回模型配置；保留已存模型/语音密钥与权限选择。
+  if (phase !== 'complete' && raw?.version !== ONBOARDING_VERSION && step !== 'welcome') step = 'model';
   const permissionChoice = PERMISSION_CHOICES.includes(raw?.permissionChoice)
     ? raw.permissionChoice
     : 'pending';
@@ -43,12 +53,11 @@ function normalizeSnapshot(raw) {
 }
 
 /** 进行中的进度与真实配置对齐：配置缺失退回相应配置步（只退不进）。 */
-export function alignStep(snapshot, { asrSaved, modelComplete }) {
+export function alignStep(snapshot, { modelComplete }) {
   if (snapshot.phase === 'complete') return snapshot;
   let index = stepIndexOf(snapshot.step);
   if (index < 0) index = 0;
   if (!modelComplete && index > stepIndexOf('model')) index = stepIndexOf('model');
-  if (!asrSaved && index > stepIndexOf('asr')) index = stepIndexOf('asr');
   if (ONBOARDING_STEPS[index] === snapshot.step) return snapshot;
   return { ...snapshot, step: ONBOARDING_STEPS[index] };
 }
@@ -143,7 +152,7 @@ export function createOnboardingStore({
   }
 
   /**
-   * 前进／后退一步：只允许相邻前进或任意后退；主进程按目标步校验硬门槛。
+   * 按主流程与可选子页导航；模型是唯一配置门槛。
    * 权限选择随麦克风步前进落账（granted/skipped），其余时候仅接受就地更新。
    */
   async function advance({ to, permissionChoice } = {}) {
@@ -156,33 +165,29 @@ export function createOnboardingStore({
     }
     const gates = await readGates();
     const from = alignStep(snapshot, gates).step;
-    const fromIndex = stepIndexOf(from);
     const toIndex = stepIndexOf(to);
-    if (toIndex > fromIndex + 1) {
-      return { ok: false, message: '引导不能跳步' };
+    if (to !== from && !NEXT_STEPS[from]?.includes(to)) {
+      return { ok: false, message: '请先完成当前引导步骤' };
     }
     const choice = PERMISSION_CHOICES.includes(permissionChoice)
       ? permissionChoice
       : snapshot.permissionChoice;
-    if (fromIndex === stepIndexOf('microphone') && toIndex === stepIndexOf('asr') && choice === 'pending') {
-      return { ok: false, message: '先选择「允许麦克风」或「稍后开启」' };
+    if (from === 'microphone' && to === 'asr' && choice !== 'granted') {
+      return { ok: false, message: '允许麦克风后可继续配置语音，或选择暂时跳过' };
     }
-    if (toIndex >= stepIndexOf('model') && !gates.asrSaved) {
-      return { ok: false, message: '语音服务密钥还没有保存成功' };
-    }
-    if (toIndex >= stepIndexOf('done') && !gates.modelComplete) {
-      return { ok: false, message: '先保存一组完整的主脑模型配置' };
+    if (toIndex > stepIndexOf('model') && !gates.modelComplete) {
+      return { ok: false, message: '先连接一个模型' };
     }
     await persist({ ...snapshot, step: to, permissionChoice: choice, updatedAt: now() });
     return { ok: true, state: await getState() };
   }
 
-  /** 完成屏「开始使用」：主进程再次校验双配置后写完成版本（幂等）。 */
+  /** 完成屏「开始使用」：模型就绪即可完成，语音配置可留空（幂等）。 */
   async function complete() {
     await ensureInitialized();
     if (snapshot.phase === 'complete') return { ok: true, state: await getState() };
     const gates = await readGates();
-    if (!gates.asrSaved) return { ok: false, message: '语音服务密钥还没有保存成功' };
+    if (snapshot.step !== 'done') return { ok: false, message: '请先完成当前引导步骤' };
     if (!gates.modelComplete) return { ok: false, message: '主脑模型还没有保存完整' };
     const stamped = now();
     await persist({

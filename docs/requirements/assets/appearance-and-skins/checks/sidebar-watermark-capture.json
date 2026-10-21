@@ -1,0 +1,129 @@
+{
+  "passed": true,
+  "commit": "e556f9844e2d3e50c0c789ed2a29c22d08ba6b27",
+  "environment": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "155.0.8059.85",
+    "viewport": {
+      "width": 1440,
+      "height": 960,
+      "scale": 2
+    }
+  },
+  "demoSessions": 50,
+  "opacity": 0.13,
+  "before": {
+    "clientHeight": 852,
+    "scrollHeight": 1814,
+    "scrollTop": 0
+  },
+  "after": {
+    "clientHeight": 852,
+    "scrollHeight": 1814,
+    "scrollTop": 0
+  },
+  "geometryUnchanged": true,
+  "watermarkFixedWhileScrolling": true,
+  "pointerCheck": [
+    {
+      "text": "整理下载文件夹 · 3",
+      "hit": true
+    },
+    {
+      "text": "本周项目进展 · 3",
+      "hit": true
+    },
+    {
+      "text": "工作流参数检查 · 3",
+      "hit": true
+    },
+    {
+      "text": "模型路由设置 · 3",
+      "hit": true
+    },
+    {
+      "text": "资料来源核对 · 3",
+      "hit": true
+    },
+    {
+      "text": "产品界面讨论 · 3",
+      "hit": true
+    },
+    {
+      "text": "长对话性能检查 · 3",
+      "hit": true
+    },
+    {
+      "text": "会议记录整理 · 3",
+      "hit": true
+    },
+    {
+      "text": "周末阅读笔记 · 3",
+      "hit": true
+    },
+    {
+      "text": "附件与文件预览 · 3",
+      "hit": true
+    },
+    {
+      "text": "导出日志按钮 · 4",
+      "hit": true
+    },
+    {
+      "text": "人物主题与皮肤切换 · 4",
+      "hit": true
+    },
+    {
+      "text": "整理下载文件夹 · 4",
+      "hit": true
+    },
+    {
+      "text": "本周项目进展 · 4",
+      "hit": true
+    },
+    {
+      "text": "工作流参数检查 · 4",
+      "hit": true
+    },
+    {
+      "text": "模型路由设置 · 4",
+      "hit": true
+    },
+    {
+      "text": "资料来源核对 · 4",
+      "hit": true
+    },
+    {
+      "text": "产品界面讨论 · 4",
+      "hit": true
+    },
+    {
+      "text": "长对话性能检查 · 4",
+      "hit": true
+    },
+    {
+      "text": "会议记录整理 · 4",
+      "hit": true
+    },
+    {
+      "text": "周末阅读笔记 · 4",
+      "hit": true
+    },
+    {
+      "text": "附件与文件预览 · 4",
+      "hit": true
+    },
+    {
+      "text": "导出日志按钮 · 5",
+      "hit": true
+    },
+    {
+      "text": "人物主题与皮肤切换 · 5",
+      "hit": true
+    }
+  ],
+  "errors": [],
+  "scope": "current renderer plus preview-only CSS; simulated sessions; no product implementation"
+}

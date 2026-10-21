@@ -7,7 +7,9 @@ Use Node.js 22.19 or later in the Node 22 line on macOS. Install dependencies wi
 - `node scripts/check-spacing.mjs`: spacing token checks.
 - `HEMI_SMOKE_TEST=1 npx electron .`: isolated application smoke test.
 
-Keep changes scoped and preserve unrelated work. Check the actual IPC and production services for changed behavior; mocks only establish behavior at their boundary. For UI lifecycle changes, verify both the Vite development renderer and the built renderer. Record the tested commit, environment, commands, and remaining gaps.
+Choose validation based on the change's impact. For small, scoped changes, run only relevant checks and targeted tests. Do not run the full test suite or broad Electron/device regression by default. Run the full test suite for broad-impact changes and releases, with application regression checks covering the affected areas. The commands above are available checks, not a mandatory checklist for every change. Expand validation only when failures or unresolved concerns justify it.
+
+Keep changes scoped and preserve unrelated work. When a change affects IPC or production services, verify the changed behavior against the actual implementation; mocks only establish behavior at their boundary. For UI lifecycle changes, verify the affected behavior in both the Vite development renderer and the built renderer. Record the tested commit, environment, commands, and remaining gaps.
 
 Development data is separate from installed application data. Set `HEMI_USER_DATA_DIR` to a fresh temporary directory for isolated verification. Keep credentials, personal conversations, recordings, and local application data out of commits.
 

@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "variant": "v3",
+  "commit": "e556f9844e2d3e50c0c789ed2a29c22d08ba6b27",
+  "environment": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "155.0.8059.85"
+  },
+  "geometryUnchanged": true,
+  "entryAboveSettings": true,
+  "skins": 6,
+  "selectionLocalOnly": true,
+  "escapeAndFocusReturn": true,
+  "outsideClose": true,
+  "backgroundToggle": false,
+  "backgroundFollowsSkin": true,
+  "compactWindowFits": true,
+  "errors": [],
+  "limitations": "preview DOM over current renderer; no product IPC/persistence; non-blue full character artwork not integrated"
+}

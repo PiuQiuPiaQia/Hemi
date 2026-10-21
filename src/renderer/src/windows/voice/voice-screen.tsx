@@ -1705,6 +1705,7 @@ function ChatTurnItem({
   };
 
   const editable = isEditableMessage(item) && !busy && !editing;
+  const streaming = item.live && item.streaming !== false;
 
   // —— 用户消息：右对齐气泡（设计稿 user-message）——
   if (item.author === 'user') {
@@ -1890,13 +1891,13 @@ function ChatTurnItem({
           未完成 · 已停止
         </span>
       ) : null}
-      {item.live && !item.parts?.length && !item.text ? <WaitingStatus /> : null}
-      {item.live && item.text && !item.parts?.some((part) => part.type !== 'text') ? <span className="h24-reply-status" role="status">回应中</span> : null}
+      {streaming && !item.parts?.length && !item.text ? <WaitingStatus /> : null}
+      {streaming && item.text && !item.parts?.some((part) => part.type !== 'text') ? <span className="h24-reply-status" role="status">回应中</span> : null}
       {/* 056：有按序的段（思考／正文／工具组）就照接口返回的先后从上往下排；旧档走 048 形态。 */}
       {item.parts?.length ? (
         <TurnParts
           parts={item.parts}
-          live={item.live}
+          live={streaming}
           renderText={renderText ?? ((text: string) => renderReplyText(text))}
           renderTask={renderTask}
           onOpenDeliverable={onOpenDeliverable}

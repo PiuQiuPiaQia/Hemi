@@ -1,0 +1,463 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-10-21",
+  "status": "design-source-v1",
+  "productionIntegrated": false,
+  "colorStatus": "starter-palette-requires-full-page-validation",
+  "imageGeneration": "built-in image_gen",
+  "skins": [
+    {
+      "id": "classic",
+      "name": "经典",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#f6f6f5",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#f2f5f1",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#e9e9e7",
+        "borderControl": "#8b8b88",
+        "accent": "#566e5d",
+        "accentText": "#566e5d",
+        "fillPrimary": "#1a1a19",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {},
+      "watermark": null
+    },
+    {
+      "id": "cafe-blue",
+      "name": "晴海蓝",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#edf2fb",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#edf3ff",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#dce4f0",
+        "borderControl": "#8b8b88",
+        "accent": "#385f9f",
+        "accentText": "#385f9f",
+        "fillPrimary": "#385f9f",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {
+        "master": {
+          "path": "masters/cafe-blue.png",
+          "format": "PNG",
+          "width": 1135,
+          "height": 1386,
+          "bytes": 2165348,
+          "sha256": "9731518b3e1a165b928cfe02d3503977a29d7a05ae7b21205c08481ed476cb9c",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.27722,
+          "nearOpaquePixelFraction": 0.66461,
+          "alphaMin": 0,
+          "alphaMax": 255
+        },
+        "portrait": {
+          "path": "portraits/cafe-blue.png",
+          "format": "PNG",
+          "width": 1254,
+          "height": 1254,
+          "bytes": 2078120,
+          "sha256": "1e901793f14c7dbaca115f7aafe8c3de56987d5c3149161b0f7b45674f7e57e7",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.28069,
+          "nearOpaquePixelFraction": 0.69364,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "frames": {
+        "card": {
+          "source": "portrait",
+          "width": 102,
+          "height": 100,
+          "scale": 1.22,
+          "origin": "50% 56%",
+          "leftFadePercent": 18
+        },
+        "welcomeAvatar": {
+          "source": "portrait",
+          "width": 40,
+          "height": 40,
+          "scale": 1.18,
+          "origin": "50% 58%"
+        },
+        "sidebar": {
+          "source": "master",
+          "width": 270,
+          "right": -20,
+          "bottom": 16,
+          "opacity": 0.13,
+          "maskStopsPercent": [
+            0,
+            12,
+            84,
+            100
+          ]
+        }
+      },
+      "watermark": "fixed-to-sidebar-not-scroll-content"
+    },
+    {
+      "id": "cafe-purple",
+      "name": "月见紫",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#f4effa",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#f6f2fc",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#e4dceb",
+        "borderControl": "#8b8b88",
+        "accent": "#70509c",
+        "accentText": "#70509c",
+        "fillPrimary": "#70509c",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {
+        "master": {
+          "path": "masters/cafe-purple.png",
+          "format": "PNG",
+          "width": 1197,
+          "height": 1314,
+          "bytes": 1913836,
+          "sha256": "c78cbcf5d334e7bf043fcf1da0bb6785cd8d2038d6379e63a703cbd600cd446a",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.31616,
+          "nearOpaquePixelFraction": 0.63513,
+          "alphaMin": 0,
+          "alphaMax": 255
+        },
+        "portrait": {
+          "path": "portraits/cafe-purple.png",
+          "format": "PNG",
+          "width": 1254,
+          "height": 1254,
+          "bytes": 1953735,
+          "sha256": "3688400a4931839aea79fcd6a3c483a51da082d5e2fbe331c0e22d07b7797a1b",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.28791,
+          "nearOpaquePixelFraction": 0.67261,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "frames": {
+        "card": {
+          "source": "portrait",
+          "width": 102,
+          "height": 100,
+          "scale": 1.22,
+          "origin": "50% 56%",
+          "leftFadePercent": 18
+        },
+        "welcomeAvatar": {
+          "source": "portrait",
+          "width": 40,
+          "height": 40,
+          "scale": 1.18,
+          "origin": "50% 58%"
+        },
+        "sidebar": {
+          "source": "master",
+          "width": 270,
+          "right": -20,
+          "bottom": 16,
+          "opacity": 0.13,
+          "maskStopsPercent": [
+            0,
+            12,
+            84,
+            100
+          ]
+        }
+      },
+      "watermark": "fixed-to-sidebar-not-scroll-content"
+    },
+    {
+      "id": "cafe-orange",
+      "name": "焦糖橙",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#f8efe7",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#fbf2ea",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#e8dbce",
+        "borderControl": "#8b8b88",
+        "accent": "#a6502e",
+        "accentText": "#a6502e",
+        "fillPrimary": "#a6502e",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {
+        "master": {
+          "path": "masters/cafe-orange.png",
+          "format": "PNG",
+          "width": 1060,
+          "height": 1484,
+          "bytes": 2557156,
+          "sha256": "0f7785c0ad02d278dc372bd645dc4ca0ac7244f7aea5c61ebed958bf22696f1f",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.22399,
+          "nearOpaquePixelFraction": 0.70538,
+          "alphaMin": 0,
+          "alphaMax": 255
+        },
+        "portrait": {
+          "path": "portraits/cafe-orange.png",
+          "format": "PNG",
+          "width": 1254,
+          "height": 1254,
+          "bytes": 2425332,
+          "sha256": "1ed5a67d1756f200a3557f6f8699484840829fb3ffe268f3d97a60193cc73c70",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.20857,
+          "nearOpaquePixelFraction": 0.75861,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "frames": {
+        "card": {
+          "source": "portrait",
+          "width": 102,
+          "height": 100,
+          "scale": 1.22,
+          "origin": "50% 56%",
+          "leftFadePercent": 18
+        },
+        "welcomeAvatar": {
+          "source": "portrait",
+          "width": 40,
+          "height": 40,
+          "scale": 1.18,
+          "origin": "50% 58%"
+        },
+        "sidebar": {
+          "source": "master",
+          "width": 270,
+          "right": -20,
+          "bottom": 16,
+          "opacity": 0.13,
+          "maskStopsPercent": [
+            0,
+            12,
+            84,
+            100
+          ]
+        }
+      },
+      "watermark": "fixed-to-sidebar-not-scroll-content"
+    },
+    {
+      "id": "cafe-gold",
+      "name": "蜜糖金",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#faf4e5",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#fbf5e8",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#e8dfc9",
+        "borderControl": "#8b8b88",
+        "accent": "#876318",
+        "accentText": "#876318",
+        "fillPrimary": "#876318",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {
+        "master": {
+          "path": "masters/cafe-gold.png",
+          "format": "PNG",
+          "width": 1114,
+          "height": 1412,
+          "bytes": 2272182,
+          "sha256": "80193d3dbf56174493eeea2a79995ad5a0724bfe015cde4d28da5153b32bdd19",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.19661,
+          "nearOpaquePixelFraction": 0.7596,
+          "alphaMin": 0,
+          "alphaMax": 255
+        },
+        "portrait": {
+          "path": "portraits/cafe-gold.png",
+          "format": "PNG",
+          "width": 1254,
+          "height": 1254,
+          "bytes": 2186147,
+          "sha256": "80fc7bb84ce1dc24280ae9979b345cae58b1136646af5b843d83cbe3b1312934",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.18275,
+          "nearOpaquePixelFraction": 0.78787,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "frames": {
+        "card": {
+          "source": "portrait",
+          "width": 102,
+          "height": 100,
+          "scale": 1.22,
+          "origin": "50% 56%",
+          "leftFadePercent": 18
+        },
+        "welcomeAvatar": {
+          "source": "portrait",
+          "width": 40,
+          "height": 40,
+          "scale": 1.18,
+          "origin": "50% 58%"
+        },
+        "sidebar": {
+          "source": "master",
+          "width": 270,
+          "right": -20,
+          "bottom": 16,
+          "opacity": 0.13,
+          "maskStopsPercent": [
+            0,
+            12,
+            84,
+            100
+          ]
+        }
+      },
+      "watermark": "fixed-to-sidebar-not-scroll-content"
+    },
+    {
+      "id": "cafe-red",
+      "name": "围巾红",
+      "supportedModes": [
+        "light"
+      ],
+      "palette": {
+        "surfaceRail": "#f9efed",
+        "surfaceCanvas": "#ffffff",
+        "surfacePanel": "#ffffff",
+        "surfaceSelected": "#fcf2f0",
+        "textPrimary": "#1a1a19",
+        "textBody": "#2d2d2c",
+        "textSecondary": "#696966",
+        "borderDecorative": "#eadbd8",
+        "borderControl": "#8b8b88",
+        "accent": "#a63034",
+        "accentText": "#a63034",
+        "fillPrimary": "#a63034",
+        "onPrimary": "#ffffff",
+        "statusSuccess": "#2f6b45",
+        "statusRunning": "#526b8c",
+        "statusWarning": "#8a641d",
+        "statusDanger": "#b4483d"
+      },
+      "assets": {
+        "master": {
+          "path": "masters/cafe-red.png",
+          "format": "PNG",
+          "width": 1110,
+          "height": 1417,
+          "bytes": 1866480,
+          "sha256": "43e8f85223c916a9b6113bc62ad714e0c7dff1b1d23d25242b5597b2d72fa085",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.40808,
+          "nearOpaquePixelFraction": 0.57141,
+          "alphaMin": 0,
+          "alphaMax": 255
+        },
+        "portrait": {
+          "path": "portraits/cafe-red.png",
+          "format": "PNG",
+          "width": 1254,
+          "height": 1254,
+          "bytes": 1813253,
+          "sha256": "2d365466162739cc52c8572fcd94dfc4fedc67ba8e112b157cd1f9ae19c011ce",
+          "hasAlpha": true,
+          "transparentPixelFraction": 0.41133,
+          "nearOpaquePixelFraction": 0.56687,
+          "alphaMin": 0,
+          "alphaMax": 255
+        }
+      },
+      "frames": {
+        "card": {
+          "source": "portrait",
+          "width": 102,
+          "height": 100,
+          "scale": 1.22,
+          "origin": "50% 56%",
+          "leftFadePercent": 18
+        },
+        "welcomeAvatar": {
+          "source": "portrait",
+          "width": 40,
+          "height": 40,
+          "scale": 1.18,
+          "origin": "50% 58%"
+        },
+        "sidebar": {
+          "source": "master",
+          "width": 270,
+          "right": -20,
+          "bottom": 16,
+          "opacity": 0.13,
+          "maskStopsPercent": [
+            0,
+            12,
+            84,
+            100
+          ]
+        }
+      },
+      "watermark": "fixed-to-sidebar-not-scroll-content"
+    }
+  ]
+}
