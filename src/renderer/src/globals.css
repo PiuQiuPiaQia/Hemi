@@ -6492,21 +6492,67 @@ html.kb-nav .compact-shell .h24-msg-copy:focus-visible {
 
 @media (min-width: 1180px) {
   .compact-shell .h24-workspace[data-preview-open='true'] {
-    grid-template-columns: var(--h24-sidebar-w) minmax(var(--h24-main-min-w), 1fr) minmax(360px, 410px);
+    grid-template-columns: var(--h24-sidebar-w) minmax(var(--h24-main-min-w), 1fr) minmax(360px, var(--h24-preview-w, 410px));
   }
 
   .compact-shell .h24-workspace[data-preview-open='true'] .h24-preview {
     position: relative;
     inset: auto;
-    border-left: 1px solid var(--n-150);
+    border-left: none;
   }
 
   .compact-shell.h24-shell[data-market-open='true'] .h24-workspace[data-preview-open='true'] {
-    grid-template-columns: minmax(var(--h24-main-min-w), 1fr) minmax(360px, 410px);
+    grid-template-columns: minmax(var(--h24-main-min-w), 1fr) minmax(360px, var(--h24-preview-w, 410px));
   }
 
   .compact-shell.h24-shell[data-market-open='true'] .h24-preview {
     inset: auto;
+  }
+}
+
+/* 预览面板宽度调整手柄：≥1180px 并排模式显示，贴在预览面板左缘。
+   绝对定位而不是网格单元：.h24-workspace 是单行三列 grid，作为流内元素
+   会占掉预览列、把面板挤到隐式第二行。right 用同一份宽度变量对齐边界。 */
+.compact-shell .h24-preview-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--h24-preview-w, 410px) - 5px);
+  z-index: 31;
+  width: 10px;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  transition: background var(--dur-2) var(--ease-out);
+}
+
+.compact-shell .h24-preview-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 4px;
+  bottom: 0;
+  width: 1px;
+  /* 常驻分隔线：面板 border-left 已交给手柄，独占一行时不能没有边界。 */
+  background: var(--n-150);
+  transition: background var(--dur-2) var(--ease-out);
+}
+
+.compact-shell .h24-preview-resizer:hover::before,
+.compact-shell .h24-preview-resizer[data-hovered='true']::before,
+.compact-shell .h24-preview-resizer[data-dragging='true']::before {
+  background: var(--h24-green);
+}
+
+html.kb-nav .compact-shell .h24-preview-resizer:focus-visible {
+  outline: 2px solid var(--h24-green);
+  outline-offset: -2px;
+}
+
+/* 窄窗覆盖模式不显示手柄 */
+@media (max-width: 1179px) {
+  .compact-shell .h24-preview-resizer {
+    display: none;
   }
 }
 

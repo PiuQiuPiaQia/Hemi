@@ -29,6 +29,7 @@ import { Menu, MenuItem } from '@/components/menu'
 import { useClipboardCopy } from '@/lib/use-clipboard-copy'
 import { segmentTaggedText } from '@/windows/voice/lib/composer-tokens'
 import { FilePreviewPanel } from '@/windows/voice/file-preview'
+import { PreviewResizer, loadPreviewWidth } from '@/windows/voice/preview-resizer'
 import {
   closePreviewTab as closeTabInQueue,
   EMPTY_PREVIEW_TABS,
@@ -491,6 +492,9 @@ export function VoiceScreen({
     return EMPTY_PREVIEW_TABS;
   });
   const [previewOpen, setPreviewOpen] = useState(() => previewTabs.tabs.length > 0);
+
+  // 预览面板宽度：从 localStorage 恢复，拖动时实时更新
+  const [previewWidth, setPreviewWidth] = useState(() => loadPreviewWidth());
 
   const openPreviewTab = useCallback((tab: PreviewTabId) => {
     setPreviewOpen(true);
@@ -957,6 +961,9 @@ export function VoiceScreen({
           data-preview-open={
             !skillMarketOpen && previewOpen && previewTabs.tabs.length ? 'true' : 'false'
           }
+          style={{
+            '--h24-preview-w': `${previewWidth}px`,
+          } as React.CSSProperties}
         >
           {/* 抽屉打开时的遮罩（窄窗）；常驻侧栏布局下不渲染命中。 */}
           <button
@@ -1342,28 +1349,37 @@ export function VoiceScreen({
               窄窗覆盖主列）。Tab 切换只换当前对象，对话滚动位置与草稿不动。
               056：执行过程也是这里的一种 Tab（对话流角色行点击打开）。 */}
           {!skillMarketOpen && previewOpen && previewTabs.tabs.length ? (
-            <FilePreviewPanel
-              tabs={previewTabs.tabs}
-              activeKey={previewTabs.activeKey ?? previewTabKey(previewTabs.tabs[0])}
-              snapOf={(taskId) => taskSnaps?.[taskId] ?? processSnaps[taskId]}
-              attachmentMetaOf={attachmentMetaOf}
-              attachmentOptions={attachmentOptions}
-              deliverableMetaOf={deliverableMetaOf}
-              deliverableOptions={deliverableOptions}
-              onActivate={activatePreviewTab}
-              onOpenTab={openPreviewTab}
-              onCloseTab={closePreviewTab}
-              onCollapse={() => setPreviewOpen(false)}
-              onContinueDiscuss={
-                onContinueDiscuss
-                  ? (snap) => {
-                      setPreviewOpen(false);
-                      onContinueDiscuss(snap);
-                    }
-                  : undefined
-              }
-              onTaskAction={onTaskAction}
-            />
+            <>
+              <PreviewResizer
+                width={previewWidth}
+                onWidthChange={setPreviewWidth}
+                sidebarWidth={224}
+                mainMinWidth={540}
+                marketOpen={skillMarketOpen}
+              />
+              <FilePreviewPanel
+                tabs={previewTabs.tabs}
+                activeKey={previewTabs.activeKey ?? previewTabKey(previewTabs.tabs[0])}
+                snapOf={(taskId) => taskSnaps?.[taskId] ?? processSnaps[taskId]}
+                attachmentMetaOf={attachmentMetaOf}
+                attachmentOptions={attachmentOptions}
+                deliverableMetaOf={deliverableMetaOf}
+                deliverableOptions={deliverableOptions}
+                onActivate={activatePreviewTab}
+                onOpenTab={openPreviewTab}
+                onCloseTab={closePreviewTab}
+                onCollapse={() => setPreviewOpen(false)}
+                onContinueDiscuss={
+                  onContinueDiscuss
+                    ? (snap) => {
+                        setPreviewOpen(false);
+                        onContinueDiscuss(snap);
+                      }
+                    : undefined
+                }
+                onTaskAction={onTaskAction}
+              />
+            </>
           ) : null}
           {/* 062：本地文件链接解析失败的反馈（无上下文弹窗，底部 toast 原位说明）。 */}
           {linkToast
