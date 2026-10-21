@@ -92,6 +92,19 @@ test('宿主回合重置：本就在主模型时不动、不虚发切换事件�
   }
 });
 
+test('恢复的备用 epoch 与新实例相同时，手动重试首请求仍用主模型；direct 不消费重置边界', () => {
+  const { route, runtime, routing } = routerOf();
+  resetRoutingForApplicationTurn({ routing, runtime });
+  const archived = { slot: 'fallback', fallbackUsed: true, candidateIndex: 1, epoch: 1 };
+  assert.equal(route({ reason: 'direct' }).model, 'hemi/main-m');
+  const first = route({ reason: 'retry', state: archived, failed: failure });
+  assert.equal(first.model, 'hemi/main-m', '旧失败不能触发新应用回合的自动降级');
+  assert.deepEqual(first.state, { slot: 'primary', fallbackUsed: false, epoch: 1 });
+  const automatic = route({ reason: 'retry', state: first.state, failed: failure });
+  assert.equal(automatic.model, 'hemi-fallback/fb-m', '本次主请求失败后仍可自动降级');
+  assert.equal(route({ reason: 'user', state: automatic.state }).model, 'hemi-fallback/fb-m', '同一运行内并入沿用当前模型');
+});
+
 test('备用已用过的回合里再失败：路由拒绝（不来回跳）', () => {
   const { route } = routerOf();
   const r1 = route({ reason: 'retry', state: { slot: 'primary', fallbackUsed: false }, failed: failure });
@@ -107,7 +120,7 @@ test('未配备用与候选链耗尽分别说明原因，多候选仍按冻结�
   const empty = routerOf({ withoutFallback: true });
   assert.throws(() => empty.route({ reason: 'retry', failed: failure }), error => {
     assert.equal(error.reason, 'no-fallback');
-    assert.match(describeModelError(error), /没有可用的备用模型/);
+    assert.match(describeModelError(error), /当前模型请求失败，本轮未切换模型/);
     return true;
   });
   const { route } = routerOf({ extraFallbacks: [{ modelKey: 'r/last', model: 'last-m',

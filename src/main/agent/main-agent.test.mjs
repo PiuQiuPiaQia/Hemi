@@ -416,6 +416,41 @@ test('真实 SDK 主备均失败：预算耗尽仍返回候选耗尽原因，原
   }
 });
 
+test('手动重试同一句先请求主模型；恢复旧会话后也不能直接沿用备用，只有新故障才自动降级', async t => {
+  let failure = 'both';
+  const mock = await startMock(body => failure === 'both' || failure === 'primary' && body.model === 'primary'
+    ? { status: 503 } : { text: `FROM_${body.model}` });
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-manual-retry-')));
+  const sessions = [];
+  t.after(() => {
+    for (const agent of sessions) agent.dispose();
+    mock.server.closeAllConnections(); mock.server.close();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+  const candidate = model => ({ modelKey: `test/${model}`, model, baseUrl: mock.base, api: 'openai-completions', apiKey: 'test' });
+  const make = entries => {
+    const agent = createMainAgent({ conversationId: 'conv-manual-retry', toolDeps: baseDeps(), entries,
+      sessionOptions: { cwd, agentDir: cwd, routing: { execution: candidate('primary'), fallback: candidate('backup') } } });
+    sessions.push(agent); return agent;
+  };
+  const input = { userText: '同一句失败输入', inputId: 'in-failed' };
+  const agent = make();
+  assert.match((await agent.runTurn(input)).modelError, /fallback-exhausted/);
+  assert.deepEqual(mock.requests.map(r => r.model), ['primary', 'backup']);
+  const archived = await agent.exportEntries();
+  failure = null;
+  assert.equal((await agent.runTurn({ ...input, inputId: 'in-retry-live' })).lastText, 'FROM_primary');
+  assert.deepEqual(mock.requests.slice(2).map(r => r.model), ['primary'], '驻留会话重试先调用主模型');
+  agent.dispose();
+
+  const restored = make([archived.header, ...archived.entries]);
+  assert.equal((await restored.runTurn({ ...input, inputId: 'in-retry-restored' })).lastText, 'FROM_primary');
+  assert.deepEqual(mock.requests.slice(3).map(r => r.model), ['primary'], '恢复的备用状态不能覆盖手动重试的主模型');
+  failure = 'primary';
+  assert.equal((await restored.runTurn({ ...input, inputId: 'in-retry-outage' })).lastText, 'FROM_backup');
+  assert.deepEqual(mock.requests.slice(4).map(r => r.model), ['primary', 'backup'], '本次主请求实际失败后才自动降级');
+});
+
 test('停止在途请求后续聊：保留已接收上下文，新输入不重复挂旧上下文', async () => {
   await withAgent((_body, n) => n === 1 ? { hang: true } : { text: 'NEW_ANSWER' }, baseDeps(), async ({ agent, mock }) => {
     const pending = agent.runTurn({ userText: 'OLD_REQUEST', inputId: 'in-old', contextText: 'OLD_FROZEN_CONTEXT' });

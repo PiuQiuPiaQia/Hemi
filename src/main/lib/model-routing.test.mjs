@@ -56,7 +56,7 @@ test('describeModelError：进气泡／任务卡的路由内部码翻成人话�
   assert.match(text, /输出过程中中断/);
   assert.doesNotMatch(text, /再发一遍|重试/, '已有工具副作用时不默认建议整轮重发');
   assert.match(text, /（底层报错：terminated）$/, '原失败信息要留给日志／审计对账');
-  assert.equal(describeModelError('HEMI_ROUTING_STOPPED: no-fallback'), '模型请求失败，当前没有可用的备用模型');
+  assert.equal(describeModelError('HEMI_ROUTING_STOPPED: no-fallback'), '当前模型请求失败，本轮未切换模型');
   assert.match(describeModelError(new RoutingStoppedError('fallback-exhausted', '503')), /已尝试本轮可用的备用模型，仍未成功.*503/);
   assert.match(describeModelError(new RoutingStoppedError('budget-used', '503').message), /允许的备用尝试已用完.*（底层报错：503）/);
   assert.match(describeModelError(new RoutingStoppedError('vision-missing').message), /不支持本轮图片/);

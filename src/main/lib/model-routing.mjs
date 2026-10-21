@@ -56,7 +56,7 @@ export class RoutingStoppedError extends Error {
 
 const ROUTE_STOP_TEXT = {
   'output-started': '模型在输出过程中中断。本轮未切换备用模型，已生成的内容已保留',
-  'no-fallback': '模型请求失败，当前没有可用的备用模型',
+  'no-fallback': '当前模型请求失败，本轮未切换模型',
   'fallback-exhausted': '已尝试本轮可用的备用模型，仍未成功',
   'budget-used': '模型请求失败，本轮允许的备用尝试已用完',
   'vision-missing': '模型请求失败，下一备用模型不支持本轮图片，无法切换',

@@ -39,9 +39,13 @@ export function createRoutingExtension({ routing, runtime, onRoute = null, name 
           // epoch 后，SDK 回传的旧代 state 作废，改用宿主持有的新 state。否则 SDK 会把
           // 上一回合的备用 state 原样送回来，宿主重置被冲掉。
           const runtimeEpoch = runtime.epoch ?? 0;
+          // 恢复会话后 epoch 会从头计数，可能恰好撞上存档里的备用 epoch。
+          // 应用新回合的首个请求必须采用宿主重置；direct（如压缩）不能消费此边界。
+          const freshApplicationTurn = request.reason !== 'direct' && runtime.resetPending === true;
+          if (freshApplicationTurn) runtime.resetPending = false;
           const incoming = request.reason !== 'direct' && request.state ? request.state : null;
           const incomingEpoch = incoming ? incoming.epoch ?? 0 : 0;
-          const useIncoming = incoming && incomingEpoch === runtimeEpoch;
+          const useIncoming = incoming && incomingEpoch === runtimeEpoch && !freshApplicationTurn;
           const state = useIncoming ? incoming : runtime.state;
           if (useIncoming) {
             runtime.state = incoming;
@@ -52,7 +56,7 @@ export function createRoutingExtension({ routing, runtime, onRoute = null, name 
           const candidateOf = s => candidates[indexOf(s)] ?? routing.execution;
           let next = state;
           // SDK 的 user 理由不能区分应用新回合与队列消费，备用重置由宿主边界负责。
-          if (request.reason === 'retry') {
+          if (request.reason === 'retry' && !freshApplicationTurn) {
             const failed = request.failed?.message ?? null;
             // 上下文/长度超限走 SDK 原有压缩恢复，不消耗备用机会（返回当前 state）。
             const contextOverflow = Boolean(
@@ -114,6 +118,7 @@ export function resetRoutingForApplicationTurn({ routing, runtime, onRoute = nul
   const prev = runtime.state;
   // epoch 递增：SDK 回传的旧代 state（含备用槽位）自此作废。
   runtime.epoch = (runtime.epoch ?? 0) + 1;
+  runtime.resetPending = true;
   if (prev.slot === 'primary' && !prev.fallbackUsed) return false;
   runtime.state = { slot: 'primary', fallbackUsed: false };
   const to = routing.execution;

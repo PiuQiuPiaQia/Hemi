@@ -9,13 +9,13 @@ import { app, ipcMain } from 'electron';
 import { IPC } from '../src/shared/ipc-channels.mjs';
 import { initializeStableSafeStorageIdentity } from '../src/main/lib/config-store.mjs';
 import { registerAllIpcHandlers } from '../src/main/ipc/index.mjs';
-import { abortActiveTextModelTurn } from '../src/main/ipc/llm.ipc.mjs';
+import { abortActiveTextModelTurn, getAgentRuntime } from '../src/main/ipc/llm.ipc.mjs';
 import { disposeTaskManager } from '../src/main/ipc/task.ipc.mjs';
 import { shutdownBrowserBridgeService } from '../src/main/services/browser-bridge-service.mjs';
 
 const real = process.env.HEMI_AUDIT_REAL === '1';
-const cases = new Set((process.env.HEMI_AUDIT_CASES ?? (real ? 'context' : 'stream,errors,context')).split(','));
-assert.ok([...cases].every(name => ['stream', 'errors', 'context'].includes(name)), '验收场景名称有效');
+const cases = new Set((process.env.HEMI_AUDIT_CASES ?? (real ? 'context' : 'stream,errors,retry,context')).split(','));
+assert.ok([...cases].every(name => ['stream', 'errors', 'retry', 'context'].includes(name)), '验收场景名称有效');
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-audit-')));
 const userData = path.join(root, 'userData'); fs.mkdirSync(userData);
 const output = path.resolve('.visual/workflow/vision', `session-audit-${real ? 'real' : 'controlled'}-${Date.now()}`);
@@ -23,6 +23,7 @@ fs.mkdirSync(output, { recursive: true });
 const evidence = { root, userData, realModel: real, provider: real ? 'existing configuration copy' : 'local controlled endpoint',
   cases: [...cases], checks: [], requests: [], samples: [] };
 let profileId = 'auto', server, watchdog, turn = 30000, streamStartedAt = 0, streamClosedAt = 0;
+let retryFailure = 'both';
 if (real) {
   const source = process.env.HEMI_AUDIT_CONFIG ?? path.join(os.homedir(), 'Library/Application Support/hemi/runtime-v2/text-model-profiles.json');
   const directory = JSON.parse(fs.readFileSync(source, 'utf8'));
@@ -79,7 +80,8 @@ async function startProvider() {
         factsGuidance: all.includes('不主动复述本块、内部编号或标签') && all.includes('用户明确询问诊断信息时可据实解释'),
         stopGuidance: all.includes('宿主目标终态 · 内部运行事实') && all.includes('未完成部分已经取消，不是待办') };
       evidence.requests.push(row);
-      if (body.tools?.length && ['AUDIT_EXHAUST', 'AUDIT_NO_FALLBACK'].includes(marker)) {
+      if (body.tools?.length && (['AUDIT_EXHAUST', 'AUDIT_NO_FALLBACK'].includes(marker)
+        || marker === 'AUDIT_RETRY' && (retryFailure === 'both' || retryFailure === 'primary' && body.model === 'audit-primary'))) {
         row.injectedStatus = 503; res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'controlled upstream outage' } })); return;
       }
@@ -142,7 +144,7 @@ app.whenReady().then(async () => {
       }
       if (cases.has('errors')) for (const [marker, fallback, expected, modelCount] of [
         ['AUDIT_EXHAUST', 'audit-provider/backup', /已尝试本轮可用的备用模型/, 2],
-        ['AUDIT_NO_FALLBACK', null, /没有可用的备用模型/, 1],
+        ['AUDIT_NO_FALLBACK', null, /当前模型请求失败，本轮未切换模型/, 1],
         ['AUDIT_PARTIAL', 'audit-provider/backup', /输出过程中中断/, 1],
       ]) {
         await roles(fallback); const start = evidence.requests.length;
@@ -153,6 +155,25 @@ app.whenReady().then(async () => {
         check(`${marker} 如实失败并显示可理解的原因`, snapshot.runs[accepted.runId].outcome === 'failed'
           && expected.test(displayed) && !/HEMI_ROUTING_STOPPED/.test(displayed), displayed);
         if (marker === 'AUDIT_PARTIAL') check('中断前的正文仍在正式流', displayed.includes('已经生成的有效内容'));
+      }
+      if (cases.has('retry')) {
+        await roles('audit-provider/backup');
+        const cid = 'conv-audit-retry', text = 'AUDIT_RETRY 重试同一条输入。';
+        const calls = start => evidence.requests.slice(start).filter(r => r.hasTools && r.marker === 'AUDIT_RETRY').map(r => r.model);
+        const start = evidence.requests.length, failed = await send(cid, text), snapshot = await settled(cid, failed);
+        check('首次主备均失败，真实请求顺序为主模型→备用', snapshot.runs[failed.runId].outcome === 'failed'
+          && JSON.stringify(calls(start)) === JSON.stringify(['audit-primary', 'audit-backup']), calls(start));
+        await getAgentRuntime().persist(cid);
+        getAgentRuntime().invalidate(cid);
+        check('驻留会话已释放，下次提交必须从正式存档恢复', !getAgentRuntime().get(cid));
+        retryFailure = null;
+        const retryStart = evidence.requests.length, retried = await send(cid, text), recovered = await settled(cid, retried);
+        check('恢复后手动重试同一句，先调用主模型且成功时不调用备用', recovered.runs[retried.runId].outcome === 'completed'
+          && JSON.stringify(calls(retryStart)) === JSON.stringify(['audit-primary']), calls(retryStart));
+        retryFailure = 'primary';
+        const autoStart = evidence.requests.length, automatic = await send(cid, text), completed = await settled(cid, automatic);
+        check('本次主请求确实失败后才自动降级到备用', completed.runs[automatic.runId].outcome === 'completed'
+          && JSON.stringify(calls(autoStart)) === JSON.stringify(['audit-primary', 'audit-backup']), calls(autoStart));
       }
     }
     if (cases.has('context')) {
