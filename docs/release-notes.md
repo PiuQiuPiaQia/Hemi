@@ -1,9 +1,12 @@
-本次更新简化首次设置，并修复对话界面的显示问题。
+本次更新加入角色皮肤与冷启动演出，并修复手动重试仍调用备用模型的问题。
 
-- 首次启动先连接模型，支持 New API 登录和手动配置，并验证模型的工具调用能力。
-- 语音、桌面操控、浏览器控制和模型路由可按需配置；跳过语音即可开始文字对话，未完成的引导可继续。
-- 修复流式回复中旧段落仍显示光标的问题，以及输入框调整高度时的布局循环。
-- 开发模式的性能面板支持拖动和键盘移动。
+- 换肤：侧栏底部、设置按钮上方新增换肤入口，提供经典、晴海蓝、月见紫、焦糖橙、蜜糖金、围巾红六款浅色皮肤，点击即应用并保存，当前会话和进行中的操作不中断。
+- 人物皮肤同步配色、侧栏人物水印、主页人物与题字和局部待机动画；启动时有冷启动演出，可按 Esc 或点跳过，开启减少动态效果时直接进入静态首帧。
+- 后台任务完成时，窗口未聚焦、最小化或隐藏会弹出系统通知，点击通知回到主窗口。
+- 预览面板宽度可拖动边线调整，方向键微调，双击恢复默认宽度。
+- 修复失败后手动重试仍落在备用模型的问题：重试先请求主模型，只有这一轮确实失败才自动降级；恢复旧会话后也不沿用存档里的备用状态。
+- 未配置备用模型时的失败提示改为「当前模型请求失败，本轮未切换模型」。
+- 开发版运行时使用带 DEV 角标的独立图标，与正式版区分。
 
 下载：macOS Apple Silicon 使用 `.dmg`；Windows x64 使用 `-setup.exe`。
 macOS 安装包尚未进行 Developer ID 签名和公证，首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -13,12 +16,28 @@ Hemi 自有代码采用 MIT。第三方许可、原生库对应源码和重建�
 
 ---
 
-This update simplifies first-run setup and fixes conversation display issues.
+This update adds character skins with a cold-start intro, and fixes manual
+retries still calling the fallback model.
 
-- Connect a model first through New API sign-in or manual configuration, with a tool-calling capability check.
-- Configure voice, desktop control, browser control, and model routing as needed. Start chatting with text without voice setup, and resume unfinished onboarding.
-- Fix stale streaming cursors on earlier reply segments and a layout loop when resizing the message input.
-- Move the development performance monitor by dragging or using the keyboard.
+- Skins: a new picker under the sidebar, above Settings, with six light themes
+  (Classic, Clear Blue, Moon Violet, Caramel Orange, Honey Gold, Scarf Red).
+  Choosing one applies and saves immediately without interrupting the current
+  conversation or running work.
+- Character skins bring their palette, a sidebar watermark, the home character
+  and lettering with an idle animation. Character skins also play a cold-start
+  intro that Esc or the skip button ends early; with reduced motion enabled the
+  app starts on the static first frame.
+- When a background task finishes while the window is unfocused, minimized, or
+  hidden, a system notification appears; clicking it restores the main window.
+- Resize the preview panel by dragging its edge, nudge it with the arrow keys,
+  and double-click to restore the default width.
+- Fix a manual retry after a failure still using the fallback model: a retry now
+  asks the primary model first and only falls back if that attempt actually
+  fails. Restoring an older conversation no longer reuses its archived fallback
+  state.
+- The failure notice without a fallback now reads "当前模型请求失败，本轮未切换模型".
+- The development runtime uses its own DEV-badged icon, distinct from the
+  packaged app.
 
 Downloads: `.dmg` for macOS Apple Silicon; `-setup.exe` for Windows x64.
 The macOS app is not Developer ID signed or notarized. First launch may require
