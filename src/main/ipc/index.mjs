@@ -9,14 +9,17 @@ import { registerExecutorIpc } from './executor.ipc.mjs';
 import { registerFloatingIpc } from './floating.ipc.mjs';
 import { registerFlowIpc } from './flow.ipc.mjs';
 import { initConversationFlowService } from '../services/conversation-flow-service.mjs';
-import { app, BrowserWindow, dialog } from 'electron';
+import { createTurnNotifier } from '../services/turn-notifier.mjs';
+import { notifyViaAppleScript } from '../services/system-notification.mjs';
+import { showMainWindow } from '../windows/main-window.mjs';
+import { app, BrowserWindow, dialog, Notification } from 'electron';
 import { initializeRuntimeStorage, acknowledgeLegacyBranch, runtimeDataDir } from '../agent-runtime/storage-migration.mjs';
 import {resolveCapabilities} from '../agent-runtime/index.mjs';
 import { findInstalledApplication } from '../services/installed-apps.mjs';
 import path from 'node:path';
 
 import { IPC } from '../../shared/ipc-channels.mjs';
-import { state } from '../state.mjs';
+import { state, isSmokeTest, BRAND_NAME } from '../state.mjs';
 import { registerLlmIpc } from './llm.ipc.mjs';
 import { registerMemoryIpc } from './memory.ipc.mjs';
 import { registerOnboardingIpc } from './onboarding.ipc.mjs';
@@ -68,14 +71,44 @@ export async function registerAllIpcHandlers() {
   registerComposerIpc();
   registerMemoryIpc();
   // 057：对话流服务（单注册表）先建，llm.ipc 注册时挂真实 runtime 适配。
+  // 任务完成通知（2026-10-21）：用户不在主窗口前时，收口结果发一条系统横幅；
+  // 点击回到应用。冒烟/自驱动实例不弹真实通知（自动化不该打扰桌面）。
+  const turnNotifier = createTurnNotifier({
+    getWindow: () => state.mainWindow,
+    showWindow: () => showMainWindow(),
+    brandName: BRAND_NAME,
+    enabled: !isSmokeTest && Notification.isSupported(),
+    log: createLogger('notify'),
+    showNotification: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body });
+      notification.on('click', onClick);
+      // macOS 未打包实例/未授通知权限时不显示横幅（实测 UNErrorDomain 1）：记日志并让
+      // dock 图标弹跳；开发态再补一条 AppleScript 通知，否则 dev 里根本验证不了这个功能。
+      notification.on('failed', (_event, error) => {
+        const notifyLog = createLogger('notify');
+        notifyLog.warn(`系统通知未能显示：${error?.message ?? error ?? '未知原因'}`);
+        if (process.platform === 'darwin') {
+          app.dock?.bounce?.('informational');
+          if (!app.isPackaged) void notifyViaAppleScript({ title, body, log: notifyLog });
+        }
+      });
+      notification.show();
+    },
+  });
   initConversationFlowService({
     dir: path.join(runtimeDataDir(app.getPath('userData')), 'conversations'),
     log: createLogger('flow'),
     workspaceOf: id => getWorkspaceService()?.resolve(id ?? 'default'),
-    onUnreadChanged: id => {
+    onUnreadChanged: (id, completion) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC.conversation.changed, { kind: 'unread', id });
       }
+      if (!completion) return;
+      turnNotifier.notifyCompletion({
+        conversationId: id,
+        conversationTitle: getConversationMetadata(id)?.title ?? null,
+        ...completion,
+      });
     },
     broadcast: (conversationId, change) => {
       if (!state.mainWindow || state.mainWindow.isDestroyed()) return;

@@ -144,3 +144,27 @@ test('派发即持久化正式用户项，无须等长运行收口；队列派�
     await service.dropAll(); __resetConversationFlowServiceForTests(); fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('完成通知素材：最近收口回合的结果口径与该回合输入摘要', async () => {
+  __resetConversationFlowServiceForTests();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-flow-notify-'));
+  const notices = [];
+  const service = initConversationFlowService({ dir, onUnreadChanged: (id, completion) => notices.push({ id, completion }) });
+  try {
+    const controller = service.controllerFor('conv-notify');
+    const input = { inputId: 'in-1', text: '整理下载文件夹', createdAt: 1 };
+    controller.applyFact({ type: 'input-accepted', input });
+    controller.applyFact({ type: 'run-preparing', runId: 'r1', source: 'user', inputIds: ['in-1'], at: 1 });
+    controller.applyFact({ type: 'run-started', runId: 'r1', at: 2 });
+    controller.applyFact({ type: 'input-delivered', input, runId: 'r1', at: 3 });
+    controller.applyFact({ type: 'run-closed', runId: 'r1', outcome: 'completed', at: 4 });
+    await service.store.flush('conv-notify');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].completion.outcome, 'completed');
+    assert.equal(notices[0].completion.preview, '整理下载文件夹');
+    assert.equal(notices[0].completion.source, 'user');
+  } finally {
+    await service.dropAll(); __resetConversationFlowServiceForTests(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

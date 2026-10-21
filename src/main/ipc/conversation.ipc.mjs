@@ -36,7 +36,12 @@ export function persistConversationInput(conversationId) {
 
 export function getConversationMetadata(conversationId) {
   const session = hostConversationApi?.get(conversationId);
-  return session ? {profileId: session.profileId ?? null, workspaceId: session.workspaceId ?? null} : null;
+  return session ? {
+    profileId: session.profileId ?? null,
+    workspaceId: session.workspaceId ?? null,
+    // 完成通知的标题来源：会话标题即用户认得出的任务名。
+    title: typeof session.title === 'string' ? session.title : null,
+  } : null;
 }
 
 export function getConversationDiagnostics(conversationId) {

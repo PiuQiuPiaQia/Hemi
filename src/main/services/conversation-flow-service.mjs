@@ -10,7 +10,7 @@
 import { createConversationController } from './conversation-controller.mjs';
 import { createFlowStore } from './flow-store.mjs';
 import { bootstrapFlowFromTurns, restoreFlowSnapshot } from './flow-bootstrap.mjs';
-import { conversationStatus, withConversationUnread } from '../../shared/conversation-status.mjs';
+import { newSettledRuns, conversationStatus, withConversationUnread } from '../../shared/conversation-status.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { recoverConversationFlow } from './conversation-recovery.mjs';
@@ -51,13 +51,16 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
             store: {
               update: (id) => {
                 let unreadChanged = false;
+                let completion = null;
                 return store.update(id, record => {
-                  const next = withConversationUnread(record, controller.getSnapshot());
+                  const snapshot = controller.getSnapshot();
+                  const next = withConversationUnread(record, snapshot);
                   unreadChanged = next.unreadAt !== record.unreadAt;
+                  if (unreadChanged) completion = completedRunInfo(record, snapshot);
                   return next;
                 }).then(() => {
                   if (!unreadChanged) return;
-                  try { onUnreadChanged?.(id); }
+                  try { onUnreadChanged?.(id, completion); }
                   catch (error) { log?.warn?.(`未读广播失败（${id}）：${error?.message ?? error}`); }
                 });
               },
@@ -153,4 +156,23 @@ function unsupportedRuntime() {
   const error = new Error('flow runtime 未接线：命令受理但不可执行');
   error.code = 'unsupported';
   return error;
+}
+
+/**
+ * 新收口主回合的通知素材（与未读同一口径）：取最近一次结果与它的输入摘要。
+ * 输入文本来自 flow 时间线的用户项——队列派发/事件回合可能没有用户项，正文就只留结果口径。
+ */
+function completedRunInfo(record, snapshot) {
+  const fresh = newSettledRuns(record, snapshot);
+  if (!fresh.length) return null;
+  const run = fresh[fresh.length - 1];
+  const inputId = Array.isArray(run.inputIds) ? run.inputIds[0] : null;
+  const input = inputId
+    ? (snapshot.timeline ?? []).findLast?.(item => item.kind === 'user' && item.id === inputId) ?? null
+    : null;
+  return {
+    outcome: run.outcome ?? null,
+    source: run.source ?? null,
+    preview: typeof input?.text === 'string' ? input.text : '',
+  };
 }

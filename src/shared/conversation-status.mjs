@@ -8,13 +8,20 @@ export function conversationStatus(flow, { live = false, isTaskLive = () => true
   return null;
 }
 
-/** 新收口的用户／排队／事件回合产生未读；旧档、停止、准备卡和重复保存不产生通知。 */
-export function withConversationUnread(record, flow, now = Date.now()) {
-  const hasNewResult = Object.values(flow?.runs ?? {}).some(run => run
+/**
+ * 本进程新收口、应视作「新结果」的主回合（未读与完成通知共用同一口径）：
+ * 旧档里的历史运行、停止／中断、准备卡都不算。
+ */
+export function newSettledRuns(record, flow) {
+  return Object.values(flow?.runs ?? {}).filter(run => run
     && ['user', 'queue', 'event'].includes(run.source)
     && ['completed', 'partial', 'failed'].includes(run.outcome)
-    && run.closedAt != null && record.flow?.runs?.[run.runId]?.closedAt == null);
-  if (!hasNewResult) return { ...record, flow };
+    && run.closedAt != null && record?.flow?.runs?.[run.runId]?.closedAt == null);
+}
+
+/** 新收口的用户／排队／事件回合产生未读；旧档、停止、准备卡和重复保存不产生通知。 */
+export function withConversationUnread(record, flow, now = Date.now()) {
+  if (!newSettledRuns(record, flow).length) return { ...record, flow };
   // CAS 清读后的新结果也有独立身份，即便同一毫秒收口也不会被旧回执清掉。
   const unreadAt = Math.max(now, (record.unreadAt ?? 0) + 1, (record.lastReadAt ?? 0) + 1);
   return { ...record, flow, unreadAt };
