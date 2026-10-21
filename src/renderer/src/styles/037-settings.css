@@ -438,7 +438,7 @@ html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; box-shadow: var
 .h37-access-pick-sub { font-size: var(--fs-12); color: var(--muted); }
 .h37-access-pick-check { width: 16px; height: 16px; flex: none; color: var(--accent-text); }
 .h37-access-pick-state { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); height: min(18rem, 42dvh); border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-13); color: var(--muted); }
-.h37-run-dot { width: var(--sp-6); height: var(--sp-6); border-radius: 50%; background: var(--g-500); flex: none; }
+.h37-run-dot { width: var(--sp-6); height: var(--sp-6); border-radius: 50%; background: var(--state-500); flex: none; }
 
 
 

@@ -4,6 +4,9 @@
  * 的 re-export 消费。只放纯类型，不放任何依赖 DOM 或 Node API 的代码。
  */
 
+import type {AppearanceBootstrap,AppearanceSnapshot,AppearanceSetRequest,AppearanceSetResult,AppearanceApplied,AppearanceActivity} from './appearance/types';
+export type {AppearanceBootstrap,AppearanceSnapshot,AppearancePreference,AppearanceSetRequest,AppearanceSetResult,AppearanceApplied,AppearanceActivity,SkinId} from './appearance/types';
+
 export type DoubaoConfig = {
   apiKey?: string;
   resourceId: string;
@@ -1980,6 +1983,13 @@ export type ProviderImportPendingItem = {
 };
 
 export type HemiVoiceBridge = {
+  getAppearanceBootstrap: () => AppearanceBootstrap | null;
+  getAppearance: () => Promise<AppearanceSnapshot>;
+  setAppearance: (request:AppearanceSetRequest) => Promise<AppearanceSetResult>;
+  onAppearanceChanged: (callback:(snapshot:AppearanceSnapshot)=>void) => () => void;
+  onAppearanceActivity: (callback:(activity:AppearanceActivity)=>void) => () => void;
+  reportAppearanceApplied: (value:AppearanceApplied) => void;
+  reportAppearanceVisualReady: (value:AppearanceApplied) => void;
   platform: string;
   getSkillState: () => Promise<SkillMarketState>;
   refreshSkillCatalog: () => Promise<SkillActionResult>;

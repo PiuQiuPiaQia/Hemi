@@ -6,6 +6,9 @@ import { openExternalIfAllowed } from '../lib/external-links.mjs';
 import { createLogger } from '../lib/logger.mjs';
 import { BRAND_NAME, isSmokeTest, state } from '../state.mjs';
 import { loadRenderer } from './loader.mjs';
+import { requestAppearanceShow, waitForAppearance } from './appearance-window.mjs';
+import { getAppearanceService } from '../services/appearance-instance.mjs';
+import { getSkin } from '../../shared/appearance/skins.mjs';
 import { mainWindowSizeFor } from './main-window-size.mjs';
 import { createWindowStateStore, restoreBounds, SAVE_DEBOUNCE_MS } from './window-state-store.mjs';
 import { markCurrentCaptionRead } from '../services/caption-read-state.mjs';
@@ -62,8 +65,7 @@ export function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   hideFloatingWindow();
   if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  void waitForAppearance(mainWindow).then(ready=>{if(ready&&!mainWindow.isDestroyed()){mainWindow.show();mainWindow.focus();}});
 }
 
 export async function createMainWindow() {
@@ -111,7 +113,7 @@ export async function createMainWindow() {
     fullscreenable: false,
     title: BRAND_NAME,
     icon: appIconPath,
-    backgroundColor: '#fafcfb',
+    backgroundColor: getSkin(getAppearanceService().getSnapshot().preference.skinId).windowBackground,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // 红绿灯与 52px 顶栏（2026-10-03 用户裁决自 62 调低，渲染层
     // --hemi-topbar-h）的中线对齐：灯钮高 ~12px，y = 26 - 6 = 20；
@@ -165,8 +167,10 @@ export async function createMainWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    if (!isSmokeTest) mainWindow?.show();
-    if (restoreMaximized) mainWindow?.maximize();
+    requestAppearanceShow(mainWindow,()=>{
+      if (!isSmokeTest) mainWindow?.show();
+      if (restoreMaximized) mainWindow?.maximize();
+    });
   });
   mainWindow.on('show', hideFloatingWindow);
   mainWindow.on('focus', hideFloatingWindow);

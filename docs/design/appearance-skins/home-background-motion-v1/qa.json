@@ -1,0 +1,139 @@
+{
+  "date": "2026-10-21T02:10:29.680Z",
+  "baseHead": "559397ac57bdd85893be3380e55e03f2d1501fa3",
+  "testedState": "Uncommitted design artifacts on baseHead",
+  "environment": {
+    "platform": "darwin",
+    "node": "v22.22.3",
+    "browser": "155.0.8059.85"
+  },
+  "commands": [
+    "node docs/design/appearance-skins/home-background-motion-v1/export-character.mjs",
+    "node docs/design/appearance-skins/home-background-motion-v1/verify-and-export.mjs"
+  ],
+  "checks": {
+    "existingUI": {
+      "comparedElements": 73,
+      "geometryFontsRadii": "unchanged against existing scene snapshot"
+    },
+    "anchor": {
+      "sourceOriginDelta": {
+        "x": -0.0018262987013031307,
+        "y": -0.005817099567096307
+      },
+      "sourceScaleDelta": {
+        "x": 0.0000034667921570141758,
+        "y": -0.000002814387070393387
+      },
+      "pointerEvents": "none",
+      "muted": true,
+      "loop": true
+    },
+    "playPause": true,
+    "nativeLoopWrap": {
+      "timeAfterWrap": 225.605
+    },
+    "fullSidebar": {
+      "count": 50,
+      "scrollTop": 962,
+      "before": [
+        760.640625,
+        74.875,
+        886.734375,
+        1021.4375
+      ],
+      "after": [
+        760.640625,
+        74.875,
+        886.734375,
+        1021.4375
+      ]
+    },
+    "transparentSource": {
+      "width": 1232,
+      "height": 1418,
+      "duration": 8,
+      "transparent": 623001,
+      "nearlyOpaque": 1036556,
+      "sha256": "c9b4ba2fe6336d84ba99321ed4dde9a5c3df2806559dee6ccfc5a490d55a4d25"
+    },
+    "decodeFailureFallback": {
+      "state": {
+        "mode": "static",
+        "playing": false,
+        "time": 0,
+        "duration": 8000,
+        "reducedMotion": false,
+        "ready": true,
+        "failure": "人物视频加载失败，已保留静态背景"
+      },
+      "staticVisible": "visible"
+    },
+    "wrapperControls": true,
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 960,
+        "viewport": 1440,
+        "shell": 1440,
+        "horizontalScroll": 1440
+      },
+      {
+        "width": 980,
+        "height": 760,
+        "viewport": 980,
+        "shell": 980,
+        "horizontalScroll": 980
+      },
+      {
+        "width": 768,
+        "height": 1024,
+        "viewport": 768,
+        "shell": 768,
+        "horizontalScroll": 768
+      },
+      {
+        "width": 375,
+        "height": 812,
+        "viewport": 375,
+        "shell": 375,
+        "horizontalScroll": 375
+      }
+    ],
+    "reducedMotion": {
+      "mode": "static",
+      "playing": false,
+      "time": 0,
+      "duration": 8000,
+      "reducedMotion": true,
+      "ready": true,
+      "failure": null
+    },
+    "movie": {
+      "width": 1440,
+      "height": 960,
+      "duration": 8,
+      "advanced": true
+    },
+    "browserErrors": [],
+    "initialDecodeFailureFallback": {
+      "method": "Playwright init script supplies invalid media data before video source assignment; ready resolves into static fallback",
+      "state": {
+        "mode": "static",
+        "playing": false,
+        "time": 0,
+        "duration": 8000,
+        "reducedMotion": false,
+        "ready": true,
+        "failure": "人物视频加载失败，已保留静态背景"
+      }
+    }
+  },
+  "gaps": [
+    "Read-only DOM/CSS snapshot, not the live Hemi application. No IPC, personal conversations, or model services.",
+    "Hemi Vite and built renderers, Electron target-platform decoding, multiwindow lifecycle and power use are not validated.",
+    "The character is the approved single-image parameter mesh; it is not a formal Cubism model.",
+    "Light skin concept only; no separate dark-mode composition."
+  ],
+  "result": "PASS"
+}

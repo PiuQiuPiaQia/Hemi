@@ -114,8 +114,8 @@ html.kb-nav .compact-shell .h25-process-body:focus-visible {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  background: var(--g-50);
-  color: var(--g-600);
+  background: var(--state-50);
+  color: var(--state-600);
 }
 
 .compact-shell .h25-timeline-node svg {
@@ -131,8 +131,8 @@ html.kb-nav .compact-shell .h25-process-body:focus-visible {
 
 .compact-shell .h25-timeline > li[data-state='running'] .h25-timeline-node {
   background: var(--bg-surface);
-  box-shadow: 0 0 0 1px var(--g-500);
-  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--state-500);
+  color: var(--state-700);
 }
 
 .compact-shell .h25-timeline > li[data-state='attention'] .h25-timeline-node {
@@ -444,7 +444,7 @@ html.kb-nav .compact-shell .h25-process-body:focus-visible {
 }
 
 .compact-shell .countdown-fill {
-  background: var(--g-500);
+  background: var(--state-500);
   transition: width 1s linear;
 }
 

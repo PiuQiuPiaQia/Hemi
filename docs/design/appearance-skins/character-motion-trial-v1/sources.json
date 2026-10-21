@@ -1,0 +1,20 @@
+{
+  "method": "Built-in image_gen for blink keyframe edits; source PNGs copied unmodified. Data URLs package original bytes for offline WebGL texture loading.",
+  "sources": {
+    "base": {
+      "file": "../v1/masters/cafe-blue.png",
+      "bytes": 2165348,
+      "sha256": "9731518b3e1a165b928cfe02d3503977a29d7a05ae7b21205c08481ed476cb9c"
+    },
+    "half": {
+      "file": "assets/eye-half.png",
+      "bytes": 2142733,
+      "sha256": "4e3997b5356cf96abf9ab4cfdde49623b12dc4ad23fbd229f0403aeb0203d59b"
+    },
+    "closed": {
+      "file": "assets/eye-closed.png",
+      "bytes": 2140398,
+      "sha256": "48b1ec1796438480ce7c91ccb268e009819dd81025fbd019e8958fa32d9da050"
+    }
+  }
+}

@@ -44,6 +44,11 @@ import { TaskPopover } from '@/windows/orb/task-popover';
 import { installNativeInput } from '@/lib/native-input';
 import '@/globals.css';
 import '@/styles/index.css';
+import '@/appearance/appearance.css';
+import {initializeAppearance} from '@/appearance/runtime';
+import {StartupStage} from '@/appearance/startup-stage';
+import {setAppearanceScene} from '@/appearance/scene';
+import {SKIN_IDS} from '@shared/appearance/skins.mjs';
 
 installNativeInput();
 
@@ -5449,13 +5454,15 @@ document.documentElement.dataset.window = isTaskPopover
 
 const root = document.getElementById('root');
 if (root) {
-  createRoot(root).render(
+  setAppearanceScene({appReady:true});
+  const requestedSkin=new URLSearchParams(location.search).get('skin');
+  void initializeAppearance({fixtureSkin:SKIN_IDS.find(id=>id===requestedSkin)??'classic'}).then(()=>createRoot(root).render(
     <StrictMode>
       {isTaskPopover ? scenes[scene]?.() : floatingWindow ? (
         <div style={{ height: '100dvh', background: 'var(--n-150)' }}>{scenes[scene]?.() ?? null}</div>
       ) : (
-        <div className="min-h-dvh bg-[var(--bg-canvas)]">{scenes[scene]?.() ?? null}</div>
+        <StartupStage allowIntro={false}><div className="min-h-dvh appearance-fixture-host">{scenes[scene]?.() ?? null}</div></StartupStage>
       )}
     </StrictMode>,
-  );
+  ));
 }

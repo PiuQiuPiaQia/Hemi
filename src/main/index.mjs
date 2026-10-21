@@ -116,8 +116,7 @@ if (!hasSingleInstanceLock) {
     // 再次启动时把已有实例的主窗口带到前台，而不是新开一个。
     if (state.mainWindow && !state.mainWindow.isDestroyed()) {
       if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-      state.mainWindow.show();
-      state.mainWindow.focus();
+      showMainWindow();
     }
   });
 }

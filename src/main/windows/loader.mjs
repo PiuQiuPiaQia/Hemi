@@ -1,4 +1,5 @@
 import { rendererIndexPath } from '../paths.mjs';
+import { registerAppearanceWindow } from './appearance-window.mjs';
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -18,6 +19,7 @@ export function rendererUrl(mode = 'main') {
 
 export async function loadRenderer(window, mode) {
   const target = rendererUrl(mode);
+  registerAppearanceWindow(window,mode,target);
   if (target.type === 'url') {
     await window.loadURL(target.value);
     return;

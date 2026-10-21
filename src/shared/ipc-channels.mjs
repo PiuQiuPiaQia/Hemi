@@ -7,6 +7,10 @@
  * 不漂移。新增通道时：先加到这里，再写 preload 与主进程两侧。
  */
 export const IPC = {
+  appearance: {
+    bootstrap:'appearance:bootstrap',get:'appearance:get',set:'appearance:set',changed:'appearance:changed',
+    applied:'appearance:applied',visualReady:'appearance:visual-ready',activity:'appearance:activity',
+  },
   skills: {
     state: 'skills:state',
     refresh: 'skills:refresh',

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hemi · 主页人物动画整体预览</title>
+<style>
+:root{color-scheme:light;--ink:#29364a;--muted:#566b84;--accent:#385f9f;--line:#dce4f0;--paper:#fff;--soft:#edf3ff}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#edf2fb;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.preview{height:100dvh;display:grid;grid-template-rows:minmax(0,1fr) auto}iframe{display:block;width:100%;height:100%;border:0}.controls{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;background:var(--paper);border-top:1px solid var(--line);font-size:12px}.controls p{margin:0;color:var(--muted);line-height:1.6}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}button,a{font:inherit;font-size:12px;color:var(--accent);border:1px solid var(--line);border-radius:7px;background:var(--paper);padding:6px 11px;min-height:32px;text-decoration:none;cursor:pointer;white-space:nowrap}button:hover,a:hover{background:var(--soft)}button[aria-pressed=true]{background:var(--accent);color:var(--paper);border-color:var(--accent)}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.5;cursor:default}.status{color:var(--muted);font-variant-numeric:tabular-nums;min-width:60px}.capture .controls{display:none}.capture .preview{grid-template-rows:minmax(0,1fr)}@media(max-width:700px){.controls{padding:8px 10px;flex-wrap:wrap;gap:6px}.controls p{width:100%}.actions{gap:6px}.full-link{display:none}}
+</style></head>
+<body><main class="preview"><iframe id="scene" title="Hemi 主页背景动画只读预览"></iframe><footer class="controls"><p>主页背景整体预览 · 当前界面只读</p><div class="actions"><button id="motion" type="button" aria-pressed="true">动态背景</button><button id="static" type="button" aria-pressed="false">静态对照</button><button id="toggle" type="button">暂停</button><span class="status" aria-live="polite">准备画面</span><a class="full-link" href="scene.html">只看页面</a></div></footer></main>
+<script>
+(() => {
+  const $=s=>document.querySelector(s),frame=$('#scene'),capture=new URLSearchParams(location.search).has('capture');
+  if(capture)document.body.classList.add('capture');let current={mode:'motion',playing:false,time:0},id=0,resolveReady;
+  const requests=new Map();window.previewReady=new Promise(resolve=>resolveReady=resolve);
+  function reflect(state){current=state;$('#motion').setAttribute('aria-pressed',String(state.mode==='motion'));$('#static').setAttribute('aria-pressed',String(state.mode==='static'));$('#toggle').textContent=state.playing?'暂停':'播放';$('#toggle').disabled=!!state.failure;$('.status').textContent=state.failure?'静态回退':state.mode==='static'?'静态':state.playing?'循环播放':'已暂停';}
+  function command(action,rest={}){return new Promise((resolve,reject)=>{const requestId=++id;requests.set(requestId,{resolve,reject});frame.contentWindow.postMessage({type:'hemi-home-command',requestId,action,...rest},'*');});}
+  addEventListener('message',event=>{if(event.source!==frame.contentWindow)return;const message=event.data;if(message?.type==='hemi-home-ready'){reflect(message.state);resolveReady(true);}if(message?.type==='hemi-home-state'){reflect(message.state);if(requests.has(message.requestId)){requests.get(message.requestId).resolve(message.state);requests.delete(message.requestId);}}if(message?.type==='hemi-home-error'){if(requests.has(message.requestId)){requests.get(message.requestId).reject(new Error(message.message));requests.delete(message.requestId);}$('.status').textContent=message.message;}});
+  $('#motion').onclick=()=>command('mode',{mode:'motion'});$('#static').onclick=()=>command('mode',{mode:'static',autoplay:false});$('#toggle').onclick=()=>command(current.playing?'pause':'play');
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&current.ready)command('pause');});
+  window.homePreview={seek:time=>command('seek',{time}),play:()=>command('play'),pause:()=>command('pause'),setMode:(mode,autoplay=true)=>command('mode',{mode,autoplay}),getState:()=>({...current}),duration:8000};
+  frame.src='scene.html'+(capture?'?capture':'');
+})();
+</script></body></html>

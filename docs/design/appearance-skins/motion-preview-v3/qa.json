@@ -1,0 +1,151 @@
+{
+  "date": "2026-10-21T04:12:39.512Z",
+  "baseHead": "559397ac57bdd85893be3380e55e03f2d1501fa3",
+  "testedState": "Uncommitted design artifacts on baseHead",
+  "environment": {
+    "platform": "darwin",
+    "node": "v22.22.3",
+    "browser": "155.0.8059.85"
+  },
+  "commands": [
+    "node --check docs/design/appearance-skins/motion-preview-v3/demo-motion.js",
+    "node docs/design/appearance-skins/motion-preview-v3/verify-and-export.mjs"
+  ],
+  "checks": {
+    "characterHandoff": {
+      "home": [
+        760.640625,
+        74.875,
+        886.734375,
+        1021.4375
+      ],
+      "front": [
+        760.65625,
+        74.89054870605469,
+        886.71875,
+        1021.4374389648438
+      ],
+      "difference": [
+        -0.015625,
+        -0.0155487060546875,
+        0.015625,
+        0.00006103515625
+      ],
+      "sourceTimes": [
+        5.35,
+        5.35
+      ]
+    },
+    "fullToHomeSameFrame": true,
+    "existingUI": {
+      "comparedElements": 73,
+      "geometryFontsRadii": "unchanged"
+    },
+    "automaticHandoff": {
+      "state": {
+        "time": 6198.500000017882,
+        "playing": true,
+        "phase": "home",
+        "duration": 14000,
+        "bootDuration": 6000,
+        "loopDuration": 8000,
+        "staticHome": false,
+        "ready": true,
+        "failure": null,
+        "reducedMotion": false
+      },
+      "videoPaused": [
+        false,
+        true
+      ],
+      "transform": "none"
+    },
+    "pauseFreezesClock": true,
+    "continuesHome": {
+      "state": {
+        "time": 14214.10000001192,
+        "playing": true,
+        "phase": "home",
+        "duration": 14000,
+        "bootDuration": 6000,
+        "loopDuration": 8000,
+        "staticHome": false,
+        "ready": true,
+        "failure": null,
+        "reducedMotion": false
+      },
+      "bootOpacity": "0",
+      "frontPaused": true
+    },
+    "controls": "Replay, direct homepage, skip, play/pause, scrub passed",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 960,
+        "time": 2300,
+        "viewport": 1440,
+        "scroll": 1440
+      },
+      {
+        "width": 1440,
+        "height": 960,
+        "time": 8300,
+        "viewport": 1440,
+        "scroll": 1440
+      },
+      {
+        "width": 768,
+        "height": 1024,
+        "time": 2300,
+        "viewport": 768,
+        "scroll": 768
+      },
+      {
+        "width": 768,
+        "height": 1024,
+        "time": 8300,
+        "viewport": 768,
+        "scroll": 768
+      },
+      {
+        "width": 375,
+        "height": 812,
+        "time": 2300,
+        "viewport": 375,
+        "scroll": 375
+      },
+      {
+        "width": 375,
+        "height": 812,
+        "time": 8300,
+        "viewport": 375,
+        "scroll": 375
+      }
+    ],
+    "reducedMotion": {
+      "time": 6000,
+      "playing": false,
+      "phase": "home",
+      "duration": 14000,
+      "bootDuration": 6000,
+      "loopDuration": 8000,
+      "staticHome": true,
+      "ready": true,
+      "failure": null,
+      "reducedMotion": true
+    },
+    "movie": {
+      "width": 1440,
+      "height": 960,
+      "duration": 14,
+      "advanced": true
+    },
+    "browserErrors": []
+  },
+  "gaps": [
+    "Read-only Hemi snapshot, not actual application cold start or live model/IPC behavior.",
+    "Cubism modeling, head-turn/arm animation, Electron development/built renderer lifecycle and target-platform performance are not implemented or validated.",
+    "Light skin preview only."
+  ],
+  "result": "PASS"
+}

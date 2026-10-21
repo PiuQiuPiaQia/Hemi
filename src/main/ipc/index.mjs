@@ -1,5 +1,6 @@
 import { setAuxiliaryTransportObserver } from '../agent-runtime/auxiliary-transport.mjs';
 import { registerAppIpc } from './app.ipc.mjs';
+import { registerAppearanceIpc } from './appearance.ipc.mjs';
 import { registerAsrIpc } from './asr.ipc.mjs';
 import { registerAudioIpc } from './audio.ipc.mjs';
 import { registerComposerIpc } from './composer.ipc.mjs';
@@ -48,6 +49,7 @@ import { registerWorkspaceIpc, getWorkspaceService } from './workspace.ipc.mjs';
 import { registerSkillsIpc, getSkillService } from './skills.ipc.mjs';
 
 export async function registerAllIpcHandlers() {
+  await registerAppearanceIpc();
   // 在任何目录实例创建前原子激活；旧版本分叉只能由用户明确选择。
   const storage = await initializeRuntimeStorage({ userDataDir: app.getPath('userData') });
   if (storage.conflict) {

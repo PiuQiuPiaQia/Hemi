@@ -8,6 +8,9 @@ import Home from '@/windows/voice/page';
 import { installNativeInput } from '@/lib/native-input';
 import '@/globals.css';
 import '@/styles/index.css';
+import '@/appearance/appearance.css';
+import {initializeAppearance} from '@/appearance/runtime';
+import {StartupStage} from '@/appearance/startup-stage';
 
 installNativeInput();
 
@@ -23,7 +26,7 @@ document.documentElement.dataset.window =
     ? windowMode
     : 'main';
 
-createRoot(root).render(
+void initializeAppearance().then(()=>createRoot(root).render(
   <StrictMode>
     {windowMode === 'orb' ? (
       <FloatingOrb />
@@ -32,7 +35,7 @@ createRoot(root).render(
     ) : windowMode === 'task-popover' ? (
       <TaskPopover />
     ) : (
-      <Home />
+      <StartupStage><Home /></StartupStage>
     )}
   </StrictMode>,
-);
+));

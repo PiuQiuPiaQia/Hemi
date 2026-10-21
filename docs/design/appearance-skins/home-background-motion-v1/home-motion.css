@@ -1,0 +1,5 @@
+/* Read-only Hemi composition preview. Preserve the existing UI and skin styles. */
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#edf2fb;color-scheme:light}
+.compact-shell *,.compact-shell *::before,.compact-shell *::after{animation:none!important;transition:none!important;caret-color:transparent}
+.compact-shell .h24-sidebar-item:not([data-current='true']){background:transparent!important}
+.theme-home-backdrop>video{position:absolute;max-width:none;pointer-events:none;user-select:none;visibility:hidden;mask-image:linear-gradient(to bottom,black 0%,black 71.5035%,transparent 98.8717%);-webkit-mask-image:linear-gradient(to bottom,black 0%,black 71.5035%,transparent 98.8717%)}

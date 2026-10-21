@@ -1,6 +1,26 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+let appearanceBootstrap = null;
+const appearanceListeners = new Set();
+const appearanceActivityListeners = new Set();
+ipcRenderer.on('appearance:changed', (_event, snapshot) => {
+  if (appearanceBootstrap) appearanceBootstrap = { ...appearanceBootstrap, snapshot };
+  for (const listener of appearanceListeners) listener(snapshot);
+});
+ipcRenderer.on('appearance:activity', (_event, activity) => {
+  if (appearanceBootstrap) appearanceBootstrap = { ...appearanceBootstrap, activity };
+  for (const listener of appearanceActivityListeners) listener(activity);
+});
+try { appearanceBootstrap = ipcRenderer.sendSync('appearance:bootstrap'); } catch {}
+
 contextBridge.exposeInMainWorld('hemiVoice', {
+  getAppearanceBootstrap: () => appearanceBootstrap,
+  getAppearance: () => ipcRenderer.invoke('appearance:get'),
+  setAppearance: (request) => ipcRenderer.invoke('appearance:set', request),
+  onAppearanceChanged: (callback) => { appearanceListeners.add(callback); return () => appearanceListeners.delete(callback); },
+  onAppearanceActivity: (callback) => { appearanceActivityListeners.add(callback); return () => appearanceActivityListeners.delete(callback); },
+  reportAppearanceApplied: (value) => ipcRenderer.send('appearance:applied', value),
+  reportAppearanceVisualReady: (value) => ipcRenderer.send('appearance:visual-ready', value),
   platform: process.platform,
   getSkillState: () => ipcRenderer.invoke('skills:state'),
   refreshSkillCatalog: () => ipcRenderer.invoke('skills:refresh'),

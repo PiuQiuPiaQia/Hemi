@@ -541,8 +541,8 @@ html.kb-nav .h37-seg > button:focus-visible {
 }
 
 .h37-badge[data-tone='ok'] {
-  color: var(--accent-text);
-  background: var(--g-50);
+  color: var(--state-700);
+  background: var(--state-50);
 }
 
 .h37-badge[data-tone='warn'] {
@@ -566,7 +566,7 @@ html.kb-nav .h37-seg > button:focus-visible {
 }
 
 .h37-badge[data-tone='ok']::before {
-  background: var(--g-500);
+  background: var(--state-500);
 }
 
 .h37-tag {
@@ -816,7 +816,7 @@ button.h37-row:hover,
   width: 12px;
   height: 12px;
   stroke-width: 2.5;
-  color: var(--g-500);
+  color: var(--state-500);
 }
 
 .h37-saved[data-state='hidden'] {
@@ -1070,7 +1070,7 @@ html.kb-nav .h37-menu-item:focus-visible {
   width: 16px;
   height: 16px;
   flex: none;
-  color: var(--g-600);
+  color: var(--state-600);
 }
 
 .h37-toast-card[data-tone='err'] > svg {

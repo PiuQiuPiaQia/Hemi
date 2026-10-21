@@ -22,6 +22,9 @@ export function InfoPopover({
   headerActions,
   openOnHover = false,
   className = '',
+  side = 'top',
+  align,
+  initialFocus,
   children,
 }: {
   open: boolean;
@@ -33,6 +36,9 @@ export function InfoPopover({
   /** 只读信息预览：悬浮打开，不显示关闭按钮或模态遮罩。 */
   openOnHover?: boolean;
   className?: string;
+  side?: 'top'|'right'|'bottom'|'left';
+  align?: 'start'|'center'|'end';
+  initialFocus?: React.ComponentProps<typeof Popover.Popup>['initialFocus'];
   children: ReactNode;
 }) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
@@ -83,8 +89,8 @@ export function InfoPopover({
         {!openOnHover ? <Popover.Backdrop className="h37-info-scrim" /> : null}
         <Popover.Positioner
           className={`h37-info-positioner${openOnHover ? ' h37-info-hover-positioner' : ''}`}
-          side="top"
-          align={openOnHover ? 'center' : 'start'}
+          side={side}
+          align={align ?? (openOnHover ? 'center' : 'start')}
           sideOffset={8}
           collisionPadding={12}
           positionMethod="fixed"
@@ -93,7 +99,7 @@ export function InfoPopover({
             ref={popupRef}
             className={`h37-info-popover${openOnHover ? ' h37-info-hover' : ''} ${className}`}
             aria-labelledby={titleId}
-            initialFocus={openOnHover ? false : undefined}
+            initialFocus={initialFocus ?? (openOnHover ? false : undefined)}
             finalFocus={openOnHover ? false : undefined}
           >
             <header className="h37-info-head">

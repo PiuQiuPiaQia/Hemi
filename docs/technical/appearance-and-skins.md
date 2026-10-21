@@ -2,16 +2,16 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本与日期 | 1.1，2026-10-21（Asia/Shanghai） |
-| 状态 | 技术设计，待实现 |
+| 版本与日期 | 1.2，2026-10-21（Asia/Shanghai） |
+| 状态 | 已接入真实应用；平台验证见实施记录 |
 | 产品依据 | [人物主题与换肤需求](../requirements/appearance-and-skins.md) |
 | 物料依据 | [人物物料包 v1](../design/appearance-skins/v1/README.md) |
-| 源码审查基线 | `e556f9844e2d3e50c0c789ed2a29c22d08ba6b27` 加当前工作树 |
+| 源码审查基线 | `559397ac57bdd85893be3380e55e03f2d1501fa3` 加本轮未提交工作树 |
 | 运行约束 | macOS、Node.js 22.19+ 的 Node 22 线；项目锁定 Electron 44、React 19、Vite 8 |
 
 采用主进程统一管理外观、语义 CSS 变量驱动页面的方案。六款皮肤共用组件与布局；人物属于皮肤资源，侧栏背景不参与排版。首版仅浅色，不增加人物背景开关，不调整模型、语音或任务配置。
 
-本文给出模块、接口、启动顺序、并发与错误处理和测试拆分。拟新增文件和接口以代码样式标出；可点击的源码链接指向已有实现。
+本文给出已落地的模块、接口、启动顺序、并发与错误处理。完整演出、资源生命周期和实测结果见[实施方案与验证记录](appearance-implementation.md)。
 
 冷启动演出和整体场景已按用户澄清扩展，见[冷启动与背景技术补充](appearance-startup-and-background.md)。该补充增加启动舞台、真实 UI 交接和场景资源；下文普通主题提交与多窗口规则继续适用。
 
@@ -53,7 +53,7 @@ flowchart LR
 
 ## 2 模块与文件拆分
 
-以下均为实施阶段拟新增或修改的内容，本轮未接入生产代码。
+以下模块已接入生产；设计预览继续作为视觉依据，不代替实际应用。
 
 | 模块或路径 | 职责 |
 | --- | --- |
@@ -72,9 +72,12 @@ flowchart LR
 | `src/renderer/src/components/skin-picker.tsx` | 两列六卡、当前态、保存中/错误、键盘与关闭行为 |
 | `src/renderer/src/components/skin-watermark.tsx` | 侧栏底层装饰；无事件、无焦点、无排版占位 |
 | `scripts/generate-appearance.mjs` | 注册表完整性校验，生成首帧 CSS，提供 `--check` 防漂移 |
+| `src/renderer/src/appearance/startup-stage.tsx` | 真实 UI 启动舞台、媒体对齐、中断、双就绪和焦点交接 |
+| `src/renderer/src/appearance/theme-backdrop.tsx` | 当前人物媒体、题字、局部动画播放和静态回退 |
+| `src/renderer/src/appearance/scene.ts` | 投影真实页面、输入/通话与应用准备状态，不持有业务实例 |
 | `scripts/build-skin-assets.mjs` | 离线生成运行所需尺寸并记录 hash；不在用户换肤时执行 |
 
-同步修改现有 `src/shared/ipc-channels.mjs`、`src/shared/protocol.ts`、`src/preload/index.cjs`、`src/main/ipc/index.mjs`、主进程启动、四类窗口、renderer HTML/入口、NavRail、Sidebar、欢迎槽位、样式及 fixture。先绘制这些文件的调用关系，再分提交实现，避免把生产行为藏在演示 fixture 中。
+同步修改现有 `src/shared/ipc-channels.mjs`、`src/shared/protocol.ts`、`src/preload/index.cjs`、`src/main/ipc/index.mjs`、主进程启动、四类窗口、renderer HTML/入口、NavRail、Sidebar、欢迎槽位、样式及 fixture。真实路径与 fixture 共用组件；生产状态来自固定桥接，不使用 fixture 的本地选择逻辑。
 
 ## 3 数据契约
 
@@ -117,6 +120,8 @@ type AppearanceBootstrap = {
   snapshot: AppearanceSnapshot;
   windowMode: 'main' | 'orb' | 'caption' | 'task-popover';
   backgroundColor: string; // 来自注册表；悬浮窗口固定透明
+  coldStart: boolean;
+  activity: { visible: boolean; focused: boolean };
 };
 
 type AppearanceSetResult =
@@ -138,13 +143,15 @@ type AppearanceSetResult =
 | `appearance:set` | invoke；有换肤入口的主窗口可写 | 校验并提交完整 skinId/mode，返回明确回执 |
 | `appearance:changed` | 主进程发送 | 成功提交后的全量快照，包含提交发起窗口 |
 | `appearance:bootstrap` | preload 内部的一次 sendSync | 每次文档加载取最新内存快照及窗口 mode；不开放给页面任意调用 |
+| `appearance:visual-ready` | renderer 固定桥发送 | 当前版本舞台可绘制；与真实 APP_READY 分开 |
+| `appearance:activity` | 主进程发送 | 登记窗口的 visible/focused，用于停止隐藏解码 |
 | `appearance:applied` | renderer 经固定桥发送 | `{sessionId, revision, status: 'ready' / 'degraded' / 'error'}`，用于显示检查与测量 |
 
 可信调用者须同时满足：已登记的自有 window/webContents、顶层 frame、预期本地 URL 或明确允许的 Vite 地址。不要只用 `BrowserWindow.getAllWindows()` 广播或仅凭窗口存在就授权；外部登录 `WebContentsView`、子 frame 和弹出的非 Hemi 窗口均不进入外观登记表。
 
-preload 暴露 `getAppearanceBootstrap()`、`getAppearance()`、`setAppearance()`、`onAppearanceChanged()`、`reportAppearanceApplied()`。回调只收到净化后的数据，取消订阅仅删除自己的 listener，不使用 removeAllListeners，不暴露 Electron event 或通用 send/invoke。原有 sandbox/contextIsolation 保持。该桥接方式符合 [Electron 44 Context Isolation](https://github.com/electron/electron/blob/v44.0.0/docs/tutorial/context-isolation.md) 的固定接口建议。
+preload 暴露 `getAppearanceBootstrap()`、`getAppearance()`、`setAppearance()`、`onAppearanceChanged()`、`reportAppearanceApplied()`、`reportAppearanceVisualReady()`、`onAppearanceActivity()`。回调只收到净化后的数据，取消订阅仅删除自己的 listener，不使用 removeAllListeners，不暴露 Electron event 或通用 send/invoke。原有 sandbox/contextIsolation 保持。该桥接方式符合 [Electron 44 Context Isolation](https://github.com/electron/electron/blob/v44.0.0/docs/tutorial/context-isolation.md) 的固定接口建议。
 
-bootstrap 同步调用仅用于首帧：处理器在建窗口前注册，直接复制内存值，禁止 await、磁盘 IO、等待 renderer、截图或大资源处理。Electron 明确指出 sendSync 会阻塞 renderer，因此日常读取和写入全部使用 invoke；实现须记录 bootstrap 耗时，并验证不会形成主进程等待 renderer 的循环。[Electron 44 ipcRenderer](https://github.com/electron/electron/blob/v44.0.0/docs/api/ipc-renderer.md)
+bootstrap 同步调用仅用于首帧：处理器在建窗口前注册，直接复制内存值，禁止 await、磁盘 IO、等待 renderer、截图或大资源处理。Electron 明确指出 sendSync 会阻塞 renderer，因此日常读取和写入全部使用 invoke；bootstrap 只执行快照复制与资格计数，不等待 renderer；真实首帧与恢复显示由 Electron 回归验证。[Electron 44 ipcRenderer](https://github.com/electron/electron/blob/v44.0.0/docs/api/ipc-renderer.md)
 
 不把创建时的 `additionalArguments` 或 localStorage 当成唯一启动来源：创建后换过皮肤，再 reload 时它们可能已过期。若实施时能提供同等正确且已验证的异步首帧方案，可替换这一个内部同步通道，但必须保留加载前遮挡与显示检查。
 
@@ -217,7 +224,7 @@ Hemi 文档设 `color-scheme: light`；不为首版人物皮肤全局强制 nati
 
 ### 7.2 浮层
 
-复用 InfoPopover/Base UI 的生命周期、碰撞、窄窗遮罩与焦点规则。为现有组件增加可选 side、align、offset、initialFocus/finalFocus 参数，旧调用保留默认行为；不能全局修改定位使其他浮层跟着迁移。
+复用 InfoPopover/Base UI 的生命周期、碰撞、窄窗遮罩与焦点规则。为现有组件增加可选 side、align、initialFocus 参数，旧调用保留默认行为；不能全局修改定位使其他浮层跟着迁移。
 
 换肤在桌面采用入口右侧、底部优先对齐，碰撞时夹到可用视口；≤600px 继续底部面板。外层 392px，内部六张 100px 高卡片、2 列、10px gap；沿用当前字体/6px 卡片圆角，错误反馈只在异常时临时出现。
 
@@ -249,13 +256,13 @@ Flowgram 独立 root 继承 html 的 CSS 变量，必要的 JS theme 参数显�
 
 [物料 manifest](../design/appearance-skins/v1/manifest.json) 为设计源物料清单，包含原图 hash、尺寸、透明信息、裁切和背景参数；它不是生产运行时 manifest。完整母版保留在 docs/design，不随应用全量装入内存。
 
-实施时离线导出三档：侧栏 width 540px（270px 的 2×）、卡片透明裁切约 256px、欢迎头像 96px。卡片与头像共用同一裁切来源，避免各自重画后脸部不一致。可优先使用现有 Electron 44 的 nativeImage 做离线 crop/resize/toPNG，固定导出平台与参数，不增加 renderer 图片处理依赖；不在用户换肤路径执行。[Electron 44 nativeImage](https://github.com/electron/electron/blob/v44.0.0/docs/api/native-image.md)
+当前导出 960px 宽静态人物、256px 方形头像/卡片共用裁切，以及约 1000px 宽的透明动画。侧栏与主页复用静态人物，避免再打包重复的侧栏副本；卡片和欢迎头像复用相同人脸来源。离线浏览器 Canvas 处理 WebP，FFmpeg 编码 VP9 alpha；用户换肤路径不执行图片加工，也不新增 renderer 依赖。
 
 导出文件放入 `src/renderer/src/assets/skins/`，由静态 import 映射给 renderer，让 Vite 管理开发/构建资源 URL。不要把运行时字符串路径传给 `new URL` 期待 Vite 自动分析；不要引用桌面或 docs 路径。[Vite 静态资源](https://vite.dev/guide/assets.html)
 
 无依赖 bootstrap 脚本和生成颜色 CSS 使用 public 的稳定文件名，并在最终 HTML 中输出适合 `base:'./'` 的相对引用；同时验证 HTTP 开发页与 file 协议打包页，不能直接把 `/appearance-bootstrap.js` 留在打包 HTML 中。
 
-资源预算为工程目标：全部卡片与头像压缩后合计 ≤600KiB，五张侧栏图合计 ≤3MiB；超出时先调整尺寸/编码并复核边缘，不能用降低正文可读性代替。首版 PNG 可保持 alpha，未来需要 WebP 时再独立评估编码工具与许可。
+资源预算为工程目标：全部卡片与头像压缩后合计 ≤600KiB，五张侧栏图合计 ≤3MiB；超出时先调整尺寸/编码并复核边缘，不能用降低正文可读性代替。当前已通过本地浏览器 Canvas 导出 WebP，透明影片由 FFmpeg 编码 VP9 alpha；不新增 renderer 依赖。
 
 ## 9 故障与观测
 
@@ -270,7 +277,7 @@ Flowgram 独立 root 继承 html 的 CSS 变量，必要的 JS theme 参数显�
 | 资源缺失 | 配色照常，头像回退、背景空缺；记录资源 ID，不记录用户内容 |
 | 平台原生窗口差异 | 分平台验证透明和标题栏，不由 CSS 截图推断 |
 
-记录请求到达、写入开始/结束、提交、每个可见窗口 applied 的耗时与版本。P95 用主进程同一时钟测提交至 applied 回执，renderer 回执须在已应用颜色和本次可见资源绘制后的帧发送；该数值含 IPC 返回延迟，是保守的应用耗时。点击至提交单列，首次显示单列，隐藏窗口不混入可见窗口 P95。
+生产日志记录有界错误码，不写用户内容。回归脚本在真实主进程中临时采集提交与 applied 的耗时和版本，不给正式 renderer 增加诊断权限。P95 用主进程同一时钟测提交至 applied 回执，renderer 回执须在已应用颜色和本次可见资源绘制后的帧发送；该数值含 IPC 返回延迟，是保守的应用耗时。点击至提交单列，首次显示单列，隐藏窗口不混入可见窗口 P95。真实卡片的 pointerdown 至已提交快照广播另行采样，包含写盘与 IPC。
 
 不为遥测保留人物解码对象或不断增长的请求记录；请求缓存、诊断和资源缓存都设上限。日志沿用现有 logger，禁止附带凭据、个人对话或录音。
 
@@ -296,6 +303,6 @@ Flowgram 独立 root 继承 html 的 CSS 变量，必要的 JS theme 参数显�
 
 ## 11 本轮交付和剩余验证
 
-本轮交付人物设计源物料、清单、使用预览和本技术方案；不修改生产 IPC、窗口或主题运行代码。原需求中已有的原型检查继续有效，但不能替代上述集成验收。
+本轮交付六款皮肤、原子存储和固定 IPC、四类窗口同步、六卡入口、侧栏水印、主页人物/题字、完整冷启动和局部动画，以及源物料到打包资源的导出脚本。
 
-还需在实施中完成：资源三档导出及预算、完整语义色迁移、实际 bootstrap/窗口显示检查、原子存储与广播、全部页面与五款叠字对比度、构建应用和 Windows 实机。技术方案里的预算、时序和接口均须由对应测试证明，不能写成已经实现的性能结论。
+准确验证环境、命令、结果、性能与剩余项统一见[实施记录](appearance-implementation.md)。Windows 实机和真实模型/语音执行中的长期观察仍单列，不以当前平台的 UI 回归替代。

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {SkinWatermark} from '@/components/skin-watermark';
 import {
   DndContext,
   KeyboardSensor,
@@ -189,6 +190,7 @@ export function ConversationSidebar({
 
   return (
     <aside className="h24-sidebar" aria-label="主导航">
+      <SkinWatermark />
       <button
         type="button"
         className="h24-sidebar-new"

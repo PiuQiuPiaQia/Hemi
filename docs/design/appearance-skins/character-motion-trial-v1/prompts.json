@@ -1,0 +1,15 @@
+{
+  "mode": "Built-in image_gen image editing",
+  "transparent_background": true,
+  "reference": "../v1/masters/cafe-blue.png",
+  "prompts": [
+    {
+      "output": "assets/eye-closed.png",
+      "prompt": "Use case: precise-object-edit / identity-preserve.\nAsset type: one CLOSED-EYE blink keyframe for a 2D character animation, edited from Image 1.\nImage 1 is the edit target, not a style inspiration. Preserve this exact character, original full transparent silhouette, exact canvas aspect ratio and subject registration. Keep the original composition, scale, head tilt, smile and mouth shape, hair, outfit, ribbons, ears, colors, shading and all other pixels as unchanged as possible.\nChange only the visibly OPEN blue eye on the VIEWER'S LEFT (the eye around x=490, y=470 on the 1135x1386 reference canvas): gently close that eye for a natural blink. Replace its eye white, iris and pupil with the natural skin-colored eyelid and a delicate curved closed upper lash line in the SAME position and perspective. Keep the OTHER eye already winking on the viewer's right unchanged. The resulting frame has both eyes gently closed and the exact same happy open-mouth smile.\nThis is a registered animation keyframe, NOT a new portrait: do not reframe, rotate, resize, redraw hair, alter face proportions, invent a pose or move any features. Retain original canvas and character alignment. No text, no layout board, no new accessories, no background; genuinely transparent alpha background. Deliver a single complete character frame."
+    },
+    {
+      "output": "assets/eye-half.png",
+      "prompt": "Use case: precise-object-edit / identity-preserve.\nAsset: ONE HALF-CLOSED EYE intermediate keyframe for a character blink animation. Image 1 is the exact edit target. Keep its original 1135x1386 transparent canvas, subject registration, full cutout, proportions, expression, open smiling mouth, pose, head angle, all hair, costume, shading and every other feature unchanged.\nChange ONLY the visibly open BLUE eye on the VIEWER'S LEFT, around x=480,y=465: lower its upper eyelid to approximately 50% closed, partly covering the blue iris and pupil. The bottom eyelid and corners remain fixed; the upper lash line follows the natural perspective and descends halfway. The already winking eye on the viewer's right remains exactly as it is.\nThis is a registered in-between animation frame, not a new illustration. Preserve the exact eye location and face contour; no resizing, no reframing, no changes outside this one open eye region. Do not fully close this eye; some blue iris must remain visible beneath the lowered upper lid. No text or extra objects. Genuine transparent alpha background. Deliver one complete character keyframe."
+    }
+  ]
+}

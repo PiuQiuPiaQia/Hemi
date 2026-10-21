@@ -244,7 +244,7 @@ label.h59-resolve {
 }
 .h59-card[data-status="completed"] > header > span,
 .h59-card[data-status="running"] > header > span {
-  color: var(--accent-text);
+  color: var(--state-700);
 }
 .h59-card[data-status="failed"] > header > span,
 .h59-card[data-status="interrupted"] > header > span {
@@ -1201,7 +1201,7 @@ label.h59-resolve {
 }
 .h59-run-preview .h59-steps button[data-status="succeeded"] svg,
 .h59-run-preview .h59-steps button[data-status="running"] svg {
-  color: var(--accent-text);
+  color: var(--state-700);
 }
 .h59-run-preview > section {
   margin-top: var(--gap-section);

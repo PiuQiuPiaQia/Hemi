@@ -271,7 +271,7 @@ html.kb-nav .floating-orb-button:focus-visible .floating-orb-core {
 .floating-caption-shell .caption-thinking-dots i {
   width: 4px;
   height: 4px;
-  background: var(--g-500);
+  background: var(--state-500);
   animation: hemi-breathe 1.2s ease-in-out infinite;
 }
 
@@ -302,7 +302,7 @@ html.kb-nav .floating-orb-button:focus-visible .floating-orb-core {
 .floating-caption-shell .caption-task-dot {
   width: 6px;
   height: 6px;
-  background: var(--g-500);
+  background: var(--state-500);
   animation: hemi-breathe 1.2s ease-in-out infinite;
 }
 
@@ -348,12 +348,12 @@ html.kb-nav .floating-orb-button:focus-visible .floating-orb-core {
 
 .floating-caption-shell .floating-status-pill[data-state='listening'],
 .floating-caption-shell .floating-status-pill[data-state='requesting'] {
-  color: var(--accent-text);
+  color: var(--state-700);
 }
 
 .floating-caption-shell .floating-status-pill[data-state='listening']::before,
 .floating-caption-shell .floating-status-pill[data-state='requesting']::before {
-  background: var(--g-500);
+  background: var(--state-500);
   animation: hemi-breathe 1.2s ease-in-out infinite;
 }
 

@@ -191,7 +191,7 @@
   width: 4px;
   height: 4px;
   border-radius: var(--r-full);
-  background: var(--g-500);
+  background: var(--state-500);
   animation: h48-breathe 1.2s ease-in-out infinite;
 }
 

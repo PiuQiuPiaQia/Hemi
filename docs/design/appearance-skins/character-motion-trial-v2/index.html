@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>晴海蓝 · 人物动作试片 v2</title>
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+<main>
+  <header><h1>晴海蓝 · 人物动作试片 v2</h1><span>发梢与衣料动作对照</span></header>
+  <div class="player">
+    <div class="stage"><div class="logical">
+      <div class="scene-line"></div><div class="lettering"><strong>Smile</strong><em>DeepSeek</em></div>
+      <div class="mode-badge" id="mode-label">新版 · 动作增强</div>
+      <canvas class="hero" id="hero" width="1231" height="1418" aria-label="完整人物：眨眼、发梢摆动、衣料随呼吸起伏"></canvas>
+      <div class="detail hair-detail"><canvas id="hair" width="860" height="512" aria-label="发梢同步放大"></canvas></div>
+      <div class="detail-label hair-label"><i></i>发梢 · 局部摆动</div>
+      <div class="detail cloth-detail"><canvas id="cloth" width="900" height="536" aria-label="肩部、蝴蝶结和衣料同步放大"></canvas></div>
+      <div class="detail-label cloth-label"><i></i>肩部与衣料 · 随呼吸起伏</div>
+    </div></div>
+    <div class="controls">
+      <div class="modes" role="group" aria-label="动作对照"><button type="button" data-mode="original" aria-pressed="false">原版</button><button type="button" data-mode="enhanced" aria-pressed="true">新版</button><button type="button" data-mode="still" aria-pressed="false">静止对照</button></div>
+      <button id="toggle" type="button">暂停</button><button id="blink" type="button">眨眼一次</button><button id="mesh" type="button" aria-pressed="false">变形网格</button>
+      <label>眼睛<input id="eye" type="range" min="0" max="1" step=".01" value="0" aria-label="手动眼睛闭合程度"></label>
+      <input class="timeline" id="time" type="range" min="0" max="8000" step="10" value="0" aria-label="试片进度，毫秒"><output>0.0 / 8.0s</output>
+    </div>
+  </div>
+  <p class="note">默认展示新版；可切换原版或静止画面对照。保留原图脸部位置，增强发梢、肩部和衣料的局部运动。<a href="README.md">制作与验证记录</a>。本页是人物动画试片，尚未接入 Hemi。</p>
+  <p class="error" role="alert"></p>
+</main>
+<script src="../character-motion-trial-v1/assets-data.js"></script><script src="rig.js"></script>
+</body>
+</html>

@@ -33,6 +33,14 @@
   --g-800: #4b6152;
   --g-900: #3e5044;
 
+  /* Business status stays recognizable when the brand palette changes. */
+  --state-50: #f2f5f1;
+  --state-100: #e4ebe3;
+  --state-200: #cfdcd1;
+  --state-500: #8fa794;
+  --state-600: #74907b;
+  --state-700: #566e5d;
+
   --danger: #b4483d;
   --danger-50: #fbefed;
   --danger-200: #ecd0cb;

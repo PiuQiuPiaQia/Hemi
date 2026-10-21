@@ -4,6 +4,8 @@
 
 打开 [预览页](index.html) 可切换主页和会话阅读两张静态效果图。
 
+人物局部动画已合成到[主页动态整体预览](../home-background-motion-v1/index.html)，沿用这里的构图和界面样式。
+
 ![主页效果](welcome.png)
 
 | 区域 / 状态 | 处理方式 |

@@ -16,6 +16,7 @@ import { isOnboardingInProgress } from '../ipc/onboarding.ipc.mjs';
 import { isSmokeTest, state } from '../state.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
 import { loadRenderer } from './loader.mjs';
+import { waitForAppearance } from './appearance-window.mjs';
 
 export const FLOATING_ORB_SIZE = 92;
 const FLOATING_ORB_MARGIN = 24;
@@ -132,7 +133,7 @@ export function handleTaskHover(hovered) {
       void (async () => {
         const popover = await createTaskPopoverWindow();
         positionTaskPopover();
-        if (!popover.isVisible()) popover.showInactive();
+        if (!popover.isVisible() && await waitForAppearance(popover) && !popover.isDestroyed()) popover.showInactive();
       })();
     }, 200);
     return;
@@ -480,6 +481,7 @@ export async function showFloatingOrbIfNeeded({ allowSmoke = false } = {}) {
     if (!stored.floatingOrbEnabled || !config.apiKey) return;
 
     const { orb, caption } = await createFloatingSurface();
+    if (!await waitForAppearance(orb) || !await waitForAppearance(caption)) return;
     if (!isMainWindowForeground()) {
       positionFloatingCaption(...orb.getPosition());
       caption.showInactive();

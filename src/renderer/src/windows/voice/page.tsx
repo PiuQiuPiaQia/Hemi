@@ -1,4 +1,5 @@
 import {confirmWorkflowLeave} from "./workflow-leave-guard";
+import {setAppearanceScene} from '@/appearance/scene';
 import type { ChatTurnReceipt, ConversationDeliverableView, ConversationTurnState, SkillSelectionView } from '@shared/protocol';
 import { retainedDeliverables } from './lib/retained-deliverables';
 'use client';
@@ -3670,6 +3671,8 @@ export default function Home() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(()=>{setAppearanceScene({appReady:!bootstrapping});if(bootstrapping||setupRequired||settingsOpen)setAppearanceScene({view:'other',inputActive:false});},[bootstrapping,setupRequired,settingsOpen]);
 
   if (bootstrapping) {
     return (

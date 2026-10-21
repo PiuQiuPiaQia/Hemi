@@ -1,0 +1,184 @@
+{
+  "date": "2026-10-21T01:53:57.311Z",
+  "head": "559397ac57bdd85893be3380e55e03f2d1501fa3",
+  "environment": {
+    "platform": "darwin",
+    "node": "v22.22.3",
+    "browser": "155.0.8059.85"
+  },
+  "command": "node docs/design/appearance-skins/character-motion-trial-v2/verify-and-export.mjs --check-existing",
+  "checks": {
+    "renderers": [
+      {
+        "renderer": "WebKit WebGL",
+        "cols": 96,
+        "rows": 120,
+        "vertices": 11737,
+        "triangles": 23040
+      },
+      {
+        "renderer": "WebKit WebGL",
+        "cols": 96,
+        "rows": 120,
+        "vertices": 11737,
+        "triangles": 23040
+      },
+      {
+        "renderer": "WebKit WebGL",
+        "cols": 96,
+        "rows": 120,
+        "vertices": 11737,
+        "triangles": 23040
+      }
+    ],
+    "pixels": {
+      "eyeOnly": {
+        "pixels": 13969,
+        "bbox": [
+          443,
+          423,
+          604,
+          544
+        ]
+      },
+      "faceStability": {
+        "pixels": 0,
+        "bbox": null
+      },
+      "localMotion": {
+        "pixels": 786975,
+        "bbox": [
+          52,
+          420,
+          1201,
+          1408
+        ]
+      },
+      "loopBoundary": {
+        "pixels": 0,
+        "bbox": null
+      }
+    },
+    "hairSilhouette": {
+      "original": {
+        "min": 54,
+        "max": 69,
+        "excursion": 15
+      },
+      "enhanced": {
+        "min": 34,
+        "max": 96,
+        "excursion": 62
+      }
+    },
+    "clothLandmark": {
+      "original": {
+        "samples": 32,
+        "min": 41.57500721084511,
+        "max": 42.614573441242754,
+        "excursion": 1.0395662303976465
+      },
+      "enhanced": {
+        "samples": 32,
+        "min": 32.05950642193547,
+        "max": 52.11306917688266,
+        "excursion": 20.053562754947194
+      }
+    },
+    "reducedMotionPaused": true,
+    "comparisonModes": "Original, enhanced, and still buttons passed",
+    "controls": "Eye slider, mesh toggle, manual blink, play/pause passed",
+    "viewports": [
+      {
+        "viewport": 375,
+        "page": 375,
+        "scene": {
+          "width": 353,
+          "height": 235.33331298828125
+        },
+        "stage": {
+          "width": 353,
+          "height": 235.328125
+        }
+      },
+      {
+        "viewport": 768,
+        "page": 768,
+        "scene": {
+          "width": 734,
+          "height": 489.3333740234375
+        },
+        "stage": {
+          "width": 734,
+          "height": 489.328125
+        }
+      },
+      {
+        "viewport": 1440,
+        "page": 1440,
+        "scene": {
+          "width": 1198,
+          "height": 798.6666870117188
+        },
+        "stage": {
+          "width": 1198,
+          "height": 798.65625
+        }
+      }
+    ],
+    "darkMode": "Skipped: this standalone blue skin concept explicitly uses light surfaces (color-scheme: light)",
+    "video": {
+      "character-motion-preview.mp4": {
+        "duration": 8,
+        "width": 1440,
+        "height": 960,
+        "alpha": {
+          "zero": 0,
+          "opaque": 1382400,
+          "partial": 0,
+          "nearlyOpaque": 1382400
+        },
+        "playbackAdvanced": true,
+        "isAlpha": false,
+        "bytes": 2686997
+      },
+      "character-idle-alpha.webm": {
+        "duration": 8,
+        "width": 616,
+        "height": 710,
+        "alpha": {
+          "zero": 156749,
+          "opaque": 4461,
+          "partial": 276150,
+          "nearlyOpaque": 260440
+        },
+        "playbackAdvanced": true,
+        "isAlpha": true,
+        "bytes": 2088822
+      }
+    },
+    "browserErrors": [],
+    "legacyV1Scaling": {
+      "method": "Playwright file URL spot-check with reduced motion; compare rendered logical width to stage width",
+      "checks": [
+        {
+          "width": 375,
+          "scene": 353,
+          "stage": 353
+        },
+        {
+          "width": 1200,
+          "scene": 1166,
+          "stage": 1166
+        }
+      ]
+    }
+  },
+  "gaps": [
+    "Procedural WebGL mesh, not a Cubism model or editor project.",
+    "No head turn, separate articulated arms, or lip sync.",
+    "Desktop Chrome artifact verification only; Hemi Electron development/built renderers and target-platform decoding have not been tested.",
+    "Keyframe mixing can briefly blend lash lines; production eye rig needs continuous eyelid geometry."
+  ],
+  "result": "PASS"
+}

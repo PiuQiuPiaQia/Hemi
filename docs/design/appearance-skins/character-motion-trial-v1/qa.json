@@ -1,0 +1,114 @@
+{
+  "date": "2026-10-21T01:45:20.865Z",
+  "head": "559397ac57bdd85893be3380e55e03f2d1501fa3",
+  "environment": {
+    "platform": "darwin",
+    "node": "v22.22.3",
+    "browser": "155.0.8059.85"
+  },
+  "command": "node docs/design/appearance-skins/character-motion-trial-v1/verify-and-export.mjs --check-existing",
+  "checks": {
+    "renderers": [
+      {
+        "renderer": "WebKit WebGL",
+        "cols": 96,
+        "rows": 120,
+        "vertices": 11737,
+        "triangles": 23040
+      },
+      {
+        "renderer": "WebKit WebGL",
+        "cols": 96,
+        "rows": 120,
+        "vertices": 11737,
+        "triangles": 23040
+      }
+    ],
+    "pixels": {
+      "eyeOnly": {
+        "pixels": 13969,
+        "bbox": [
+          395,
+          407,
+          556,
+          528
+        ]
+      },
+      "faceStability": {
+        "pixels": 0,
+        "bbox": null
+      },
+      "localMotion": {
+        "pixels": 645027,
+        "bbox": [
+          2,
+          405,
+          1134,
+          1385
+        ]
+      },
+      "loopBoundary": {
+        "pixels": 0,
+        "bbox": null
+      }
+    },
+    "reducedMotionPaused": true,
+    "controls": "Eye slider, mesh toggle, manual blink, play/pause passed",
+    "viewports": [
+      {
+        "viewport": 375,
+        "page": 375
+      },
+      {
+        "viewport": 560,
+        "page": 560
+      },
+      {
+        "viewport": 980,
+        "page": 980
+      },
+      {
+        "viewport": 1440,
+        "page": 1440
+      }
+    ],
+    "video": {
+      "character-motion-preview.mp4": {
+        "duration": 8,
+        "width": 1440,
+        "height": 960,
+        "alpha": {
+          "zero": 0,
+          "opaque": 1382400,
+          "partial": 0,
+          "nearlyOpaque": 1382400
+        },
+        "playbackAdvanced": true,
+        "isAlpha": false,
+        "bytes": 1474283
+      },
+      "character-idle-alpha.webm": {
+        "duration": 8,
+        "width": 560,
+        "height": 684,
+        "alpha": {
+          "zero": 108505,
+          "opaque": 4410,
+          "partial": 270125,
+          "nearlyOpaque": 256014
+        },
+        "playbackAdvanced": true,
+        "isAlpha": true,
+        "bytes": 1201969
+      }
+    },
+    "browserErrors": []
+  },
+  "gaps": [
+    "Procedural WebGL mesh, not a Cubism model or editor project.",
+    "No head turn, separate articulated arms, or lip sync.",
+    "Desktop Chrome artifact verification only; Hemi Electron development/built renderers and target-platform decoding have not been tested.",
+    "Keyframe mixing can briefly blend lash lines; production eye rig needs continuous eyelid geometry."
+  ],
+  "result": "PASS"
+}

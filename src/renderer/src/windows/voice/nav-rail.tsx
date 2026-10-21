@@ -1,4 +1,5 @@
 import { MessageCircle, Settings, Sparkles, Workflow } from 'lucide-react';
+import {SkinPicker} from '@/components/skin-picker';
 
 /**
  * 034 v3（2026-10-02 用户裁决，参考 Codex 桌面版）：应用级页面导航收进
@@ -62,6 +63,7 @@ export function NavRail({
         </button>
       ) : null}
       <div className="h24-navrail-spacer" />
+      <SkinPicker />
       <button
         type="button"
         className="h24-navrail-item"

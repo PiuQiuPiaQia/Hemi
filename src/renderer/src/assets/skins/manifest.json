@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "durationMs": 8000,
+  "framesPerSecond": 30,
+  "method": "Existing approved artwork; offline WebGL local deformation and VP9 alpha encoding. No Cubism runtime.",
+  "skins": {
+    "cafe-blue": {
+      "width": 1135,
+      "height": 1386,
+      "padding": {
+        "x": 48,
+        "y": 16
+      },
+      "motion": "blink-hair-cloth",
+      "files": {
+        "cafe-blue.webp": {
+          "bytes": 287708,
+          "sha256": "d3e869926318784a0921ad96717ddc4408da532fda496a82a4f57ddfc141d238"
+        },
+        "cafe-blue-portrait.webp": {
+          "bytes": 30924,
+          "sha256": "7cceca00dfa074cde91a6b45465ea1455a8b4b4b3c79250b6f3acbde3394688d"
+        },
+        "cafe-blue-idle.webm": {
+          "bytes": 5056723,
+          "sha256": "e2be91f1e17a267acc5bbaec3f327c63e5ebfd80885ab99480c0bfe9ce6dea28"
+        }
+      }
+    },
+    "cafe-purple": {
+      "width": 1197,
+      "height": 1314,
+      "padding": {
+        "x": 48,
+        "y": 16
+      },
+      "motion": "hair-cloth",
+      "files": {
+        "cafe-purple.webp": {
+          "bytes": 238642,
+          "sha256": "953bc199c5d2bfdb23e68aeab493ac39d52131743330826d2d555e1407f0b028"
+        },
+        "cafe-purple-portrait.webp": {
+          "bytes": 32610,
+          "sha256": "4c98b1d581afdcb7734d73f8541f76679b6c34a10a41fb90626ebee696891e34"
+        },
+        "cafe-purple-idle.webm": {
+          "bytes": 5676804,
+          "sha256": "c2360c07858ce1ea32a081c9ed9c001fde781c2bbaa1ef450570a50efd78baf0"
+        }
+      }
+    },
+    "cafe-orange": {
+      "width": 1060,
+      "height": 1484,
+      "padding": {
+        "x": 48,
+        "y": 16
+      },
+      "motion": "hair-cloth",
+      "files": {
+        "cafe-orange.webp": {
+          "bytes": 420864,
+          "sha256": "dd6ede054e8b08b22eed4e3cfbadae66e119cea912613b9c475d8e4052bd85bd"
+        },
+        "cafe-orange-portrait.webp": {
+          "bytes": 35300,
+          "sha256": "eb116e128db5a41bd1945e143fc96ca8ce1c28283ca39f6f3385a777b9b895da"
+        },
+        "cafe-orange-idle.webm": {
+          "bytes": 6653261,
+          "sha256": "d38a98c2b0d61853326075d1347423087cbb4d048da6145919678adddbb8f052"
+        }
+      }
+    },
+    "cafe-gold": {
+      "width": 1114,
+      "height": 1412,
+      "padding": {
+        "x": 48,
+        "y": 16
+      },
+      "motion": "hair-cloth",
+      "files": {
+        "cafe-gold.webp": {
+          "bytes": 283248,
+          "sha256": "bc9faaff39c76229041e824ae704defd57df4fecb6a291d969cf193080e7c5b7"
+        },
+        "cafe-gold-portrait.webp": {
+          "bytes": 30528,
+          "sha256": "a980a231abd39a72fdfd910dab92a79c6048bd16b098c32c108fe94195f82c27"
+        },
+        "cafe-gold-idle.webm": {
+          "bytes": 4975103,
+          "sha256": "58e1eb2e8818874e1ed79868c285e79c22f30e9b86c24d96044592caa208f3ec"
+        }
+      }
+    },
+    "cafe-red": {
+      "width": 1110,
+      "height": 1417,
+      "padding": {
+        "x": 48,
+        "y": 16
+      },
+      "motion": "scarf-cloth",
+      "files": {
+        "cafe-red.webp": {
+          "bytes": 186660,
+          "sha256": "f47cd9739cad2c9bc228afdbfaacd189bd3fdcfee63e53c9390dd3da16b6b12e"
+        },
+        "cafe-red-portrait.webp": {
+          "bytes": 17628,
+          "sha256": "cf655cf35b8e3ab8f4533d532a4dd8a97dffdf98b90366ff192fa32619e19e95"
+        },
+        "cafe-red-idle.webm": {
+          "bytes": 1600071,
+          "sha256": "29637809f1d2f561b1129544e0859b9a1971a18575df2be3955d1c3f35928683"
+        }
+      }
+    }
+  }
+}

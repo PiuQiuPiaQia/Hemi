@@ -69,6 +69,8 @@ import { ScopePopover } from '@/windows/voice/scope-popover';
 import { ThinkingLevelStrip } from '@/windows/voice/thinking-level-strip';
 import { ConversationSidebar } from '@/windows/voice/sidebar';
 import { NavRail } from '@/windows/voice/nav-rail';
+import {SkinWelcomeAvatar} from '@/components/skin-watermark';
+import {useThemeScene} from '@/appearance/scene';
 import { SKILLS_TOPBAR_SLOT_ID, SkillMarket } from '@/windows/voice/skill-market';
 import { WorkflowStudio } from '@/windows/voice/workflow-studio';
 import { TextComposer } from '@/windows/voice/text-composer';
@@ -460,6 +462,7 @@ export function VoiceScreen({
   // 飘在右上角（2026-10-09 用户实测「识别结果跑偏」）。在途内容一出现即收起空态。
   const conversationEmpty =
     !conversationLoading && !transcripts.length && !interimText && !streamingReply && !streamingThinking && turnPhase !== 'thinking';
+  useThemeScene(skillMarketOpen||workflowStudioOpen?'other':conversationEmpty?'home':'reading',Boolean(textDraft.trim())||callActive);
   // 025 → 056：任务/子 agent 的执行过程是预览 Tab 队列里的一页（对话流角色行
   // 点击打开，2026-10-15 用户裁决）。冻结档案的快照不在实时快照表里——打开时
   // 定格一份兜底，实时表有同 taskId 的活快照时照旧以实时为准。
@@ -1132,7 +1135,7 @@ export function VoiceScreen({
                 spacer 收起、输入框沉到底部。 */}
             {conversationEmpty ? (
               <div className="h24-empty" aria-label="功能引导">
-                <span className="h37-orb" data-live="true" style={{ '--orb': '40px' } as CSSProperties} aria-hidden="true" />
+                <span className="h37-orb" data-live="true" style={{ '--orb': '40px' } as CSSProperties} aria-hidden="true"><SkinWelcomeAvatar /></span>
                 <p className="h24-empty-greeting">今天想做什么？</p>
                 <p className="h24-empty-hint">直接说，或交给 Hemi 一件事——语音、文字都行。</p>
               </div>
