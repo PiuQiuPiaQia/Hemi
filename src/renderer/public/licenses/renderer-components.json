@@ -1,6 +1,6 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "ad3c8601b53894a8e9929bf98f05dbee31e3916e336cb45f3a735e155b4e5a05",
+  "lockfileSha256": "97775712c30a00b1cf82754a9c3e23589a987a73147668445701289576e99b20",
   "components": [
     {
       "name": "@base-ui/react",
