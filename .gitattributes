@@ -6,6 +6,12 @@ src/main/skills/official/** -text
 # These files are verified byte-for-byte on every packaging platform.
 third-party/** text eol=lf
 third-party/*.tar.gz -text
+# 这三项的字节被 sources/release 清单按 sha256 钉死（pdfjs archiveSha256、
+# playwright-sources.json、pptx-preview-sources.json noticeSha256），上游原文
+# 带 CRLF，eol=lf 归一化会让干净 checkout 上的校验对不上。
+third-party/pdfjs/cmaps.zip -text
+third-party/licenses/Playwright-LICENSE -text
+third-party/licenses/Pptx-embedded-NOTICES.txt -text
 package-lock.json text eol=lf
 src/renderer/public/licenses/** text eol=lf
 # 生成后逐字节比对（npm run build 的 prebuild → generate-appearance --check）。

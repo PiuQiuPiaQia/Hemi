@@ -13,6 +13,7 @@
 //  - 纯函数（data URL 解析／视图构造／格式化）与 IO 分离，node --test 直接覆盖。
 import { mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { DOCUMENT_FILE_BYTE_LIMIT, isDocumentFile, parseDocumentBytes, readDocumentBytes, readDocumentText } from './documents.mjs';
 
 import {
   IMAGE_FILE_BYTE_LIMIT,
@@ -43,10 +44,10 @@ const MIME_BY_EXT = {
 };
 const PASTE_NAME_PREFIX = '粘贴图片';
 
-/** 按文件名判断附件种类：'text' | 'image' | null（null＝首批不收的格式）。 */
+/** 文档提取为文本，沿用 text 元数据与历史快照协议。 */
 export function guessAttachmentKind(filename) {
   const ext = path.extname(String(filename ?? '')).toLowerCase();
-  if (TEXT_EXTENSIONS.has(ext)) return 'text';
+  if (TEXT_EXTENSIONS.has(ext) || isDocumentFile(filename)) return 'text';
   if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   return null;
 }
@@ -95,6 +96,9 @@ export function attachmentView(record) {
 function failureCodeMessage(record, error) {
   if (error?.code === 'ENOENT') {
     return { code: 'source-missing', message: '原文件不在登记时的位置，可能已被移动或删除' };
+  }
+  if (isDocumentFile(record?.originPath)) {
+    return { code: error?.code ?? 'document-unreadable', message: error.message || '文档现在读不了，稍后再试' };
   }
   return { code: 'read-failed', message: '文件现在读不了，稍后再试' };
 }
@@ -208,9 +212,14 @@ export function createAttachmentStore({
     if (stats.isDirectory()) throw new Error('选中的是文件夹，本期只支持单个文件');
     const kind = guessAttachmentKind(resolved);
     if (!kind) {
-      throw new Error('暂不支持这种格式：首版支持 txt/md 与图片（jpg/png/webp/gif）');
+      throw new Error('暂不支持这种格式：支持 txt/md、图片，以及 PDF/Word/Excel/PPT（pdf/docx/xlsx/pptx）');
     }
-    if (kind === 'text' && stats.size > TEXT_FILE_BYTE_LIMIT * 4) {
+    if (!stats.isFile()) throw new Error('附件需要是普通文件');
+    const document = isDocumentFile(resolved);
+    if (document && stats.size > DOCUMENT_FILE_BYTE_LIMIT) {
+      throw new Error(`文件太大（${formatBytes(stats.size)}），文档附件支持 20MB 内`);
+    }
+    if (kind === 'text' && !document && stats.size > TEXT_FILE_BYTE_LIMIT * 4) {
       throw new Error(`文件太大（${formatBytes(stats.size)}），文本附件支持 2MB 内`);
     }
     if (kind === 'image' && stats.size > IMAGE_FILE_BYTE_LIMIT) {
@@ -338,6 +347,7 @@ export function createAttachmentStore({
       owned.record ??
       (owned.error?.code === 'unknown' ? stagedFallbackRecord(stagedPath) : null);
     if (!record) return owned.error;
+    if (isDocumentFile(record.originPath)) return readDocumentPreview(record);
     try {
       const buffer = readFileSync(record.originPath);
       if (record.kind === 'image') {
@@ -358,6 +368,41 @@ export function createAttachmentStore({
     } catch (error) {
       const { code, message } = failureCodeMessage(record, error);
       return { ok: false, code, message };
+    }
+  }
+
+  /** 文档预览与回合共用提取器，不把二进制文件误当 UTF-8 文本。 */
+  async function readDocumentPreview(record) {
+    try {
+      const { text } = await readDocumentText(record.originPath);
+      return {
+        ok: true,
+        kind: 'text',
+        markdown: false,
+        text: `（文档文字预览；内嵌图片、图表和原始版式不在提取范围内）\n\n${clampText(text).text}`,
+      };
+    } catch (error) {
+      const { code, message } = failureCodeMessage(record, error);
+      return { ok: false, code, message };
+    }
+  }
+
+  /** Visual preview bytes are transient and can only be read by registered identity. */
+  async function readDocumentSource({ conversationId, attachmentId }) {
+    const owned = ownedRecord(conversationId, attachmentId);
+    if (owned.error) return owned.error;
+    const record = owned.record;
+    if (!isDocumentFile(record.originPath)) return { ok: false, message: '这个附件不是文档' };
+    try {
+      if (/\.xlsx$/i.test(record.originPath)) {
+        const { sheets } = await readDocumentText(record.originPath);
+        return { ok: true, format: 'xlsx', sheets };
+      }
+      const source = await readDocumentBytes(record.originPath);
+      if (source.format !== 'pdf') await parseDocumentBytes(source.bytes.slice(), source.format, { allowEmpty: true });
+      return { ok: true, ...source };
+    } catch (error) {
+      return { ok: false, ...failureCodeMessage(record, error) };
     }
   }
 
@@ -424,6 +469,14 @@ export function createAttachmentStore({
         }
         continue;
       }
+      if (isDocumentFile(record.originPath)) {
+        const preview = await readDocumentPreview(record);
+        blocks.push({
+          header: `来源：消息附件「${record.name}」（${formatBytes(record.sizeBytes)} 文档，${captured}）${preview.ok ? '' : `—— ${preview.message}`}`,
+          text: preview.ok ? preview.text : '',
+        });
+        continue;
+      }
       try {
         const buffer = readFileSync(record.originPath);
         const text = buffer.subarray(0, TEXT_FILE_BYTE_LIMIT).toString('utf8');
@@ -464,6 +517,7 @@ export function createAttachmentStore({
     get,
     markSent,
     readPreview,
+    readDocumentSource,
     openSource,
     resolveEnvelopeForTurn,
   };

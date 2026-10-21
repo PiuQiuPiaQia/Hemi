@@ -14,6 +14,18 @@ const snapshot = (timeline, tasks = {}) => ({
 // 旧损坏材料须先经过生产恢复归一化；renderer 不再承担整表历史兜底。
 const recoveredView = (flow, turns) => projectFlowTimeline(normalizeFlowHistory(flow, turns).snapshot, turns);
 
+test('后台/资源等待收起回应光标但仍保留活目标，恢复生成时重新显示', () => {
+  const project = createFlowTimelineProjector();
+  const timeline = [{ itemId: 'a', kind: 'assistant', runId: 'r', parts: [{ partId: 'p', kind: 'text', content: '等待结果。' }] }];
+  for (const phase of ['waiting-background', 'waiting-resource']) {
+    const flow = { ...snapshot(timeline), activeRunId: 'r', runs: { r: { activity: { phase } } } };
+    const waiting = project(flow).transcripts[0];
+    assert.equal(waiting.live, true);
+    assert.equal(waiting.streaming, false);
+    assert.equal(project({ ...flow, runs: { r: { activity: { phase: 'running' } } } }).transcripts[0].streaming, true);
+  }
+});
+
 test('流式展示只跟随当前助手尾段，派单切段与并入输入后的旧行立即收走光标资格', () => {
   const project = createFlowTimelineProjector();
   const first = { itemId: 'first', kind: 'assistant', runId: 'r', parts: [

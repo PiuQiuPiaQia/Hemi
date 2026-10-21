@@ -81,3 +81,25 @@ BOOT_VISUAL_READY 只说明同主题舞台可以绘制，与 ready-to-show 和�
 真实 Electron 的 Vite 与构建 renderer 使用同一套 `scripts/verify-appearance.mjs`，验证冷启动、结束释放、跳过、reload/恢复不重播、草稿暂停与阅读静态图/播放器释放、减少动态效果、五路真实 alpha 解码、多窗口同步和窄窗面板。本轮静态阅读优化另由 `scripts/verify-appearance-reading.mjs` 覆盖。准确命令、基线和结果统一记录在[实施记录](appearance-implementation.md)。
 
 当前平台为 macOS Apple Silicon。Windows 的标题栏、透明窗口、字体回退、VP9 解码和性能需在 Windows 实机补验；未以 macOS 结果声称已经覆盖。正式 Live2D 拆层、模型绑定、转头和挥手另属后续素材制作需求。
+
+## 7 冷启动末段错位修复（2026-10-21）
+
+真实 Electron 逐帧复现：启动层内固定定位的人物和透视平面产生文档滚动溢出。第 6 秒卸载启动层时，滚动条消失，1440px 窗口中的 AppSurface 从 1430px 突然扩为 1440px；输入框横移 5px，主页人物横移约 11.2px。此时 AppSurface 的 transform 已经是 none，因此问题来自文档可用宽度变化。
+
+仅在 StartupStage 尚未 done 时设置 `overflow:clip`，将离开舞台的画面裁剪在舞台内，避免产生文档滚动区域。使用 clip 保留原有定位和滚动容器语义；done 后恢复 visible，不影响日常页面和浮层。动画时间线、人物锚点与媒体交接不变。
+
+验证基线：`e0b9705` 加当前未提交工作区，macOS arm64、Node.js 22.22.3、Electron 44.0.0。没有提交或清理工作区内其他改动。所有应用验证均使用脚本新建的临时 `HEMI_USER_DATA_DIR`，仅写入测试皮肤、窗口尺寸和引导完成状态。
+
+验证命令与结果：
+
+- `npm run build`：通过 TypeScript 和构建；仍有现有的大 chunk 提示。
+- `node scripts/check-spacing.mjs`：通过。
+- `node --check scripts/verify-appearance-startup.mjs`、修改文件的 `git diff --check`：通过。
+- Vite：`HEMI_DEV_PORT=5193 npm run dev:renderer`；`VITE_DEV_SERVER_URL=http://127.0.0.1:5193 node scripts/verify-appearance-startup.mjs` 可运行全部案例，也可在命令尾追加案例名分批运行。
+- 构建 renderer：`node scripts/verify-appearance-startup.mjs`，使用相同案例和断言。
+
+两种 renderer 均覆盖 blue-wide（1440px）、purple-mid（980px）、orange-breakpoint（880px）、gold-narrow（768px）、red-compact（560px）。每帧检查文档没有额外滚动区域、布局宽度不变，展开后的 AppSurface、顶栏、输入框和人物在交接两侧的矩形最大差均为 0px；检查完整 6 秒演出、前景影片释放、输入可用及 renderer/资源错误。另在开发版 blue-wide、构建版 red-compact 检查 done 后裁剪恢复 visible。
+
+桌面焦点切换会按现有规则提前结束演出；这类运行被自然完成断言拒绝，不作为末段通过证据。为完成不受桌面操作影响的几何采样，开发版 blue-wide 的最终记录及构建版 orange-breakpoint、gold-narrow、red-compact 使用 `HEMI_STARTUP_HOLD_FOCUS=1`，仅在测试进程内固定原生 isFocused 返回值。其他最终案例使用真实焦点，开发版 blue-wide 另有真实焦点完整复现与修复后采样。固定焦点案例不用于证明原生焦点取消逻辑。
+
+逐帧 JSON 和交接前后截图：`.visual/workflow/vision/startup-handoff/{dev,built}/<case>/`；缺陷复现：同目录 `before-complete-1440/`。人工复核了 1440、768、560px 截图，未见新增裁切或错位。原生窗口最小宽度为 560px，因此未测 375px；当前主题仅支持 light，未测 dark。Windows 未覆盖，本轮未运行与该 CSS 修复无关的完整业务测试。

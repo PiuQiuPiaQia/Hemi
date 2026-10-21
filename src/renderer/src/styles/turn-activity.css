@@ -1,0 +1,93 @@
+/* Text keeps the foreground; the ordered execution details share one quiet row. */
+.compact-shell .turn-activity {
+  min-width: 0;
+  margin: var(--sp-8) 0 var(--sp-12);
+  color: var(--muted);
+  font-size: var(--fs-13);
+}
+
+.compact-shell .turn-activity-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  max-width: 100%;
+  min-height: 28px;
+  padding: var(--sp-4) 0;
+  border-radius: var(--r-sm);
+  color: inherit;
+  text-align: left;
+  cursor: var(--cursor-arrow);
+}
+
+.compact-shell .turn-activity-head:hover {
+  color: var(--ink);
+}
+
+.compact-shell .turn-activity-head:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.compact-shell .turn-activity-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-shell .turn-activity-head > svg,
+.compact-shell .turn-activity-head > .h37-spinner,
+.compact-shell .turn-activity-step > svg,
+.compact-shell .turn-activity-step > .h37-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.compact-shell .turn-activity-count,
+.compact-shell .turn-activity-failed {
+  flex: none;
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.compact-shell .turn-activity-failed,
+.compact-shell .turn-activity-step[data-state='error'] > svg {
+  color: var(--danger);
+}
+
+.compact-shell .turn-activity[data-open='true'] .turn-activity-chevron {
+  transform: rotate(90deg);
+}
+
+.compact-shell .turn-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin: var(--sp-4) 0 0;
+  padding: 0 0 0 var(--sp-12);
+  border-left: 1px solid var(--line);
+  list-style: none;
+}
+
+.compact-shell .turn-activity-list > li {
+  min-width: 0;
+}
+
+.compact-shell .turn-activity-list .h48-thinking {
+  margin: 0;
+}
+
+.compact-shell .turn-activity-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-height: 24px;
+}
+
+.compact-shell .turn-activity-step > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

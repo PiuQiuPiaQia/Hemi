@@ -40,8 +40,11 @@ test('guessFileKind：文本/图片/不支持', () => {
   assert.equal(guessFileKind('a.txt'), 'text');
   assert.equal(guessFileKind('a.MD'), 'text');
   assert.equal(guessFileKind('b.PNG'), 'image');
-  assert.equal(guessFileKind('c.pdf'), null);
-  assert.equal(guessFileKind('d.docx'), null);
+  assert.equal(guessFileKind('c.pdf'), 'text');
+  assert.equal(guessFileKind('d.docx'), 'text');
+  assert.equal(guessFileKind('e.xlsx'), 'text');
+  assert.equal(guessFileKind('f.pptx'), 'text');
+  assert.equal(guessFileKind('legacy.doc'), null);
 });
 
 test('pickBrowserApp：排除 Hemi 自身与非浏览器，前台优先', () => {
@@ -249,7 +252,7 @@ test('createWorkContext：目录/不支持格式/未知类型报可读错误', a
     });
     await assert.rejects(() => context.attach('file'), /文件夹/);
 
-    const docPath = path.join(dir, 'a.docx');
+    const docPath = path.join(dir, 'a.doc');
     writeFileSync(docPath, 'x');
     await assert.rejects(
       () => createWorkContext({ showOpenDialog: async () => ({ canceled: false, filePaths: [docPath] }), readFinderSelection: () => [] }).attach('file'),

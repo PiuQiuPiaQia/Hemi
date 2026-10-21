@@ -45,6 +45,7 @@ export const IPC = {
   composer: {
     /** 028：本条消息附件——文件登记（选择窗/拖入共用，路径由渲染层受控取得）。 */
     attachFile: 'composer:attach-file',
+    readDocument: 'composer:read-document',
     /** 028：粘贴图片登记（data URL 落受控暂存区取得稳定身份）。 */
     attachPaste: 'composer:attach-paste',
     /** 028：移除未发送附件（撤销登记，粘贴暂存字节一并清理）。 */
@@ -217,7 +218,7 @@ export const IPC = {
     /** 在 Finder 中定位 hemi.log。 */
     revealLog: 'app:reveal-log',
   },
-  /** 044：应用内更新（electron-updater + 私有仓回环桥，见 services/update-bridge）。 */
+  /** 044：应用内更新（electron-updater + 公开 Release 下载）。 */
   updater: {
     getState: 'updater:get-state',
     check: 'updater:check',

@@ -7,8 +7,7 @@
  * 为什么需要它：electron-builder 26.x `--publish always` + 双 target（dmg+zip）
  * 时两个 publisher 竞争「create GitHub release」，每次发版都会产生两个同 tag
  * 的 release 对象——一个全量、一个只有 dmg.blockmap 的孤儿（v0.4.0～v0.5.1
- * 四连发实测）。更新桥不受影响（pickRelease 跳过无 latest-mac.yml 的条目），
- * 但 releases 页每 tag 挂残缺重复项、按 tag 直达会命中没 dmg 的那个。
+ * 四连发实测）。残缺重复项会让公开下载直链命中缺少清单或安装包的对象。
  *
  * 用法：
  *   npm run verify:release -- [--fix] [--no-smoke] [--fresh] [vX.Y.Z]
@@ -54,7 +53,7 @@ const tag = explicitTag ?? `v${pkg.version}`;
 
 /** 必备产物（blockmap 缺失降级为警告——差量更新关闭时无功能影响）。 */
 const REQUIRED_ASSETS = ['.dmg', '-mac.zip', 'latest-mac.yml', '-setup.exe', 'latest.yml', 'uiohook-napi-1.5.5-source.tar.gz', 'licenses-macos.json', 'licenses-windows.json'];
-/** 完整 release 的判别特征：更新清单在这，更新桥 pickRelease 同口径。 */
+/** 完整 release 的判别特征：公开更新所需的清单必须存在。 */
 const MANIFEST = 'latest-mac.yml';
 /** win 的更新清单（2026-10-12 起 win 应用内更新上线，nsis target 产出）。 */
 const WIN_MANIFEST = 'latest.yml';

@@ -245,3 +245,133 @@ test('没用过浏览器的回合不启动桥；重复收尾幂等，失败保�
     assert.equal(ends.length, 3, '同一 SDK 会话下一轮仍能使用浏览器');
   } finally { await service.stopHub(); (await dialed).ws.close(); }
 });
+
+function headlessHarness() {
+  const events = [];
+  return {
+    events,
+    factory() {
+      events.push('factory');
+      return {
+        checkAvailable: async () => events.push('available'),
+        stop: async () => events.push('stop'),
+        createClient({ taskId }) {
+          events.push(`${taskId}:create`);
+          return {
+            ensureReady: async () => events.push(`${taskId}:ready`),
+            endSession: async () => events.push(`${taskId}:end`),
+            request: async op => { events.push(`${taskId}:${op}`); return { backend: 'headless' }; },
+          };
+        },
+      };
+    },
+  };
+}
+
+test('未装扩展自动回退；迟到的扩展只影响新任务，同一任务保持无头会话', async () => {
+  const harness = headlessHarness();
+  const service = createBrowserBridgeService({ ports: [await freePort()], extensionWaitMs: 0, headlessFactory: () => harness.factory() });
+  const first = service.createClient({ taskId: 'headless-first' });
+  let extension;
+  try {
+    await first.ensureReady();
+    assert.equal(first.backend, 'headless');
+    extension = await dialExtension(service.port);
+    const next = service.createClient({ taskId: 'extension-next' });
+    await next.waitReady(2000); await next.ensureReady();
+    assert.equal(next.backend, 'extension');
+    await first.ensureReady();
+    assert.equal(first.backend, 'headless');
+    await first.request('session.navigate', { url: 'https://example.test/' });
+    assert.ok(harness.events.includes('headless-first:session.navigate'));
+    await first.endSession(); await next.endSession();
+    // 同一 SDK 客户端下一轮重新选择，此时扩展优先。
+    await first.ensureReady(); assert.equal(first.backend, 'extension');
+    await first.endSession();
+    assert.equal(harness.events.filter(e => e === 'headless-first:create').length, 1);
+  } finally { await service.stopHub(); extension?.ws.close(); }
+});
+
+test('扩展断连：在途动作失败且不重放，后续自动回退并要求先重新导航', async () => {
+  const harness = headlessHarness(), seen = [];
+  const service = createBrowserBridgeService({ ports: [await freePort()], extensionWaitMs: 0, headlessFactory: () => harness.factory() });
+  await service.start();
+  const client = service.createClient({ taskId: 'disconnect' });
+  const extension = await dialExtension(service.port, { onCommand: cmd => {
+    seen.push(cmd.op); return cmd.op === 'tab.click' ? null : { ok: true, data: {} };
+  } });
+  try {
+    await client.waitReady(2000); await client.ensureReady();
+    const pending = client.request('tab.click', { selector: '#submit' });
+    const rejected = assert.rejects(pending, /连接断开/);
+    while (!seen.includes('tab.click')) await new Promise(resolve => setTimeout(resolve, 5));
+    await extension.close(); await rejected;
+    assert.equal(harness.events.length, 0, '不能把结果未知的动作重放到无头实例');
+    await client.ensureReady();
+    assert.equal(client.backend, 'headless');
+    await assert.rejects(client.request('tab.click', { selector: '#submit' }), /先 browser_navigate/);
+    await client.request('session.navigate', { url: 'https://example.test/' });
+    await client.request('tab.extract');
+    assert.ok(!harness.events.includes('disconnect:tab.click'));
+  } finally { await client.endSession(); await service.stopHub(); }
+});
+
+test('扩展等待期间取消不启动无头浏览器；工作流可检查无头可用性而不启动任务', async () => {
+  const harness = headlessHarness();
+  const service = createBrowserBridgeService({ ports: [await freePort()], extensionWaitMs: 1000, headlessFactory: () => harness.factory() });
+  const client = service.createClient({ taskId: 'aborted' });
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10);
+    await assert.rejects(client.ensureReady(controller.signal), /中断/); clearTimeout(timer);
+    await client.endSession();
+    assert.deepEqual(service.activeTaskIds, []); assert.deepEqual(harness.events, []);
+    assert.equal(await service.checkAvailable(), 'headless');
+    assert.deepEqual(harness.events, ['factory', 'available']);
+  } finally { await service.stopHub(); }
+});
+
+test('停止无头任务不会取消并行扩展任务的在途请求', async () => {
+  const harness = headlessHarness();
+  const service = createBrowserBridgeService({ ports: [await freePort()], extensionWaitMs: 0, headlessFactory: () => harness.factory() });
+  const local = service.createClient({ taskId: 'local' });
+  await local.ensureReady();
+  let held;
+  const extension = await dialExtension(service.port, { onCommand: cmd => {
+    if (cmd.op === 'tab.extract') { held = cmd; return null; }
+    return { ok: true, data: {} };
+  } });
+  const remote = service.createClient({ taskId: 'remote' });
+  try {
+    await remote.waitReady(2000); await remote.ensureReady();
+    const pending = remote.request('tab.extract');
+    while (!held) await new Promise(resolve => setTimeout(resolve, 5));
+    await local.stop();
+    extension.ws.send(JSON.stringify({ type: 'result', id: held.id, ok: true, data: { preserved: true } }));
+    assert.deepEqual(await pending, { preserved: true });
+  } finally { await remote.endSession(); await service.stopHub(); extension.ws.close(); }
+});
+
+test('结束任务取消尚未发出的排队动作，下一轮不会收到上一轮的动作', async () => {
+  let release;
+  const events = [];
+  const service = createBrowserBridgeService({ ports: [await freePort()], extensionWaitMs: 0, headlessFactory: () => ({
+    stop: async () => {},
+    createClient: () => ({
+      ensureReady: async () => {}, endSession: async () => {},
+      request: async op => { events.push(op); if (op === 'hold') await new Promise(resolve => { release = resolve; }); return {}; },
+    }),
+  }) });
+  const client = service.createClient({ taskId: 'queued' });
+  try {
+    await client.ensureReady();
+    const first = client.request('hold');
+    const queued = assert.rejects(client.request('tab.click'), /取消排队/);
+    while (!release) await new Promise(resolve => setTimeout(resolve, 5));
+    await client.endSession();
+    release(); await first; await queued;
+    assert.deepEqual(events, ['hold']);
+    await client.ensureReady(); await client.request('session.navigate');
+    assert.deepEqual(events, ['hold', 'session.navigate']);
+  } finally { await client.endSession(); await service.stopHub(); }
+});

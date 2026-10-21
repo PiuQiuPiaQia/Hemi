@@ -8,7 +8,7 @@ import type { SessionState, TurnPhase } from '@/shared/types';
  * 接通中 > 回合相位（thinking/speaking/replying）> 聆听（含临时稿提示）。
  */
 
-export type CallDockPhase = 'muted' | 'connecting' | 'thinking' | 'speaking' | 'replying' | 'listening' | 'idle';
+export type CallDockPhase = 'muted' | 'connecting' | 'thinking' | 'speaking' | 'replying' | 'listening' | 'idle' | 'waiting';
 
 export type CallDockStatus = {
   phase: CallDockPhase;
@@ -28,6 +28,7 @@ export function resolveCallDockStatus(input: {
   muted: boolean;
   /** 048：思考起点（毫秒时间戳；null＝不在思考）——思考计时的依据。 */
   thinkingSince?: number | null;
+  waiting?: 'background' | 'resource' | null;
 }): CallDockStatus {
   const { callActive, sessionState, turnPhase, streamingReply, interimText, muted } = input;
 
@@ -36,6 +37,9 @@ export function resolveCallDockStatus(input: {
   }
   if (sessionState === 'requesting') {
     return { phase: 'connecting', label: '正在接通', detail: '马上好' };
+  }
+  if (input.waiting) {
+    return { phase: 'waiting', label: input.waiting === 'background' ? '等待后台任务' : '等待工作区资源', detail: '就绪后自动继续' };
   }
   if (turnPhase === 'thinking') {
     if (streamingReply) {

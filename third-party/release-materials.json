@@ -22,7 +22,8 @@
     "@ubjs/node-win32-arm64-msvc": "0.31.0-3",
     "@ubjs/node-win32-x64-msvc": "0.31.0-3",
     "quickjs-wasi": "3.6.2",
-    "uiohook-napi": "1.5.5"
+    "uiohook-napi": "1.5.5",
+    "playwright-core": "1.64.1"
   },
   "files": [
     {
@@ -144,6 +145,41 @@
       "path": "third-party/uiohook-relink.md",
       "bytes": 3578,
       "sha256": "dacfd71eaf2401179b7d23c0e21c8049543e1fb777bb494efc40eb851d078868"
+    },
+    {
+      "path": "third-party/licenses/Playwright-LICENSE",
+      "bytes": 11601,
+      "sha256": "45873d00a0dd243596deb4aa23b2493b3d1f0671921bf2538ea431d7380220eb"
+    },
+    {
+      "path": "third-party/licenses/Playwright-NOTICE",
+      "bytes": 254,
+      "sha256": "6d602191187b35b9b01d2cffa01c8469c2c8d9de8a96f1bf868e0f264f51c81d"
+    },
+    {
+      "path": "third-party/licenses/Playwright-ThirdPartyNotices.txt",
+      "bytes": 676,
+      "sha256": "a549d329bad8806fe279f0ecae0fc0270dec7e7c2dc8ec10f90e394f7c32b144"
+    },
+    {
+      "path": "third-party/licenses/Playwright-utilsBundle-LICENSE.txt",
+      "bytes": 106591,
+      "sha256": "1362b7f413c08083af537384162ab69a323d019fe26e0a2cd78536fafd6b9cbf"
+    },
+    {
+      "path": "third-party/licenses/Playwright-serverRegistry-LICENSE.txt",
+      "bytes": 2982,
+      "sha256": "3098a6efcbc11752cbdf6075fa65480f5470f78c8d981fab9c0796dc9a41cefe"
+    },
+    {
+      "path": "third-party/licenses/Playwright-webp_codec.LICENSE",
+      "bytes": 8841,
+      "sha256": "995c7ee35aceb7666829b7a501ca89c0864e12b493c1174b155774ab1e03d831"
+    },
+    {
+      "path": "third-party/playwright-sources.json",
+      "bytes": 2508,
+      "sha256": "738e8cac87a73287824f79b2d06f1fa5ce621b4109608b9ac2688715641c05ac"
     }
   ]
 }

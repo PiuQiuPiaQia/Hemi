@@ -1,4 +1,5 @@
 import { modelPolicyView } from '@shared/model-policy-view.mjs';
+import { AttachmentCard } from './attachment-card';
 import {
   useEffect,
   useMemo,
@@ -15,7 +16,6 @@ import {
   AtSign,
   FileText,
   Folder,
-  Image as ImageIcon,
   Check,
   MessageSquareText,
   Slash,
@@ -89,15 +89,6 @@ const COMPOSER_HINT = 'Enter 发送，Shift+Enter 换行；文字回复默认不
 /** 候选面板打开时的发送提示（063：先选择能力，不把候选片段发出去）。 */
 const PANEL_OPEN_SEND_HINT = '先选择能力，或按 Esc 返回输入';
 
-/** 附件体积的人读文案（与主进程 attachments.mjs 同口径，仅展示用）。 */
-function attachmentSizeLabel(sizeBytes: number) {
-  const value = Number(sizeBytes);
-  if (!Number.isFinite(value) || value < 0) return '';
-  if (value < 1024) return `${Math.round(value)} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** `/` 首层候选的本地过滤（名称精确/前缀/包含优先于说明弱匹配；分组次序稳定）。 */
 function filterSlashEntries<T extends { name: string; description?: string }>(entries: T[], query: string): T[] {
   const keyword = query.trim().toLowerCase();
@@ -125,6 +116,7 @@ type TextComposerProps = {
   onSend: () => void;
   /** 模型请求实际在途（播放中与后台任务不锁输入）。 */
   busy: boolean;
+  waiting?: boolean;
   /** 有未提交语音：按住录音／ASR 临时稿／定稿未提交。 */
   pendingSpeech: boolean;
   /** 主脑模型已配置。 */
@@ -200,6 +192,7 @@ export function TextComposer({
   onChange,
   onSend,
   busy,
+  waiting = false,
   pendingSpeech,
   modelReady,
   callActive,
@@ -881,68 +874,13 @@ export function TextComposer({
 
       {/* 028 R-03：附件托盘——发送前确认范围（预览进 027 宿主、可移除、失败说明）。 */}
       {attachments.length || attachError ? (
-        <div className="h24-attach-tray" aria-label="本条消息的附件">
-          {attachments.map((attachment) => {
-            // 图片附件带缩略图（ZCode 形态）：48×48 圆角小图，hover 右上角圆形移除钮。
-            const thumb =
-              attachment.kind === 'image' && attachment.thumbnailUrl ? attachment.thumbnailUrl : null;
-            return (
-              <div
-                key={attachment.attachmentId}
-                className={`h24-attach-card${thumb ? ' h24-attach-card-image' : ''}`}
-                data-kind={attachment.kind}
-              >
-                <button
-                  type="button"
-                  className="h24-attach-open"
-                  title={attachment.originPath || attachment.name}
-                  aria-label={thumb ? `预览图片附件 ${attachment.name}` : '预览这个附件'}
-                  onClick={
-                    onPreviewAttachment
-                      ? () => onPreviewAttachment(attachment.conversationId, attachment.attachmentId)
-                      : undefined
-                  }
-                >
-                  {thumb ? (
-                    <img
-                      className="h24-attach-thumb"
-                      src={thumb}
-                      alt={attachment.name}
-                      draggable={false}
-                    />
-                  ) : (
-                    <>
-                      {attachment.kind === 'image' ? (
-                        <ImageIcon className="size-3.5" aria-hidden="true" />
-                      ) : (
-                        <FileText className="size-3.5" aria-hidden="true" />
-                      )}
-                      <span className="h24-attach-name" title={attachment.originPath || attachment.name}>
-                        {attachment.name}
-                      </span>
-                      <small className="h24-attach-meta">
-                        {attachment.source === 'paste' ? '粘贴' : '文件'}
-                        {' · '}
-                        {attachmentSizeLabel(attachment.sizeBytes)}
-                      </small>
-                      {attachment.status !== 'ready' ? (
-                        <small className="h24-attach-status">{attachment.message || '未就绪'}</small>
-                      ) : null}
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="h24-attach-remove"
-                  aria-label={`移除附件 ${attachment.name}`}
-                  title="移除附件"
-                  onClick={onRemoveAttachment ? () => onRemoveAttachment(attachment.attachmentId) : undefined}
-                >
-                  <X className="size-3" aria-hidden="true" />
-                </button>
-              </div>
-            );
-          })}
+        <div className="h24-attach-tray h-attachment-tray" aria-label="本条消息的附件">
+          {attachments.map((attachment) => <AttachmentCard
+            key={attachment.attachmentId}
+            attachment={attachment}
+            onOpen={onPreviewAttachment ? () => onPreviewAttachment(attachment.conversationId, attachment.attachmentId) : undefined}
+            onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.attachmentId) : undefined}
+          />)}
           {attachError ? (
             <p className="h24-attach-error" role="alert">
               {attachError}
@@ -1015,7 +953,7 @@ export function TextComposer({
           rows={1}
           placeholder={
             busy && !value.trim()
-              ? '正在回应，可先写下一句…'
+              ? waiting ? '任务等待中，可先写下一句…' : '正在回应，可先写下一句…'
               : fresh
                 ? '问点什么，或交给 Hemi 一件事…'
                 : '继续聊聊，或交给 Hemi 一件事…'

@@ -40,6 +40,8 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   function handle(event) {
     const facts = [];
     switch (event?.kind) {
+      case 'activity':
+        return [{ type: 'run-activity', runId, activity: event.activity, ...gen() }];
       case 'text': {
         const delta = typeof event.text === 'string' ? event.text : '';
         if (!delta) return facts;
@@ -149,6 +151,7 @@ export function projectTaskFact(snapshot, { generation = null } = {}) {
     outcomeReason: snap.outcomeReason ?? null,
     taskText: typeof snap.taskText === 'string' ? snap.taskText.slice(0, 400) : '',
     progressText: snap.progressText ?? null,
+    activity: snap.activity ?? null,
     stageText: snap.stageText ?? null,
     readOnly: Boolean(snap.readOnly),
     permission: snap.permission ?? null,

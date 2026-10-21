@@ -83,6 +83,31 @@ function managerWith({ onTerminal = null, onSettled = null } = {}) {
 
 const done = (text) => ({ texts: [text], lastText: text, usages: [], toolNames: [], modelError: null, aborted: false });
 
+test('子 agent 等后台命令/资源时不误判模型停摆，恢复后看门狗继续生效', async () => {
+  let now = 1000;
+  const timers = [], fake = fakeSession();
+  const manager = createSubagentManager({ createSession: async () => fake.session, nowFn: () => now,
+    setIntervalFn: fn => { const timer = { fn }; timers.push(timer); return timer; },
+    clearIntervalFn: timer => { const index = timers.indexOf(timer); if (index >= 0) timers.splice(index, 1); },
+    stallTimeoutMs: 1000,
+  });
+  const running = await manager.spawn({ role: roles.get('fixer'), prompt: '等待后台命令', background: true, conversationId: 'c' });
+  await tick(); await tick();
+  for (const phase of ['waiting-background', 'waiting-resource']) {
+    fake.emit('activity', { phase, since: now, jobs: [], resources: [] });
+    now += 10000;
+    timers.forEach(timer => timer.fn()); await tick();
+    assert.equal(manager.snapshot().tasks[0].phase, 'running');
+    assert.match(manager.snapshot().tasks[0].progressText, /等待/);
+  }
+  fake.emit('activity', { phase: 'running', since: null, jobs: [], resources: [] });
+  now += 1001;
+  timers.forEach(timer => timer.fn()); await tick(); await tick();
+  assert.equal((await manager.waitFor(running.taskId, { conversationId: 'c' })).outcome, 'stopped');
+  assert.equal(manager.snapshot().tasks[0].activity, null);
+  manager.disposeAll();
+});
+
 test('clipReport：按码点截断并报告总长', () => {
   assert.deepEqual(clipReport('短'), { text: '短', truncated: false, total: 1 });
   const long = '字'.repeat(MAX_REPORT_CHARS + 5);

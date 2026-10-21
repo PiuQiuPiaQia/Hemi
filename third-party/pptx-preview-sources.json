@@ -1,0 +1,17 @@
+{
+  "package": "@aiden0z/pptx-renderer@1.2.4",
+  "sourceCommit": "b28ab6326ba058138b662714be15335e5ca1f1a8",
+  "sourceLock": "https://raw.githubusercontent.com/aiden0z/pptx-renderer/b28ab6326ba058138b662714be15335e5ca1f1a8/pnpm-lock.yaml",
+  "sourceLockSha256": "ec6a58a4dd9a84957e489bee94dfa389eefe4573b6fc09c312acdcd666a8096e",
+  "bundledPackages": [
+    "echarts@6.0.0",
+    "zrender@6.0.0",
+    "jszip@3.10.1",
+    "pako@1.0.11",
+    "tslib@2.3.0"
+  ],
+  "browserBundleSha256": "31cf1e39818c52395b185186229f80ecf8333db0d7bb3a06f6c0bd74b87aaad5",
+  "noticeFile": "third-party/licenses/Pptx-embedded-NOTICES.txt",
+  "noticeSha256": "66d1788e9f7755204d045308c39dcea45454c24337834263ab088bee1c40da10",
+  "note": "The browser export prebundles dependencies, so their notices are recorded here in addition to the Vite module inventory. No implementation source was copied into Hemi."
+}

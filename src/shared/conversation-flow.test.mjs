@@ -14,6 +14,20 @@ const makeInput = (inputId, text = `消息${inputId}`, extra = {}) => ({
   inputId, editRevision: 0, text, inputSource: 'text', attachmentIds: [], references: null, createdAt: 1, ...extra,
 });
 
+test('后台等待属于原运行且保留待发送队列；收口后旧 activity 不能复活状态', () => {
+  const setup = prepared();
+  const activity = { phase: 'waiting-background', since: 20, jobs: [{ id: 'j', command: 'wait-ci' }], resources: [] };
+  const waiting = setup.apply({ type: 'run-activity', runId: 'run-1', generation: 1, activity });
+  assert.equal(waiting.applied, true);
+  assert.equal(waiting.snapshot.phase, 'running');
+  assert.equal(waiting.snapshot.activeRunId, 'run-1');
+  assert.deepEqual(waiting.snapshot.runs['run-1'].activity, activity);
+  assert.equal(setup.apply({ type: 'run-activity', runId: 'run-1', generation: 0, activity }).applied, false);
+  const closed = setup.apply({ type: 'run-closed', runId: 'run-1', at: 30 });
+  assert.equal(closed.snapshot.runs['run-1'].activity, null);
+  assert.equal(setup.apply({ type: 'run-activity', runId: 'run-1', activity }).applied, false);
+});
+
 function prepared() {
   let snapshot = createFlowSnapshot({ conversationId: 'c1' });
   const apply = (fact) => {

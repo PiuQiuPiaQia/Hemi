@@ -342,6 +342,8 @@ contextBridge.exposeInMainWorld('hemiVoice', {
     ipcRenderer.invoke('composer:list-slash-candidates', { conversationId }),
   readAttachmentPreview: (conversationId, attachmentId, stagedPath) =>
     ipcRenderer.invoke('composer:read-preview', { conversationId, attachmentId, stagedPath }),
+  readAttachmentDocument: (conversationId, attachmentId) =>
+    ipcRenderer.invoke('composer:read-document', { conversationId, attachmentId }),
   openAttachmentSource: (conversationId, attachmentId) =>
     ipcRenderer.invoke('composer:open-source', { conversationId, attachmentId }),
   // 029 P2：运行中投递——队列 CRUD／继续发送／阶段交接 + 推送订阅。

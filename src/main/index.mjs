@@ -46,7 +46,6 @@ import { scheduleStartupUpdaterCheck } from './ipc/updater.ipc.mjs';
 import { disposeCuaDriver } from './agent/gate/cua-client.mjs';
 import { closeActiveTtsPlayback } from './ipc/tts.ipc.mjs';
 import { publishUiState } from './ipc/ui.ipc.mjs';
-import { disposeUpdaterService } from './services/update-instance.mjs';
 import { getProviderImportService } from './ipc/provider-import.ipc.mjs';
 import { getRemoteService } from './remote/remote-service.mjs';
 import { conversationMedia } from './services/media-preview.mjs';
@@ -293,8 +292,6 @@ app.on('before-quit', () => {
   closeActiveTtsPlayback();
   void stopDuplexHost();
   void stopActiveAsrSession();
-  // 044：关更新分发桥（未启动过为 no-op）。
-  void disposeUpdaterService();
   // 047：导入操作只停止/回收浏览器（journal 已在各边界 durable，不依赖退出补写）。
   void getProviderImportService()?.disposeForQuit?.();
   // 049：退出时关闭 SSH 主连接（ssh -O exit；不留主连接进程，AC-03）。

@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { conversationStatus, withConversationUnread } from './conversation-status.mjs';
 
+test('后台等待和资源排队显示等待，执行恢复后回到运行；离线档案不冒充等待', () => {
+  const flow = { phase: 'running', activeRunId: 'r', tasks: {}, runs: {} };
+  for (const phase of ['waiting-background', 'waiting-resource']) {
+    const waiting = { ...flow, runs: { r: { activity: { phase } } } };
+    assert.equal(conversationStatus(waiting, { live: true }), 'waiting');
+    assert.equal(conversationStatus(waiting), null);
+    assert.equal(conversationStatus({ ...waiting, phase: 'stopping' }, { live: true }), 'running');
+  }
+  assert.equal(conversationStatus({ ...flow, runs: { r: { activity: { phase: 'running' } } } }, { live: true }), 'running');
+});
+
 test('列表只显示真实主运行和后台任务；确认及停止屏障仍属于运行', () => {
   const flow = { phase: 'running', tasks: {}, pending: [], runs: {} };
   const status = patch => conversationStatus({ ...flow, ...patch }, { live: true });

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { AttachmentCard } from './attachment-card';
+import { RunActivity } from './run-activity';
 import {
   ArrowDown,
   Check,
@@ -69,6 +71,7 @@ import { ScopePopover } from '@/windows/voice/scope-popover';
 import { ThinkingLevelStrip } from '@/windows/voice/thinking-level-strip';
 import { ConversationSidebar } from '@/windows/voice/sidebar';
 import { NavRail } from '@/windows/voice/nav-rail';
+import { useConversationNav } from './lib/use-conversation-nav';
 import {SkinWelcomeAvatar} from '@/components/skin-watermark';
 import {useThemeScene} from '@/appearance/scene';
 import { SKILLS_TOPBAR_SLOT_ID, SkillMarket } from '@/windows/voice/skill-market';
@@ -111,6 +114,7 @@ type VoiceScreenProps = {
    * 流式元素之后——「先思考、后派手」的时间线在画面上成立（2026-10-14 用户
    * 裁决）；回合收口后传 null，卡回原位、交代照常排其后。 */
   turnStartedAt: number | null;
+  runActivity?: import('@shared/protocol').RunActivityView | null;
   /** 通话计时（Call Dock 显示；callActive 门控由 page 侧保证）。 */
   elapsedSeconds: number;
   /** 024：用户静音（Call Dock 静音键；true 时上行被静音门压制）。 */
@@ -184,6 +188,8 @@ type VoiceScreenProps = {
   textPendingSpeech: boolean;
   /** 主脑模型已配置。 */
   textModelReady: boolean;
+  /** 语音识别服务已配置；控制语音输入与通话入口的显示。 */
+  voiceModelReady: boolean;
   /**
    * 032：主界面就近修复条（语音服务/麦克风问题；模型缺失走输入区既有提示）。
    * 修复后 page 侧回读状态自动撤下；null＝无。
@@ -319,6 +325,7 @@ export function VoiceScreen({
   callActive,
   turnPhase,
   turnStartedAt,
+  runActivity,
   elapsedSeconds,
   callMuted,
   dockCollapsed,
@@ -365,6 +372,7 @@ export function VoiceScreen({
   textModelBusy,
   textPendingSpeech,
   textModelReady,
+  voiceModelReady,
   onOpenSettings,
   onOpenModelSettings,
   skillMarketOpen = false,
@@ -452,8 +460,10 @@ export function VoiceScreen({
     taskView.current = { scope, values, signatures };
     return values;
   }, [allTaskSnaps, transcripts, currentConversationId, timelineGeneration]);
-  // 窄窗（≤880px）侧栏抽屉：常驻侧栏放不下时收进抽屉，顶栏菜单唤起。
-  const [navOpen, setNavOpen] = useState(false);
+  // 窄窗：对话图标悬浮预览列表；点击图标或顶栏菜单可保持展开。
+  const navPage = skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : 'home';
+  const conversationNav = useConversationNav(navPage);
+  const navOpen = conversationNav.open;
   const [workspaceAlertSlot, setWorkspaceAlertSlot] = useState<HTMLDivElement | null>(null);
   /** 空态示例任务填入后把焦点交回输入框（与外部的 composerFocusToken 相加，任一变化即聚焦）。 */
   const [suggestionFocus, setSuggestionFocus] = useState(0);
@@ -858,7 +868,7 @@ export function VoiceScreen({
   newConversationRef.current = () => {
     onNewConversation();
     onCloseSkillMarket?.();
-    setNavOpen(false);
+    conversationNav.close();
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -890,7 +900,7 @@ export function VoiceScreen({
             <button
               type="button"
               className="icon-btn h24-nav-toggle"
-              onClick={() => setNavOpen((open) => !open)}
+              onClick={conversationNav.toggle}
               aria-label={navOpen ? '关闭导航' : '打开导航'}
               aria-expanded={navOpen}
               title="导航"
@@ -911,7 +921,7 @@ export function VoiceScreen({
              066：最右是本机项目工作区的「打开目录」split 按钮。 */
           workflowStudioOpen ? <div id="h59-editor-actions-slot" /> : (
             <>
-              {callActive && !dockCollapsed ? null : (
+              {!voiceModelReady || (callActive && !dockCollapsed) ? null : (
                 <button
                   type="button"
                   className="h24-call-nav"
@@ -943,8 +953,10 @@ export function VoiceScreen({
           铺满（CSS 挂在 data-market-open 上），对话列表只在首页页面内出现。 */}
       <div className="h24-frame">
         <NavRail
-          page={skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : 'home'}
+          page={navPage}
+          homePreviewProps={conversationNav.triggerProps}
           onShowHome={() => {
+            if (navPage === 'home' && conversationNav.collapsed) conversationNav.toggle();
             onCloseSkillMarket?.();
             onCloseWorkflowStudio?.();
           }}
@@ -961,6 +973,7 @@ export function VoiceScreen({
         <section
           className="h24-workspace"
           data-nav-open={navOpen ? 'true' : 'false'}
+          data-nav-preview={conversationNav.previewOnly ? 'true' : undefined}
           data-preview-open={
             !skillMarketOpen && previewOpen && previewTabs.tabs.length ? 'true' : 'false'
           }
@@ -974,21 +987,22 @@ export function VoiceScreen({
             className="h24-backdrop"
             aria-label="关闭导航"
             tabIndex={-1}
-            onClick={() => setNavOpen(false)}
+            onClick={conversationNav.close}
           />
           {!workflowStudioOpen ? <ConversationSidebar
-            onHistoryOpen={() => setNavOpen(false)}
+            interactionProps={conversationNav.sidebarProps}
+            onHistoryOpen={conversationNav.close}
             currentConversationId={currentConversationId}
             conversationVisible={!skillMarketOpen}
             onNewConversation={() => {
               onNewConversation();
               onCloseSkillMarket?.();
-              setNavOpen(false);
+              conversationNav.close();
             }}
             onOpenConversation={(id) => {
               onOpenConversation(id);
               onCloseSkillMarket?.();
-              setNavOpen(false);
+              conversationNav.close();
             }}
             onConversationRemoved={onConversationRemoved}
             onConversationRenamed={onConversationRenamed}
@@ -999,7 +1013,7 @@ export function VoiceScreen({
           {/* 059：工作流页（与技能中心平级）；main 区在两页打开时都隐藏。 */}
           {workflowStudioOpen ? (
             <WorkflowStudio
-              onNavigate={() => setNavOpen(false)}
+              onNavigate={conversationNav.close}
               onTitleChange={setWorkflowHeading}
               taskState={taskState} onTaskAction={onTaskAction}
               conversationId={currentConversationId} currentProfileId={currentProfileId} modelProfiles={modelProfiles} onOpenConversation={onOpenConversation}
@@ -1200,6 +1214,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
+              <RunActivity activity={runActivity} onStop={onStopModelTurn} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}
@@ -1208,6 +1223,7 @@ export function VoiceScreen({
                 queueEditSaving={queueEditSaving}
                 onCancelQueueEdit={onCancelQueueEdit}
                 busy={textModelBusy}
+                waiting={Boolean(runActivity?.phase.startsWith('waiting-'))}
                 pendingSpeech={textPendingSpeech}
                 modelReady={textModelReady}
                 callActive={callActive}
@@ -1229,6 +1245,7 @@ export function VoiceScreen({
                       turnPhase={turnPhase}
                       streamingReply={streamingReply}
                       thinkingSince={streamingThinking && streamingThinking.endedAt == null ? streamingThinking.startedAt : null}
+                      waiting={runActivity?.phase === 'waiting-background' ? 'background' : runActivity?.phase === 'waiting-resource' ? 'resource' : null}
                       interimText={interimText}
                       elapsedSeconds={elapsedSeconds}
                       muted={callMuted}
@@ -1241,7 +1258,7 @@ export function VoiceScreen({
                   // P2（031 用户裁决同位）：提交簇＝[按住说话提示][模型]，紧贴发送键。
                   <div className="text-composer-submit">
                     {/* 043：长按键提示平台化（win 的快照快捷键未定案时不显示键名）。 */}
-                    {isMacPlatform ? (
+                    {voiceModelReady && isMacPlatform ? (
                       <span className="h24-shortcut-hint" role="status" title="按住 Option 说话，松开发送">
                         <Mic aria-hidden="true" />
                         <span>按住说话</span>
@@ -1290,7 +1307,7 @@ export function VoiceScreen({
                 tasksRunning={(taskState?.tasks ?? []).some((task) => task.phase !== 'terminal')}
                 toolbar={
                   <>
-                    <ContextAttachButton busy={contextBusy} error={contextError} onAttach={onAttachContext} />
+                    <AttachmentAddButton busy={contextBusy} error={contextError} onAttach={onAttachContext} />
                     <span className="h37-tool-sep" aria-hidden="true" />
                     {/* 033：工作区——发送前可见当前任务在哪个目录工作（v2 默认优先）。 */}
                     <WorkspaceBar
@@ -1459,10 +1476,8 @@ function ContextChips({
   );
 }
 
-/** 008 附加入口——回形针 icon + 内联菜单（选中文件 / 截取窗口或区域）。
- *  采集出错与进行中状态都收在 icon 的悬浮提示里，不占版面。
- *  2026-10-06：迁移到统一 Menu 组件。 */
-function ContextAttachButton({
+/** The picker, drop and paste paths all add message attachments. */
+function AttachmentAddButton({
   busy,
   error,
   onAttach
@@ -1480,12 +1495,10 @@ function ContextAttachButton({
     hint: string
     icon: typeof Globe
   }> = [
-    // 063：按用户裁决移除「截取窗口或区域」入口——系统截图仍可粘贴/拖入，
-    // 桌面视觉工具按既有能力另走；此菜单只保留工作对象的文件入口。
-    { kind: 'file', label: '选中文件', hint: '添加为工作对象，后续对话会继续携带，直到移除', icon: FileText },
+    { kind: 'file', label: '选中文件', hint: '图片、PDF、Word、Excel、PPT，添加到本条消息', icon: FileText },
   ]
 
-  const hint = error || (busy ? '正在获取内容…' : '附加当前对象')
+  const hint = error || (busy ? '正在添加附件…' : '添加附件')
 
   return (
     <div className="relative">
@@ -1766,8 +1779,18 @@ function ChatTurnItem({
           </div>
         ) : (
           <>
+            {item.attachments?.length ? (
+              <div className="h24-msg-attachments h-attachment-sent-tray" aria-label="本条消息的附件">
+                {item.attachments.map((attachment) => <AttachmentCard
+                  key={attachment.attachmentId}
+                  attachment={attachment}
+                  sent
+                  onOpen={onPreviewAttachment ? () => onPreviewAttachment(attachment.conversationId, attachment.attachmentId) : undefined}
+                />)}
+              </div>
+            ) : null}
             {/* 063：行内标签（技能＋四类引用）随正文原位回显；旧三类引用芯片在下方。 */}
-            <p className="h24-user-bubble">
+            {item.text.trim() ? <p className="h24-user-bubble">
               {segmentTaggedText(item.text, { skills: item.skills ?? [], references: item.references ?? [] }).map((segment, index) =>
                 segment.type === 'text' ? (
                   <span key={index}>{segment.text}</span>
@@ -1784,7 +1807,7 @@ function ChatTurnItem({
                   </span>
                 ),
               )}
-            </p>
+            </p> : null}
             {/* 028 R-04：历史回看能分清本条消息实际携带的附件（点击进预览宿主）。 */}
             {item.references?.length ? (
               <div className="h24-msg-attachments" aria-label="本条消息的引用">
@@ -1794,50 +1817,6 @@ function ChatTurnItem({
                     <span>{reference.name}</span>
                   </span>
                 ))}
-              </div>
-            ) : null}
-            {item.attachments?.length ? (
-              <div className="h24-msg-attachments" aria-label="本条消息的附件">
-                {item.attachments.map((attachment) => {
-                  // 图片附件带缩略图（与输入框托盘同形态）：小图点击进预览。
-                  const thumb =
-                    attachment.kind === 'image' && attachment.thumbnailUrl && attachment.status !== 'failed'
-                      ? attachment.thumbnailUrl
-                      : null;
-                  return (
-                    <button
-                      key={attachment.attachmentId}
-                      type="button"
-                      className={`h24-msg-attachment${thumb ? ' h24-msg-attachment-image' : ''}`}
-                      title={attachment.originPath || attachment.name}
-                      aria-label={thumb ? `预览图片附件 ${attachment.name}` : undefined}
-                      onClick={
-                        onPreviewAttachment
-                          ? () => onPreviewAttachment(attachment.conversationId, attachment.attachmentId)
-                          : undefined
-                      }
-                    >
-                      {thumb ? (
-                        <img
-                          className="h24-attach-thumb"
-                          src={thumb}
-                          alt={attachment.name}
-                          draggable={false}
-                        />
-                      ) : (
-                        <>
-                          {attachment.kind === 'image' ? (
-                            <ImageIcon className="size-3" aria-hidden="true" />
-                          ) : (
-                            <FileText className="size-3" aria-hidden="true" />
-                          )}
-                          <span>{attachment.name}</span>
-                          {attachment.status === 'failed' ? <small>原文件不可用</small> : null}
-                        </>
-                      )}
-                    </button>
-                  );
-                })}
               </div>
             ) : null}
             <div className="h24-user-actions">

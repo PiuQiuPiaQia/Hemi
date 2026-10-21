@@ -132,3 +132,25 @@ test('同批两个浏览器调用能执行并收口，不在执行前互相等�
   assert.deepEqual(navigated.sort(), ['https://example.com/0', 'https://example.com/1']);
   assert.equal(cleaned, true); assert.equal(result.aborted, false);
 });
+
+test('交互资源排队有等待事实，等待期间不误触静默停止；释放后继续真实 SDK 工具轮', { timeout: 10000 }, async t => {
+  const { getInteractiveResourceCoordinator } = await import('../workflows/interactive-resource-coordinator.mjs');
+  const coordinator = getInteractiveResourceCoordinator();
+  const held = await coordinator.acquire('interactive:local', 'held-by-other-task');
+  t.after(() => held.release());
+  const { make } = await fixture(t);
+  let waiting, navigations = 0;
+  const queued = new Promise(resolve => { waiting = resolve; });
+  const session = make({ tools: ['browser_navigate'], features: { browser: true }, stallTimeoutMs: 1000, browserBridge: {
+    async ensureReady() {}, async request() { navigations++; return { url: 'https://example.com' }; }, async endSession() {},
+  } });
+  session.on('activity', activity => { if (activity.phase === 'waiting-resource') waiting(activity); });
+  const running = session.prompt('PARALLEL_BROWSER');
+  assert.equal((await queued).resources[0].resource.scope, 'desktop');
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(session.isBusy(), true);
+  assert.equal(navigations, 0);
+  held.release();
+  assert.equal((await running).aborted, false);
+  assert.equal(navigations, 2);
+});

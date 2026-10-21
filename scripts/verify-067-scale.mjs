@@ -45,15 +45,15 @@ try {
     results.push({ count, warm, end }); check(`${count} 行：挂载与缓存预算、五轮 GC 后堆／DOM／监听器边界`);
     await page.locator(vp).evaluate(el => { el.scrollTop = 0; }); await pause();
     const row = page.locator('[data-virtual-row="virtual-1"]');
+    await row.locator('.turn-activity-head').click();
     await row.locator('.h48-thinking-head').click();
-    await row.locator('.h56-tools-head').click();
     await page.locator('textarea.text-composer-input').focus();
     await page.locator(vp).evaluate(el => { el.scrollTop = el.scrollHeight; }); await pause();
     assert.equal(await row.count(), 0, '已展开行必须真正卸载');
     await page.locator(vp).evaluate(el => { el.scrollTop = 0; }); await pause();
     assert.equal(await row.locator('.h48-thinking-head').getAttribute('aria-expanded'), 'true');
-    assert.equal(await row.locator('.h56-tools-head').getAttribute('aria-expanded'), 'true');
-    check(`${count} 行：思考／工具展开状态跨实际卸载恢复`);
+    assert.equal(await row.locator('.turn-activity-head').getAttribute('aria-expanded'), 'true');
+    check(`${count} 行：过程组／思考展开状态跨实际卸载恢复`);
     await page.locator(vp).evaluate(el => { el.scrollTop = el.scrollHeight * .5; }); await pause();
     const anchor = () => page.locator(vp).evaluate(el => {
       const top = el.getBoundingClientRect().top;

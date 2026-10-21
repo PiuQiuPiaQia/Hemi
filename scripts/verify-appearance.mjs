@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import electronPath from 'electron';
 import {createConversationStore} from '../src/main/history/conversation-store.mjs';
+import {SKINS} from '../src/shared/appearance/skins.mjs';
 const runtime=process.env.HEMI_DESIGN_PLAYWRIGHT_MODULE||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const {_electron}=await import(await fs.access(runtime).then(()=>pathToFileURL(runtime).href,()=> 'playwright'));
 const mode=process.env.VITE_DEV_SERVER_URL?'dev':'built',root=process.cwd(),out=path.resolve(`.visual/workflow/vision/appearance-implementation/${mode}`),ud=await fs.mkdtemp(path.join(os.tmpdir(),`hemi-appearance-${mode}-`));
@@ -42,7 +43,7 @@ try{
   check('skin entry is immediately above Settings', (await shirt.boundingBox()).y<(await settings.boundingBox()).y);
   await shirt.click();await page.getByRole('radiogroup',{name:'选择皮肤'}).waitFor();
   const cards=page.getByRole('radio'),panel=page.locator('.skin-picker');await page.waitForTimeout(260);
-  check('picker is a six-card 392px panel',await cards.count()===6&&Math.abs((await panel.boundingBox()).width-392)<1);
+  check('picker includes every registered skin in a 392px panel',await cards.count()===SKINS.length&&Math.abs((await panel.boundingBox()).width-392)<1);
   await snap('picker');
   await page.getByRole('radio',{name:'月见紫',exact:true}).evaluate(el=>el.addEventListener('pointerdown',()=>{const start=performance.now();const off=window.hemiVoice.onAppearanceChanged(()=>{window.__appearanceClickCommitMs=performance.now()-start;off();});},{once:true}));
   await page.getByRole('radio',{name:'月见紫',exact:true}).click();await page.waitForFunction(()=>document.documentElement.dataset.skin==='cafe-purple');

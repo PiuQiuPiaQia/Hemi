@@ -1,0 +1,219 @@
+[
+  {
+    "id": "classic",
+    "name": "经典",
+    "windowBackground": "#fafcfb",
+    "palette": {
+      "rail": "#f6f6f5",
+      "accent": "#566e5d",
+      "line": "#e9e9e7",
+      "scale": {
+        "50": "#f2f5f1",
+        "100": "#e4ebe3",
+        "200": "#cfdcd1",
+        "300": "#bccbbd",
+        "500": "#8fa794",
+        "600": "#74907b",
+        "800": "#4b6152",
+        "900": "#3e5044"
+      }
+    },
+    "interaction": {
+      "color": "#1a1a19",
+      "hover": 8,
+      "active": 12,
+      "activeHover": 16
+    },
+    "lettering": null,
+    "assets": null
+  },
+  {
+    "id": "cafe-blue",
+    "name": "晴海蓝",
+    "palette": {
+      "rail": "#edf2fb",
+      "accent": "#385f9f",
+      "line": "#dce4f0",
+      "scale": {
+        "50": "#edf3ff",
+        "100": "#dfe9fb",
+        "200": "#c4d5f5",
+        "300": "#a5bee9",
+        "500": "#7d9dd6",
+        "600": "#587fc1",
+        "800": "#2e508c",
+        "900": "#253f70"
+      }
+    },
+    "lettering": {
+      "headline": "Smile",
+      "subline": "DeepSeek",
+      "color": "#7893b6"
+    },
+    "assets": {
+      "image": "cafe-blue.webp",
+      "portrait": "cafe-blue-portrait.webp",
+      "motion": "cafe-blue-idle.webm",
+      "width": 1135,
+      "height": 1386,
+      "paddingX": 48,
+      "paddingY": 16,
+      "durationMs": 8000,
+      "framesPerSecond": 30,
+      "motionKind": "blink-hair-cloth"
+    }
+  },
+  {
+    "id": "cafe-purple",
+    "name": "月见紫",
+    "palette": {
+      "rail": "#f4effa",
+      "accent": "#70509c",
+      "line": "#e4dceb",
+      "scale": {
+        "50": "#f6f2fc",
+        "100": "#ebe2f5",
+        "200": "#daceeb",
+        "300": "#c1aadf",
+        "500": "#a78acb",
+        "600": "#8965b0",
+        "800": "#61428b",
+        "900": "#513475"
+      }
+    },
+    "lettering": {
+      "headline": "Sister",
+      "subline": "GPT",
+      "color": "#a08ab9"
+    },
+    "assets": {
+      "image": "cafe-purple.webp",
+      "portrait": "cafe-purple-portrait.webp",
+      "motion": "cafe-purple-idle.webm",
+      "width": 1197,
+      "height": 1314,
+      "paddingX": 48,
+      "paddingY": 16,
+      "durationMs": 8000,
+      "framesPerSecond": 30,
+      "motionKind": "hair-cloth"
+    }
+  },
+  {
+    "id": "cafe-orange",
+    "name": "焦糖橙",
+    "palette": {
+      "rail": "#f8efe7",
+      "accent": "#a6502e",
+      "line": "#e8dbce",
+      "scale": {
+        "50": "#fbf2ea",
+        "100": "#f2e0d0",
+        "200": "#e9c6ac",
+        "300": "#dba582",
+        "500": "#cb835b",
+        "600": "#b76841",
+        "800": "#914225",
+        "900": "#78351f"
+      }
+    },
+    "lettering": {
+      "headline": "Suspended",
+      "subline": "Claude",
+      "color": "#b78b6d",
+      "sizes": {
+        "home": 76,
+        "medium": 57,
+        "narrow": 48,
+        "startup": 76,
+        "startupMedium": 57,
+        "startupNarrow": 48,
+        "startupCompact": 48
+      }
+    },
+    "assets": {
+      "image": "cafe-orange.webp",
+      "portrait": "cafe-orange-portrait.webp",
+      "motion": "cafe-orange-idle.webm",
+      "width": 1060,
+      "height": 1484,
+      "paddingX": 48,
+      "paddingY": 16,
+      "durationMs": 8000,
+      "framesPerSecond": 30,
+      "motionKind": "hair-cloth"
+    }
+  },
+  {
+    "id": "cafe-gold",
+    "name": "蜜糖金",
+    "palette": {
+      "rail": "#faf4e5",
+      "accent": "#876318",
+      "line": "#e8dfc9",
+      "scale": {
+        "50": "#fbf5e8",
+        "100": "#f0e6c8",
+        "200": "#e4d29e",
+        "300": "#cdb46e",
+        "500": "#b49a4e",
+        "600": "#9c7e30",
+        "800": "#745313",
+        "900": "#604410"
+      }
+    },
+    "lettering": {
+      "headline": "Sweet",
+      "subline": "Grok",
+      "color": "#b59d6f"
+    },
+    "assets": {
+      "image": "cafe-gold.webp",
+      "portrait": "cafe-gold-portrait.webp",
+      "motion": "cafe-gold-idle.webm",
+      "width": 1114,
+      "height": 1412,
+      "paddingX": 48,
+      "paddingY": 16,
+      "durationMs": 8000,
+      "framesPerSecond": 30,
+      "motionKind": "hair-cloth"
+    }
+  },
+  {
+    "id": "cafe-red",
+    "name": "围巾红",
+    "palette": {
+      "rail": "#f9efed",
+      "accent": "#a63034",
+      "line": "#eadbd8",
+      "scale": {
+        "50": "#fcf2f0",
+        "100": "#f1dedd",
+        "200": "#e8bfbd",
+        "300": "#dba19f",
+        "500": "#cc7b7c",
+        "600": "#bb565a",
+        "800": "#90262c",
+        "900": "#772028"
+      }
+    },
+    "lettering": {
+      "headline": "Stupid",
+      "subline": "Doubao",
+      "color": "#b58583"
+    },
+    "assets": {
+      "image": "cafe-red.webp",
+      "portrait": "cafe-red-portrait.webp",
+      "motion": "cafe-red-idle.webm",
+      "width": 1110,
+      "height": 1417,
+      "paddingX": 48,
+      "paddingY": 16,
+      "durationMs": 8000,
+      "framesPerSecond": 30,
+      "motionKind": "scarf-cloth"
+    }
+  }
+]

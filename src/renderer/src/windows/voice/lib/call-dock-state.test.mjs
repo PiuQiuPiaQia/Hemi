@@ -12,6 +12,16 @@ const base = {
   muted: false,
 };
 
+test('后台和资源等待不会伪装成思考/回应，静音和接通优先级保持', () => {
+  for (const waiting of ['background', 'resource']) {
+    const state = { ...base, turnPhase: 'thinking', streamingReply: '已有文字', waiting };
+    assert.equal(resolveCallDockStatus(state).phase, 'waiting');
+    assert.match(resolveCallDockStatus(state).label, /等待/);
+    assert.equal(resolveCallDockStatus({ ...state, muted: true }).phase, 'muted');
+    assert.equal(resolveCallDockStatus({ ...state, sessionState: 'requesting' }).phase, 'connecting');
+  }
+});
+
 // ---- resolveCallDockStatus：五态映射与优先级 ----
 
 test('静音是硬覆盖：任何相位都显示已静音', () => {

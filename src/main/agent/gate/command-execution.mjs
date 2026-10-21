@@ -1,8 +1,6 @@
 /** 060：本机命令直接执行。权限由工具门控决定；本层只拥有进程、输出和终态。 */
 import { spawn, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
-import { processBirth } from '../../agent-runtime/owned-processes.mjs';
 import { promisify } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
 import { comSpecPath, cmdExecArgs } from '../../platform/win-compat.mjs';
@@ -11,7 +9,7 @@ const exec = promisify(execFile);
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_OUTPUT = 8 * 1024 * 1024;
 
-export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, env = process.env, maxOutput = MAX_OUTPUT, onSpawn = null, ownerToken = null }) {
+export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, env = process.env, maxOutput = MAX_OUTPUT, onSpawn = null, onOutput = null, ownerToken = null }) {
   if (signal?.aborted) return { code: null, signal: null, stdout: '', stderr: '', aborted: true, timedOut: false, cleanupConfirmed: true, truncated: false, status: 'cancelled' };
   const windows = process.platform === 'win32';
   return new Promise((resolve) => {
@@ -27,6 +25,7 @@ export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, en
       bytes += kept.length;
       truncated ||= chunk.length > remaining;
       if (which === 'out') stdout += decoders.out.write(kept); else stderr += decoders.err.write(kept);
+      onOutput?.({ stdout, stderr });
     };
     const kill = async (force = false) => {
       if (!child?.pid) return;
@@ -103,55 +102,19 @@ export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, en
       const status = !cleanupConfirmed ? 'cleanup-failed' : aborted ? 'cancelled' : timedOut ? 'timed-out' : spawnError ? 'start-failed' : code === 0 ? 'succeeded' : 'failed';
       resolve({ code, signal: exitSignal, stdout, stderr, cleanupError, spawnError: spawnError?.code ?? null, timedOut, aborted, cleanupConfirmed, truncated, status });
     });
-    timer = setTimeout(() => { timedOut = true; terminate(); }, timeoutMs);
+    if (timeoutMs > 0) timer = setTimeout(() => { timedOut = true; terminate(); }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });
 }
 
-/** 一个 Pi 会话的命令归属。SDK dispose／settled 不能早于本层的资源退出确认。 */
-export function createCommandScope() {
-  const active = new Set();
-  return {
-    run(options) {
-      const controller = new AbortController();
-      const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
-      const record = { controller, promise: null };
-      const execution = currentExecutionScope()?.execution;
-      const id = randomUUID(), token = randomUUID();
-      let registered = false;
-      const onSpawn = execution?.journal ? async pid => {
-        const birth = await processBirth(pid);
-        await execution.journal.processStart({id, token, pid, birth, owner:execution.owner});
-        registered = true;
-      } : null;
-      const promise = runCommand({ ...options, signal, ...(onSpawn ? {onSpawn, ownerToken:token} : {}) })
-        .then(async result => {
-          if (registered) {
-            try {await execution.journal.processEnd(id,{state:result.cleanupConfirmed?'finished':'unknown',cleanupConfirmed:result.cleanupConfirmed});}
-            catch(error){execution.fatalError = `命令退出事实保存失败：${error.message}`;throw error;}
-          }
-          if (!result.cleanupConfirmed && execution) {
-            execution.cleanupUnconfirmed = true;
-            execution.fatalError = '命令进程尚未确认退出，已停止后续操作；请核对后重启应用';
-            throw new Error(execution.fatalError);
-          }
-          return result;
-        }).finally(() => active.delete(record));
-      record.promise = promise;
-      active.add(record);
-      return promise;
-    },
-    async abort() {
-      const owned = [...active];
-      for (const record of owned) record.controller.abort();
-      const results = await Promise.all(owned.map((record) => record.promise));
-      if (results.some((result) => !result.cleanupConfirmed)) throw new Error('命令所属进程未确认退出，请核对后继续');
-    },
-  };
-}
+export { createCommandScope } from './command-scope.mjs';
 
 export function commandToolResult(out) {
+  if (out.status === 'background') return {
+    content: [{ type: 'text', text: `命令已转后台（${out.jobId}），仍属于当前目标。可继续做不依赖它的工作；无独立工作时结束本次回复，宿主会等待完成后自动唤醒你。不要用 sleep 或循环查询等待，也不要提前宣布整个目标完成。` }],
+    isError: false, details: out,
+  };
   const text = [out.stdout, out.stderr ? `stderr:\n${out.stderr}` : '',
     `exit=${out.code ?? 'none'}${out.signal ? ` signal=${out.signal}` : ''} · ${out.status}`,
     out.truncated ? '（输出已截断）' : '',

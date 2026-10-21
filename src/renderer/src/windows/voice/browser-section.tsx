@@ -10,11 +10,11 @@ import type { BrowserActPreferences, BrowserBridgeStatus, BrowserControlPreferen
  * 模型与路由页的 BrowserDecisionSection，这里只留开关、摘要与「配置决策模型」跳转。
  */
 
-const BRIDGE_HINT = '不碰你打开的标签页，直接复用已登录状态。';
+const BRIDGE_HINT = '扩展可用时优先使用；未连接时自动使用独立浏览器。';
 
 const BRIDGE_STATE_TEXT: Record<BrowserBridgeStatus['state'], string> = {
   off: '还没跑过浏览器任务，用时自动连接',
-  connecting: '正在连接 Chrome 扩展…',
+  connecting: '正在准备浏览器通道…',
   ready: '已连接 Chrome 扩展',
   error: '连接出了问题',
 };
@@ -65,7 +65,9 @@ export function BrowserSection({ onConfigureDecision }: { onConfigureDecision?: 
 
   const enabled = prefs?.enabled ?? false;
   const bridgeState = bridge?.state ?? 'off';
-  const badge = BRIDGE_BADGE[bridgeState];
+  const headless = bridge?.backend === 'headless';
+  const extensionConnected = bridge?.extensionConnected ?? (bridgeState === 'ready' && !headless);
+  const badge = headless && bridgeState === 'ready' ? { label: '运行中', tone: 'ok' } : BRIDGE_BADGE[bridgeState];
   const actEnabled = act?.enabled ?? true;
   const decisionModel = act?.model?.trim() || 'typesafe-ai/jev';
 
@@ -77,7 +79,7 @@ export function BrowserSection({ onConfigureDecision }: { onConfigureDecision?: 
       <div className="h37-group">
         <div className="h37-row">
           <span className="h37-row-text">
-            <b>用你的 Chrome 执行浏览器任务</b>
+            <b>启用浏览器控制</b>
             <span>{BRIDGE_HINT}</span>
           </span>
           <button
@@ -85,7 +87,7 @@ export function BrowserSection({ onConfigureDecision }: { onConfigureDecision?: 
             role="switch"
             className="h37-switch"
             aria-checked={enabled}
-            aria-label="用你的 Chrome 执行浏览器任务"
+            aria-label="启用浏览器控制"
             onClick={() => toggleEnabled(!enabled)}
           />
         </div>
@@ -94,15 +96,18 @@ export function BrowserSection({ onConfigureDecision }: { onConfigureDecision?: 
           <>
             <div className="h37-row h37-enter">
               <span className="h37-row-text">
-                <b>Chrome 扩展</b>
+                <b>浏览器通道</b>
                 <span>
-                  {BRIDGE_STATE_TEXT[bridgeState]}
-                  {bridge?.detail ? `：${bridge.detail}` : ''}
+                  {headless ? '独立无头浏览器 · 独立登录状态' : BRIDGE_STATE_TEXT[bridgeState]}
+                  {!headless && bridge?.detail ? `：${bridge.detail}` : ''}
                   {/* 021：显示已接入扩展的版本——改过扩展重新加载后，这里变了才算真的换新。
                       037 细节：版本号并进状态同一行。 */}
-                  {bridge?.state === 'ready' && bridge.extVersion ? ` · v${bridge.extVersion}` : ''}
+                  {!headless && bridge?.extensionConnected && bridge.extVersion ? ` · 扩展 v${bridge.extVersion}` : ''}
                 </span>
-                {bridge?.state === 'ready' && !bridge.extVersion ? (
+                {!extensionConnected ? (
+                  <span>下载并安装 Chrome 扩展，可复用你已有的登录状态。</span>
+                ) : null}
+                {bridge?.state === 'ready' && !headless && !bridge.extVersion ? (
                   <span className="h37-error-text">旧版扩展：请到 chrome://extensions 重新加载</span>
                 ) : null}
               </span>
@@ -114,6 +119,7 @@ export function BrowserSection({ onConfigureDecision }: { onConfigureDecision?: 
                 <button
                   type="button"
                   className="h37-btn h37-btn-secondary h37-btn-sm"
+                  title="下载并安装 Chrome 扩展，可复用已有登录状态"
                   onClick={() => void exportExtension()}
                 >
                   下载扩展

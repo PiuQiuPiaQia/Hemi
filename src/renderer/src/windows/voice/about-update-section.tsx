@@ -85,9 +85,7 @@ export function AboutUpdateSection() {
         actionButton = <CheckButton run={run} />;
         break;
       case 'error':
-        statusText = state?.errorMessage
-          ? `上次${state.errorMessage.includes('下载') ? '下载' : '检查'}没成功：${state.errorMessage}`
-          : '上次没成功，可以再试一次。';
+        statusText = state?.errorMessage || '更新失败，请稍后重试。';
         actionButton = <CheckButton run={run} />;
         break;
       default:
@@ -111,10 +109,10 @@ export function AboutUpdateSection() {
           </span>
           {actionButton ? <span className="h37-row-end">{actionButton}</span> : null}
         </div>
-        {phase === 'available' || phase === 'downloading' || phase === 'downloaded' ? (
+        {phase === 'available' || phase === 'downloading' || phase === 'downloaded' || phase === 'error' ? (
           <div className="h37-row">
             <span className="h37-row-text">
-              <b>这次更新改了什么</b>
+              <b>{phase === 'error' ? '手动下载更新' : '这次更新改了什么'}</b>
             </span>
             <span className="h37-row-end">
               <button
@@ -122,7 +120,7 @@ export function AboutUpdateSection() {
                 className="h37-link"
                 onClick={() => void openExternal(HEMI_RELEASES_PAGE_URL)}
               >
-                去发布页看 ↗
+                {phase === 'error' ? '去发布页下载 ↗' : '去发布页看 ↗'}
               </button>
             </span>
           </div>

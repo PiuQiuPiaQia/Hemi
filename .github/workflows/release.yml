@@ -3,8 +3,7 @@
 #
 # 前置（repo Settings → Secrets and variables → Actions）：
 # - GITHUB_TOKEN：内置，无需配置（contents:write 权限已在下方声明）。
-# - HEMI_UPDATE_TOKEN：可选。仅 contents:read 的 fine-grained PAT（只授权本仓库）——
-#   私有仓更新检查必需；repo 转公开后可不配（应用内更新匿名可达）。
+# - 应用内更新走公开 Release 下载直链，无需内置 token。
 # - macOS 默认 ad-hoc 签名，确保资源封印完整。Developer ID 发布需覆盖
 #   build.mac.identity 并配置证书与公证凭据。
 name: Release
@@ -25,8 +24,6 @@ jobs:
   release-mac:
     name: macOS arm64 · 安装包与更新清单
     runs-on: macos-15
-    env:
-      HEMI_UPDATE_TOKEN: ${{ secrets.HEMI_UPDATE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +90,7 @@ jobs:
   # 资产——全程单 publisher，无 electron-builder 双 publisher 竞争建 release 的
   # 老毛病（同 tag 双对象／422 砸死进程）。
   # win 应用内更新（2026-10-12 起）：nsis target 产出 latest.yml（win 的更新
-  # 清单）一并上挂；主进程更新桥按平台吃它，安装走 NSIS 静默更新。打包与
+  # 清单）一并上挂；electron-updater 按平台读取，安装走 NSIS 静默更新。打包与
   # 冒烟步骤与 win-probe workflow 同套（探针是它的手动触发版本）。
   release-win:
     name: Windows x64 · nsis 安装包
@@ -104,10 +101,6 @@ jobs:
     # 未配置误报损坏（win 冒烟唯一挂项）与原子写 rename 的杀毒瞬时占用（EPERM 重试）；
     # win-probe 全绿后撤门闩。verify-release 的 --mac-only 旗标保留但不再使用。
     timeout-minutes: 45
-    env:
-      # 与 mac job 同源：afterPack 写进包内 resources/update-token.txt——
-      # 私有仓下 win 端内更新同样靠它过 api.github.com 鉴权。
-      HEMI_UPDATE_TOKEN: ${{ secrets.HEMI_UPDATE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 

@@ -4,7 +4,7 @@ import { runtimeDataDir } from '../agent-runtime/storage-migration.mjs';
 // 渲染层只送 {conversationId, attachmentId}／受控取得的路径或粘贴 data URL；
 // 登记、校验、暂存与读取都在主进程（attachments.mjs）。llm.ipc 经
 // getComposerAttachments() 拿同一实例做回合解析（与 008 工作对象同型注入）。
-import { app, ipcMain, nativeImage, shell } from 'electron';
+import { app, dialog, ipcMain, nativeImage, shell } from 'electron';
 import path from 'node:path';
 
 import { IPC } from '../../shared/ipc-channels.mjs';
@@ -189,13 +189,25 @@ export function registerComposerIpc() {
   };
 
   ipcMain.handle(IPC.composer.attachFile, (_event, payload) =>
-    wrap('附件登记', () =>
-      attachments.attachFile({
+    wrap('附件登记', async () => {
+      let filePath = payload?.filePath;
+      if (payload?.source === 'picker' && !filePath) {
+        const result = await dialog.showOpenDialog(state.mainWindow, {
+          title: '添加附件',
+          properties: ['openFile'],
+          filters: [{ name: '图片与文档', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'markdown'] }],
+        });
+        if (result.canceled || !result.filePaths?.length) {
+          return { ok: true, cancelled: true, attachments: attachments.list(payload?.conversationId) };
+        }
+        filePath = result.filePaths[0];
+      }
+      return attachments.attachFile({
         conversationId: payload?.conversationId,
-        filePath: payload?.filePath,
+        filePath,
         source: payload?.source === 'drop' ? 'drop' : 'picker',
-      }),
-    ),
+      });
+    }),
   );
 
   ipcMain.handle(IPC.composer.attachPaste, (_event, payload) =>
@@ -228,6 +240,9 @@ export function registerComposerIpc() {
         stagedPath: payload?.stagedPath,
       }),
     ),
+  );
+  ipcMain.handle(IPC.composer.readDocument, (_event, payload) =>
+    wrap('文档预览', () => attachments.readDocumentSource({ conversationId: payload?.conversationId, attachmentId: payload?.attachmentId })),
   );
 
   ipcMain.handle(IPC.composer.openSource, (_event, payload) =>

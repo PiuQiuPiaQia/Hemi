@@ -59,6 +59,7 @@ export function createConversationController({
   // ------------------------------------------------------------ 状态与发布
 
   function commit(fact) {
+    const previousActivity = snapshot.runs[fact.runId]?.activity;
     const result = applyFlowFact(snapshot, fact);
     if (!result.applied) return result;
     snapshot = result.snapshot;
@@ -76,7 +77,11 @@ export function createConversationController({
     if (fact.type === 'run-closed') {
       void postClose();
     }
-    if (fact.type === 'input-delivered' || fact.type === 'run-closed') {
+    const activityChanged = fact.type === 'run-activity' && (
+      previousActivity?.phase !== fact.activity?.phase
+      || JSON.stringify(previousActivity?.jobs?.map(job => job.id)) !== JSON.stringify(fact.activity?.jobs?.map(job => job.id))
+    );
+    if (fact.type === 'input-delivered' || fact.type === 'run-closed' || activityChanged) {
       // 派发与收口是持久事实：长任务／退出前也必须保存正式输入，不能只留下
       // preparing 快照，让 turns 已有用户项而 flow 缺项。文本流不逐 token 写盘。
       void store.update(conversationId, { revision: snapshot.revision }).catch(() => {});

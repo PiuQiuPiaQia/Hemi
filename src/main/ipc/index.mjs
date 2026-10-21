@@ -139,7 +139,7 @@ export async function registerAllIpcHandlers() {
     validateCapabilities: async document=>{
       if(!document?.nodes.some(node=>node.type==='hemi-browser'))return;
       const caps=await resolveCapabilities();if(!caps.browserOn)throw new Error('请先在设置中启用浏览器控制');
-      const bridge=getBrowserBridgeService({statePath:browserBridgeStatePathFor(userDataDir),log:workflowLog});await bridge.start();if(!bridge.connected)throw new Error('浏览器扩展未连接，请连接后重新检查');
+      const bridge=getBrowserBridgeService({statePath:browserBridgeStatePathFor(userDataDir),log:workflowLog});await bridge.checkAvailable();
     },
     resolveWorkspace: conversationId => {
       const workspace = getWorkspaceService()?.resolve(getConversationMetadata(conversationId)?.workspaceId ?? 'default');

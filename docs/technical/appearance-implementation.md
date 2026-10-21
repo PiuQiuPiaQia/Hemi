@@ -12,7 +12,7 @@
 
 外观独立存于 `userData/appearance.json`，仅包含 `{schemaVersion:1,skinId,mode:'light'}`。新装或升级缺文件默认经典，保留已有合法选择。未知版本、损坏或读失败回退经典但不覆盖原文件；用户主动选择时先备份异常文件再原子替换。
 
-纯共享注册表定义六款顺序、语义色和原生背景。主进程服务初始化一次，通过异步串行队列提交；同目录独占临时文件、flush、rename 成功后才更新内存和广播。失败保留旧状态，队列可继续处理后续请求。相同 requestId 在有界缓存内去重，冲突返回明确错误；蓝→紫→蓝按出队时状态判断，保留最后选择。
+共享注册表从 `skins.config.json` 读取皮肤顺序、配色、题字及媒体定义，校验后供主进程和 renderer 共用。主进程服务初始化一次，通过异步串行队列提交；同目录独占临时文件、flush、rename 成功后才更新内存和广播。失败保留旧状态，队列可继续处理后续请求。相同 requestId 在有界缓存内去重，冲突返回明确错误；蓝→紫→蓝按出队时状态判断，保留最后选择。
 
 快照使用每进程唯一 sessionId 与递增 revision，重启不比较旧进程 revision。renderer 只显示已提交选择，保存中和错误是独立状态；资源解码和提交回执均带代次，迟到回调不得恢复旧皮肤。
 
@@ -30,7 +30,7 @@ head 先加载无依赖外部 bootstrap，写入 html 的 skin/mode/window 属�
 
 文档级 runtime 在 React 前初始化，统一订阅和合并快照；React 通过 useSyncExternalStore 读取。颜色放在 html，body Portal 和 Flowgram 独立 root 继承，不移动 Portal、不用主题 key 重挂。经典保留现有颜色；主题强调与成功/运行/警告/危险语义分离，原有几何 token 不变。
 
-注册表生成 public CSS，开发和构建检查漂移。资源由静态 import 映射，运行时不访问 docs、桌面路径或远程字体，不接受用户 CSS/脚本路径。
+配置统一生成 public CSS、early bootstrap、SkinId 类型、静态素材 import 与字节/hash 清单。开发和构建前自动更新，`--check` 可独立检查漂移；素材和配置全部校验成功后才写生成文件。运行时不访问 docs、桌面路径或远程字体，不接受用户 CSS/脚本路径。题字在主页、冷启动及各窗口宽度的字号同样来自配置。
 
 ## 5 主窗口分层与真实 UI
 
@@ -111,7 +111,7 @@ HEMI_USER_DATA_DIR=$(mktemp -d /tmp/hemi-appearance-smoke.XXXXXX) HEMI_SMOKE_TES
 
 ## 9 扩展与回退
 
-新增人物时同步更新 shared 注册表/声明、schema 允许 ID、early bootstrap 白名单、生成器顺序、renderer 资源映射及 manifest，再运行生成检查、资源导出和同一回归。普通修改配色只改注册表并重新生成 CSS。正文排版继续由既有 tokens/styles 管理，不复制整套页面。
+新增人物只需在 `src/shared/appearance/skins.config.json` 添加定义，并放入配置指定的 WebP / VP9 WebM 物料；运行开发或构建命令时自动更新类型、白名单、颜色、素材映射及清单。接入步骤、配置字段和回归命令见 [新增皮肤指南](adding-a-skin.md)。普通配色调整同样只改配置。正文排版继续由既有 tokens/styles 管理。
 
 用户选择经典即移除人物与影片，恢复原有基础颜色；不删除任何业务数据。出现写盘或备份失败时保持上一次成功选择，并允许重试。升级不主动创建/覆盖 appearance.json，已有合法选择按 schema 保留。生产运行只读取打包资源，离线导出工具和 docs 母版不进入应用运行链路。
 
@@ -143,3 +143,37 @@ HEMI_USER_DATA_DIR=$(mktemp -d /tmp/hemi-appearance-smoke.XXXXXX) HEMI_SMOKE_TES
 专项覆盖冷启动双路播放、落到历史后的静态图、五款阅读题字、阅读切肤零影片请求、50 条列表和固定淡水印、草稿和输入实例保留、980/560px 阅读、新建对话继续播放，以及再次进入对话后旧解码器释放。实际截图复核了 1440px 对话正文/代码/列表和 980/560px 窄窗；没有重新运行与本次改动无关的完整业务测试。
 
 证据位于本地 `.visual/workflow/vision/appearance-reading/{dev,built}/report.json` 及相邻 PNG，视觉报告为 `.visual/workflow/vision-report-appearance-reading.md`。原 48 项完整主题验证是上一版历史记录，本节 25 项是此次改动后的针对性验证。Windows 和正式安装包验证边界保持不变。
+
+## 12 设置页配色补齐（2026-10-21）
+
+设置页独立的白色根表面使透明顶栏、图标栏显示为白色，而二级分类栏仍显示主题色，外框出现断层；分类选中文字也仍使用深灰。补齐仅限非经典皮肤的三条外观规则：设置根表面使用 `--bg-rail`，使顶栏与两级导航底色连续；内容画布使用 24% `--bg-subtle` 混合白色，分组和输入框保留实白表面；桌面导航与窄窗抽屉的当前分类统一使用 `--g-100` 底色和 `--accent-text`。布局、字体、业务状态和警告/错误语义色保持现有实现，设置页不创建人物影片播放器。
+
+验证基线为 `e0b97054cf2845736c52dd434422a2d9430cd890` 加本轮未提交 CSS；同工作区已有其他任务的未提交改动，未纳入本次修改范围。环境为 macOS 26.5.1 / arm64 / Node 22.22.3 / Electron 44.0.0，Vite 开发 renderer 与构建 renderer 各使用全新临时 `HEMI_USER_DATA_DIR`。
+
+`npm run build`、`node scripts/check-spacing.mjs`、`node scripts/check-native.mjs`、生成文件一致性检查（build 的 prebuild）和 `git diff --check` 均通过。此次为局部 CSS 修复，没有运行完整业务测试或添加依赖。
+
+真实窗口专项检查两种模式各 38 项通过，无未捕获 renderer 错误：通过实际换肤入口选择六款皮肤；检查顶栏/图标栏/分类栏底色连续、分类文字与图标、启用开关及白色表单表面；遍历全部六个设置分类；验证换肤保留当前设置实例和未保存的供应商名称；检查 980px 设置页、560px 分类抽屉与分类跳转、无横向溢出且没有 video 节点。经典页的计算颜色及布局尺寸与修改前快照相同。
+
+本地复现：`HEMI_DEV_PORT=5317 npm run dev:renderer`，随后运行 `VITE_DEV_SERVER_URL=http://127.0.0.1:5317 node .visual/verify-appearance-settings.mjs`；构建后运行 `node .visual/verify-appearance-settings.mjs`。专项脚本与截图为本地验证物料，位于被 Git 忽略的 `.visual/`；报告及截图位于 `.visual/workflow/vision/appearance-settings/{before,dev,built}/`。视觉复核了宽窗配色、模型草稿表单和窄窗抽屉。未覆盖 Windows、正式安装包或在线模型调用，不能据此宣称这些环境通过。
+
+## 13 单一皮肤配置与交互色（2026-10-21）
+
+将原来的位置数组、人物资源映射、类型 ID、首帧白名单、生成器固定顺序和按人物 ID 写的字号分支收敛为 `skins.config.json`。共享 `createSkinRegistry` 校验配置并派生完整颜色；开发/构建入口自动生成 CSS、bootstrap、类型、静态 import 和逐文件 SHA-256 清单。生成器在全部配置和素材通过校验后才写文件，内容未变化则不写。原五款的离线导出工具也复用同一清单生成器。新增皮肤不再修改业务组件、IPC 或页面 CSS，步骤见 [新增皮肤指南](adding-a-skin.md)。
+
+hover 改为不透明的主题混色：人物皮肤默认为 16% 主色混白，选中 24%，选中后 hover 30%；经典通过自己的中性色配置使用 8/12/16%。会话列表移除原先过淡的单独混色覆盖，分类导航、图标栏、辅助按钮使用统一交互变量，皮肤卡片使用自身配置派生的 hover 色并加深内描边。表单背景、业务状态语义色和现有布局保持。
+
+验证基线为 `e0b97054cf2845736c52dd434422a2d9430cd890` 加本轮工作树。环境为 macOS 26.5.1 / arm64 / Node 22.22.3 / Electron 44.0.0；测试使用独立临时 `HEMI_USER_DATA_DIR`，没有模型凭据。工作区同时存在其他任务的修改，本轮没有修改它们。
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm test` | 1524 / 1524 通过；在本轮基础改造后运行 |
+| 最终外观专项 Node 测试 | 21 项通过；含配置扩展、无效配置、缺失/空文件和五种生成输出一致性 |
+| `npm run build` | 本工作区与新增皮肤隔离副本均通过；仅大分块提示 |
+| 生成漂移、spacing、`git diff --check` | 通过 |
+| 现有六款真实 Electron，Vite / 构建 | 各 56 项通过，无未捕获 renderer 错误 |
+| 临时第七款真实 Electron，Vite / 构建 | 各 64 项通过，无未捕获 renderer 错误 |
+| 全仓 `check-native` | 最后一次发现并行工作新增的 `styles/turn-activity.css:26` 焦点环没有 `html.kb-nav`；该文件不在本轮改动范围，保留给原任务处理 |
+
+第七款验证在临时项目副本中只追加 `trial-mint` 配置和三份新文件名的 WebP/WebM（复用现有蓝色人物作为测试物料），没有手改副本的类型、bootstrap、资源导入或业务代码。普通 `npm run build` 自动完成注册；实际卡片选择、主进程提交、保存、重启后 bootstrap、冷启动双路影片、主页影片、阅读静态图、1440/980/560px 自定义题字和抽屉 hover 全部通过。该测试皮肤没有加入正式配置。
+
+本地回归为 `VITE_DEV_SERVER_URL=http://127.0.0.1:5317 node scripts/verify-appearance-catalog.mjs` 和构建后的 `node scripts/verify-appearance-catalog.mjs`；可通过 `HEMI_APPEARANCE_APP_ROOT` 指向隔离的扩展项目。证据位于 `.visual/workflow/vision/appearance-catalog/{current-dev,current-built,extension-dev,extension-built}/`。截图复核了选中/hover 的区别、换肤面板、人物与题字、设置页和窄窗抽屉。没有新增 renderer 依赖；Windows、正式安装包与真实在线业务仍不在本轮验证范围。

@@ -1,5 +1,5 @@
 import {Dialog as PreviewDialog} from '@base-ui/react/dialog';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Workflow,
@@ -20,7 +20,7 @@ import {
 
 import { Markdown } from '@/shared/markdown';
 import type { MessageAttachmentView, TaskActionName, TaskArtifact, TaskStateSnapshot } from '@/shared/types';
-import type { ConversationDeliverableView } from '@shared/protocol';
+import type { AttachmentDocumentPreview, ConversationDeliverableView } from '@shared/protocol';
 import {
   isPreviewableArtifact,
   previewTabKey,
@@ -31,6 +31,7 @@ import { DeliveryBlocks, DeliverySources } from './delivery-view';
 import { TaskProcessBody } from './task-process';
 import { WorkflowRunPreview } from './workflow-run-preview';
 import { WorkflowDefinitionPreview } from './workflow-definition-preview';
+const DocumentPreview = lazy(() => import('./document-preview'));
 
 /**
  * 027 R-02/05/06＋028 R-03/04：应用内预览面板（多 Tab）。
@@ -53,7 +54,8 @@ import { WorkflowDefinitionPreview } from './workflow-definition-preview';
 
 type PreviewResult = {
   ok: boolean;
-  kind?: 'text' | 'image' | 'video' | 'unsupported';
+  kind?: 'text' | 'image' | 'video' | 'unsupported' | 'document';
+  document?: AttachmentDocumentPreview;
   mediaUrl?: string;
   markdown?: boolean;
   text?: string;
@@ -222,6 +224,7 @@ export function FilePreviewPanel({
   const [results, setResults] = useState<Record<string, PreviewResult | null>>({});
   const resultsRef = useRef<Record<string, PreviewResult | null>>({});
   const loadTicks = useRef<Map<string, number>>(new Map());
+  const documentKeys = useRef(new Set<string>());
 
   const applyResult = useCallback((key: string, value: PreviewResult | null) => {
     resultsRef.current = { ...resultsRef.current, [key]: value };
@@ -238,8 +241,13 @@ export function FilePreviewPanel({
         const tick = (loadTicks.current.get(key) ?? 0) + 1;
         loadTicks.current.set(key, tick);
         applyResult(key, null);
-        const stagedPath = attachmentMetaOf(tab.conversationId, tab.attachmentId)?.stagedPath;
-        const request = window.hemiVoice?.readAttachmentPreview(
+        const meta = attachmentMetaOf(tab.conversationId, tab.attachmentId);
+        const stagedPath = meta?.stagedPath;
+        const isDocument = /\.(pdf|docx|xlsx|pptx)$/i.test(meta?.name ?? '');
+        if (isDocument) documentKeys.current.add(key);
+        const request: Promise<PreviewResult> | undefined = isDocument
+          ? window.hemiVoice?.readAttachmentDocument(tab.conversationId, tab.attachmentId).then((document) => ({ ok: document.ok, kind: 'document', document, message: document.message }))
+          : window.hemiVoice?.readAttachmentPreview(
           tab.conversationId,
           tab.attachmentId,
           stagedPath,
@@ -299,6 +307,21 @@ export function FilePreviewPanel({
     },
     [applyResult, attachmentMetaOf],
   );
+
+  // Document bytes can be much larger than text previews. Release closed tabs
+  // and invalidate in-flight reads so a late result cannot restore the cache.
+  useEffect(() => {
+    const openKeys = new Set(tabs.map(previewTabKey));
+    let next: Record<string, PreviewResult | null> | null = null;
+    for (const key of documentKeys.current) {
+      if (openKeys.has(key)) continue;
+      next ??= { ...resultsRef.current };
+      delete next[key];
+      documentKeys.current.delete(key);
+      loadTicks.current.set(key, (loadTicks.current.get(key) ?? 0) + 1);
+    }
+    if (next) { resultsRef.current = next; setResults(next); }
+  }, [tabKeys, tabs]);
 
   // 新到达的文件 Tab 自动读取一次（已有结果的不重读；报告/过程 Tab 无读取）。
   useEffect(() => {
@@ -865,6 +888,10 @@ export function FilePreviewPanel({
               </button>
             ) : null}
           </div>
+        ) : activeResult.kind === 'document' && activeResult.document && activeTab.kind === 'attachment' ? (
+          <Suspense fallback={<p className="h24-preview-status" role="status">正在打开文档…</p>}>
+            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? '文档'} readText={() => window.hemiVoice.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId)} />
+          </Suspense>
         ) : activeResult.kind === 'video' && activeResult.mediaUrl ? (
           <VideoPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? '预览视频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />
         ) : isImage ? (

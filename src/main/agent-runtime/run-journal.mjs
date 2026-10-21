@@ -135,6 +135,12 @@ export function createRunJournal({ dir }) {
       if (!s.processes[id]) throw new Error('命令进程身份不存在');
       return Object.assign(s.processes[id], result, {endedAt:Date.now()});
     }),
+    processBackground: id => transaction(s => {
+      const record = s.processes[id];
+      if (!record) throw new Error('命令进程身份不存在');
+      record.background = true;
+      return record;
+    }),
     requestStart: (owner, request, limit) => transaction(s => {
       const root = s.roots[owner.rootRunId];
       if (!owns(root, owner) || terminal.has(root.status) || suspended(root)) throw new Error('根目标已停止或挂起，禁止新请求');

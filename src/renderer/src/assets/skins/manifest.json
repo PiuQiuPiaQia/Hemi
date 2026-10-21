@@ -1,8 +1,6 @@
 {
   "version": 1,
-  "durationMs": 8000,
-  "framesPerSecond": 30,
-  "method": "Existing approved artwork; offline WebGL local deformation and VP9 alpha encoding. No Cubism runtime.",
+  "generatedBy": "scripts/generate-appearance.mjs",
   "skins": {
     "cafe-blue": {
       "width": 1135,
@@ -11,6 +9,8 @@
         "x": 48,
         "y": 16
       },
+      "durationMs": 8000,
+      "framesPerSecond": 30,
       "motion": "blink-hair-cloth",
       "files": {
         "cafe-blue.webp": {
@@ -34,6 +34,8 @@
         "x": 48,
         "y": 16
       },
+      "durationMs": 8000,
+      "framesPerSecond": 30,
       "motion": "hair-cloth",
       "files": {
         "cafe-purple.webp": {
@@ -57,6 +59,8 @@
         "x": 48,
         "y": 16
       },
+      "durationMs": 8000,
+      "framesPerSecond": 30,
       "motion": "hair-cloth",
       "files": {
         "cafe-orange.webp": {
@@ -80,6 +84,8 @@
         "x": 48,
         "y": 16
       },
+      "durationMs": 8000,
+      "framesPerSecond": 30,
       "motion": "hair-cloth",
       "files": {
         "cafe-gold.webp": {
@@ -103,6 +109,8 @@
         "x": 48,
         "y": 16
       },
+      "durationMs": 8000,
+      "framesPerSecond": 30,
       "motion": "scarf-cloth",
       "files": {
         "cafe-red.webp": {

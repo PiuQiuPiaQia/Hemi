@@ -894,6 +894,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
       });
     };
     const calls = [];
+    const onActivity = activity => streamEvent({ kind: 'activity', activity });
     const onModelCall = (call) => {
       if (call.usageDetail) calls.push({ model: call.model, detail: call.usageDetail });
     };
@@ -903,6 +904,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         agent.on('stream', onStream);
         agent.on('progress', onProgress);
         agent.on('model-call', onModelCall);
+        agent.on('activity', onActivity);
         // 056：备用接替/回到主模型要留痕——之前静默切换，日志一直写着主模型，实际跑的是备用。
         const onModelRoute = (event) => {
           llmLog.info(`turn ${turnId} 模型切换 → ${event?.to?.model ?? '?'}${event?.fallbackUsed ? '（主模型失败，本回合由备用接替）' : '（回到主模型）'}`);
@@ -917,6 +919,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           agent.off('stream', onStream);
           agent.off('progress', onProgress);
           agent.off('model-call', onModelCall);
+          agent.off('activity', onActivity);
           agent.off('model-route', onModelRoute);
         }
         if (run.aborted || runToken.controller.signal.aborted) throw new Error('回合已取消。');

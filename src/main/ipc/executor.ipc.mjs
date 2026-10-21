@@ -161,9 +161,12 @@ export function registerExecutorIpc() {
         updatedAt: Number.isFinite(parsed?.updatedAt) ? parsed.updatedAt : null,
         // 021：扩展自报版本（hello 携带）——null＝旧扩展没报，指引重载。
         extVersion: typeof parsed?.extVersion === 'string' ? parsed.extVersion : null,
+        backend: ['extension', 'headless'].includes(parsed?.backend) ? parsed.backend : null,
+        extensionConnected: parsed?.extensionConnected === true,
+        headlessTasks: Number.isInteger(parsed?.headlessTasks) ? parsed.headlessTasks : 0,
       };
     } catch {
-      return { state: 'off', detail: null, port: null, updatedAt: null, extVersion: null };
+      return { state: 'off', detail: null, port: null, updatedAt: null, extVersion: null, backend: null, extensionConnected: false, headlessTasks: 0 };
     }
   });
   // 2026-09-20 二次裁决：导出去哪由用户在系统目录选择窗里定（比如桌面），

@@ -1,6 +1,6 @@
 /**
  * 044 · 应用内更新服务：包一层 electron-updater，产出设置页「关于与更新」
- * 消费的线性状态机。分发走 update-bridge 的回环桥（私有仓事实见该文件头注）。
+ * 消费的线性状态机。分发直接走公开 GitHub Release 下载地址。
  *
  * 行为口径：
  * - 未打包实例（dev/冒烟/自驱动）一律 supported=false，检查/下载直接回执
@@ -11,14 +11,14 @@
  * - autoDownload=false：发现新版本只亮状态，下载由用户在设置页点按钮。
  * - autoInstallOnAppQuit=true：下载完成后正常退出也会自动装上，按钮只是
  *   「立刻重启安装」的捷径。
- * - 关闭差量更新（blockmap）：产物 ~414MB 全量下载，换掉回环桥上 Range
- *   分段转发的整类失败模式；家庭带宽下可接受。
+ * - 关闭差量更新（blockmap）：直接全量下载，保留 sha512 完整性校验。
  */
 import path from 'node:path';
 import { readFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
-import { createUpdateBridge, defaultChannelFile } from './update-bridge.mjs';
+import { UPDATE_FEED_URL } from '../../shared/release-info.mjs';
+import { formatUpdateError } from './updater-error.mjs';
 
 // ESM 里同步 require 内置模块（child_process 的 execFileSync/spawn 都要同步语义）。
 const nodeRequire = createRequire(import.meta.url);
@@ -30,17 +30,6 @@ const STARTUP_CHECK_DELAY_MS = 15_000;
  * 由 appId 派生）。下载完成后 zip + update-info.json 落 ~/Library/Caches/<此名>/pending/。
  */
 const UPDATER_CACHE_DIR_NAME = 'hemi-desktop-updater';
-
-/**
- * 默认 token 装载：CI 构建时 afterPack 把只读 PAT 写进 Resources/update-token.txt
- * （HEMI_UPDATE_TOKEN secret，仅 contents:read）。文件缺失＝匿名（repo 公开后
- * 的形态），读取失败也按匿名处理——更新检查不该被 token 问题打死。
- */
-export function defaultLoadToken(resourcesPath) {
-  return readFile(path.join(resourcesPath, 'update-token.txt'), 'utf8')
-    .then((text) => text.trim() || null)
-    .catch(() => null);
-}
 
 async function defaultUpdaterFactory() {
   const mod = await import('electron-updater');
@@ -121,10 +110,6 @@ echo "--- swap done $(date) ---" >> "$LOG"
 export function createUpdaterService({
   app,
   log = null,
-  resourcesPath = process.resourcesPath,
-  loadToken = null,
-  fetchImpl = globalThis.fetch,
-  createBridge = createUpdateBridge,
   updaterFactory = defaultUpdaterFactory,
   timeoutSet = (fn, ms) => setTimeout(fn, ms),
   execFn = null,
@@ -170,10 +155,8 @@ export function createUpdaterService({
 
   let broadcastFn = () => {};
   let autoUpdater = null;
-  let bridge = null;
   let setupPromise = null;
-
-  const resolveToken = loadToken ?? (() => defaultLoadToken(resourcesPath));
+  let operation = '检查更新';
 
   function getState() {
     return { ...state };
@@ -191,18 +174,17 @@ export function createUpdaterService({
   }
 
   function fail(error) {
-    const message = error?.message ?? String(error);
+    const message = formatUpdateError(error, operation);
     state.phase = 'error';
     state.errorMessage = message;
-    log?.warn?.(`更新流程失败：${message}`);
+    log?.warn?.(`更新流程失败（${operation}）：${error?.stack ?? error?.message ?? String(error)}`);
     broadcastFn(getState());
+    return message;
   }
 
   async function ensureSetup() {
     if (!setupPromise) {
       setupPromise = (async () => {
-        const token = await resolveToken();
-        bridge = await createBridge({ token, fetchImpl, log, channelFile: defaultChannelFile(platform) });
         autoUpdater = await updaterFactory();
         autoUpdater.autoDownload = false;
         autoUpdater.autoInstallOnAppQuit = true;
@@ -210,7 +192,7 @@ export function createUpdaterService({
         // electron-updater 自带 logger 直写 console——统一走本服务的日志，
         // 别在生产控制台刷噪声。
         autoUpdater.logger = null;
-        autoUpdater.setFeedURL({ provider: 'generic', url: bridge.url });
+        autoUpdater.setFeedURL({ provider: 'generic', url: UPDATE_FEED_URL });
         autoUpdater.on('checking-for-update', () => setPhase('checking'));
         autoUpdater.on('update-available', (info) =>
           setPhase('available', { availableVersion: info?.version ?? null }));
@@ -226,7 +208,7 @@ export function createUpdaterService({
             progressPercent: 100,
           }));
         autoUpdater.on('error', (error) => fail(error));
-        log?.info?.(`更新服务就绪（分发桥 ${bridge.url}）`);
+        log?.info?.(`更新服务就绪（公开下载 ${UPDATE_FEED_URL}）`);
       })().catch((error) => {
         setupPromise = null;
         throw error;
@@ -239,6 +221,7 @@ export function createUpdaterService({
     if (!supported) {
       return { ok: false, code: 'unsupported', message: unsupportedMessage };
     }
+    operation = '检查更新';
     try {
       await ensureSetup();
       setPhase('checking');
@@ -247,8 +230,7 @@ export function createUpdaterService({
       if (state.phase === 'checking') setPhase('not-available');
       return { ok: true };
     } catch (error) {
-      fail(error);
-      return { ok: false, code: 'check-failed', message: error?.message ?? String(error) };
+      return { ok: false, code: 'check-failed', message: fail(error) };
     }
   }
 
@@ -260,13 +242,13 @@ export function createUpdaterService({
     if (state.phase !== 'available') {
       return { ok: false, code: 'no-update', message: '当前没有待下载的新版本' };
     }
+    operation = '下载更新';
     try {
       setPhase('downloading', { progressPercent: 0 });
       await autoUpdater.downloadUpdate();
       return { ok: true };
     } catch (error) {
-      fail(error);
-      return { ok: false, code: 'download-failed', message: error?.message ?? String(error) };
+      return { ok: false, code: 'download-failed', message: fail(error) };
     }
   }
 
@@ -313,6 +295,7 @@ export function createUpdaterService({
     if (state.phase !== 'downloaded') {
       return { ok: false, code: 'not-downloaded', message: '新版本还没下载完成' };
     }
+    operation = '安装更新';
     // win 的 NSIS 静默更新不校验签名（electron-updater 只在配置了签名校验的
     // mac 路径做），exe 的完整性由下载层 sha512 把关——一律原生 quitAndInstall。
     if (platform === 'win32') {
@@ -329,8 +312,7 @@ export function createUpdaterService({
     try {
       return await installViaSwap();
     } catch (error) {
-      fail(error);
-      return { ok: false, code: 'install-failed', message: error?.message ?? String(error) };
+      return { ok: false, code: 'install-failed', message: fail(error) };
     }
   }
 
@@ -344,18 +326,12 @@ export function createUpdaterService({
     timer?.unref?.();
   }
 
-  async function dispose() {
-    if (bridge) await bridge.close().catch(() => {});
-    bridge = null;
-  }
-
   return {
     getState,
     check,
     download,
     install,
     scheduleStartupCheck,
-    dispose,
     setBroadcast(fn) {
       broadcastFn = fn ?? (() => {});
     },

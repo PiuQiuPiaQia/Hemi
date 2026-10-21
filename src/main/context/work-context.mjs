@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { detectScreenRecording } from '../agent/vision-permissions.mjs';
 import { CAPTURE_LONG_EDGE, cua } from '../agent/gate/cua-client.mjs';
+import { isDocumentFile, readDocumentText } from '../composer/documents.mjs';
 
 /** 每对象文本预算（字符）：超长截断并明示，不伪造完整范围（R-03/R-07）。 */
 export const PER_OBJECT_TEXT_LIMIT = 6000;
@@ -69,7 +70,7 @@ export function clampText(text, limit = PER_OBJECT_TEXT_LIMIT) {
 /** 按扩展名猜文件种类：'text' | 'image' | null（null＝不支持的格式）。 */
 export function guessFileKind(filename) {
   const ext = path.extname(String(filename ?? '')).toLowerCase();
-  if (TEXT_EXTENSIONS.has(ext)) return 'text';
+  if (TEXT_EXTENSIONS.has(ext) || isDocumentFile(filename)) return 'text';
   if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   return null;
 }
@@ -344,6 +345,7 @@ export function createWorkContext({
   }
 
   function addObject(partial) {
+    assertCapacity();
     seq += 1;
     const object = {
       id: `ctx-${seq}`,
@@ -390,7 +392,7 @@ export function createWorkContext({
   }
 
   /** 读取单个文件（R-03）：文本或图片；目录/不支持/过大都报可读错误。只产 payload。 */
-  function buildFilePayload(filePath) {
+  async function buildFilePayload(filePath) {
     const cleanPath = String(filePath ?? '').trim();
     if (!cleanPath) throw new Error('没有拿到文件路径');
     let stats;
@@ -404,9 +406,17 @@ export function createWorkContext({
     }
     const kind = guessFileKind(cleanPath);
     if (!kind) {
-      throw new Error('暂不支持这种文件格式：首版支持 txt/md 与图片（jpg/png/webp/gif），其他可手动粘贴相关内容');
+      throw new Error('暂不支持这种文件格式：支持 txt/md、图片，以及 PDF/Word/Excel/PPT（pdf/docx/xlsx/pptx）');
     }
     const name = path.basename(cleanPath);
+    if (isDocumentFile(cleanPath)) {
+      const { text } = await readDocumentText(cleanPath);
+      const clamped = clampText(text);
+      return {
+        kind: 'file', source: '文件', title: name, detail: cleanPath,
+        scope: '文档文字（内嵌图片、图表及版式未提取）', text: clamped.text,
+      };
+    }
     if (kind === 'text') {
       if (stats.size > TEXT_FILE_BYTE_LIMIT * 4) {
         throw new Error(`文件太大（${Math.round(stats.size / 1024 / 1024)}MB），本期只支持 2MB 内的文本文件`);
@@ -565,7 +575,7 @@ end tell`).trim();
           throw new Error('Finder 里选中了多个文件：请只选中一个再附加，或用浏览窗口挑');
         }
         if (paths.length === 1) {
-          return { ok: true, object: addObject(buildFilePayload(paths[0])) };
+          return { ok: true, object: addObject(await buildFilePayload(paths[0])) };
         }
         const payload = await pickFilePayload();
         return payload ? { ok: true, object: addObject(payload) } : { ok: true, cancelled: true };
@@ -588,7 +598,7 @@ end tell`).trim();
     if (!object) throw new Error('对象不存在或已被移除');
     let payload;
     if (object.kind === 'file') {
-      payload = buildFilePayload(object.detail);
+      payload = await buildFilePayload(object.detail);
     } else if (object.kind === 'web') {
       payload = await buildWebPayload();
     } else {

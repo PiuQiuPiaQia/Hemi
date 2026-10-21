@@ -1,0 +1,22 @@
+/* ZCode-inspired document surfaces; Hemi theme tokens for the surrounding UI. */
+.h-doc-viewer { display: flex; flex-direction: column; min-width: 0; width: 100%; }
+.h-doc-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); padding-block: var(--sp-8); border-bottom: 1px solid var(--line); font-size: var(--fs-12); }
+.h-doc-controls button, .h-doc-sheet-tabs button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--sp-28); padding-inline: var(--sp-8); border-radius: var(--sp-4); color: var(--h24-muted); }
+.h-doc-controls button:hover, .h-doc-controls [aria-pressed='true'], .h-doc-sheet-tabs [aria-selected='true'] { color: var(--ink); background: var(--bg-canvas); }
+.h-doc-controls button:disabled { opacity: .35; cursor: default; }
+.h-doc-view-switch, .h-doc-pages, .h-doc-zoom { display: flex; align-items: center; gap: var(--sp-4); }
+.h-doc-pages { margin-left: auto; font-variant-numeric: tabular-nums; }
+.h-doc-zoom { margin-left: auto; }
+.h-doc-pages + .h-doc-zoom { margin-left: 0; }
+.h-doc-viewport { width: 100%; min-width: 0; overflow: auto; background: var(--bg-canvas); }
+.h-doc-surface { display: flex; flex-direction: column; align-items: center; width: max-content; min-width: 100%; padding: var(--sp-16); box-sizing: border-box; }
+.h-doc-surface canvas, .h-doc-frame { display: block; flex: none; border: 1px solid var(--line); background: white; }
+.h-doc-frame { max-width: none; }
+.h-doc-sheet-tabs { display: flex; gap: var(--sp-4); padding: var(--sp-8); border-bottom: 1px solid var(--line); background: var(--bg-surface); overflow: auto; font-size: var(--fs-12); }
+.h-doc-sheet-tabs button { flex: none; }
+.h-doc-sheet-scroll { overflow: auto; max-height: calc(var(--sp-48) * 12); background: var(--bg-surface); }
+.h-doc-sheet { border-collapse: separate; border-spacing: 0; font-size: var(--fs-12); }
+.h-doc-sheet th, .h-doc-sheet td { min-width: calc(var(--sp-48) * 2); max-width: calc(var(--sp-48) * 5); padding: var(--sp-8); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; vertical-align: top; }
+.h-doc-sheet th { position: sticky; z-index: 1; top: 0; background: var(--bg-canvas); color: var(--h24-muted); font-weight: 500; text-align: center; }
+.h-doc-sheet tr > th:first-child { left: 0; min-width: var(--sp-32); }
+.h-doc-note { padding: var(--sp-8); color: var(--h24-muted); font-size: var(--fs-12); }

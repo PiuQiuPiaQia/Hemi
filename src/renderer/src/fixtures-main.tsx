@@ -1668,6 +1668,7 @@ function screenProps(input: Partial<ScreenProps> & { streamingParts?: TurnPart[]
     textModelBusy: false,
     textPendingSpeech: false,
     textModelReady: true,
+    voiceModelReady: true,
     // 025：产物打开/定位回调（交付场景的成果 chips 需要；默认 no-op）。
     onOpenArtifact: () => {},
     onOpenSettings: () => {},

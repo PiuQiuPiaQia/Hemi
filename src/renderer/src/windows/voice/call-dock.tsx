@@ -21,6 +21,7 @@ export type CallDockProps = {
   muted: boolean;
   /** 048：思考起点（毫秒时间戳；null＝不在思考）。 */
   thinkingSince?: number | null;
+  waiting?: 'background' | 'resource' | null;
   onToggleMute: () => void;
   /** 037 起通话条嵌在输入框顶部、不再收起；保留可选以兼容旧调用。 */
   onCollapse?: () => void;
@@ -42,6 +43,7 @@ export function CallDock({
   elapsedSeconds,
   muted,
   thinkingSince = null,
+  waiting = null,
   onToggleMute,
   onEndCall,
 }: CallDockProps) {
@@ -53,6 +55,7 @@ export function CallDock({
     interimText,
     muted,
     thinkingSince,
+    waiting,
   });
   return (
     <section className="h24-call-dock h37-call-strip" data-phase={status.phase} aria-label="实时通话">

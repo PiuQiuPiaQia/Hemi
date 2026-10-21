@@ -1426,6 +1426,12 @@ export default function Home() {
         bridge.getConfig(),
         bridge.getMicrophonePermissionStatus(),
       ]);
+      updateConfigForm({
+        resourceId: config.resourceId,
+        endpoint: config.endpoint,
+        hasApiKey: Boolean(config.hasApiKey),
+        keyStoredSecurely: Boolean(config.keyStoredSecurely),
+      });
       setMicrophonePermission(permission);
       setRepairHint((current) => {
         if (current?.key === 'asr' && config.hasApiKey) return null;
@@ -1435,7 +1441,7 @@ export default function Home() {
     } catch {
       /* 读取失败保留现状 */
     }
-  }, []);
+  }, [updateConfigForm]);
 
   // 设置页关回主界面时刷新目录（组可能被编辑/增删）与就绪状态（032：解耦后
   // 模型组由 031 区块独立保存，这里回读默认组决定输入区就绪与修复条去留）。
@@ -1611,15 +1617,22 @@ export default function Home() {
       if (!bridge || contextBusy) return;
       setContextBusy(true);
       try {
+        if (kind === 'file') {
+          const conversationId = ensureConversationForAttachment();
+          const result = await bridge.attachFile({ conversationId, source: 'picker' });
+          if (conversationId === conversationIdRef.current && result.attachments) setDraftAttachments(result.attachments);
+          return;
+        }
         const result = await bridge.attachContext(kind);
         setContextState(result.state);
       } catch (error) {
-        flashContextError(messageFromError(error, '附加失败，请再试一次。'));
+        if (kind === 'file') flashAttachError(messageFromError(error, '附件没有加上'));
+        else flashContextError(messageFromError(error, '附加失败，请再试一次。'));
       } finally {
         setContextBusy(false);
       }
     },
-    [contextBusy, flashContextError],
+    [contextBusy, ensureConversationForAttachment, flashAttachError, flashContextError],
   );
 
   const handleRefreshContext = useCallback(
@@ -3775,6 +3788,7 @@ export default function Home() {
         callActive={isCallActive}
         turnPhase={turnPhase}
         turnStartedAt={Number(flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.startedAt) || null}
+        runActivity={flowSnapshot?.phase !== 'stopping' ? flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.activity : null}
         elapsedSeconds={elapsedSeconds}
         callMuted={callMuted}
         dockCollapsed={dockCollapsed}
@@ -3795,8 +3809,9 @@ export default function Home() {
         streamingThinking={streamingThinking}
         usageRecords={usageRecords}
         usageRunning={
-          modelBusy ||
-          (taskState?.tasks ?? []).some((task) => task.conversationId === conversationId && task.phase !== 'terminal')
+          (modelBusy && !flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.activity?.phase.startsWith('waiting-')) ||
+          (taskState?.tasks ?? []).some((task) => task.conversationId === conversationId && task.phase !== 'terminal'
+            && !task.activity?.phase.startsWith('waiting-'))
         }
         interimText={speechPreviewText}
         transcripts={transcripts}
@@ -3829,6 +3844,7 @@ export default function Home() {
         textModelBusy={modelBusy}
         textPendingSpeech={textPendingSpeech}
         textModelReady={Boolean(modelForm.hasApiKey && modelForm.model.trim())}
+        voiceModelReady={Boolean(configForm.hasApiKey)}
         onOpenSettings={async () => {
           if(!await confirmWorkflowLeave())return;
           // 2026-10-08 用户裁决：普通设置入口落第一分类「通用」——此前硬编码

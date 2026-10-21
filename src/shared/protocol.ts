@@ -466,6 +466,7 @@ export type LlmDeltaEvent = { conversationId?: string | null; requestId?: string
   | { turnId: number; kind: 'thinking'; text: string }
   | { turnId: number; kind: 'thinking_end' }
   | { turnId: number; kind: 'restart' }
+  | { turnId: number; kind: 'activity'; activity: RunActivityView }
   /** 056：主 agent 自己的工具调用（对话流折叠展示；args 为有界摘要）。 */
   | { turnId: number; kind: 'tool_start'; tool: string; toolCallId?: string; args?: Record<string, string | number | boolean> }
   | { turnId: number; kind: 'tool_end'; tool: string; toolCallId?: string; isError?: boolean });
@@ -826,6 +827,8 @@ export type TaskStateSnapshot = {
   taskText: string;
   /** 进度行文案（无总数时不伪造计数，R-13）。 */
   progressText: string;
+  /** 宿主的后台命令/资源等待事实，供任务详情和恢复投影使用。 */
+  activity?: RunActivityView | null;
   /** 2026-09-26：任务开始时间戳——运行中任务卡「已跑 X 分钟」用；旧快照缺省。 */
   startedAt?: number | null;
   /** 含核验与回炉总结的终态时刻；旧快照可缺省。 */
@@ -953,6 +956,9 @@ export type BrowserBridgeStatus = {
   updatedAt: number | null;
   /** 021：已接入 Chrome 扩展自报的版本；null＝旧扩展未上报（指引重载）。 */
   extVersion: string | null;
+  backend?: 'extension' | 'headless' | null;
+  extensionConnected?: boolean;
+  headlessTasks?: number;
 };
 
 /** web 检索配置（设置页读写；key 明文不出主进程，回执只带 hasApiKey）。 */
@@ -1243,6 +1249,14 @@ export type ArtifactPreviewResult = {
   code?: string;
 };
 
+export type AttachmentDocumentPreview = {
+  ok: boolean;
+  format?: 'pdf' | 'docx' | 'xlsx' | 'pptx';
+  bytes?: Uint8Array;
+  sheets?: Array<{ name: string; rows: Array<Array<{ address: string; value: string; formula?: string }>>; truncated: boolean }>;
+  message?: string;
+};
+
 /**
  * 009 任务历史视图（列表项）。corrupt＝记录文件损坏（AC-06 可见不可静默）。
  * 终态语义与 TaskOutcome 一致；interrupted＝重启补标的「执行中断/待核实」；
@@ -1386,7 +1400,7 @@ export type ConversationSession = {
 };
 
 /** 015 会话列表行（不带全文）。 */
-export type ConversationStatus = 'running';
+export type ConversationStatus = 'running' | 'waiting';
 
 export type ConversationSummary = {
   id: string;
@@ -1592,6 +1606,21 @@ export type TurnQueuePushEvent =
  */
 export type FlowPhase = 'idle' | 'preparing' | 'running' | 'stopping';
 
+export type RunActivityView = {
+  phase: 'running' | 'waiting-background' | 'waiting-resource';
+  since: number | null;
+  jobs: Array<{
+    id: string; toolCallId?: string; command: string;
+    startedAt: number; endedAt: number | null; status: string;
+    code: number | null; output: string;
+  }>;
+  resources: Array<{
+    toolCallId: string; tool: string; since: number;
+    resource: { host: string; scope: string; mode: string };
+    blockers: Array<{ tool?: string; description?: string; owner?: { conversationId?: string } | string }>;
+  }>;
+};
+
 export type FlowSnapshotView = {
   schemaVersion: number;
   conversationId: string;
@@ -1602,7 +1631,7 @@ export type FlowSnapshotView = {
   queuePaused: boolean;
   pending: FlowInputView[];
   timeline: FlowItemView[];
-  runs: Record<string, Record<string, unknown>>;
+  runs: Record<string, Record<string, unknown> & { activity?: RunActivityView | null }>;
   tasks: Record<string, Record<string, unknown>>;
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;
@@ -2400,7 +2429,8 @@ export type HemiVoiceBridge = {
   /** 028 本条消息附件：登记（文件/粘贴）/ 移除 / 列表 / 受控预览 / 受控打开。 */
   attachFile: (payload: {
     conversationId: string;
-    filePath: string;
+    /** Picker opens the native dialog when no path is supplied. */
+    filePath?: string;
     source: 'picker' | 'drop';
   }) => Promise<ComposerAttachmentResult>;
   attachPasteImage: (payload: { conversationId: string; dataUrl: string }) => Promise<ComposerAttachmentResult>;
@@ -2414,6 +2444,7 @@ export type HemiVoiceBridge = {
     attachmentId: string,
     stagedPath?: string,
   ) => Promise<ArtifactPreviewResult>;
+  readAttachmentDocument: (conversationId: string, attachmentId: string) => Promise<AttachmentDocumentPreview>;
   openAttachmentSource: (
     conversationId: string,
     attachmentId: string,

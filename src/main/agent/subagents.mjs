@@ -213,6 +213,7 @@ export function createSubagentManager({
       outcome: task.outcome,
       taskText: task.description || task.prompt,
       progressText: task.progressText,
+      activity: task.activity ?? null,
       startedAt: task.startedAt ?? null,
       endedAt: task.endedAt ?? null,
       readOnly: task.readOnly,
@@ -431,6 +432,11 @@ export function createSubagentManager({
       for (const task of tasks.values()) {
         if (task.phase !== 'running') continue;
         runnable = true;
+        if (['waiting-background', 'waiting-resource'].includes(task.activity?.phase)) {
+          // 宿主有明确等待事实；后台进程的硬超时/取消负责收口，不误报模型流停摆。
+          task.lastActivityAt = now;
+          continue;
+        }
         const active = task.activeTool;
         if (active) {
           const heldMs = now - active.startedAt;
@@ -918,6 +924,15 @@ export function createSubagentManager({
       if (previous) previous.session = null; // 历史任务终态不变，运行实例转交新任务。
       const session = task.session;
       session.on('progress', (event) => { if (tasks.get(task.key)?.session === session) handleProgress(task, event); });
+      session.on('activity', activity => {
+        if (tasks.get(task.key)?.session !== session || task.phase === 'terminal') return;
+        task.activity = activity;
+        task.lastActivityAt = nowFn();
+        task.progressText = activity.phase === 'waiting-background' ? '等待后台命令完成，随后自动继续'
+          : activity.phase === 'waiting-resource' ? '等待工作区资源，释放后自动继续'
+          : task.progressBase ?? '继续执行';
+        broadcast();
+      });
       // 模型正在流式输出（思考／正文／工具参数分片）也是活动：停摆看门狗只认工具事件会把
       // 读完资料后写长报告、或长思考的那一轮当成「模型流停摆」掐掉（10-19 t24 实录）。
       session.on('stream', () => { if (task.phase === 'running' && tasks.get(task.key)?.session === session) task.lastActivityAt = nowFn(); });
@@ -1031,6 +1046,7 @@ export function createSubagentManager({
       task.permission = null;
     }
     task.phase = 'terminal';
+    task.activity = null;
     task.outcome = outcome;
     task.endedAt = nowFn();
     task.activeTool = null;

@@ -259,7 +259,7 @@ export function createHemiSession({
   const touchStallWatchdog = () => {
     clearTimeout(stallTimer);
     stallTimer = null;
-    if (!stallTimeoutMs || !busy || activeTools > 0) return;
+    if (!stallTimeoutMs || !busy || activeTools > 0 || resourceWaits.size > 0) return;
     stallTimer = setTimeout(() => {
       log?.warn?.(`[${label}] 静默超过 ${Math.round(stallTimeoutMs / 60000)} 分钟，按停止收口`);
       void abort();
@@ -368,7 +368,21 @@ export function createHemiSession({
         listAppWindows: (o) => cua.listAppWindows(o),
         log,
       });
-  const commands = createCommandScope();
+  let backgroundJobs = [];
+  let waitingForBackground = false;
+  let backgroundWaitSince = null;
+  const resourceWaits = new Map();
+  function publishActivity() {
+    if (disposed) return;
+    touchStallWatchdog();
+    emitter.emit('activity', {
+      phase: waitingForBackground ? 'waiting-background' : resourceWaits.size ? 'waiting-resource' : 'running',
+      since: backgroundWaitSince ?? [...resourceWaits.values()][0]?.since ?? null,
+      jobs: backgroundJobs,
+      resources: [...resourceWaits.values()],
+    });
+  }
+  const commands = createCommandScope({ onChange: jobs => { backgroundJobs = jobs; publishActivity(); } });
   const interactive = getInteractiveResourceCoordinator();
   const leases = new Map();
   const releaseInteraction = callId => {
@@ -472,10 +486,18 @@ export function createHemiSession({
         if (shared) { leases.set(event.toolCallId, shared); return; }
         const owner=`${effectiveAccessId}:${event.toolCallId}`;
         const item={owner,lease:null};leases.set(event.toolCallId,item);
+        const holder = interactive.snapshot('interactive:local').holder;
+        if (holder) {
+          resourceWaits.set(event.toolCallId, { toolCallId: event.toolCallId, tool: event.toolName, since: Date.now(),
+            resource: { host: 'local', scope: 'desktop', mode: 'write' }, blockers: [{ description: '另一个任务正在使用桌面或浏览器' }],
+          });
+          publishActivity();
+        }
         try {
           item.lease=await interactive.acquire('interactive:local',owner,{timeoutMs:600000});
           if(abortRequested||disposed){releaseInteraction(event.toolCallId);throw new DOMException('操作已停止','AbortError');}
         } catch(error){leases.delete(event.toolCallId);return {block:true,reason:error.message};}
+        finally { resourceWaits.delete(event.toolCallId); publishActivity(); }
       });
       pi.on('tool_result',event=>{releaseInteraction(event.toolCallId);});
     }});
@@ -503,6 +525,11 @@ export function createHemiSession({
         return target;
       }, fileHost: remoteInfo?.host ?? 'local', browserOwner: effectiveAccessId, getExecution: () => runtimeExecution,
       beforeExecute: async () => runtimeExecution?.persistSession?.(await exportEntries(), runtimeExecution),
+      onActivity: event => {
+        if (event.finished) resourceWaits.delete(event.toolCallId);
+        else resourceWaits.set(event.toolCallId, event);
+        publishActivity();
+      },
       callAnchor: id => sessionManager?.getEntries().findLast(entry => entry.type === 'message' && entry.message?.role === 'assistant' && entry.message.content?.some(block => block.type === 'toolCall' && block.id === id))?.id,
       sourceFor: (tool, args, result) => sourceForResult({ toolName: tool, input: args, details: result.details, content: result.content }),
     });
@@ -746,7 +773,7 @@ export function createHemiSession({
    * 跑一次 agent 运行：prompt → agent_settled 收口。
    * @returns {Promise<{texts: string[], lastText: string|null, usages: Array, toolNames: string[], modelError: string|null, aborted: boolean}>}
    */
-  async function prompt(text, { images = [], inputId = null, hostEvent = null } = {}) {
+  async function promptOnce(text, { images = [], inputId = null, hostEvent = null } = {}) {
     await ready();
     await browserCleanup;
     if (disposed) return { ...freshRun(), aborted: true };
@@ -794,6 +821,49 @@ export function createHemiSession({
     run = freshRun();
     if (promptError && !disposed) throw promptError instanceof Error ? promptError : new Error(String(promptError));
     return { ...partial, modelError: partial.modelError ?? (disposed ? null : '运行未正常收口'), aborted: true };
+  }
+
+  /** 模型可先完成独立工作；其停止生成后，由宿主等进程终态再续跑同一目标。 */
+  async function prompt(text, options = {}) {
+    const execution = runtimeExecution;
+    let result = await promptOnce(text, options);
+    const append = next => {
+      result = { ...result, ...next,
+        texts: [...result.texts, ...next.texts], usages: [...result.usages, ...next.usages],
+        toolNames: [...result.toolNames, ...next.toolNames], requests: result.requests + next.requests,
+      };
+    };
+    try {
+      while (!result.aborted && !result.modelError && !disposed && !abortRequested
+        && !execution?.cancelled?.() && commands.hasBackground(execution?.owner)) {
+        waitingForBackground = true;
+        backgroundWaitSince = Date.now();
+        publishActivity();
+        let events;
+        try { events = await commands.waitForCompletion(execution?.owner); }
+        finally { waitingForBackground = false; backgroundWaitSince = null; publishActivity(); }
+        if (disposed || abortRequested || execution?.cancelled?.() || runtimeExecution !== execution) break;
+        if (!events.length) continue;
+        // hostEvent 不创建用户目标、不重置备用或预算；命令结果按原归属只消费一次。
+        const content = ['［后台命令完成 · 宿主观察，不是用户新指令］',
+          '继续当前已授权目标，先检查退出状态；失败不能当成成功，也不要直接重跑有副作用的命令。',
+          ...events.map(event => `命令 ${event.id}：${event.command}\n${event.text}${event.outputRef ? `\n完整输出快照：${event.outputRef}（需要时用 context_read 分段读取）` : ''}`),
+        ].join('\n\n');
+        append(await promptOnce('', { hostEvent: { customType: 'hemi_background_command_result',
+          content, eventIds: events.map(event => event.id),
+        } }));
+        await execution?.persistSession?.(await exportEntries(), execution);
+      }
+      if (result.aborted || result.modelError || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
+      return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
+    } catch (error) {
+      await commands.abort();
+      throw error;
+    } finally {
+      waitingForBackground = false;
+      backgroundWaitSince = null;
+      publishActivity();
+    }
   }
 
   /** 用户插话：运行在途时经 SDK steer，当前工具结束后、下一次模型请求前送达。
@@ -950,7 +1020,7 @@ export function createHemiSession({
     recordBudgetSummary,
     getEntries,
     callAnchor: toolCallId => sessionManager?.getEntries().findLast(entry => entry.type === 'message' && entry.message?.role === 'assistant' && entry.message.content?.some(block => block.type === 'toolCall' && block.id === toolCallId))?.id ?? null,
-    isBusy: () => busy,
+    isBusy: () => busy || waitingForBackground,
     isDisposed: () => disposed,
     dispose,
     on: emitter.on.bind(emitter),

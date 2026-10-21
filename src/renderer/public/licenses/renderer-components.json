@@ -1,7 +1,28 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "92f01db38663c9941e059b6fd94afbdb37220a926cdb82456d716d9311a25c3a",
+  "lockfileSha256": "93add01f5b5a4dcd01536e64807138dc8519ef809581943f762c4abb183e451b",
   "components": [
+    {
+      "name": "@aiden0z/pptx-renderer",
+      "version": "1.2.4",
+      "license": "Apache-2.0",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/aiden0z/pptx-renderer.git"
+      },
+      "locations": [
+        "node_modules/@aiden0z/pptx-renderer"
+      ],
+      "modules": [
+        "node_modules/@aiden0z/pptx-renderer/dist/aiden0z-pptx-renderer.browser.es.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/@aiden0z/pptx-renderer/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
     {
       "name": "@base-ui/react",
       "version": "1.7.0",
@@ -1469,6 +1490,27 @@
       ]
     },
     {
+      "name": "docx-preview",
+      "version": "0.4.0",
+      "license": "Apache-2.0",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/VolodymyrBaydalka/docxjs.git"
+      },
+      "locations": [
+        "node_modules/docx-preview"
+      ],
+      "modules": [
+        "node_modules/docx-preview/dist/docx-preview.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/docx-preview/LICENSE",
+          "sha256": "8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f"
+        }
+      ]
+    },
+    {
       "name": "escape-string-regexp",
       "version": "5.0.0",
       "license": "MIT",
@@ -1543,6 +1585,24 @@
         {
           "source": "node_modules/fast-equals/LICENSE",
           "sha256": "f70545fce49626ae2659adc8a526f2355c77afa2fb8b6ca1363090db8a14ef6f"
+        }
+      ]
+    },
+    {
+      "name": "fflate",
+      "version": "0.8.3",
+      "license": "MIT",
+      "repository": "https://github.com/101arrowz/fflate",
+      "locations": [
+        "node_modules/fflate"
+      ],
+      "modules": [
+        "node_modules/fflate/esm/browser.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/fflate/LICENSE",
+          "sha256": "0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551"
         }
       ]
     },
@@ -1701,6 +1761,27 @@
         {
           "source": "node_modules/is-plain-obj/license",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "jszip",
+      "version": "3.10.2",
+      "license": "(MIT OR GPL-3.0-or-later)",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/Stuk/jszip.git"
+      },
+      "locations": [
+        "node_modules/jszip"
+      ],
+      "modules": [
+        "node_modules/jszip/dist/jszip.min.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/jszip/LICENSE.markdown",
+          "sha256": "566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4"
         }
       ]
     },
@@ -2222,6 +2303,7 @@
         "node_modules/lucide-react/dist/esm/icons/audio-lines.mjs",
         "node_modules/lucide-react/dist/esm/icons/ban.mjs",
         "node_modules/lucide-react/dist/esm/icons/blocks.mjs",
+        "node_modules/lucide-react/dist/esm/icons/book-open.mjs",
         "node_modules/lucide-react/dist/esm/icons/brain.mjs",
         "node_modules/lucide-react/dist/esm/icons/check-check.mjs",
         "node_modules/lucide-react/dist/esm/icons/check.mjs",
@@ -2240,6 +2322,7 @@
         "node_modules/lucide-react/dist/esm/icons/ellipsis.mjs",
         "node_modules/lucide-react/dist/esm/icons/external-link.mjs",
         "node_modules/lucide-react/dist/esm/icons/eye.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file-pen-line.mjs",
         "node_modules/lucide-react/dist/esm/icons/file-text.mjs",
         "node_modules/lucide-react/dist/esm/icons/file.mjs",
         "node_modules/lucide-react/dist/esm/icons/folder-input.mjs",
@@ -2305,6 +2388,7 @@
         "node_modules/lucide-react/dist/esm/icons/user-check.mjs",
         "node_modules/lucide-react/dist/esm/icons/video.mjs",
         "node_modules/lucide-react/dist/esm/icons/workflow.mjs",
+        "node_modules/lucide-react/dist/esm/icons/wrench.mjs",
         "node_modules/lucide-react/dist/esm/icons/x.mjs",
         "node_modules/lucide-react/dist/esm/shared/src/utils/hasA11yProp.mjs",
         "node_modules/lucide-react/dist/esm/shared/src/utils/mergeClasses.mjs",
@@ -3826,6 +3910,27 @@
         {
           "source": "node_modules/unist-util-visit/license",
           "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "unpdf",
+      "version": "1.9.1",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/unjs/unpdf.git"
+      },
+      "locations": [
+        "node_modules/unpdf"
+      ],
+      "modules": [
+        "node_modules/unpdf/dist/pdfjs.mjs"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/unpdf/LICENSE",
+          "sha256": "4a57080b8ecdb3a53ec678828121849ce5df877a99b1ad8d50e165d8a2aded1b"
         }
       ]
     },

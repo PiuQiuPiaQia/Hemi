@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ComponentProps } from 'react';
 import {SkinWatermark} from '@/components/skin-watermark';
 import {
   DndContext,
@@ -72,6 +73,7 @@ export function ConversationSidebar({
   onConversationRemoved,
   onConversationRenamed,
   onHistoryOpen,
+  interactionProps,
 }: {
   /** 当前会话 id（null＝未落盘新会话）；命中项高亮并在切换后触发列表刷新。 */
   currentConversationId: string | null;
@@ -82,6 +84,7 @@ export function ConversationSidebar({
   /** 024：重命名落盘后上抛（当前会话改名时顶栏标题跟着换）。 */
   onConversationRenamed?: (id: string, title: string) => void;
   onHistoryOpen?: () => void;
+  interactionProps?: Pick<ComponentProps<'aside'>, 'id' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
 }) {
   const { list, setList, error, setError, loadList } = useConversationList(true, conversationVisible ? currentConversationId : null);
   /** 行内重命名：editingId 命中的行渲染输入框。 */
@@ -189,7 +192,7 @@ export function ConversationSidebar({
   );
 
   return (
-    <aside className="h24-sidebar" aria-label="主导航">
+    <aside className="h24-sidebar" aria-label="主导航" {...interactionProps}>
       <SkinWatermark />
       <button
         type="button"

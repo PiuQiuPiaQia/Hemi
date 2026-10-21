@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createUpdaterService, detectSigningMode, findCachedUpdateZip } from './updater.mjs';
+import { UPDATE_FEED_URL } from '../../shared/release-info.mjs';
 
 /** 假 electron-updater：EventEmitter + 记录调用与关键配置。
  * 真库在 checkForUpdates/downloadUpdate 调用期间同步派事件（先于 promise
@@ -50,22 +51,18 @@ function setup({ isPackaged = true } = {}) {
     app: fakeApp({ isPackaged }),
     // 钉 darwin 测 mac 分支（安装分流到 Squirrel/换包的那套）；win 有专属用例。
     platform: 'darwin',
-    loadToken: async () => 'tok',
-    createBridge: async () => ({ url: 'http://127.0.0.1:45678', close: async () => {} }),
     updaterFactory: async () => autoUpdater,
   });
   service.setBroadcast((state) => broadcasts.push(state));
   return { service, autoUpdater, broadcasts };
 }
 
-test('未打包实例：supported=false，动作直接拒绝、不创建桥与更新器', async () => {
-  let bridgeCreated = false;
+test('未打包实例：supported=false，动作直接拒绝、不创建更新器', async () => {
+  let updaterCreated = false;
   const service = createUpdaterService({
     app: fakeApp({ isPackaged: false }),
     platform: 'darwin',
-    loadToken: async () => 'tok',
-    createBridge: async () => { bridgeCreated = true; return { url: 'x', close: async () => {} }; },
-    updaterFactory: async () => fakeAutoUpdater(),
+    updaterFactory: async () => { updaterCreated = true; return fakeAutoUpdater(); },
   });
   const state = service.getState();
   assert.equal(state.supported, false);
@@ -75,20 +72,14 @@ test('未打包实例：supported=false，动作直接拒绝、不创建桥与�
   assert.equal(check.code, 'unsupported');
   assert.equal((await service.download()).code, 'unsupported');
   assert.equal((await service.install()).code, 'unsupported');
-  assert.equal(bridgeCreated, false);
+  assert.equal(updaterCreated, false);
 });
 
-test('打包的 Windows 实例：完整更新流走通，桥吃 latest.yml、安装直接 quitAndInstall（NSIS 原生路）', async () => {
+test('打包的 Windows 实例：完整更新流走通，公开下载、安装直接 quitAndInstall（NSIS 原生路）', async () => {
   const autoUpdater = fakeAutoUpdater();
-  const bridgeArgs = [];
   const service = createUpdaterService({
     app: fakeApp({ isPackaged: true }),
     platform: 'win32',
-    loadToken: async () => 'tok',
-    createBridge: async (args) => {
-      bridgeArgs.push(args);
-      return { url: 'http://127.0.0.1:45678', close: async () => {} };
-    },
     updaterFactory: async () => autoUpdater,
     // win 安装不该碰任何 mac 专属命令（codesign 探测/ditto 换包）——一碰就炸。
     execFn: (file) => {
@@ -106,17 +97,15 @@ test('打包的 Windows 实例：完整更新流走通，桥吃 latest.yml、安
   assert.equal(service.getState().phase, 'downloaded');
   assert.equal((await service.install()).ok, true);
   assert.equal(autoUpdater.calls.some((c) => c.kind === 'install'), true);
-  assert.equal(bridgeArgs[0]?.channelFile, 'latest.yml');
+  assert.deepEqual(autoUpdater.calls[0].feed, { provider: 'generic', url: UPDATE_FEED_URL });
 });
 
-test('其余平台（无分发形态）：supported=false（原因 unsupported-platform），动作拒绝且不建桥', async () => {
-  let bridgeCreated = false;
+test('其余平台（无分发形态）：supported=false（原因 unsupported-platform），动作拒绝且不建更新器', async () => {
+  let updaterCreated = false;
   const service = createUpdaterService({
     app: fakeApp({ isPackaged: true }),
     platform: 'linux',
-    loadToken: async () => 'tok',
-    createBridge: async () => { bridgeCreated = true; return { url: 'x', close: async () => {} }; },
-    updaterFactory: async () => fakeAutoUpdater(),
+    updaterFactory: async () => { updaterCreated = true; return fakeAutoUpdater(); },
   });
   const state = service.getState();
   assert.equal(state.supported, false);
@@ -126,7 +115,7 @@ test('其余平台（无分发形态）：supported=false（原因 unsupported-p
   assert.match(check.message, /发布页/);
   assert.equal((await service.download()).code, 'unsupported');
   assert.equal((await service.install()).code, 'unsupported');
-  assert.equal(bridgeCreated, false);
+  assert.equal(updaterCreated, false);
 });
 
 test('检查流程：checking → available（事件驱动），版本号进状态并广播', async () => {
@@ -145,7 +134,7 @@ test('检查流程：checking → available（事件驱动），版本号进状�
   assert.equal(autoUpdater.config.disableDifferentialDownload, true);
   assert.deepEqual(autoUpdater.calls[0], {
     kind: 'setFeedURL',
-    feed: { provider: 'generic', url: 'http://127.0.0.1:45678' },
+    feed: { provider: 'generic', url: UPDATE_FEED_URL },
   });
   // 广播序列：checking → available。
   assert.deepEqual(broadcasts.map((s) => s.phase), ['checking', 'available']);
@@ -197,8 +186,6 @@ test('安装（真证书形态）：downloaded 才放行，走 Squirrel quitAndI
   const certified = createUpdaterService({
     app: fakeApp(),
     platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => ({ url: 'http://127.0.0.1:1', close: async () => {} }),
     updaterFactory: async () => autoUpdater,
     execFn: (file, args) => {
       if (file === 'codesign') return 'TeamIdentifier=AB12CD34EF';
@@ -232,8 +219,6 @@ test('安装（未签名形态）：自研换包——ditto 解包、版本护�
   const service = createUpdaterService({
     app: { ...fakeApp(), quit: () => { quitCalled = true; } },
     platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => ({ url: 'http://127.0.0.1:1', close: async () => {} }),
     updaterFactory: async () => autoUpdater,
     homeDir: home,
     appBundlePath: bundle,
@@ -294,8 +279,6 @@ test('换包版本护栏：暂存包版本与待装版本不符 → 拒装并清
   const service = createUpdaterService({
     app: { ...fakeApp(), quit: () => {} },
     platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => ({ url: 'http://127.0.0.1:1', close: async () => {} }),
     updaterFactory: async () => autoUpdater,
     homeDir: home,
     appBundlePath: bundle,
@@ -353,26 +336,60 @@ test('错误事件：phase=error 带消息；后续可再检查恢复', async ()
   autoUpdater.emitter.emit('error', new Error('网络断了'));
   const errored = service.getState();
   assert.equal(errored.phase, 'error');
-  assert.match(errored.errorMessage, /网络断了/);
+  assert.equal(errored.errorMessage, '检查更新失败：请稍后重试或前往发布页下载。');
 
   autoUpdater.emitter.emit('update-available', { version: '0.4.1' });
   assert.equal(service.getState().phase, 'available');
   assert.equal(service.getState().errorMessage, null);
 });
 
-test('检查抛错（桥起不来等）：回执 ok=false 带消息，状态进 error', async () => {
+test('下载错误：事件、拒绝回执与广播都只给简短提示，日志保留完整原因', async () => {
+  const autoUpdater = fakeAutoUpdater();
+  const logs = [], broadcasts = [];
   const service = createUpdaterService({
     app: fakeApp(),
     platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => { throw new Error('端口占用'); },
-    updaterFactory: async () => fakeAutoUpdater(),
+    updaterFactory: async () => autoUpdater,
+    log: { warn: (line) => logs.push(line) },
+  });
+  service.setBroadcast((state) => broadcasts.push(state));
+  autoUpdater.onCheck = () => autoUpdater.emitter.emit('update-available', { version: '0.4.0' });
+  await service.check();
+  const error = new Error('502 Bad Gateway\nGET https://github.com/example/update.zip\nHeaders: {"connection":"keep-alive"}');
+  autoUpdater.onDownload = () => {
+    autoUpdater.emitter.emit('error', error);
+    throw error;
+  };
+  const result = await service.download();
+  assert.equal(result.ok, false);
+  assert.equal(result.message, '下载更新失败：更新服务暂时不可用，请稍后重试。');
+  assert.equal(service.getState().errorMessage, result.message);
+  assert.ok(broadcasts.filter((state) => state.phase === 'error').every((state) => state.errorMessage === result.message));
+  assert.ok(logs.some((line) => line.includes(error.message)));
+  autoUpdater.onCheck = () => autoUpdater.emitter.emit('update-not-available');
+  await service.check();
+  assert.equal(service.getState().phase, 'not-available');
+  assert.equal(service.getState().errorMessage, null);
+});
+
+test('初始化失败：回执与状态都只给简短提示，后续检查可重试', async () => {
+  let attempts = 0;
+  const service = createUpdaterService({
+    app: fakeApp(),
+    platform: 'darwin',
+    updaterFactory: async () => {
+      if (attempts++ === 0) throw new Error('updater import failed: internal details');
+      return fakeAutoUpdater();
+    },
   });
   const result = await service.check();
   assert.equal(result.ok, false);
   assert.equal(result.code, 'check-failed');
-  assert.match(result.message, /端口占用/);
+  assert.equal(result.message, '检查更新失败：请稍后重试或前往发布页下载。');
+  assert.equal(service.getState().errorMessage, result.message);
   assert.equal(service.getState().phase, 'error');
+  assert.equal((await service.check()).ok, true);
+  assert.equal(service.getState().errorMessage, null);
 });
 
 test('启动静默检查：打包实例按延迟排入，未打包不排', async () => {
@@ -381,8 +398,6 @@ test('启动静默检查：打包实例按延迟排入，未打包不排', async
   const service = createUpdaterService({
     app: fakeApp(),
     platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => ({ url: 'http://127.0.0.1:1', close: async () => {} }),
     updaterFactory: async () => autoUpdater,
     timeoutSet: (fn) => { fired.push(fn); return { unref() {} }; },
   });
@@ -400,20 +415,4 @@ test('启动静默检查：打包实例按延迟排入，未打包不排', async
   });
   unpackaged.scheduleStartupCheck();
   assert.equal(fired.length, 1);
-});
-
-test('dispose：关桥（未启动过为 no-op 不抛）', async () => {
-  let closed = false;
-  const service = createUpdaterService({
-    app: fakeApp(),
-    platform: 'darwin',
-    loadToken: async () => null,
-    createBridge: async () => ({ url: 'x', close: async () => { closed = true; } }),
-    updaterFactory: async () => fakeAutoUpdater(),
-  });
-  await service.dispose();
-  assert.equal(closed, false);
-  await service.check().catch(() => {});
-  await service.dispose();
-  assert.equal(closed, true);
 });

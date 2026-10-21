@@ -112,7 +112,7 @@ export async function assembleTurnEnvelope({
         readAttachment: async (attachmentId) => {
           const view = getComposerAttachments()?.get?.(conversationId, attachmentId);
           if (!view) return { ok: false, name: '附件', message: '已失效或不在本会话' };
-          const preview = getComposerAttachments()?.readPreview?.({ conversationId, attachmentId });
+          const preview = await getComposerAttachments()?.readPreview?.({ conversationId, attachmentId });
           if (!preview?.ok) return { ok: false, name: view.name, message: preview?.message ?? '读取失败' };
           return {
             ok: true,

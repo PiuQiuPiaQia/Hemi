@@ -4,8 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {createHash} from 'node:crypto';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {SKINS} from '../src/shared/appearance/skins.mjs';
+import {generateAppearanceFiles} from './generate-appearance.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url)),out=path.join(root,'src/renderer/src/assets/skins');await fs.mkdir(out,{recursive:true});
 const manifest=JSON.parse(await fs.readFile(path.join(root,'docs/design/appearance-skins/v1/manifest.json'),'utf8'));
 const ffmpeg=process.env.HEMI_PREVIEW_FFMPEG||'/opt/homebrew/bin/ffmpeg';
@@ -17,7 +18,6 @@ const profiles={
 const {chromium}=await import(process.env.HEMI_PREVIEW_PLAYWRIGHT||pathToFileURL(path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs')).href);
 const browser=await chromium.launch({headless:true,executablePath:process.env.HEMI_PREVIEW_CHROME||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
 async function webp(source,file,width,height){const page=await browser.newPage();try{const data='data:image/png;base64,'+(await fs.readFile(source)).toString('base64');const encoded=await page.evaluate(async({data,width,height})=>{const image=new Image();image.src=data;await image.decode();const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height||Math.round(image.height*width/image.width);canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const result=canvas.toDataURL('image/webp',.90);if(!result.startsWith('data:image/webp;'))throw new Error('WebP encoder unavailable');return result.split(',')[1];},{data,width,height});await fs.writeFile(file,Buffer.from(encoded,'base64'));}finally{await page.close();}}
-const records={};
 try{
  for(const skin of manifest.skins.filter(s=>s.id!=='classic')){
   const source=skin.assets.master,src=path.join(root,'docs/design/appearance-skins/v1',source.path),portrait=path.join(root,'docs/design/appearance-skins/v1',skin.assets.portrait.path);
@@ -47,8 +47,7 @@ try{
     encoder.stdin.end();await done;
    }finally{if(encoder&&encoder.exitCode===null)encoder.kill();await page.close();}
   }
-  const files={};for(const name of [`${skin.id}.webp`,`${skin.id}-portrait.webp`,`${skin.id}-idle.webm`]){const bytes=await fs.readFile(path.join(out,name));files[name]={bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};}
-  records[skin.id]={width:source.width,height:source.height,padding:{x:48,y:16},motion:skin.id==='cafe-blue'?'blink-hair-cloth':skin.id==='cafe-red'?'scarf-cloth':'hair-cloth',files};console.log(`${skin.id}: exported`);
+  console.log(`${skin.id}: exported`);
  }
- await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify({version:1,durationMs:8000,framesPerSecond:30,method:'Existing approved artwork; offline WebGL local deformation and VP9 alpha encoding. No Cubism runtime.',skins:records},null,2)+'\n');
+ for(const [file,content] of await generateAppearanceFiles(SKINS))await fs.writeFile(path.join(root,file),content);
 }finally{await browser.close();}

@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { get as httpGet } from 'node:http';
 
 import { BrowserWsHub } from '../agent/gate/browser-ws.mjs';
+import { createHeadlessBrowserService } from './headless-browser-service.mjs';
 
 /**
  * 023 R-15 · 应用级浏览器桥单例（BrowserBridgeService）。
@@ -18,11 +19,14 @@ import { BrowserWsHub } from '../agent/gate/browser-ws.mjs';
  *     绝不静默串台；
  *   - 021 的版本握手、报忙端口探测（detectOtherHubs）保留为桥本体异常时
  *     的可行动文案来源。
+ *
+ * 浏览器工具按任务选择后端：短等扩展握手，未连接则启动独立无头会话。
+ * 无头任务不中途切换到扩展；扩展断连的在途动作不重放，后续回退需重新导航。
  */
 
 /** 桥端口段：扩展侧按同一段顺序重试；前缀固定本机回环。 */
 export const BRIDGE_PORTS = [9467, 9468, 9469, 9470];
-export const OP_TIMEOUT_MS = { navigate: 30000, screenshot: 20000, default: 15000 };
+export const OP_TIMEOUT_MS = { 'session.navigate': 30000, 'tab.screenshot': 20000, default: 15000 };
 
 /**
  * 探测同机桥端口段里是否有【别的】Hemi 桥在运行（022 真机：并行任务时扩展
@@ -91,6 +95,8 @@ export function createBrowserBridgeService({
   writeFileFn = writeFile,
   opTimeout = OP_TIMEOUT_MS,
   now = Date.now,
+  extensionWaitMs = 1000,
+  headlessFactory = () => createHeadlessBrowserService({ log, opTimeout }),
 } = {}) {
   let state = 'off';
   let hub = null;
@@ -101,10 +107,14 @@ export function createBrowserBridgeService({
   let extMultiTask = false;
   /** 按任务记账：taskId -> { label, session 镜像 }。enterTask/leaveTask 维护。 */
   const activeTasks = new Map();
+  let headless = null;
+  const headlessService = () => headless ??= headlessFactory();
+  const extensionReady = () => state === 'ready' && Boolean(hub?.connected);
 
   async function writeStatus(partial) {
     if (!statePath) return;
     const primary = activeTasks.values().next().value ?? null;
+    const headlessTasks = [...activeTasks.values()].filter(task => task.backend === 'headless').length;
     const payload = {
       state,
       updatedAt: now(),
@@ -114,6 +124,13 @@ export function createBrowserBridgeService({
       multiTask: extMultiTask,
       tasks: activeTasks.size,
       ...partial,
+      backend: primary?.backend ?? (extensionReady() ? 'extension' : null),
+      extensionConnected: extensionReady(),
+      headlessTasks,
+      ...(headlessTasks ? {
+        state: 'ready',
+        detail: primary?.backend === 'extension' ? `另有 ${headlessTasks} 个无头浏览器任务（独立登录状态）` : '正在使用独立无头浏览器（独立登录状态）',
+      } : {}),
     };
     try {
       await writeFileFn(statePath, `${JSON.stringify(payload)}\n`);
@@ -127,12 +144,13 @@ export function createBrowserBridgeService({
     return state;
   }
 
-  function rejectAll(message) {
-    for (const [, entry] of pending) {
+  function rejectAll(message, taskId = null) {
+    for (const [key, entry] of pending) {
+      if (taskId !== null && entry.taskId !== taskId) continue;
       clearTimeout(entry.timer);
       entry.reject(new Error(message));
+      pending.delete(key);
     }
-    pending.clear();
   }
 
   function wireHub() {
@@ -190,10 +208,11 @@ export function createBrowserBridgeService({
   }
 
   /** 等扩展 hello；超时后按 021 报忙探测给出可行动文案。 */
-  async function waitReadyGlobal(waitMs = 35000) {
+  async function waitReadyGlobal(waitMs = 35000, signal) {
     if (state === 'ready') return;
     const started = now();
     while (now() - started < waitMs) {
+      if (signal?.aborted) throw new Error('操作已被中断，未执行');
       if (state === 'ready') return;
       if (state === 'off') throw new Error('浏览器桥未启动');
       if (state === 'error') {
@@ -220,25 +239,66 @@ export function createBrowserBridgeService({
     // extract 读到导航前的旧页（2026-10-14 真机实录）。不同任务各自一条队列，互不阻塞。
     let chain = Promise.resolve();
     let ending = null;
+    let backend = null;
+    let local = null;
+    let selecting = null;
+    let switched = false;
+    let epoch = 0;
 
     async function ensureReady(signal) {
       if (signal?.aborted) throw new Error('操作已被中断，未执行');
-      await ensureStarted();
-      await waitReadyGlobal();
-      // 能力门禁：扩展不支持多任务时，同一时间只允许一个任务占用通道（R-15
-      // 裁决的兜底语义；新扩展 multiTask=true 后这里恒放行）。
-      if (!extMultiTask && !activeTasks.has(id) && activeTasks.size >= 1) {
-        const holder = activeTasks.keys().next().value;
-        log?.info?.(`[browser] 通道被任务 ${holder} 占用且扩展不支持多任务，报忙`);
-        throw new Error(`浏览器通道正被另一个任务使用：等那个任务完成后再下浏览器操作，或先停止它；期间可用 web_search/web_extract 兜底`);
-      }
-      if (!activeTasks.has(id)) {
-        activeTasks.set(id, { label: String(taskLabel).slice(0, 40), session: null });
-        void writeStatus({});
-      }
+      if (ending) await ending;
+      if (backend === 'headless') { await local.ensureReady(signal); return; }
+      if (backend === 'extension' && extensionReady()) return;
+      if (selecting) return selecting;
+      selecting = (async () => {
+        try {
+          await ensureStarted();
+          if (!extensionReady()) await waitReadyGlobal(extensionWaitMs, signal);
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          log?.debug?.(`[browser] 扩展暂不可用，选择无头后端：${error.message}`);
+        }
+        if (signal?.aborted) throw new Error('操作已被中断，未执行');
+        if (!extensionReady()) {
+          const next = headlessService().createClient({ taskId: id, taskLabel });
+          try { await next.ensureReady(signal); }
+          catch (error) {
+            await next.endSession().catch(() => {});
+            await writeStatus({ state: 'error', detail: error.message });
+            throw error;
+          }
+          switched = backend === 'extension';
+          backend = 'headless'; local = next; session = null;
+          activeTasks.set(id, { label: String(taskLabel).slice(0, 40), session: null, backend });
+          await writeStatus({});
+          return;
+        }
+        // 能力门禁：扩展不支持多任务时，同一时间只允许一个任务占用通道（R-15
+        // 裁决的兜底语义；新扩展 multiTask=true 后这里恒放行）。
+        if (!extMultiTask && !activeTasks.has(id) && [...activeTasks.values()].some(task => task.backend === 'extension')) {
+          const holder = activeTasks.keys().next().value;
+          log?.info?.(`[browser] 通道被任务 ${holder} 占用且扩展不支持多任务，报忙`);
+          throw new Error(`浏览器通道正被另一个任务使用：等那个任务完成后再下浏览器操作，或先停止它；期间可用 web_search/web_extract 兜底`);
+        }
+        if (!activeTasks.has(id)) {
+          activeTasks.set(id, { label: String(taskLabel).slice(0, 40), session: null, backend: 'extension' });
+          void writeStatus({});
+        }
+        backend = 'extension';
+      })();
+      try { await selecting; } finally { selecting = null; }
     }
 
     async function sendRequest(op, params) {
+      if (backend === 'headless') {
+        if (switched && !['session.navigate', 'session.end', 'tab.list'].includes(op)) {
+          throw new Error('Chrome 扩展连接断开，已回退独立无头浏览器（独立登录状态）；请先 browser_navigate 重新打开目标页面并核对状态，再继续操作，不要直接重复提交');
+        }
+        const result = await local.request(op, params);
+        if (op === 'session.navigate') switched = false;
+        return result;
+      }
       if (!hub?.connected) throw new Error('浏览器桥未连接：Chrome 扩展不在（任务窗口可能已被关闭）');
       const cmdId = `${id}-${++seq}`;
       const payload = JSON.stringify({ type: 'cmd', id: cmdId, op, params, taskId: id, taskLabel: String(taskLabel).slice(0, 40) });
@@ -248,7 +308,7 @@ export function createBrowserBridgeService({
           pending.delete(cmdId);
           reject(new Error(`浏览器操作超时（${Math.round(timeoutMs / 1000)}s）：${op}`));
         }, timeoutMs);
-        pending.set(cmdId, { resolve, reject, timer });
+        pending.set(cmdId, { resolve, reject, timer, taskId: id });
         try {
           hub.sendText(payload);
         } catch (error) {
@@ -277,7 +337,10 @@ export function createBrowserBridgeService({
         return hub?.port ?? null;
       },
       get connected() {
-        return Boolean(hub?.connected);
+        return backend === 'headless' || extensionReady();
+      },
+      get backend() {
+        return backend;
       },
       get session() {
         return session;
@@ -298,7 +361,11 @@ export function createBrowserBridgeService({
       },
 
       request(op, params = {}) {
-        const run = chain.then(() => sendRequest(op, params));
+        const expected = epoch;
+        const run = chain.then(() => {
+          if (expected !== epoch) throw new Error('浏览器任务已结束，取消排队操作');
+          return sendRequest(op, params);
+        });
         chain = run.catch(() => {});
         return run;
       },
@@ -322,11 +389,15 @@ export function createBrowserBridgeService({
       async endSession() {
         if (ending) return ending;
         // 没用过浏览器的回合不创建任务记账，也不发无意义的 session.end。
-        if (!activeTasks.has(id) && !session) return;
+        if (!activeTasks.has(id) && !session && !selecting) return;
+        epoch++;
         ending = (async () => {
+          await selecting?.catch(() => {});
           try {
-            if (hub?.connected) await this.request('session.end', {});
+            if (backend === 'headless') await local.endSession();
+            else if (hub?.connected) await this.request('session.end', {});
             session = null;
+            backend = null; local = null; switched = false;
             releaseTask();
           } catch (error) {
             // 失败保留归属供下轮／dispose 重试，不能提前报 tasks=0 冒充已清理。
@@ -338,7 +409,7 @@ export function createBrowserBridgeService({
 
       /** pi-browser 停止路径的旧入口名；语义已收敛为 endSession（不关 hub）。 */
       async stop() {
-        rejectAll(`浏览器操作已被任务停止取消（任务 ${id}）`);
+        rejectAll(`浏览器操作已被任务停止取消（任务 ${id}）`, id);
         await this.endSession();
       },
     };
@@ -365,6 +436,12 @@ export function createBrowserBridgeService({
     },
     /** 测试/诊断用：客户端创建入口（与旧 createBrowserBridge 的工具面契约一致）。 */
     createClient,
+    async checkAvailable() {
+      try { await ensureStarted(); } catch { /* A port conflict must not disable headless browsing. */ }
+      if (extensionReady()) return 'extension';
+      await headlessService().checkAvailable();
+      return 'headless';
+    },
     /** 惰性启动入口（R-15：随浏览器能力启用而启动；任务侧经 ensureReady 亦会触发）。 */
     start: () => ensureStarted(),
     /** 应用退出统一关闭（R-15：hub 不随任务生死，只随应用生死）。 */
@@ -375,6 +452,7 @@ export function createBrowserBridgeService({
         hub = null;
       }
       activeTasks.clear();
+      await headless?.stop(); headless = null;
       transition('stop');
       await writeStatus({ state: 'off', detail: null });
     },

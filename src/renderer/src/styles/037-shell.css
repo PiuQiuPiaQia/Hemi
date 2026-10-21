@@ -393,6 +393,10 @@ html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
     background: var(--bg-scrim);
     animation: hemi-fade var(--dur-3) linear;
   }
+
+  .compact-shell .h24-workspace[data-nav-preview='true'] .h24-backdrop {
+    display: none;
+  }
 }
 
 @media (max-width: 600px) {

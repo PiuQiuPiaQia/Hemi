@@ -152,7 +152,8 @@ export function projectFlowTimeline(
         ...(notice && first.level === 'error' ? { kind: 'error' as const } : {}),
         ...(parts?.length ? { parts } : {}),
         ...(!run.closedAt && !run.legacy ? { live: true } : {}),
-        streaming: !run.closedAt && !run.legacy && isTailItem && segment.parts.at(-1) === item.parts.at(-1),
+        streaming: !run.closedAt && !run.legacy && !String(run.activity?.phase ?? '').startsWith('waiting-')
+          && isTailItem && segment.parts.at(-1) === item.parts.at(-1),
         ...(run.outcome === 'stopped' ? { replyStatus: 'stopped' as const } : {}),
         ...(legacy.legacyThinking ? { thinking: legacy.legacyThinking } : {}),
         ...(run.usage || legacy.legacyUsage ? { usage: (run.usage ?? legacy.legacyUsage) as TranscriptItem['usage'] } : {}),

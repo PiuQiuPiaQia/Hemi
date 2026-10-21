@@ -1,4 +1,5 @@
 import { MessageCircle, Settings, Sparkles, Workflow } from 'lucide-react';
+import type { ComponentProps } from 'react';
 import {SkinPicker} from '@/components/skin-picker';
 
 /**
@@ -14,12 +15,14 @@ import {SkinPicker} from '@/components/skin-picker';
 export function NavRail({
   page,
   onShowHome,
+  homePreviewProps,
   onShowSkills,
   onShowWorkflows,
   onOpenSettings,
 }: {
   page: 'home' | 'skills' | 'workflows' | 'settings';
   onShowHome: () => void;
+  homePreviewProps?: Pick<ComponentProps<'button'>, 'id' | 'aria-controls' | 'aria-expanded' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
   onShowSkills: () => void;
   /** 059：工作流页（与技能中心平级，R-01）；可选＝未接线的宿主不显示入口。 */
   onShowWorkflows?: () => void;
@@ -35,6 +38,7 @@ export function NavRail({
         onClick={onShowHome}
         title="对话"
         aria-label="对话"
+        {...homePreviewProps}
       >
         <MessageCircle className="size-4" aria-hidden="true" />
       </button>
