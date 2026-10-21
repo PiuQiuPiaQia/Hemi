@@ -354,7 +354,7 @@ test('060：纯工具／思考段也实时显示，收口保持同一行身份�
   assert.equal(rows[1].taskSnap.runs, 2);
 });
 
-test('062：交付文件 part 投影为紧凑入口，同文件跨运行只留第一个', () => {
+test('交付文件同回合去重，后续回合更新仍保留入口', () => {
   const user1 = { kind: 'user', id: 'in-1', runId: 'r1', text: '画一张图', inputSource: 'text' };
   const user2 = { kind: 'user', id: 'in-2', runId: 'r2', text: '再改改', inputSource: 'text' };
   const timeline = [
@@ -365,15 +365,15 @@ test('062：交付文件 part 投影为紧凑入口，同文件跨运行只留�
     ] },
     user2,
     { kind: 'assistant', itemId: 'r2:a:in-2', runId: 'r2', parts: [
-      // 第二轮更新同一文件：登记内容版本，不再复制第二个入口。
+      // 第二轮更新同一文件：同一预览身份，在当前回合也提供入口。
       { partId: 'dl-2', kind: 'deliverable', artifactId: 'd-x', name: '图.svg' },
       { partId: 'dl-3', kind: 'deliverable', artifactId: 'd-y', name: '表.md' },
     ] },
   ];
   const rows = projectFlowTimeline(snapshot(timeline)).transcripts;
   const chips = rows.flatMap((row) => (row.parts ?? []).filter((part) => part.type === 'file-delivery'));
-  assert.equal(chips.length, 2);
-  assert.deepEqual(chips.map((chip) => chip.artifactId), ['d-x', 'd-y']);
+  assert.equal(chips.length, 3);
+  assert.deepEqual(chips.map((chip) => chip.artifactId), ['d-x', 'd-x', 'd-y']);
   assert.equal(chips[0].name, '图.svg');
   // 入口出现在所属运行的助手条目里（第一轮），不是全堆到末尾。
   assert.ok(rows[1].parts.some((part) => part.type === 'file-delivery' && part.artifactId === 'd-x'));

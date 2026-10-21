@@ -2,11 +2,133 @@
    复用 024/027 的两行预览结构与 040 通用视觉规范（token、箭头光标、焦点环
    只在 html.kb-nav 下画）；本文件只补 062 新增形态，不另起一套面板样式。 */
 
-/* 对话入口：说明走正文，文件只是一枚 chip（R-01「不铺大卡」）。 */
-.compact-shell .h62-deliverable-entry {
+/* 成果在产生的回合内直接可见；图片保留完整比例，文件与图片共用打开入口。 */
+.compact-shell .h62-deliverables {
   display: flex;
-  margin: var(--sp-6) 0 var(--sp-2);
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  align-items: flex-start;
+  width: 100%;
+  margin: var(--sp-8) 0;
 }
+
+.compact-shell .h62-deliverable-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--h24-line);
+  border-radius: var(--r-lg);
+  background: var(--h24-canvas);
+  transition: border-color var(--dur-2) var(--ease-out);
+}
+
+.compact-shell .h62-deliverable-card:hover { border-color: var(--h24-composer-focus); }
+.compact-shell .h62-deliverable-card[data-kind='file'] { flex: 0 1 auto; }
+.compact-shell .h62-deliverable-card[data-kind='image'] {
+  flex: 0 1 auto;
+  width: calc(120px * var(--h62-image-ratio, 1.5));
+  min-width: min(100%, 128px);
+}
+
+.compact-shell .h62-deliverable-open {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-8) var(--sp-10);
+  border: 0;
+  background: transparent;
+  color: var(--n-700);
+  text-align: left;
+}
+
+.compact-shell .h62-deliverable-card[data-kind='image'] .h62-deliverable-open {
+  display: block;
+  padding: 0;
+}
+
+.compact-shell .h62-deliverable-thumbnail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-8);
+  width: 100%;
+  aspect-ratio: var(--h62-image-ratio, 1.5);
+  max-height: 120px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  color: var(--h24-muted);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .h62-deliverable-thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.compact-shell .h62-deliverable-thumbnail > svg { width: var(--sp-24); height: var(--sp-24); }
+.compact-shell .h62-deliverable-card[data-kind='image'] .h62-deliverable-info { padding: var(--sp-8) var(--sp-10); }
+
+.compact-shell .h62-deliverable-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.compact-shell .h62-deliverable-name {
+  overflow: hidden;
+  color: var(--n-700);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-shell .h62-deliverable-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--sp-24);
+  height: var(--sp-24);
+  border-radius: var(--r-md);
+  background: var(--bg-hover);
+  color: var(--n-600);
+}
+
+.compact-shell .h62-deliverable-icon svg { width: var(--sp-20); height: var(--sp-20); }
+
+.compact-shell .h62-deliverable-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-top: 1px solid var(--h24-line);
+  color: var(--n-600);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+
+.compact-shell .h62-deliverable-error > span { flex: 1; min-width: 0; }
+.compact-shell .h62-deliverable-error button { display: inline-flex; align-items: center; flex: none; gap: var(--sp-4); color: var(--g-700); }
+.compact-shell .h62-deliverable-error button svg { width: var(--sp-12); height: var(--sp-12); }
+html.kb-nav .compact-shell .h62-deliverable-open:focus-visible { outline: 2px solid var(--h24-composer-focus); outline-offset: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .compact-shell .h62-deliverable-card { transition: none; }
+}
+
+.h62-file-applications { max-height: min(240px, 40dvh); overflow-y: auto; }
+.h62-application-icon { flex: none; width: var(--sp-16); height: var(--sp-16); object-fit: contain; }
+.h62-application-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h62-application-default { color: var(--muted); font-size: var(--fs-11); }
+.h62-application-note { padding: var(--sp-8) var(--sp-12); color: var(--muted); font-size: var(--fs-12); }
 
 /* 正文里的本地文件链接：点击经宿主受控解析进右侧（与网页链接区分着色）。 */
 .compact-shell .md a.h62-local-link {
@@ -33,36 +155,6 @@
   width: 100%;
   max-height: 100%;
   background: var(--n-900);
-}
-
-.compact-shell .h62-deliverable-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-4);
-  max-width: 280px;
-  padding: 3px var(--sp-10);
-  border: 1px solid var(--h24-line);
-  border-radius: var(--r-full);
-  background: var(--h24-canvas);
-  color: var(--n-600);
-  font-size: var(--fs-12);
-  transition: border-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
-}
-
-.compact-shell .h62-deliverable-chip:hover {
-  border-color: var(--h24-composer-focus);
-  color: var(--g-700);
-}
-
-.compact-shell .h62-deliverable-chip span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.compact-shell .h62-deliverable-chip small {
-  color: var(--h24-muted);
-  flex: none;
 }
 
 /* 范围外格式：同一内容区里给文件信息与系统打开（R-03），不弹错误窗。 */

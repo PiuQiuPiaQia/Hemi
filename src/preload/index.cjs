@@ -325,8 +325,10 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   // 062：会话交付物受控读取/打开＋Markdown 本地链接受控解析（渲染层不持路径）。
   readConversationDeliverable: (conversationId, artifactId, linkPath = null) =>
     ipcRenderer.invoke('delivery:read-conversation-deliverable', { conversationId, artifactId, linkPath }),
-  openConversationDeliverable: (conversationId, artifactId, linkPath = null) =>
-    ipcRenderer.invoke('delivery:open-conversation-deliverable', { conversationId, artifactId, linkPath }),
+  openConversationDeliverable: (conversationId, artifactId, linkPath = null, intent = 'preview-file', applicationId = null) =>
+    ipcRenderer.invoke('delivery:open-conversation-deliverable', { conversationId, artifactId, linkPath, intent, applicationId }),
+  listConversationDeliverableApplications: (conversationId, artifactId, linkPath = null) =>
+    ipcRenderer.invoke('delivery:list-conversation-deliverable-applications', { conversationId, artifactId, linkPath }),
   resolveConversationLink: (conversationId, href) =>
     ipcRenderer.invoke('delivery:resolve-conversation-link', { conversationId, href }),
   // 028 本条消息附件：登记（文件/拖入/选择窗/粘贴）/ 移除 / 列表 / 受控预览 / 受控打开来源。

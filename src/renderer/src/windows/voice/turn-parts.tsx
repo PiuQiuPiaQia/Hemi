@@ -1,12 +1,12 @@
 import { TranscriptPartState } from './transcript-row-state';
 import type { ReactNode } from 'react';
-import { FileText, ImageIcon } from 'lucide-react';
 
 import type { TurnPart, TurnToolCall } from '@/shared/types';
 import { Markdown } from '@/shared/markdown';
 import { TurnActivity } from '@/windows/voice/turn-activity';
 import { buildTurnDisplayBlocks } from './lib/turn-display-blocks';
 import { WorkflowCard } from '@/windows/voice/workflow-card';
+import { DeliverableCards } from './deliverable-card';
 
 /**
  * 056 · 回合内容按到达顺序从上往下展示（2026-10-14 用户反馈：对话流应照接口返回的
@@ -47,25 +47,13 @@ export function TurnParts({
         }
         const { part, index } = block;
         if (part.type === 'file-delivery') {
-          // 062：紧凑文件入口（R-01）——文件名＋图标一行，大图和完整内容只在右侧。
-          return (
-            <div key={key} className="h62-deliverable-entry">
-              <button
-                type="button"
-                className="h62-deliverable-chip"
-                title={part.host ? `${part.host}:${part.name}` : part.name}
-                onClick={onOpenDeliverable ? () => onOpenDeliverable(part.artifactId, part.name) : undefined}
-              >
-                {/\.(png|jpe?g|gif|webp|svg)$/i.test(part.name) ? (
-                  <ImageIcon className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <FileText className="size-3.5" aria-hidden="true" />
-                )}
-                <span>{part.name}</span>
-                <small>查看</small>
-              </button>
-            </div>
-          );
+          // Consecutive results share a responsive grid, while text/tool boundaries stay in order.
+          if (parts[index - 1]?.type === 'file-delivery') return null;
+          const files: Array<Extract<TurnPart, { type: 'file-delivery' }>> = [];
+          for (let cursor = index; parts[cursor]?.type === 'file-delivery'; cursor++) {
+            files.push(parts[cursor] as Extract<TurnPart, { type: 'file-delivery' }>);
+          }
+          return <DeliverableCards key={key} files={files} onOpen={onOpenDeliverable} />;
         }
         if (part.type === 'workflow-card') {
           return <TranscriptPartState key={key} id={key}><WorkflowCard card={part.card} /></TranscriptPartState>;

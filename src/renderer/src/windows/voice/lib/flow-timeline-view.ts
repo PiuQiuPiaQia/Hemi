@@ -2,6 +2,7 @@
 import type { FlowSnapshotView } from '@shared/protocol';
 import type { TranscriptItem } from '@/shared/types';
 import { flowPartsToTranscriptParts } from './transcript-parts-view.ts';
+import { flowDeliverableParts } from './flow-deliverables.ts';
 
 export type FlowTimelineProjection = {
   transcripts: TranscriptItem[];
@@ -61,24 +62,13 @@ export function projectFlowTimeline(
     if (call) { tasksByCall.set(call, { ...turn.taskSnap, ...tasksByCall.get(call) } as TranscriptItem['taskSnap']); callSources.set(call, [...(callSources.get(call) ?? []), turn.taskSnap]); }
   }
   const transcripts: TranscriptItem[] = [];
-  // 062：交付文件入口按文件对象全局去重——同一路径跨运行/主与子 agent 重复声明
-  // 只保留时间线上第一个入口（R-04「不再展示一份重复文件卡」；更新只递增
-  // contentVersion，不复制第二个入口）。
-  const seenDeliverables = new Set<string>();
-  const deliverableFiltered = (parts: Array<{ partId: string; kind: string } & Record<string, unknown>>) =>
-    parts.filter((part) => {
-      if (part?.kind !== 'deliverable' || !part.artifactId) return true;
-      if (seenDeliverables.has(String(part.artifactId))) return false;
-      seenDeliverables.add(String(part.artifactId));
-      return true;
-    });
+  const deliveryParts = flowDeliverableParts(snapshot);
   const validKeys = new Set<string>();
   for (const item of timeline) {
     const run = runs[item.runId] ?? EMPTY_RUN;
     const rowKey = item.kind === 'user' ? item.id : item.itemId;
     validKeys.add(rowKey);
-    // Dedupe is ordered across the whole timeline even on a cache hit.
-    const filteredParts = item.kind === 'assistant' ? deliverableFiltered(item.parts) : [];
+    const filteredParts = item.kind === 'assistant' ? deliveryParts.get(item.itemId) ?? [] : [];
     const archived = byId.get(item.kind === 'user' ? item.id : String((item as { legacyTurnId?: string }).legacyTurnId ?? ''));
     const isTailItem = tailItems.get(item.runId) === item;
     const dependencies: unknown[] = [item, run, archived, isTailItem, ...filteredParts];
@@ -124,7 +114,7 @@ export function projectFlowTimeline(
     }
     for (const segment of segments) {
       const first = segment.parts[0];
-      const id = first === item.parts[0] ? item.itemId : `${item.itemId}:${first.partId}`;
+      const id = first.partId === item.parts[0]?.partId ? item.itemId : `${item.itemId}:${first.partId}`;
       const flow = { runId: item.runId, itemId: item.itemId, partIds: segment.parts.map((p) => p.partId) };
       const createdAt = Number(run.startedAt) || 0;
       if (segment.kind === 'delegation') {

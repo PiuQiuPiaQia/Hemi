@@ -2,6 +2,8 @@ import { useId } from 'react';
 import { BookOpen, ChevronRight, FilePenLine, Folder, Globe, Search, Square, Terminal, Wrench, X } from 'lucide-react';
 import type { TurnToolCall } from '@/shared/types';
 import type { ActivityEntry } from './lib/turn-display-blocks';
+import { formatThinkingDuration, latestLineOf } from './lib/thinking-format';
+import { useThinkingElapsed } from './lib/use-thinking-elapsed';
 import { describeToolCall } from './tool-activity';
 import { ThinkingBlock } from './thinking-block';
 import { TranscriptPartState, useTranscriptRowState } from './transcript-row-state';
@@ -21,6 +23,15 @@ function describeActivityCall(call: TurnToolCall) {
     : call);
 }
 
+function ThinkingProgress({ text, startedAt }: { text: string; startedAt: number }) {
+  const elapsedMs = useThinkingElapsed(startedAt);
+  const latest = latestLineOf(text);
+  return <>
+    <span className="turn-activity-timer" aria-hidden="true">· {formatThinkingDuration(elapsedMs ?? 0)}</span>
+    {latest ? <span className="turn-activity-preview" title={latest} aria-hidden="true">{latest}</span> : null}
+  </>;
+}
+
 /** A single disclosure for the ordered thinking/tools between two text segments. */
 export function TurnActivity({ entries, live }: { entries: ActivityEntry[]; live: boolean }) {
   const [open, setOpen] = useTranscriptRowState<boolean>('activity-expanded', false);
@@ -28,23 +39,27 @@ export function TurnActivity({ entries, live }: { entries: ActivityEntry[]; live
   const calls = entries.flatMap(entry => entry.kind === 'tool' ? [entry.call] : []);
   const running = calls.find(call => call.state === 'running');
   const tail = entries.at(-1);
-  const thinking = live && tail?.kind === 'thinking' && tail.part.endedAt == null;
+  const activeThinking = live && tail?.kind === 'thinking' && tail.part.endedAt == null ? tail : null;
+  const thinking = Boolean(activeThinking);
   const failed = calls.filter(call => call.state === 'error').length;
   const stopped = calls.filter(call => call.state === 'stopped').length;
   const interrupted = entries.some(entry => entry.kind === 'thinking' && entry.part.interrupted);
   const labels = [...new Set(calls.map(call => describeToolCall({ tool: call.tool, args: {} })))];
-  const headline = running ? `正在${describeActivityCall(running)}` : thinking ? '思考中'
+  const headline = running ? `正在${describeActivityCall(running)}` : thinking ? (open ? '执行过程' : '思考中')
     : calls.length === 1 ? describeActivityCall(calls[0])
     : calls.length ? `${labels.slice(0, 3).join('、')}${labels.length > 3 ? '等' : ''}`
     : interrupted ? '思考已中断' : '思考过程';
 
   return <div className="turn-activity" data-open={open ? 'true' : undefined}
     data-running={running || thinking ? 'true' : undefined}
+    data-thinking={thinking && !running ? 'true' : undefined}
     data-tool-states={JSON.stringify(calls.map(call => ({ id: call.id, state: call.state })))}>
     <button type="button" className="turn-activity-head" aria-expanded={open} aria-controls={bodyId}
       onClick={() => setOpen(value => !value)}>
       {running || thinking ? <i className="h37-spinner" aria-hidden="true" /> : <Wrench aria-hidden="true" />}
       <span className="turn-activity-label" title={headline}>{headline}</span>
+      {!open && !running && activeThinking ? <ThinkingProgress key={activeThinking.id}
+        text={activeThinking.part.text} startedAt={activeThinking.part.startedAt} /> : null}
       {calls.length > 1 ? <span className="turn-activity-count">{calls.length} 项操作</span> : null}
       {failed ? <span className="turn-activity-failed">{failed} 项失败</span> : null}
       {stopped ? <span className="turn-activity-count">{stopped} 项停止</span> : null}

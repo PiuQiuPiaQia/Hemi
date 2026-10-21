@@ -11,7 +11,7 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 import { createWorkspaceStore } from '../workspace/workspace-store.mjs';
 import { createRemoteService, setRemoteService } from '../remote/remote-service.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
-import { createWorkspaceOpener, normalizeOpenTarget } from '../services/workspace-open.mjs';
+import { createWorkspaceOpener, normalizeOpenTarget, workspaceViewForOpen } from '../services/workspace-open.mjs';
 import { readStoredConfig, saveStoredConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
 import { state } from '../state.mjs';
@@ -160,7 +160,11 @@ export function registerWorkspaceIpc() {
   const opener = createWorkspaceOpener({ openPath: (dir) => shell.openPath(dir) });
   ipcMain.handle(IPC.workspace.openDir, async (_event, payload) => {
     const target = normalizeOpenTarget(payload?.target);
-    const view = store.resolve(String(payload?.id ?? ''));
+    if (payload?.id === 'default') {
+      const ready = store.ensureDefault();
+      if (!ready.ok) return { ok: false, kind: 'missing', message: ready.reason };
+    }
+    const view = workspaceViewForOpen(store, String(payload?.id ?? ''));
     if (!view) return { ok: false, kind: 'unknown-workspace', message: '这个工作区不在登记表里，可能刚被移除' };
     if (view.host) {
       log.warn(`066 拒绝远端工作区本地打开：${view.host}:${view.dir}`);

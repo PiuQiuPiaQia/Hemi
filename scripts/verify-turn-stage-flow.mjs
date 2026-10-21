@@ -21,7 +21,7 @@ const workspace = path.join(userData, 'workspace/default');
 fs.mkdirSync(workspace, { recursive: true });
 const source = path.join(workspace, 'stage-source.md');
 fs.writeFileSync(source, 'STAGE_SOURCE_ACTUAL_CONTENT\n阶段验证资料。');
-const requests = [], releases = new Map();
+const requests = [], releases = new Map(), thinkingUpdates = new Map();
 const report = { mode, commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), workingTree: true,
   node: process.version, platform: `${process.platform}/${process.arch}`, checks: [], errors: [], screenshots: [] };
 const check = name => { report.checks.push(name); console.log(`PASS ${name}`); };
@@ -59,7 +59,9 @@ const server = http.createServer(async (req, res) => {
       tool('read', { path: source });
     } else if (count === 1) {
       chunk({ reasoning_content: 'PRIVATE_THINKING：文件已读取，需要运行检查命令。' });
+      thinkingUpdates.set('inspect', text => chunk({ reasoning_content: text }));
       await hold('inspect');
+      thinkingUpdates.delete('inspect');
       if (!res.destroyed) tool('bash', { command: 'printf STAGE_COMMAND_ACTUAL_RESULT' });
     } else if (count === 2) {
       chunk({ reasoning_content: 'PRIVATE_THINKING_2：检查命令已结束，核对缺失文件。' });
@@ -91,6 +93,7 @@ const resize = async width => {
   await page.waitForFunction(width => innerWidth === width, width);
   await page.mouse.move(width - 20, 860);
   await page.locator('textarea.text-composer-input').focus();
+  if (width <= 880) await page.locator('.h24-sidebar').waitFor({ state: 'hidden' });
 };
 const groups = () => page.locator('.turn-activity');
 const flow = id => page.evaluate(id => window.hemiVoice.flowGetSnapshot(id), id);
@@ -112,14 +115,41 @@ try {
   await wait(() => releases.has('inspect'), 'streamed thinking');
   await page.locator('.turn-activity[data-running="true"]').waitFor();
   assert.equal(await groups().count(), 1);
-  assert.equal(await page.locator('.h48-thinking-latest').count(), 0, 'closed process does not expose thinking preview');
+  assert.equal(await page.locator('.h48-thinking-latest').count(), 0, 'inner thinking stays unmounted while process is closed');
   assert.equal(await page.locator('.turn-activity-list').count(), 0);
   assert.match(await page.locator('.chat-copy.assistant-copy').innerText(), /先读取资料/);
   check('中途 text 原样可见，工具/思考默认收成同一个过程组');
+  const preview = groups().first().locator('.turn-activity-preview');
+  await preview.waitFor();
+  assert.match(await preview.innerText(), /PRIVATE_THINKING/);
+  const timer = groups().first().locator('.turn-activity-timer');
+  const initialTime = await timer.innerText();
+  await wait(async () => await timer.innerText() !== initialTime, 'elapsed time without new chunks');
+  const latestThought = '正在核对第一份资料的来源、关联文件与检查命令，确认依赖后继续执行。';
+  thinkingUpdates.get('inspect')(`\n\n${latestThought}`);
+  await wait(async () => await preview.innerText() === latestThought, 'live preview update');
+  for (const width of [1440, 768, 375]) {
+    await resize(width);
+    const fits = await groups().first().locator('.turn-activity-head').evaluate(node => {
+      const preview = node.querySelector('.turn-activity-preview');
+      return node.scrollWidth <= node.clientWidth && preview.getBoundingClientRect().width > 0
+        && preview.scrollHeight === preview.clientHeight;
+    });
+    assert.ok(fits, `${width}: single line preview and controls fit`);
+    await shot(`thinking-preview-${width}`);
+  }
+  await resize(1440);
+  await groups().first().screenshot({ path: path.join(evidence, 'thinking-preview.png'), scale: 'css' });
+  report.screenshots.push('thinking-preview.png');
+  check('收起时最新思考随分片更新、无新分片时耗时继续走，三档宽度固定一行');
   const head = groups().first().locator('.turn-activity-head');
   await head.focus(); await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
   await wait(async () => await head.getAttribute('aria-expanded') === 'true', 'keyboard disclosure');
+  assert.equal(await groups().first().locator('.turn-activity-label').innerText(), '执行过程');
+  assert.equal(await groups().first().locator('.turn-activity-preview').count(), 0);
+  assert.equal(await groups().first().locator('.turn-activity-timer').count(), 0);
+  assert.equal(await groups().first().locator('.h48-thinking-head').count(), 1);
   assert.deepEqual(await groups().first().locator('[data-activity-kind]').evaluateAll(nodes => nodes.map(n => n.dataset.activityKind)), ['tool', 'thinking']);
   await groups().first().locator('.h48-thinking-head').click();
   assert.match(await groups().first().locator('.h48-thinking-body').innerText(), /PRIVATE_THINKING/);
@@ -127,6 +157,7 @@ try {
   releases.get('inspect')(); releases.delete('inspect');
   await page.locator('.chat-copy.assistant-copy').filter({ hasText: '缺失文件读取失败' }).waitFor();
   await page.locator('.text-composer-send.is-stop').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('.turn-activity-preview, .turn-activity-timer').count(), 0, 'completed thinking removes live indicator');
   assert.equal(await groups().count(), 2);
   assert.equal(await head.getAttribute('aria-expanded'), 'true', 'append and text boundary retain expansion');
   assert.equal(await groups().first().locator('.h48-thinking-head').first().getAttribute('aria-expanded'), 'true');
@@ -180,10 +211,12 @@ try {
   await page.locator('.text-composer-send:not(.is-stop)').click();
   await wait(() => releases.has('stop'), 'stoppable thinking');
   await page.locator('.turn-activity[data-running="true"]').waitFor();
+  await page.locator('.turn-activity-preview').waitFor();
   const stop = page.locator('.text-composer-send.is-stop');
   await stop.focus(); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter');
   await page.locator('.h24-reply-stopped').waitFor();
   assert.equal(await page.locator('.turn-activity[data-running="true"]').count(), 0);
+  assert.equal(await page.locator('.turn-activity-preview, .turn-activity-timer').count(), 0);
   assert.equal(await page.locator('.turn-activity-list').count(), 0);
   check('停止思考后过程退出运行态，未完成回复明确标为已停止');
   const saved = await page.evaluate(async () => {

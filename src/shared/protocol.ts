@@ -396,8 +396,9 @@ export type TurnPart =
   | { type: 'thinking'; text: string; startedAt: number; endedAt: number | null; interrupted?: boolean }
   | { type: 'text'; text: string }
   | { type: 'tools'; calls: TurnToolCall[] }
-  /** 062 会话交付物：对话流紧凑文件入口（点击进右侧预览；同一文件跨运行只留一个）。 */
-  | { type: 'file-delivery'; artifactId: string; name: string; host?: string | null; description?: string }
+  /** 会话成果：同一回合去重，后续回合更新仍可见；同一文件复用预览身份。 */
+  | { type: 'file-delivery'; artifactId: string; name: string; host?: string | null; description?: string;
+      conversationId?: string; linkPath?: string; contentVersion?: number; size?: number }
   /** 059 执行卡：参数＋进展同卡（flow 的 workflow-card part 投影）。 */
   | {
       type: 'workflow-card';
@@ -1723,6 +1724,9 @@ export type ConversationDeliverableReadResult = {
   message?: string;
 };
 
+export type FileOpenApplication = { id: string; name: string; isDefault: boolean; icon: string | null };
+export type FileOpenApplicationsResult = { ok: boolean; applications: FileOpenApplication[]; message?: string };
+
 /** 062：Markdown 本地链接受控解析结果（ok 时 artifactId 与正式登记同一身份函数）。 */
 export type ConversationLinkResolution = {
   ok: boolean;
@@ -2560,7 +2564,12 @@ export type HemiVoiceBridge = {
     conversationId: string,
     artifactId: string,
     linkPath?: string | null,
-  ) => Promise<{ ok: boolean; message?: string }>;
+    intent?: 'preview-file' | 'system' | 'reveal' | 'choose-app' | 'directory' | 'application',
+    applicationId?: string | null,
+  ) => Promise<{ ok: boolean; canceled?: boolean; message?: string }>;
+  listConversationDeliverableApplications: (
+    conversationId: string, artifactId: string, linkPath?: string | null,
+  ) => Promise<FileOpenApplicationsResult>;
   /** 062：对话正文 Markdown 本地文件链接的受控解析（成功＝可预览对象，非正式交付）。 */
   resolveConversationLink: (
     conversationId: string,

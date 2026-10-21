@@ -14,6 +14,15 @@ import {
   registerConversationDeliverable,
 } from './conversation-deliverables.mjs';
 
+test('中文、特殊符号与长路径不因清洗和截断共享文件身份', () => {
+  const a = conversationArtifactId({ target: '/workspace/横版封面.svg' });
+  const b = conversationArtifactId({ target: '/workspace/尚未生成.svg' });
+  assert.notEqual(a, b);
+  const suffix = 'same/'.repeat(40) + 'out.pdf';
+  assert.notEqual(conversationArtifactId({ target: `/first/${suffix}` }), conversationArtifactId({ target: `/second/${suffix}` }));
+  assert.notEqual(conversationArtifactId({ host: 'a:b', target: '/x.pdf' }), conversationArtifactId({ host: 'a_b', target: '/x.pdf' }));
+});
+
 function makeController() {
   let snapshot = createFlowSnapshot({ conversationId: 'c1' });
   const controller = {
@@ -89,6 +98,21 @@ test('同一路径重复声明：身份复用、contentVersion 递增、对话�
   assert.equal(assistant.parts.filter((part) => part.kind === 'deliverable').length, 1);
 }));
 
+test('登记跟随真实输入锚点，过期代次不污染 artifacts', () => withTempWorkspace(({ home, workspace }) => {
+  writeFileSync(path.join(workspace, 'cover.svg'), '<svg/>');
+  const controller = makeController();
+  const runId = seedRun(controller);
+  controller.applyFact({ type: 'part-appended', runId, afterInputId: 'input-1', part: { partId: 'intro', kind: 'text', content: '已生成。' } });
+  const result = registerConversationDeliverable({ controller, runId, file: { path: 'cover.svg' }, workspaceDir: workspace, home });
+  assert.equal(controller.getSnapshot().timeline.filter(i => i.kind === 'assistant').length, 1);
+  assert.equal(controller.getSnapshot().timeline[0].afterInputId, 'input-1');
+  assert.equal(controller.getSnapshot().artifacts[result.artifactId].size, 6);
+  const version = controller.getSnapshot().artifacts[result.artifactId].contentVersion;
+  const stale = registerConversationDeliverable({ controller, runId, generation: 99, file: { path: 'cover.svg' }, workspaceDir: workspace, home });
+  assert.equal(stale.dropped, 'stale-generation');
+  assert.equal(controller.getSnapshot().artifacts[result.artifactId].contentVersion, version);
+}));
+
 test('同名异目录不合并；跨运行同路径合并身份', () => withTempWorkspace(({ home, workspace }) => {
   const dirA = path.join(workspace, 'a'); const dirB = path.join(workspace, 'b');
   mkdirSync(dirA, { recursive: true }); mkdirSync(dirB, { recursive: true });
@@ -148,13 +172,14 @@ test('家目录边界：工作区外、家目录内可登记（033 口径）', (
 
 // ---- 受控 IO ----
 
-function makeIo({ home, workspace, flowService = null, openInBrowser = null, openPath = null }) {
+function makeIo({ home, workspace, flowService = null, openInBrowser = null, openPath = null, fileActions = null }) {
   return createConversationDeliverableIo({
     flowService,
     workspaceOf: () => ({ dir: workspace, host: null, home: null }),
     remoteIo: null,
     openInBrowser,
     openPath,
+    fileActions,
   });
 }
 
@@ -237,6 +262,41 @@ test('resolveConversationLink 成功后身份与正式登记一致（Tab 自然�
   const link = await io.resolveConversationLink('c1', 'scene.svg');
   const registered = registerConversationDeliverable({ controller, runId, file: { path: 'scene.svg' }, workspaceDir: workspace, home });
   assert.equal(link.artifactId, registered.artifactId);
+}));
+
+test('旧档案文件身份保持稳定；同字数中文链接不会读成已登记的其他图片', () => withTempWorkspace(async ({ home, workspace }) => {
+  const target = path.join(workspace, '横版封面.svg');
+  const other = path.join(workspace, '尚未生成.svg');
+  writeFileSync(target, '<svg>first</svg>'); writeFileSync(other, '<svg>other</svg>');
+  const controller = makeController(); const runId = seedRun(controller);
+  controller.applyFact({ type: 'artifact-updated', artifact: { artifactId: 'legacy-id', kind: 'file', path: target, name: '横版封面.svg', producers: [] } });
+  const io = makeIo({ home, workspace, flowService: { has: () => true, controllerFor: () => controller } });
+  const registered = registerConversationDeliverable({ controller, runId, file: { path: target }, workspaceDir: workspace, home });
+  assert.equal(registered.artifactId, 'legacy-id');
+  assert.equal((await io.resolveConversationLink('c1', target)).artifactId, 'legacy-id');
+  const link = await io.resolveConversationLink('c1', other);
+  assert.notEqual(link.artifactId, 'legacy-id');
+  const result = await io.readConversationDeliverable('c1', link.artifactId, link.path);
+  assert.match(Buffer.from(result.dataUrl.split(',')[1], 'base64').toString(), /other/);
+}));
+
+test('卡片系统打开、选程序、定位目录都走实际宿主解析；失效与越界路径不触发操作', () => withTempWorkspace(async ({ home, workspace }) => {
+  const target = path.join(workspace, 'report.md'); writeFileSync(target, 'report');
+  const controller = makeController(); const runId = seedRun(controller);
+  const id = registerConversationDeliverable({ controller, runId, file: { path: target }, home }).artifactId;
+  const actions = [];
+  const io = makeIo({ home, workspace, flowService: { has: () => true, controllerFor: () => controller },
+    openPath: async filePath => { actions.push(['system', filePath]); return { ok: true }; },
+    fileActions: { perform: async (intent, filePath) => { actions.push([intent, filePath]); return { ok: true }; } },
+  });
+  for (const intent of ['system', 'choose-app', 'reveal']) assert.equal((await io.openConversationDeliverable('c1', id, null, intent)).ok, true);
+  assert.deepEqual(actions.map(a => a[0]), ['system', 'choose-app', 'reveal']);
+  assert.ok(actions.every(a => a[1] === target));
+  assert.equal((await io.openConversationDeliverable('c1', '', '/etc/hosts', 'choose-app')).ok, false);
+  assert.equal((await io.openConversationDeliverable('c1', id, null, 'arbitrary')).ok, false);
+  rmSync(target);
+  assert.equal((await io.openConversationDeliverable('c1', id, null, 'reveal')).ok, false);
+  assert.equal(actions.length, 3);
 }));
 
 test('openConversationDeliverable：本机走注入 opener；范围外格式走系统应用', () => withTempWorkspace(async ({ home, workspace }) => {

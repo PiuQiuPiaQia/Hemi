@@ -32,6 +32,10 @@ export function flowPartsToTranscriptParts(
         type: 'file-delivery',
         artifactId: String(part.artifactId ?? ''),
         name: String(part.name ?? '文件'),
+        conversationId: typeof part.conversationId === 'string' ? part.conversationId : undefined,
+        linkPath: typeof part.linkPath === 'string' ? part.linkPath : undefined,
+        contentVersion: typeof part.contentVersion === 'number' ? part.contentVersion : undefined,
+        size: typeof part.size === 'number' ? part.size : undefined,
         ...(part.host ? { host: String(part.host) } : {}),
         ...(typeof part.description === 'string' && part.description ? { description: part.description } : {}),
       });

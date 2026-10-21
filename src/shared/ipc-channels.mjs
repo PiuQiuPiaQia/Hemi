@@ -424,6 +424,7 @@ export const IPC = {
     readConversationDeliverable: 'delivery:read-conversation-deliverable',
     /** 062：会话交付物受控打开（预览栏路径点击；范围外格式走系统应用）。 */
     openConversationDeliverable: 'delivery:open-conversation-deliverable',
+    listConversationDeliverableApplications: 'delivery:list-conversation-deliverable-applications',
     /** 062：对话正文 Markdown 本地文件链接的受控解析（成功返回可预览对象，不冒充正式交付）。 */
     resolveConversationLink: 'delivery:resolve-conversation-link',
   },

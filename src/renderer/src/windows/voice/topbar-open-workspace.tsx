@@ -11,8 +11,7 @@ import { fileManagerName } from '@/windows/voice/lib/platform-format';
  *
  * - 主按钮＝用默认方式立即打开（图标跟随默认方式）；下拉箭头选方式，
  *   选中即成为新默认（落配置，跨会话保持）并立即打开。
- * - 只在本机项目工作区出现（默认空间/旧会话家目录/远端项目不显示——
- *   远端目录在本地文件管理器里没有对应物）。
+ * - 本机项目、默认空间和旧会话家目录均提供入口；远端目录不交给本机打开。
  * - 失败（目录失效、VS Code 未装等）弹 h37-toast 如实说明，不静默。
  */
 const TARGET_ICONS: Record<WorkspaceOpenTarget, typeof Folder> = {

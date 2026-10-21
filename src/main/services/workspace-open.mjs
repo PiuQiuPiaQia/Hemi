@@ -11,6 +11,19 @@
 // - VS Code：win 按常见安装路径探测 Code.exe，再退 PATH 里的 code；
 //   mac 优先 open -a（GUI 应用 PATH 很短，`code` CLI 不可靠），失败再试常见 CLI 路径。
 import { spawn } from 'node:child_process';
+import { realpathSync, statSync } from 'node:fs';
+import os from 'node:os';
+
+/** Registered workspaces retain their identity; legacy chats use the host's real home directory. */
+export function workspaceViewForOpen(store, id, { home = os.homedir() } = {}) {
+  if (id !== 'legacy-home') return store.resolve(id);
+  const view = { id: 'legacy-home', type: 'default', name: '家目录', dir: home };
+  try {
+    const dir = realpathSync(home);
+    if (statSync(dir).isDirectory()) return { ...view, dir, status: 'ok' };
+  } catch { /* report the actual unavailable location */ }
+  return { ...view, status: 'missing', message: '家目录不可用' };
+}
 
 export const WORKSPACE_OPEN_TARGETS = ['finder', 'terminal', 'vscode'];
 

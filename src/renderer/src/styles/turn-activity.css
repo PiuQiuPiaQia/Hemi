@@ -35,6 +35,25 @@ html.kb-nav .compact-shell .turn-activity-head:focus-visible {
   white-space: nowrap;
 }
 
+.compact-shell .turn-activity[data-thinking='true'] .turn-activity-label,
+.compact-shell .turn-activity-timer {
+  flex: none;
+  white-space: nowrap;
+}
+
+.compact-shell .turn-activity-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+.compact-shell .turn-activity-preview {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .compact-shell .turn-activity-head > svg,
 .compact-shell .turn-activity-head > .h37-spinner,
 .compact-shell .turn-activity-step > svg,

@@ -10,6 +10,7 @@
 // 追加。撤回按 generation 判定（编辑重发后旧代次不再进菜单），被有效运行引用
 // 的文件不因某次撤回消失。文件存在 ≠ 内容正确（010 核验仍负责业务真实性）。
 import { readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { conversationMedia, VIDEO_MIME } from './media-preview.mjs';
 
@@ -39,7 +40,8 @@ const PREVIEW_TEXT_MAX_BYTES = 1024 * 1024;
 export function conversationArtifactId({ host = null, target }) {
   const hostLabel = host ? String(host).replace(/[^A-Za-z0-9._-]/g, '_') : 'local';
   const sanitized = String(target).replace(/[^A-Za-z0-9._-]/g, '_').slice(-80);
-  return `d-${hostLabel}-${sanitized}`;
+  const digest = createHash('sha256').update(JSON.stringify([host ?? null, String(target)])).digest('hex').slice(0, 20);
+  return `d-${hostLabel}-${sanitized}-${digest}`;
 }
 
 function extOf(filePath) {
@@ -77,6 +79,7 @@ export function registerConversationDeliverable({
   controller,
   runId = null,
   generation = null,
+  afterInputId = undefined,
   file,
   workspaceDir = null,
   home = null,
@@ -91,6 +94,11 @@ export function registerConversationDeliverable({
   if (!rawPath.trim()) return { ok: false, reason: '路径为空' };
   const snapshot = controller.getSnapshot();
   const gen = generation ?? snapshot.generation ?? null;
+  if (gen !== snapshot.generation) return { ok: false, dropped: 'stale-generation' };
+  const anchor = afterInputId === undefined
+    ? snapshot.timeline?.findLast(item => item.kind === 'assistant' && item.runId === runId)?.afterInputId
+      ?? snapshot.runs?.[runId]?.inputIds?.at(-1) ?? null
+    : afterInputId;
 
   // R-05：运行已收口后的迟到声明不新增交付（登记侧守卫；归约层 artifact-updated
   // 不带运行校验，这里必须自己拦）。runId=null（后台交付）无在途运行可判，放行。
@@ -121,9 +129,12 @@ export function registerConversationDeliverable({
       return { ok: false, reason: resolved.error };
     }
     target = resolved.target;
+    try { size = statSync(target).size; } catch { /* controlled read will report a file moved after verification */ }
   }
 
-  const artifactId = conversationArtifactId({ host: remote?.host ?? null, target });
+  // Preserve old persisted identities when the exact host/path already exists.
+  const existing = Object.values(snapshot.artifacts ?? {}).find(a => a.path === target && (a.host ?? null) === (remote?.host ?? null));
+  const artifactId = existing?.artifactId ?? conversationArtifactId({ host: remote?.host ?? null, target });
   const previous = snapshot.artifacts?.[artifactId] ?? null;
   const producer = { runId, taskId, generation: gen, at };
   const producers = dedupeProducers([...(previous?.producers ?? []), producer]);
@@ -163,6 +174,7 @@ export function registerConversationDeliverable({
       (applyFact ?? ((fact) => controller.applyFact(fact)))({
         type: 'part-appended',
         runId,
+        afterInputId: anchor,
         part: {
           partId: `dl-${artifactId}`,
           kind: 'deliverable',
@@ -233,6 +245,7 @@ export function createConversationDeliverableIo({
   remoteIo = null,
   openInBrowser = null,
   openPath = null,
+  fileActions = null,
   log = null,
 }) {
   function artifactOf(conversationId, artifactId, linkPath = null) {
@@ -305,17 +318,26 @@ export function createConversationDeliverableIo({
       const data = typeof source === 'number' ? readFileSync(artifact.path) : source;
       if (data.length > maxBytes) return { ok: false, message: '文件太大，不适合应用内预览' };
       if (kind === 'text') {
-        return { ok: true, kind: 'text', markdown: extOf(artifact.path) !== '.txt', text: data.toString('utf8'), name: artifact.name, path: artifact.path };
+        return { ok: true, kind: 'text', markdown: extOf(artifact.path) !== '.txt', text: data.toString('utf8'), name: artifact.name, path: artifact.path, size };
       }
       const ext = extOf(artifact.path);
-      return { ok: true, kind: 'image', dataUrl: `data:${IMAGE_MIME[ext]};base64,${data.toString('base64')}`, name: artifact.name, path: artifact.path };
+      return { ok: true, kind: 'image', dataUrl: `data:${IMAGE_MIME[ext]};base64,${data.toString('base64')}`, name: artifact.name, path: artifact.path, size };
     } catch (error) {
       if (error?.code === 'ENOENT') return { ok: false, message: '文件不在原位置，可能已被移动或删除' };
       return { ok: false, message: '文件读取失败，可重试或用系统应用打开' };
     }
   }
 
-  async function openConversationDeliverable(conversationId, artifactId, linkPath = null) {
+  async function listConversationDeliverableApplications(conversationId, artifactId, linkPath = null) {
+    const found = artifactOf(conversationId, artifactId, linkPath);
+    if (found.error) return { ok: false, message: found.error, applications: [] };
+    if (found.artifact.host) return { ok: false, message: '远端文件需要下载到本机后再选择程序', applications: [] };
+    if (!fileActions?.listApplications) return { ok: false, message: '程序列表暂不可用', applications: [] };
+    return fileActions.listApplications(found.artifact.path);
+  }
+
+  async function openConversationDeliverable(conversationId, artifactId, linkPath = null, intent = 'preview-file', applicationId = null) {
+    if (!['preview-file', 'system', 'reveal', 'choose-app', 'directory', 'application'].includes(intent)) return { ok: false, message: '不支持的文件操作' };
     const found = artifactOf(conversationId, artifactId, linkPath);
     if (found.error) return { ok: false, message: found.error };
     const artifact = found.artifact;
@@ -327,6 +349,11 @@ export function createConversationDeliverableIo({
     } catch {
       return { ok: false, message: '文件不在原位置，可能已被移动或删除' };
     }
+    if (['reveal', 'choose-app', 'directory', 'application'].includes(intent)) {
+      if (!fileActions) return { ok: false, message: '文件操作暂不可用' };
+      return fileActions.perform(intent, artifact.path, applicationId);
+    }
+    if (intent === 'system') return openPath ? openPath(artifact.path) : { ok: false, message: '系统打开通道不可用' };
     if (['unsupported', 'video'].includes(previewKindOf(artifact.path)) && openPath) {
       return openPath(artifact.path);
     }
@@ -358,6 +385,9 @@ export function createConversationDeliverableIo({
       }
     }
     const workspace = workspaceOf?.(conversationId) ?? null;
+    const snapshot = flowService?.has(conversationId) ? flowService.controllerFor(conversationId)?.getSnapshot() : null;
+    const identity = (target, host = null) => Object.values(snapshot?.artifacts ?? {}).find(a => a.path === target && (a.host ?? null) === host)?.artifactId
+      ?? conversationArtifactId({ host, target });
     if (workspace?.host) {
       const normalized = normalizeRemotePath(candidate, { home: workspace.home ?? null, dir: workspace.dir ?? null });
       if (!normalized || remoteDeliveryDenied(normalized, { home: workspace.home ?? null })) {
@@ -371,7 +401,7 @@ export function createConversationDeliverableIo({
           return { ok: false, message: `服务器 ${workspace.host} 上找不到这个文件` };
         }
       }
-      return { ok: true, artifactId: conversationArtifactId({ host: workspace.host, target: normalized }), name: path.posix.basename(normalized), path: normalized, host: workspace.host };
+      return { ok: true, artifactId: identity(normalized, workspace.host), name: path.posix.basename(normalized), path: normalized, host: workspace.host };
     }
     const resolved = resolveDeliveryTargetPath(candidate, {
       ...(workspace?.dir ? { workspaceDir: workspace.dir } : {}),
@@ -381,11 +411,11 @@ export function createConversationDeliverableIo({
     }
     return {
       ok: true,
-      artifactId: conversationArtifactId({ target: resolved.target }),
+      artifactId: identity(resolved.target),
       name: path.basename(resolved.target),
       path: resolved.target,
     };
   }
 
-  return { readConversationDeliverable, openConversationDeliverable, resolveConversationLink };
+  return { readConversationDeliverable, openConversationDeliverable, listConversationDeliverableApplications, resolveConversationLink };
 }

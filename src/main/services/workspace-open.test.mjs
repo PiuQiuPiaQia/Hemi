@@ -2,6 +2,22 @@
 // mac 实例上同样覆盖 win32/linux 分支（platform 参数化）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { workspaceViewForOpen } from './workspace-open.mjs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+test('顶栏目录解析保留默认空间/项目身份，旧会话解析实际家目录而非默认工作区', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'hemi-open-home-'));
+  try {
+    const defaultView = { id: 'default', dir: '/default' };
+    const store = { resolve: id => id === 'default' ? defaultView : null };
+    assert.strictEqual(workspaceViewForOpen(store, 'default', { home }), defaultView);
+    assert.equal(workspaceViewForOpen(store, 'unknown', { home }), null);
+    assert.equal(workspaceViewForOpen(store, 'legacy-home', { home }).dir, realpathSync(home));
+    assert.equal(workspaceViewForOpen(store, 'legacy-home', { home: path.join(home, 'missing') }).status, 'missing');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
 import { EventEmitter } from 'node:events';
 
 import { createWorkspaceOpener, normalizeOpenTarget, WORKSPACE_OPEN_TARGETS } from './workspace-open.mjs';

@@ -1,5 +1,6 @@
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
-import { ipcMain, app, shell } from 'electron';
+import { ipcMain, app, shell, dialog } from 'electron';
+import { createLocalFileActions } from '../services/local-file-actions.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -105,14 +106,16 @@ const taskFactPublisher = createTaskFactPublisher({
  * （049 口径：本机文件系统不接触远端路径），结果回来再登记——迟到守卫按
  * 运行是否已收口在登记函数内判定。
  */
-function registerDeclaredDeliverable({ conversationId, controller, runId, file, workspace = null, taskId = null }) {
+function registerDeclaredDeliverable({ conversationId, controller, runId, file, workspace = null, taskId = null, afterInputId, generation = controller?.getSnapshot().generation }) {
   if (!controller || !file) return;
   if (workspace?.host) {
-    void verifyRemoteDeliveryTarget(workspace, file.path)
+    return verifyRemoteDeliveryTarget(workspace, file.path)
       .then((verified) => {
         registerConversationDeliverable({
           controller,
           runId,
+          afterInputId,
+          generation,
           file,
           remote: verified.error ? { host: workspace.host, error: verified.error } : { host: workspace.host, target: verified.target, size: verified.size ?? null },
           taskId,
@@ -120,11 +123,12 @@ function registerDeclaredDeliverable({ conversationId, controller, runId, file, 
         });
       })
       .catch((error) => llmLog.warn(`[delivery] 远端交付查证异常：${error?.message ?? error}`));
-    return;
   }
-  registerConversationDeliverable({
+  return registerConversationDeliverable({
     controller,
     runId,
+    afterInputId,
+    generation,
     file,
     ...(workspace?.dir ? { workspaceDir: workspace.dir } : {}),
     taskId,
@@ -208,6 +212,15 @@ function getConversationDeliverableIo() {
       },
     },
     openInBrowser,
+    fileActions: createLocalFileActions({
+      revealPath: filePath => shell.showItemInFolder(filePath),
+      openDirectory: directory => shell.openPath(directory),
+      getApplicationIcon: async applicationPath => (await app.getFileIcon(applicationPath, { size: 'small' })).toDataURL(),
+      chooseApplication: () => {
+        const options = { title: '选择打开此文件的应用程序', defaultPath: '/Applications', properties: ['openFile'], filters: [{ name: '应用程序', extensions: ['app'] }] };
+        return state.mainWindow ? dialog.showOpenDialog(state.mainWindow, options) : dialog.showOpenDialog(options);
+      },
+    }),
     openPath: async (filePath) => {
       const message = await shell.openPath(filePath);
       return message ? { ok: false, message } : { ok: true };
@@ -410,6 +423,7 @@ function createLlmFlowRuntime(conversationId) {
       // flow 补丁不必逐 token；收口/失败前强制冲净）。
       const projector = createRunPartProjector({ runId, generation, inputId: envelope?.inputId ?? null });
       let factBuffer = [];
+      const pendingDeliveries = [];
       let flushTimer = null;
       const flushFacts = () => {
         if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -446,13 +460,15 @@ function createLlmFlowRuntime(conversationId) {
             //（registerConversationDeliverable 内做路径解析/边界复核/身份去重/迟到
             // 丢弃；失败如实落 notice，不再采信模型给的路径字符串）。
             if (event?.kind === 'tool_end' && event.tool === 'register_delivery' && !event.isError) {
+              flushFacts();
               const files = Array.isArray(event.args?.files) ? event.args.files : [];
               const workspace = lastTurnCtx.get(conversationId)?.workspace ?? null;
               for (const file of files) {
-                registerDeclaredDeliverable({
+                pendingDeliveries.push(registerDeclaredDeliverable({
                   conversationId, controller, runId, file,
+                  afterInputId: projector.afterInputId, generation,
                   ...(workspace ? { workspace } : {}),
-                });
+                }));
               }
             }
             for (const fact of projector.handle(event)) bufferFact(fact);
@@ -463,6 +479,7 @@ function createLlmFlowRuntime(conversationId) {
         });
         for (const fact of projector.finish()) bufferFact(fact);
         flushFacts();
+        await Promise.allSettled(pendingDeliveries);
         controller.applyFact({ type: 'run-settled', runId, at: Date.now(), generation });
         // 057 S3：回执用量随运行收口进快照（渲染层派生回执的用量标签同一来源）。
         const hasArtifacts = Object.values(controller.getSnapshot().artifacts).some(artifact => artifact.producerRunId === runId || artifact.producers?.some(producer => producer.runId === runId));
@@ -1022,6 +1039,13 @@ export function registerLlmIpc() {
     getConversationDeliverableIo().openConversationDeliverable(
       String(payload?.conversationId ?? ''),
       String(payload?.artifactId ?? ''),
+      typeof payload?.linkPath === 'string' && payload.linkPath ? payload.linkPath : null,
+      payload?.intent ?? 'preview-file',
+      typeof payload?.applicationId === 'string' ? payload.applicationId : null,
+    ));
+  ipcMain.handle(IPC.delivery.listConversationDeliverableApplications, (_event, payload) =>
+    getConversationDeliverableIo().listConversationDeliverableApplications(
+      String(payload?.conversationId ?? ''), String(payload?.artifactId ?? ''),
       typeof payload?.linkPath === 'string' && payload.linkPath ? payload.linkPath : null,
     ));
   ipcMain.handle(IPC.delivery.resolveConversationLink, (_event, payload) =>

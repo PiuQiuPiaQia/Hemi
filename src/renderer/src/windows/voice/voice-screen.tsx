@@ -85,6 +85,7 @@ import { TaskResultBlock } from '@/windows/voice/result-view';
 import { WaitingStatus } from '@/windows/voice/waiting-status';
 import { SessionUsage } from '@/windows/voice/session-usage-view';
 import type { ConversationDeliverableView, UsageRecord } from '@shared/protocol';
+import { DeliverableContext } from './deliverable-card';
 import { ModelSelectorChip } from '@/windows/voice/model-selector';
 import { WorkspaceBar, type WorkspaceBarValue } from '@/windows/voice/workspace-bar';
 import { TopbarOpenWorkspace } from '@/windows/voice/topbar-open-workspace';
@@ -863,16 +864,15 @@ export function VoiceScreen({
         ? '家目录'
         : '';
 
-  // 066：本机项目工作区才有顶栏「打开目录」入口——默认空间/旧会话家目录没有
-  // 项目含义，远端项目（host）的目录在本地文件管理器里没有对应物，都不显示。
+  // Local conversations always expose their actual directory, including default and legacy chats.
   const openWorkspaceView =
     !skillMarketOpen &&
     !workflowStudioOpen &&
-    workspaceCurrent?.kind === 'view' &&
-    workspaceCurrent.view.type === 'project' &&
-    !workspaceCurrent.view.host
+    workspaceCurrent?.kind === 'view' && !workspaceCurrent.view.host
       ? workspaceCurrent.view
-      : null;
+      : !skillMarketOpen && !workflowStudioOpen && workspaceCurrent?.kind === 'legacy'
+        ? { id: 'legacy-home', type: 'default' as const, name: '家目录', dir: '', status: 'ok' as const }
+        : null;
 
   // 037：⌘N 新建对话（侧栏按钮上的快捷键提示）。
   const newConversationRef = useRef<() => void>(() => {});
@@ -897,6 +897,7 @@ export function VoiceScreen({
   // 待重发队列的头一条（重发必须按序，其余按钮禁用）。
 
   return (
+    <DeliverableContext.Provider value={{ conversationId: currentConversationId, onOpen: openDeliverablePreview, onOpenLink: openLocalFileLink }}>
     <main
       className="voice-shell compact-shell h24-shell min-h-dvh overflow-hidden"
       data-market-open={skillMarketOpen ? 'true' : 'false'}
@@ -1419,6 +1420,7 @@ export function VoiceScreen({
         </section>
       </div>
     </main>
+    </DeliverableContext.Provider>
   );
 }
 

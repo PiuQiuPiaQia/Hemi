@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranscriptRowState } from './transcript-row-state';
 import { ChevronRight } from 'lucide-react';
 import { formatThinkingDuration, latestLineOf } from '@/windows/voice/lib/thinking-format';
+import { useThinkingElapsed } from './lib/use-thinking-elapsed';
 
 /**
  * 048：回复上方的思考折叠头（候选稿 v3）。
@@ -12,17 +13,6 @@ import { formatThinkingDuration, latestLineOf } from '@/windows/voice/lib/thinki
  * 最新内容，用户上翻即停跟。层级只靠字号与灰度：头 13 号 muted 中字重、
  * 最新一行 13 号 muted 常规字重，不与正文抢层级。
  */
-
-/** 每秒一跳的本地计时（思考中专用；结束后由调用方给定格时长）。 */
-function useTicking(startedAt: number | null): number | null {
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (startedAt == null) return;
-    const timer = window.setInterval(() => force((n) => n + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
-  return startedAt == null ? null : Date.now() - startedAt;
-}
 
 export function ThinkingBlock({
   text,
@@ -44,7 +34,7 @@ export function ThinkingBlock({
   const [expanded, setExpanded] = useTranscriptRowState<boolean>("thinking-expanded", initialExpanded);
   const [userScrolled, setUserScrolled] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const tickingMs = useTicking(state === 'streaming' ? startedAt : null);
+  const tickingMs = useThinkingElapsed(state === 'streaming' ? startedAt : null);
 
   // 展开区跟随最新内容：流式中未上翻就贴底（新内容到来即滚到底）。
   useEffect(() => {

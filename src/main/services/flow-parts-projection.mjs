@@ -136,7 +136,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
     }];
   }
 
-  return { handle, finish, delivered(inputId) { const facts = closeOpenParts(); afterInputId = inputId; return facts; } };
+  return { handle, finish, get afterInputId() { return afterInputId; }, delivered(inputId) { const facts = closeOpenParts(); afterInputId = inputId; return facts; } };
 }
 
 const TASK_PREVIEW_LIMIT = 200;
