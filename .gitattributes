@@ -8,3 +8,7 @@ third-party/** text eol=lf
 third-party/*.tar.gz -text
 package-lock.json text eol=lf
 src/renderer/public/licenses/** text eol=lf
+# 生成后逐字节比对（npm run build 的 prebuild → generate-appearance --check）。
+# Windows checkout 默认 autocrlf 会把 CRLF 写进来，比对必挂（2026-10-21 v0.2.0
+# win job 实测：mac 绿、win 挂在 prebuild）。
+src/renderer/public/appearance-colors.css text eol=lf
