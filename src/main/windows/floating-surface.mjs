@@ -476,9 +476,9 @@ export async function showFloatingOrbIfNeeded({ allowSmoke = false } = {}) {
   floatingShowInFlight = (async () => {
     const [stored, config] = await Promise.all([
       readStoredConfig(),
-      resolveConfig(),
+      resolveConfig({ decryptSecrets: false }),
     ]);
-    if (!stored.floatingOrbEnabled || !config.apiKey) return;
+    if (!stored.floatingOrbEnabled || !config.hasApiKey) return;
 
     const { orb, caption } = await createFloatingSurface();
     if (!await waitForAppearance(orb) || !await waitForAppearance(caption)) return;

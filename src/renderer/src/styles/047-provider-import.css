@@ -289,3 +289,23 @@ html.kb-nav .h47n-method:focus-visible {
     transition: none;
   }
 }
+
+/* Account OAuth uses the existing settings rows and spacing tokens. */
+.h-oauth-label { display: flex; flex: 1 1 14rem; flex-direction: column; min-width: 0; gap: var(--sp-4); }
+.h-oauth-label > span { color: var(--muted); font-size: var(--fs-12); }
+.h-oauth-row { flex-wrap: wrap; gap: var(--sp-12); }
+.h-oauth-progress { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-16); }
+.h-oauth-progress p { margin: 0; }
+.h-oauth-prompt { display: flex; flex-direction: column; gap: var(--sp-8); width: 100%; }
+.h-oauth-prompt .h37-actions { flex-wrap: wrap; }
+.h-oauth-prompt input { min-width: 0; flex: 1; }
+.h-oauth-code { font-size: var(--fs-20); letter-spacing: 0.12em; }
+.h37-dialog-popup.h-oauth-dialog { width: min(520px, calc(100vw - var(--sp-32))); max-width: none; overflow-y: auto; gap: var(--sp-24); padding: var(--sp-24); }
+.h-oauth-dialog .h-oauth-close { position: absolute; top: var(--sp-16); right: var(--sp-16); }
+.h-oauth-status { display: flex; align-items: center; gap: var(--sp-8); }
+.h-oauth-device { display: flex; flex-direction: column; gap: var(--sp-8); width: 100%; padding: var(--sp-16); background: var(--bg-subtle); border-radius: var(--r-md); }
+.h-oauth-device .h37-actions { flex-wrap: wrap; gap: var(--sp-12); }
+.h-oauth-dialog .h-oauth-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); margin: 0; }
+@media (max-width: 600px) {
+  .h37-dialog-popup.h-oauth-dialog[data-slot='dialog-content'] { width: 100%; max-width: 100%; padding: var(--sp-20); padding-bottom: calc(var(--sp-20) + env(safe-area-inset-bottom)); }
+}

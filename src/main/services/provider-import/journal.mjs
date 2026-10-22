@@ -47,7 +47,7 @@ export function createImportJournal({
     /** durable 落盘（临时文件＋rename）。加密不可用/写失败如实抛错。 */
     async persist(operationId, payload) {
       if (!canEncrypt()) {
-        throw new Error('本机暂时无法加密导入记录（系统钥匙串不可用）');
+        throw new Error('本机暂时无法加密导入记录（本机存储不可用）');
       }
       const file = fileOf(operationId);
       const outer = {

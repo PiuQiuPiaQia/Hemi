@@ -17,7 +17,7 @@ export function createLoginMemory({ contents, session, siteOrigin, store, onErro
   let disposed = false;
   let pending = null;
   let cookieWrites = Promise.resolve();
-  const report = () => onError('账号密码或登录状态未能加密保存，请检查本机钥匙串和存储权限');
+  const report = () => onError('账号密码或登录状态未能加密保存，请检查本机存储权限');
   function trusted(event) {
     try {
       return !disposed && event.sender === contents && event.senderFrame === contents.mainFrame

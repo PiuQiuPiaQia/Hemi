@@ -279,6 +279,48 @@ test('safeStorage 不可用：带新 Key 的保存被拒、不落明文；目录
   assert.equal(list.providers.length, 0);
 });
 
+test('模型状态与非密钥编辑不访问钥匙串，实际解析仍能解密原有 Key', async () => {
+  const filePath = '/ud/text-model-profiles.json';
+  const encryptedApiKey = enc('existing-key');
+  const fs = memoryFs({ [filePath]: JSON.stringify({
+    version: 3, defaultModelId: 'a/m1', providers: [
+      { id: 'a', name: 'A', baseUrl: 'https://a/v1', encryptedApiKey, models: [{ id: 'm1', model: 'model-a1' }] },
+    ],
+  }) });
+  let reads = 0;
+  const store = storeFor(fs, { safeStorage: {
+    ...safeStub,
+    isEncryptionAvailable() { reads += 1; return true; },
+    decryptString(buf) { reads += 1; return safeStub.decryptString(buf); },
+  } });
+  assert.equal((await store.list()).providers[0].hasApiKey, true);
+  const view = await store.resolve({ decryptSecrets: false });
+  assert.equal(view.hasApiKey, true);
+  assert.equal(view.keyStoredSecurely, true);
+  assert.equal(view.apiKey, '');
+  assert.equal((await store.get('a/m1', { decryptSecrets: false })).hasApiKey, true);
+  await store.saveProvider({ id: 'a', name: 'Renamed', models: [{ id: 'm1', model: 'model-a1' }] });
+  assert.equal(reads, 0);
+  assert.equal(JSON.parse(fs.files.get(filePath)).providers[0].encryptedApiKey, encryptedApiKey);
+  assert.equal((await store.resolve({})).apiKey, 'existing-key');
+  assert.ok(reads > 0);
+});
+
+test('账号模型的状态查询使用凭据索引，不读取 token', async () => {
+  const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
+    version: 3, defaultModelId: 'account/main', providers: [
+      { id: 'account', oauthProvider: 'openai', models: [{ id: 'main', model: 'account-model' }] },
+    ],
+  }) });
+  const store = storeFor(fs, { oauth: {
+    credentials: { list: async () => [{ providerId: 'openai' }] },
+    connected: () => assert.fail('状态查询不应解密账号 token'),
+  } });
+  assert.equal((await store.list()).providers[0].hasApiKey, true);
+  assert.equal((await store.resolve({ decryptSecrets: false })).hasApiKey, true);
+  assert.equal((await store.get('account/main', { decryptSecrets: false })).hasApiKey, true);
+});
+
 test('providerCredentials：按供应商取端点与解密 Key；未知/无 Key 如实返回（041 拉取模型）', async () => {
   const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
     version: 2,

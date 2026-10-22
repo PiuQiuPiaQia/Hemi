@@ -1,7 +1,8 @@
 // 047：New API 导入 IPC——命令进协调器，状态事件推主窗口。
 // 信任边界：sender 必须是主窗口 webContents 的受信任顶层 frame（OAuth 弹窗、
 // 站点页面、其他窗口都没有导入权限）；payload 不含也不回任何秘密。
-import { app, ipcMain, safeStorage, session, WebContentsView } from 'electron';
+import { app, ipcMain, session, WebContentsView } from 'electron';
+import { secretStorage } from '../lib/secret-storage.mjs';
 
 import { IPC } from '../../shared/ipc-channels.mjs';
 import { createLogger } from '../lib/logger.mjs';
@@ -23,7 +24,7 @@ export function registerProviderImportIpc() {
     getMainWindow: () => appState.mainWindow,
     WebContentsView,
     sessionFromPartition: (partition) => session.fromPartition(partition),
-    safeStorage,
+    safeStorage: secretStorage,
     getProfilesStore: () => getProfiles(),
     journalDirPath: app.getPath('userData') + '/provider-import',
     log,

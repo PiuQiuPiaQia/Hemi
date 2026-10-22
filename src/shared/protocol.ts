@@ -1475,10 +1475,25 @@ export type ModelEntryView = {
 };
 
 /** 046：供应商线协议——OpenAI 兼容（chat/completions）或 Anthropic 原生（/v1/messages）。 */
-export type ModelProviderApi = 'openai-completions' | 'anthropic-messages';
+export type ModelProviderApi = 'openai-completions' | 'anthropic-messages' | 'openai-responses';
+
+export type OAuthProvider = 'openai' | 'anthropic' | 'github-copilot';
+export type OAuthLoginState = {
+  id: string;
+  revision: number;
+  provider: OAuthProvider;
+  name: string;
+  phase: 'login' | 'success' | 'failed' | 'cancelled';
+  message: string;
+  url: string | null;
+  userCode: string | null;
+  providerId?: string;
+  prompt: null | { id: string; type: 'text' | 'secret' | 'select' | 'manual_code'; message: string; placeholder: string; options?: Array<{ id: string; label: string }> };
+};
 
 /** 031 v2：供应商视图（端点＋Key＋协议＋模型列表；无 Key 材料）。 */
 export type ModelProviderView = {
+  oauthProvider?: OAuthProvider;
   id: string;
   name: string;
   baseUrl: string;
@@ -2074,6 +2089,11 @@ export type HemiVoiceBridge = {
   setThinkingLevel: (level: ThinkingLevel, profileId?: string) => Promise<{ thinkingLevel: ThinkingLevel }>;
   /** 031 v2 多组模型配置：目录 / 保存供应商 / 删除供应商（默认模型需替代）/ 默认模型 / 逐模型测试。 */
   listModelProfiles: () => Promise<ModelProfilesDirectory>;
+  startOAuthLogin: (provider: OAuthProvider) => Promise<OAuthLoginState>;
+  getOAuthLoginState: () => Promise<OAuthLoginState | null>;
+  answerOAuthLogin: (payload: { id: string; promptId: string; value: string }) => Promise<OAuthLoginState | null>;
+  cancelOAuthLogin: (id: string) => Promise<OAuthLoginState | null>;
+  logoutOAuth: (provider: OAuthProvider) => Promise<{ ok: boolean }>;
   saveModelProfile: (provider: ModelProviderSaveInput) => Promise<{ ok: boolean; providerId: string; modelKeys: string[] }>;
   removeModelProfile: (payload: {
     providerId: string;

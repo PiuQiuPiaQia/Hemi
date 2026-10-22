@@ -5,11 +5,12 @@ import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models
 import { ZAI_CODING_CN_MODELS } from '@earendil-works/pi-ai/providers/zai-coding-cn.models';
 import { ZAI_MODELS } from '@earendil-works/pi-ai/providers/zai.models';
 import { DEFAULT_LEVEL_TIER, normalizeThinkingFormat, normalizeThinkingLevel } from '../services/thinking-level.mjs';
+import { oauthCatalogModel, streamOAuthModel } from '../services/oauth-models.mjs';
 
 // 只查原厂目录；伙伴／订阅计划目录存在同名型号，不能按名字拿其专用端点能力。
 const OPENAI_CATALOGS = [OPENAI_MODELS, DEEPSEEK_MODELS, ZAI_CODING_CN_MODELS, ZAI_MODELS];
 export const MODEL_OUTPUT_LIMIT = 32768;
-export const piApiOf = (api) => api === 'anthropic-messages' ? api : 'openai-completions';
+export const piApiOf = (api) => ['anthropic-messages', 'openai-responses'].includes(api) ? api : 'openai-completions';
 
 /** 配置容忍完整接口 URL，SDK 接收基址并自行拼协议路径。 */
 export function modelBaseUrl(baseUrl, api = 'openai-completions') {
@@ -33,6 +34,12 @@ export function reasoningLevelOf(value, model) {
 
 /** ProviderConfig.models 的原生定义；预算与工具 schema 策略由宿主统一覆写。 */
 export function candidateModelDef(candidate) {
+  if (candidate.oauthProvider) {
+    const native = oauthCatalogModel(candidate.oauthProvider, candidate.model);
+    if (!native) throw new Error('账号模型目录不可用，请重新登录');
+    const { provider, baseUrl, ...definition } = native;
+    return { ...definition, name: candidate.name || native.name, maxTokens: Math.min(native.maxTokens, MODEL_OUTPUT_LIMIT), input: candidate.supportsVision ? ['text', 'image'] : ['text'] };
+  }
   const api = piApiOf(candidate.api);
   const catalog = api === 'anthropic-messages'
     ? ANTHROPIC_MODELS[candidate.model]
@@ -73,14 +80,19 @@ export function candidateModelDef(candidate) {
 }
 
 export function piModelOf(candidate, provider = 'hemi-chat') {
+  const definition = candidateModelDef(candidate);
   return {
-    ...candidateModelDef(candidate),
-    api: piApiOf(candidate.api), provider,
+    ...definition,
+    api: candidate.oauthProvider ? definition.api : piApiOf(candidate.api), provider,
     baseUrl: modelBaseUrl(candidate.baseUrl, candidate.api),
   };
 }
 
 export function providerRegistrationOf(candidate) {
+  if (candidate.oauthProvider) {
+    const definition = candidateModelDef(candidate);
+    return { baseUrl: candidate.baseUrl, api: definition.api, apiKey: 'oauth', models: [definition], streamSimple: (_model, context, options) => streamOAuthModel(candidate, context, options) };
+  }
   return {
     baseUrl: modelBaseUrl(candidate.baseUrl, candidate.api),
     api: piApiOf(candidate.api),

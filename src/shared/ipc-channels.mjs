@@ -179,6 +179,13 @@ export const IPC = {
     /** main → renderer：流式增量分片。 */
     delta: 'llm:delta',
   },
+  oauth: {
+    start: 'oauth:start',
+    getState: 'oauth:get-state',
+    answer: 'oauth:answer',
+    cancel: 'oauth:cancel',
+    logout: 'oauth:logout',
+  },
   usage: {
     /** 048：会话用量账本（对话侧记录＋任务执行汇总合并）。 */
     getLedger: 'usage:get-ledger',

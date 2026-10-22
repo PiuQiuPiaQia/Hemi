@@ -359,7 +359,7 @@ export function NewApiImportView({
                   <span className="h37m-sub">
                     {item.readable
                       ? `${item.siteOrigin ?? ''} · ${item.phase}${item.apiKeyHeld ? ' · 已持有加密 Key' : ''}`
-                      : '上次的导入记录在这台机器上解不开（钥匙串变了），保留现场不自动处理'}
+                      : '这条导入记录无法读取，原记录已保留'}
                   </span>
                 </span>
                 <span className="h37-row-end">

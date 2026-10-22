@@ -46,6 +46,8 @@ export function describeVisionError(status, bodyText) {
  * @returns {Promise<string>} 模型的中文回答（trim 后）。
  */
 async function answerAboutImageRaw({
+  oauthProvider,
+  api,
   baseUrl,
   apiKey,
   model,
@@ -62,6 +64,14 @@ async function answerAboutImageRaw({
   if (!apiKey) throw new Error('未配置文本模型，请先在设置里填写 API Key。');
   if (!model) throw new Error('还没有可用的视觉模型，请到 设置 → 模型 检查。');
   if (!imageData) throw new Error('图片内容为空。');
+  if (oauthProvider) {
+    const { chatTurn } = await import('./text-model.mjs');
+    const result = await chatTurn({ oauthProvider, api, baseUrl, apiKey, model, supportsVision: true, maxTokens, timeoutMs, fetchImpl, thinkingLevel: 'off', maxPreStreamRetries: 0,
+      messages: [{ role: 'user', content: [{ type: 'text', text: buildVisionPrompt({ question, header }) }, { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageData}` } }] }],
+    });
+    if (!result.content.trim()) throw new Error('视觉模型没有返回内容');
+    return result.content.trim();
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

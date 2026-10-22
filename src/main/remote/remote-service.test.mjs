@@ -28,6 +28,23 @@ function newService(dir, crypto = fakeCrypto) {
   return { ud, svc: createRemoteService({ userDataDir: ud, crypto }) };
 }
 
+test('创建/关闭服务不恢复密码，首次取用才解密且后续复用内存', () => {
+  const { ud, svc } = newService();
+  svc.rememberPassword('devbox', 'saved-pw', { remember: true });
+  svc.close();
+  let decrypts = 0;
+  const crypto = { ...fakeCrypto, decrypt(blob) { decrypts += 1; return fakeCrypto.decrypt(blob); } };
+  const idle = createRemoteService({ userDataDir: ud, crypto });
+  idle.close();
+  assert.equal(decrypts, 0);
+  const active = createRemoteService({ userDataDir: ud, crypto });
+  assert.equal(decrypts, 0);
+  assert.equal(active.hasPassword('devbox'), true);
+  assert.equal(active.hasPassword('devbox'), true);
+  assert.equal(decrypts, 1);
+  active.close();
+});
+
 test('记住密码：加密落盘（0600）＋重启恢复到内存池；不勾只进内存', () => {
   const { ud, svc } = newService();
   svc.rememberPassword('devbox', 'pw-1', { remember: true });

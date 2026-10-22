@@ -4,7 +4,7 @@
 // 模型——endpoint 与 Key 属于供应商，型号/思考强度/视觉能力属于模型；会话
 // 选择与默认值都落在「模型键」（providerId/modelId）上。
 //
-// 其余纪律：Key 只存 safeStorage 密文（不可用时仅进程内存）、渲染层只拿视图；
+// 其余纪律：Key 只存注入的加密存储密文（不可用时仅进程内存）、渲染层只拿视图；
 // 损坏目录只读回落；删除含默认模型的供应商必须显式给替代模型；
 // HEMI_LLM_* 环境覆盖最高且如实标记。
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -13,6 +13,8 @@ import path from 'node:path';
 import { AUTO_SELECTION_ID } from './model-routing.mjs';
 import { normalizeThinkingFormat, normalizeThinkingLevel } from '../services/thinking-level.mjs';
 import { noteActivity } from './perf.mjs';
+import { hasSupportedSecret } from './local-secrets.mjs';
+import { isOAuthProvider, OAUTH_PROVIDERS } from '../services/oauth-models.mjs';
 
 /** 047：目录 schema 3＝2 ＋顶层 importReceipts（导入提交事实，普通读写显式保留）。 */
 export const PROFILES_VERSION = 3;
@@ -68,7 +70,7 @@ function normalizeModel(raw) {
 }
 
 /** 046：供应商线协议（openai-completions＝OpenAI 兼容；anthropic-messages＝Anthropic 原生）。 */
-export const PROVIDER_APIS = ['openai-completions', 'anthropic-messages'];
+export const PROVIDER_APIS = ['openai-completions', 'anthropic-messages', 'openai-responses'];
 
 /** 非法/缺省回落 openai-completions（存量目录无此字段，行为不变）。 */
 export function normalizeProviderApi(value) {
@@ -95,6 +97,7 @@ export function normalizeProvider(raw) {
     name: (typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : '').slice(0, 40) || '未命名供应商',
     baseUrl: typeof raw.baseUrl === 'string' && raw.baseUrl.trim() ? raw.baseUrl.trim() : '',
     api: normalizeProviderApi(raw.api),
+    ...(isOAuthProvider(raw.oauthProvider) ? { oauthProvider: raw.oauthProvider } : {}),
     encryptedApiKey: typeof raw.encryptedApiKey === 'string' ? raw.encryptedApiKey : '',
     models: uniqueModels,
     createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
@@ -207,6 +210,7 @@ export function providerView(provider) {
     name: provider.name,
     baseUrl: provider.baseUrl,
     api: provider.api ?? 'openai-completions',
+    ...(provider.oauthProvider ? { oauthProvider: provider.oauthProvider } : {}),
     hasApiKey: Boolean(provider.encryptedApiKey),
     keyStoredSecurely: Boolean(provider.encryptedApiKey),
     updatedAt: provider.updatedAt,
@@ -234,13 +238,29 @@ export function createProfileStore({
   safeStorage = null,
   env = process.env,
   log = null,
+  oauth = null,
 } = {}) {
   let directory = null;
   let corrupt = false;
 
   const canEncrypt = () => Boolean(safeStorage?.isEncryptionAvailable?.());
 
-  function providerApiKey(provider) {
+  async function providerHasStoredKey(provider) {
+    if (!provider.oauthProvider) return Boolean(provider.encryptedApiKey);
+    // 账号连接也只读取存档索引；设置/启动状态查询不解密 token。
+    if (oauth?.credentials?.list) {
+      const entries = await oauth.credentials.list();
+      return entries.some(entry => entry.providerId === provider.oauthProvider);
+    }
+    return Boolean(await oauth?.connected(provider.oauthProvider));
+  }
+
+  function apiFor(provider, model) {
+    return (provider.oauthProvider ? oauth?.models?.getModel?.(provider.oauthProvider, model.model)?.api : null) ?? provider.api ?? 'openai-completions';
+  }
+
+  async function providerApiKey(provider) {
+    if (provider.oauthProvider) return await oauth?.connected(provider.oauthProvider) ? 'oauth' : '';
     if (provider.encryptedApiKey && canEncrypt()) {
       try {
         return safeStorage.decryptString(Buffer.from(provider.encryptedApiKey, 'base64'));
@@ -293,6 +313,9 @@ export function createProfileStore({
       if (Array.isArray(raw?.providers) && raw.providers.length === 0) return null;
       const next = normalizeDirectory(raw);
       if (!next) throw new Error('目录结构无效');
+      for (const provider of next.providers) {
+        if (!hasSupportedSecret(safeStorage, provider.encryptedApiKey)) provider.encryptedApiKey = '';
+      }
       directory = next;
       return directory;
     } catch (error) {
@@ -344,30 +367,34 @@ export function createProfileStore({
         visionModelKey: directory.visionModelKey ?? null,
         corrupt: false,
         envOverride: envOverrideActive(env),
-        providers: directory.providers.map(providerView),
+        providers: await Promise.all(directory.providers.map(async provider => {
+          const hasApiKey = await providerHasStoredKey(provider);
+          return { ...providerView(provider), hasApiKey, keyStoredSecurely: hasApiKey };
+        })),
       };
     },
 
     /** 单个模型的完整配置（主进程：逐模型测试 / 探活回显）。 */
-    async get(modelKey) {
+    async get(modelKey, { decryptSecrets = true } = {}) {
       await ensureLoaded();
       const found = findModel(modelKey);
       if (!found) return null;
-      const apiKey = providerApiKey(found.provider);
+      const apiKey = decryptSecrets ? await providerApiKey(found.provider) : '';
       return {
         modelKey,
         providerId: found.provider.id,
         modelId: found.model.id,
         name: found.provider.name,
         baseUrl: found.provider.baseUrl,
-        api: found.provider.api ?? 'openai-completions',
+        api: apiFor(found.provider, found.model),
+        ...(found.provider.oauthProvider ? { oauthProvider: found.provider.oauthProvider } : {}),
         model: found.model.model,
         apiKey,
         thinkingLevel: found.model.thinkingLevel,
         thinkingFormat: found.model.thinkingFormat,
         supportsVision: found.model.supportsVision,
         visionModel: found.model.visionModel,
-        hasApiKey: Boolean(apiKey),
+        hasApiKey: decryptSecrets ? Boolean(apiKey) : await providerHasStoredKey(found.provider),
       };
     },
 
@@ -376,7 +403,7 @@ export function createProfileStore({
       await ensureLoaded();
       const provider = directory?.providers.find((item) => item.id === providerId) ?? null;
       if (!provider) return null;
-      const apiKey = providerApiKey(provider);
+      const apiKey = await providerApiKey(provider);
       return {
         providerId: provider.id,
         name: provider.name,
@@ -404,6 +431,10 @@ export function createProfileStore({
       const previous = providerId && directory
         ? directory.providers.find((item) => item.id === providerId) ?? null
         : null;
+      if (previous?.oauthProvider && (input?.apiKey || input?.baseUrl && input.baseUrl !== previous.baseUrl || input?.api && input.api !== previous.api)) throw new Error('账号连接由服务商管理，请通过重新登录更新。');
+      if (previous?.oauthProvider) {
+        if (input.models?.some(model => !oauth.models.getModel(previous.oauthProvider, model.model))) throw new Error('请选择账号目录中的模型');
+      }
       const keep = (next, prev) => (typeof next === 'string' && next.trim() ? next : prev);
       const models = (Array.isArray(input?.models) ? input.models : [])
         .map((raw, index) => normalizeModel({
@@ -411,7 +442,7 @@ export function createProfileStore({
           model: raw?.model,
           thinkingLevel: raw?.thinkingLevel,
           thinkingFormat: raw?.thinkingFormat,
-          supportsVision: raw?.supportsVision === true,
+          supportsVision: raw?.supportsVision === true && (!previous?.oauthProvider || oauth.models.getModel(previous.oauthProvider, raw.model)?.input.includes('image')),
           visionModel: raw?.visionModel,
         }))
         .filter(Boolean);
@@ -422,6 +453,7 @@ export function createProfileStore({
         baseUrl: keep(input?.baseUrl, previous?.baseUrl),
         // 046：协议缺省沿旧值（编辑表单整单提交）；从未有过的落 openai 兜底。
         api: normalizeProviderApi(input?.api ?? previous?.api),
+        ...(previous?.oauthProvider ? { oauthProvider: previous.oauthProvider } : {}),
         encryptedApiKey: previous?.encryptedApiKey ?? '',
         models,
         createdAt: previous?.createdAt ?? Date.now(),
@@ -430,7 +462,7 @@ export function createProfileStore({
       const apiKey = typeof input?.apiKey === 'string' ? input.apiKey.trim() : '';
       if (apiKey) {
         if (!canEncrypt()) {
-          throw new Error('本机暂时无法加密保存密钥（系统钥匙串不可用），请稍后重试。');
+          throw new Error('本机暂时无法加密保存密钥（本机存储不可用），请稍后重试。');
         }
         next.encryptedApiKey = safeStorage.encryptString(apiKey).toString('base64');
       }
@@ -459,6 +491,27 @@ export function createProfileStore({
       });
     },
 
+    /** Main-process-only account catalog import. Stable IDs preserve selections on reconnect. */
+    async saveOAuthProvider(oauthProvider, catalog) {
+      return queueWrite(async () => {
+        await ensureLoaded();
+        if (corrupt) throw new Error('配置目录损坏，修复后才能保存');
+        if (!isOAuthProvider(oauthProvider) || !catalog.length) throw new Error('账号模型目录为空');
+        if (envOverrideActive(env)) throw new Error('环境变量正在覆盖模型配置，请先移除覆盖再登录。');
+        const id = `oauth-${oauthProvider}`;
+        const previous = directory?.providers.find(provider => provider.id === id);
+        const models = catalog.map(item => {
+          const old = previous?.models.find(model => model.model === item.id);
+          return normalizeModel({ ...old, id: old?.id ?? `m-${Buffer.from(item.id).toString('base64url')}`, model: item.id, supportsVision: item.supportsVision });
+        });
+        const provider = normalizeProvider({ id, name: previous?.name ?? OAUTH_PROVIDERS[oauthProvider], oauthProvider, baseUrl: catalog[0].baseUrl, api: catalog[0].api, models, createdAt: previous?.createdAt, updatedAt: Date.now() });
+        const providers = previous ? directory.providers.map(item => item.id === id ? provider : item) : [...(directory?.providers ?? []), provider];
+        const keys = providers.flatMap(item => item.models.map(model => `${item.id}/${model.id}`));
+        await persist({ ...directory, version: PROFILES_VERSION, providers, defaultModelId: keys.includes(directory?.defaultModelId) ? directory.defaultModelId : `${id}/${models[0].id}`, visionModelKey: directory?.visionModelKey ?? null });
+        return { ok: true, providerId: id };
+      });
+    },
+
     /** 删除供应商（连同其模型）；含默认模型时必须显式给替代模型键。 */
     async removeProvider({ providerId, replacementModelId = '' }) {
       return queueWrite(async () => {
@@ -482,6 +535,7 @@ export function createProfileStore({
       const providers = directory.providers.filter((item) => item.id !== providerId);
       const remainingKeys = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
       const lastKey = directory.lastConversationModelKey;
+      if (target.oauthProvider) await oauth.models.logout(target.oauthProvider);
       await persist({
         ...directory,
         defaultModelId,
@@ -594,7 +648,7 @@ export function createProfileStore({
         if (typeof planHash !== 'string' || !planHash) throw new Error('导入缺少计划指纹');
         if (!Array.isArray(providerInputs) || providerInputs.length === 0) throw new Error('导入计划为空');
         if (envOverrideActive(env)) throw new Error('环境变量（HEMI_LLM_*）正在覆盖模型配置，先清掉再导入');
-        if (!canEncrypt()) throw new Error('本机暂时无法加密保存密钥（系统钥匙串不可用）');
+        if (!canEncrypt()) throw new Error('本机暂时无法加密保存密钥（本机存储不可用）');
 
         const existingReceipt = directory?.importReceipts?.find((receipt) => receipt.operationId === operationId);
         if (existingReceipt) {
@@ -699,8 +753,8 @@ export function createProfileStore({
       }
       const found = findModel(modelKey);
       if (!found) return { ok: false, reason: 'missing', message: '选择的模型已不在配置里，请重新选择' };
-      const apiKey = providerApiKey(found.provider);
-      if (!apiKey) return { ok: false, reason: 'no-credentials', message: `「${found.provider.name}」还没有可用的 API Key` };
+      const apiKey = await providerApiKey(found.provider);
+      if (!apiKey) return { ok: false, reason: 'no-credentials', message: found.provider.oauthProvider ? `「${found.provider.name}」账号已退出或凭据不可用，请重新登录` : `「${found.provider.name}」还没有可用的 API Key` };
       return {
         ok: true,
         config: {
@@ -708,7 +762,8 @@ export function createProfileStore({
           providerId: found.provider.id,
           name: found.provider.name,
           baseUrl: found.provider.baseUrl,
-          api: found.provider.api ?? 'openai-completions',
+          api: apiFor(found.provider, found.model),
+          ...(found.provider.oauthProvider ? { oauthProvider: found.provider.oauthProvider } : {}),
           apiKey,
           model: found.model.model,
           thinkingLevel: found.model.thinkingLevel,
@@ -720,7 +775,7 @@ export function createProfileStore({
     },
 
     /** 回合解析：modelKey → 供应商端点/Key + 模型字段；环境覆盖最高并如实标记。 */
-    async resolve({ modelKey = null } = {}) {
+    async resolve({ modelKey = null, decryptSecrets = true } = {}) {
       await ensureLoaded();
       let base;
       let resolvedKey = null;
@@ -732,8 +787,10 @@ export function createProfileStore({
           providerId: found.provider.id,
           name: found.provider.name,
           baseUrl: found.provider.baseUrl,
-          api: found.provider.api ?? 'openai-completions',
-          apiKey: providerApiKey(found.provider),
+          api: apiFor(found.provider, found.model),
+          ...(found.provider.oauthProvider ? { oauthProvider: found.provider.oauthProvider } : {}),
+          apiKey: decryptSecrets ? await providerApiKey(found.provider) : '',
+          hasApiKey: await providerHasStoredKey(found.provider),
           model: found.model.model,
           thinkingLevel: found.model.thinkingLevel,
           thinkingFormat: found.model.thinkingFormat,
@@ -755,8 +812,10 @@ export function createProfileStore({
               providerId: fallback.provider.id,
               name: fallback.provider.name,
               baseUrl: fallback.provider.baseUrl,
-              api: fallback.provider.api ?? 'openai-completions',
-              apiKey: providerApiKey(fallback.provider),
+              api: apiFor(fallback.provider, fallback.model),
+              ...(fallback.provider.oauthProvider ? { oauthProvider: fallback.provider.oauthProvider } : {}),
+              apiKey: decryptSecrets ? await providerApiKey(fallback.provider) : '',
+              hasApiKey: await providerHasStoredKey(fallback.provider),
               model: fallback.model.model,
               thinkingLevel: fallback.model.thinkingLevel,
               thinkingFormat: fallback.model.thinkingFormat,
@@ -774,7 +833,10 @@ export function createProfileStore({
         requestedModelKey: modelKey ?? null,
         missingModelKey: missing,
         envOverride: overridden,
+        ...(env.HEMI_LLM_API_KEY || env.HEMI_LLM_BASE_URL ? { oauthProvider: undefined } : {}),
         apiKey: env.HEMI_LLM_API_KEY || base.apiKey,
+        hasApiKey: Boolean(env.HEMI_LLM_API_KEY || (decryptSecrets ? base.apiKey : base.hasApiKey)),
+        keyStoredSecurely: Boolean(base.hasApiKey),
         baseUrl: env.HEMI_LLM_BASE_URL || base.baseUrl,
         model: env.HEMI_LLM_MODEL || base.model,
         thinkingLevel:

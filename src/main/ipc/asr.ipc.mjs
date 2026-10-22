@@ -1,4 +1,4 @@
-import { ipcMain, safeStorage } from 'electron';
+import { ipcMain } from 'electron';
 
 import { createRecognitionOptions, DoubaoAsrSession } from '../services/doubao-asr.mjs';
 import { readStoredConfig, resolveConfig, saveStoredConfig } from '../lib/config-store.mjs';
@@ -44,12 +44,12 @@ async function stopActiveSession() {
 
 export function registerAsrIpc() {
   ipcMain.handle(IPC.asr.getConfig, async () => {
-    const config = await resolveConfig();
+    const config = await resolveConfig({ decryptSecrets: false });
     return {
       resourceId: config.resourceId,
       endpoint: config.endpoint,
-      hasApiKey: Boolean(config.apiKey),
-      keyStoredSecurely: safeStorage.isEncryptionAvailable(),
+      hasApiKey: config.hasApiKey,
+      keyStoredSecurely: config.keyStoredSecurely,
     };
   });
 

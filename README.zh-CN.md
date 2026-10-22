@@ -14,6 +14,10 @@ Hemi 是一款 macOS 桌面 AI 助手，用语音或文字交代任务，让 AI 
 
 [![Hemi 会话用量：各角色调用、输入输出与缓存统计](docs/media/screenshots/feature-usage.png)](docs/media/screenshots/feature-usage.png)
 
+## 模型账号登录
+
+在「设置 → 模型与路由 → 添加供应商 → 账号登录」连接 ChatGPT、Claude 或 GitHub Copilot。浏览器授权后，模型直接加入对话与角色路由的选择列表。凭据加密保存在本机，到期自动刷新；支持重新登录和退出登录。每家服务商保留一个账号，具体模型权限与额度由服务商决定。
+
 ## New API 登录接入
 
 在应用内登录受支持的 New API 站点，创建专属 Key，验证并导入接口与模型配置。支持保留登录状态、过期后补全账号密码。

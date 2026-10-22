@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { hasSupportedSecret } from '../../lib/local-secrets.mjs';
 
 export function loginSiteKey(origin) {
   const url = new URL(origin);
@@ -27,6 +28,7 @@ export function createLoginStore({ dirPath, safeStorage, fs = {} }) {
     if (raw.length > 1024 * 1024) throw new Error('LOGIN_STORE_CORRUPT');
     const outer = JSON.parse(raw);
     if (outer.schema !== 1 || typeof outer.encrypted !== 'string') throw new Error('LOGIN_STORE_CORRUPT');
+    if (!hasSupportedSecret(safeStorage, outer.encrypted)) return { origin };
     const payload = JSON.parse(safeStorage.decryptString(Buffer.from(outer.encrypted, 'base64')));
     if (payload.origin !== origin) throw new Error('LOGIN_ORIGIN_MISMATCH');
     return payload;

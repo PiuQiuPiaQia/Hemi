@@ -2988,7 +2988,7 @@ export default function Home() {
         return;
       }
       if (!saved.keyStoredSecurely) {
-        setSetupError('本机暂时无法加密保存密钥（系统钥匙串不可用），请稍后重试。');
+        setSetupError('本机暂时无法加密保存密钥（本机存储不可用），请稍后重试。');
         return;
       }
       updateConfigForm({
@@ -3093,7 +3093,7 @@ export default function Home() {
         resourceId: configForm.resourceId.trim() || DURATION_RESOURCE_ID,
       });
       if (!saved.hasApiKey) throw new Error('密钥没有保存成功，请重新输入。');
-      if (!saved.keyStoredSecurely) throw new Error('本机暂时无法加密保存密钥（系统钥匙串不可用），请稍后重试。');
+      if (!saved.keyStoredSecurely) throw new Error('本机暂时无法加密保存密钥（本机存储不可用），请稍后重试。');
       updateConfigForm({
         apiKey: '',
         resourceId: saved.resourceId,

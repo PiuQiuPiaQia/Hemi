@@ -27,6 +27,7 @@ import { registerOnboardingIpc } from './onboarding.ipc.mjs';
 import { registerPermissionsIpc } from './permissions.ipc.mjs';
 import { registerPlatformIpc } from './platform.ipc.mjs';
 import { registerProviderImportIpc } from './provider-import.ipc.mjs';
+import { registerOAuthIpc } from './oauth.ipc.mjs';
 import { registerSystemIpc } from './system.ipc.mjs';
 import { registerTaskIpc } from './task.ipc.mjs';
 import { registerAccessIpc } from './access.ipc.mjs';
@@ -155,6 +156,7 @@ export async function registerAllIpcHandlers() {
   registerWorkflowIpc();
   // 047：New API 站点登录导入（状态机/秘密在主进程协调器）。
   registerProviderImportIpc();
+  registerOAuthIpc();
   registerOnboardingIpc();
   registerTtsIpc();
   registerAppIpc();

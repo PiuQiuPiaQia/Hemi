@@ -14,6 +14,10 @@ Configure models for the main agent and individual roles. Delegate as needed to 
 
 [![Hemi session usage: role calls, input, output, and cache statistics](docs/media/screenshots/feature-usage.png)](docs/media/screenshots/feature-usage.png)
 
+## Model account sign-in
+
+Connect ChatGPT, Claude, or GitHub Copilot under Settings → Models and routing → Add provider → Account sign-in. After browser authorization, select the imported models for conversations and role routing. Credentials are encrypted locally and refreshed automatically. Reconnect or sign out at any time; one account is stored per provider. Model access and usage limits depend on the provider.
+
 ## New API sign-in
 
 Sign in to a supported New API site inside Hemi. Create a dedicated key, verify the endpoints, and import model settings. Retain sessions and autofill saved credentials when signing in again.

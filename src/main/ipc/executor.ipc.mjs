@@ -61,10 +61,10 @@ export function registerExecutorIpc() {
   // hasApiKey，明文不出主进程（与 LLM key 同一纪律）。
   ipcMain.handle(IPC.executor.getWebSearch, async () => {
     const stored = await readStoredConfig();
-    const web = await resolveWebSearchConfig();
+    const web = await resolveWebSearchConfig({ decryptSecrets: false });
     return {
       enabled: stored.webSearchEnabled === true,
-      hasApiKey: Boolean(web.apiKey),
+      hasApiKey: web.hasApiKey,
       provider: web.provider,
     };
   });
@@ -72,15 +72,15 @@ export function registerExecutorIpc() {
     const next = {};
     if (payload && typeof payload.enabled === 'boolean') next.webSearchEnabled = payload.enabled;
     const saved = await saveStoredConfig(next);
-    let key = await resolveWebSearchConfig();
+    let key = await resolveWebSearchConfig({ decryptSecrets: false });
     if (payload && typeof payload.apiKey === 'string') {
       const stored = await saveWebSearchStore({ apiKey: payload.apiKey });
-      key = { provider: stored.provider, apiKey: stored.hasApiKey ? 'present' : '' };
+      key = { provider: stored.provider, hasApiKey: stored.hasApiKey };
       log.info(`web 检索 key：${stored.hasApiKey ? `已更新（${stored.keyStoredSecurely ? '加密落盘' : '内存暂存'}）` : '已清除'}`);
     }
     return {
       enabled: saved.webSearchEnabled === true,
-      hasApiKey: Boolean(key.apiKey),
+      hasApiKey: key.hasApiKey,
       provider: key.provider,
     };
   });
@@ -88,12 +88,12 @@ export function registerExecutorIpc() {
   // 020：browser_act（Jev 步进）——开关、端点与 key（key 只写不读，同 web 检索纪律）。
   ipcMain.handle(IPC.executor.getBrowserAct, async () => {
     const stored = await readStoredConfig();
-    const jev = await resolveJevConfig();
+    const jev = await resolveJevConfig({ decryptSecrets: false });
     return {
       enabled: stored.browserActEnabled !== false,
       baseUrl: stored.jevBaseUrl,
       model: stored.jevModel,
-      hasApiKey: Boolean(jev.apiKey),
+      hasApiKey: jev.hasApiKey,
     };
   });
   ipcMain.handle(IPC.executor.setBrowserAct, async (_event, payload) => {
@@ -106,12 +106,12 @@ export function registerExecutorIpc() {
       await saveStoredConfig({ jevApiKey: payload.apiKey });
       log.info(`Jev key：${payload.apiKey ? '已更新（加密落盘）' : '已清除'}`);
     }
-    const jev = await resolveJevConfig();
+    const jev = await resolveJevConfig({ decryptSecrets: false });
     return {
       enabled: saved.browserActEnabled !== false,
       baseUrl: saved.jevBaseUrl,
       model: saved.jevModel,
-      hasApiKey: Boolean(jev.apiKey),
+      hasApiKey: jev.hasApiKey,
     };
   });
   // 设置页「测试连通性」：用输入框当前值（含未保存的 key）探活 Jev 决策端，

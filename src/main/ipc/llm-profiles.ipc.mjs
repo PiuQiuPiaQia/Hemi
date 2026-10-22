@@ -7,7 +7,7 @@
  * llm.ipc 只留耳／口适配、主 agent 回合与 029 队列。
  */
 
-import { ipcMain, safeStorage } from 'electron';
+import { ipcMain } from 'electron';
 
 import { parseModelKey } from '../lib/model-profiles.mjs';
 import { AUTO_SELECTION_ID } from '../lib/model-routing.mjs';
@@ -21,7 +21,7 @@ import { normalizeThinkingLevel } from '../services/thinking-level.mjs';
 import { resolveTextModelConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
-import { getProfiles } from '../lib/profiles-holder.mjs';
+import { getProfiles, getOAuthRuntime } from '../lib/profiles-holder.mjs';
 import { roleModelsView } from '../lib/role-models.mjs';
 import { loadRoles } from '../agent/agent-roles.mjs';
 
@@ -80,6 +80,11 @@ export function registerLlmProfilesIpc() {
     const hasKey = typeof payload?.modelKey === 'string' && payload.modelKey.trim();
     const model = hasKey ? await getProfiles().get(payload.modelKey) : null;
     if (hasKey && !model) return { ok: false, error: '没有这个模型。', errorKind: 'missing' };
+    if (model?.oauthProvider) {
+      try {
+        return await pingTextModel({ ...model, ...(typeof payload?.model === 'string' ? { model: payload.model } : {}), requireTools: payload?.requireTools === true });
+      } catch { return { ok: false, error: '账号模型连接失败，请检查账号权限、额度和网络，或重新登录。', errorKind: 'auth' }; }
+    }
     const pick = (value, fallback) =>
       (typeof value === 'string' && value.trim() ? value.trim() : fallback);
     const base = {
@@ -115,6 +120,11 @@ export function registerLlmProfilesIpc() {
     let baseUrl = pick(payload?.baseUrl);
     let apiKey = pick(payload?.apiKey);
     if (payload?.providerId) {
+      const provider = (await getProfiles().list()).providers.find(item => item.id === payload.providerId);
+      if (provider?.oauthProvider) {
+        try { return { ok: true, models: (await getOAuthRuntime().catalog(provider.oauthProvider)).map(model => model.id) }; }
+        catch { return { ok: false, error: '账号模型目录不可用，请重新登录。' }; }
+      }
       const creds = await getProfiles().providerCredentials(String(payload.providerId));
       if (!creds) return { ok: false, error: '没有这个供应商。' };
       baseUrl = baseUrl || creds.baseUrl;
@@ -141,12 +151,12 @@ export function registerLlmProfilesIpc() {
 
   ipcMain.handle(IPC.llm.getConfig, async () => {
     // 031：模型就绪判定与首启引导读默认组（环境覆盖仍生效并如实返回有效值）。
-    const resolved = await getProfiles().resolve({});
+    const resolved = await getProfiles().resolve({ decryptSecrets: false });
     return {
       baseUrl: resolved.baseUrl,
       model: resolved.model,
-      hasApiKey: Boolean(resolved.apiKey),
-      keyStoredSecurely: Boolean(resolved.apiKey) && safeStorage.isEncryptionAvailable(),
+      hasApiKey: resolved.hasApiKey,
+      keyStoredSecurely: resolved.keyStoredSecurely,
       // 033：思考强度档位（default＝厂商中档）。
       thinkingLevel: resolved.thinkingLevel,
       supportsVision: resolved.supportsVision,
@@ -204,14 +214,14 @@ export function registerLlmProfilesIpc() {
         })
       ).providerId;
     }
-    const resolved = await getProfiles().resolve({});
+    const resolved = await getProfiles().resolve({ decryptSecrets: false });
     return {
       baseUrl: resolved.baseUrl,
       model: resolved.model,
       thinkingLevel: resolved.thinkingLevel,
       thinkingFormat: resolved.thinkingFormat,
-      hasApiKey: Boolean(resolved.apiKey),
-      keyStoredSecurely: Boolean(resolved.apiKey) && safeStorage.isEncryptionAvailable(),
+      hasApiKey: resolved.hasApiKey,
+      keyStoredSecurely: resolved.keyStoredSecurely,
       supportsVision: resolved.supportsVision,
       visionModel: resolved.visionModel,
       ...(providerId ? { providerId } : {}),
@@ -225,7 +235,7 @@ export function registerLlmProfilesIpc() {
       typeof payload === 'object' && payload && typeof payload.profileId === 'string' && payload.profileId !== AUTO_SELECTION_ID
         ? payload.profileId
         : (await getProfiles().list()).defaultModelId;
-    const target = await getProfiles().get(modelKey);
+    const target = await getProfiles().get(modelKey, { decryptSecrets: false });
     if (!target) return { thinkingLevel: 'default' };
     const provider = (await getProfiles().list()).providers.find((item) => item.id === target.providerId);
     if (!provider) return { thinkingLevel: 'default' };
@@ -240,7 +250,7 @@ export function registerLlmProfilesIpc() {
         thinkingLevel: model.modelKey === modelKey ? level : model.thinkingLevel,
       })),
     });
-    const after = await getProfiles().get(modelKey);
+    const after = await getProfiles().get(modelKey, { decryptSecrets: false });
     return { thinkingLevel: after?.thinkingLevel ?? 'default' };
   });
 

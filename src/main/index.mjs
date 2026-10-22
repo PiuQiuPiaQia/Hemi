@@ -4,7 +4,6 @@ import path from 'node:path';
 import { appIconPath, devAppIconPath } from './paths.mjs';
 
 import { registerAllIpcHandlers } from './ipc/index.mjs';
-import { initializeStableSafeStorageIdentity } from './lib/config-store.mjs';
 import { openExternalIfAllowed } from './lib/external-links.mjs';
 import {
   startGlobalPushToTalk,
@@ -63,12 +62,9 @@ const STABLE_STORAGE_NAME = 'hemi';
 // 本地调试实例（未打包的 electron .）默认与生产安装包隔离存储：共用同名
 // userData 会共享单实例锁与全部状态文件——dev 与安装包互踢、互相覆盖配置
 // 与会话记录（2026-09-24 用户要求隔离）。HEMI_USER_DATA_DIR 仍是最高优先级
-// 覆盖，自驱动/冒烟 harness 全走它，不受影响。首次使用 dev 目录需按
-// AGENTS.md 从生产目录拷一次配置。
-// 注意：app.name 不能跟着分支——macOS safeStorage 的 Keychain 身份跟它走，
-// dev 改名会换掉加密钥匙，生产目录拷来的密文配置（API Key 等）全部解不开
-// （2026-09-24 真机实测：改名后「模型未配置／ASR 未配置」）。隔离只动
-// userData 路径，单实例锁与日志随路径自然分家。
+// 覆盖，自驱动/冒烟 harness 全走它，不受影响。
+// 凭据使用各自 userData/secrets 中的本地加密钥匙，不依赖应用名或系统钥匙串。
+// 复制已加密配置时需同时保留 secrets；测试使用独立合成凭据。
 const DEV_STORAGE_NAME = 'hemi-dev';
 app.setName(STABLE_STORAGE_NAME);
 const stableUserDataPath = process.env.HEMI_USER_DATA_DIR
@@ -156,8 +152,7 @@ app.whenReady().then(async () => {
   createLogger('audio').info(
     `系统 AEC（EnforceSystemEchoCancellation）：${isAecEnforced ? '已请求启用（macOS VoiceProcessingIO，实际生效以接通后诊断与媒体日志为准）' : '未请求（默认链路）'}`,
   );
-  initializeStableSafeStorageIdentity();
-  app.setName(BRAND_NAME);
+  // 原生品牌由 bundle、菜单与关于面板提供，凭据不依赖运行时品牌名。
   // 「关于」面板对齐品牌。Dock 悬停名和原生菜单名来自 bundle 的 Info.plist；
   // dev:electron 在启动前同步品牌元数据，打包实例由 electron-builder 写入。
   // dev 运行态补设 Dock 图标；打包后图标来自 bundle，不再运行时覆盖。

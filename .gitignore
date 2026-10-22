@@ -30,6 +30,8 @@ yarn-error.log*
 
 # local environment
 .env*
+# App-owned secret material if an isolated userData is placed inside the checkout.
+**/secrets/key-v1*
 
 # deployment and generated files
 .vercel

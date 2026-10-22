@@ -70,7 +70,7 @@ export function SetupScreen(props: SetupScreenProps) {
           {step === 'model' ? <>
             <StepIcon><Cpu /></StepIcon>
             <h1 className="onboarding-title">连接模型</h1>
-            <p className="onboarding-lead">登录 New API 站点，或使用自己的 API Key。</p>
+            <p className="onboarding-lead">登录模型账号、连接 New API 站点，或使用自己的 API Key。</p>
             <OnboardingModelStep onContinue={async () => { await onAdvance('capabilities'); }} onBack={() => void onAdvance('welcome')} onBusyChange={setModelBusy} />
           </> : null}
 

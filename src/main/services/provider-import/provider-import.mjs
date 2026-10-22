@@ -38,7 +38,7 @@ const ERROR_MESSAGES = {
   LOGIN_REQUIRED: '站点要求重新登录',
   ACCOUNT_CHANGED: '登录的账号和这次导入不一致',
   NO_GROUPS: '这个账号没有可用的分组',
-  ENCRYPTION_UNAVAILABLE: '本机暂时无法加密保存（系统钥匙串不可用）',
+  ENCRYPTION_UNAVAILABLE: '本机暂时无法加密保存（本机存储不可用）',
   ENV_OVERRIDE: '环境变量（HEMI_LLM_*）正在覆盖模型配置，先清掉再导入',
   STORE_CORRUPT: '模型配置目录损坏，修复后才能导入',
   STORE_FAILED: '本机保存失败，Key 已创建，稍后重试保存',

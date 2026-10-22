@@ -1,4 +1,4 @@
-import { ipcMain, safeStorage } from 'electron';
+import { ipcMain } from 'electron';
 
 import { DoubaoTtsSession } from '../services/doubao-tts.mjs';
 import { TtsPlayback } from '../services/tts-playback.mjs';
@@ -75,13 +75,13 @@ function sendTtsEvent(turnId, event) {
 
 export function registerTtsIpc() {
   ipcMain.handle(IPC.tts.getConfig, async () => {
-    const config = await resolveConfig();
+    const config = await resolveConfig({ decryptSecrets: false });
     return {
       ttsEnabled: config.ttsEnabled,
       ttsVoice: config.ttsVoice,
       ttsResourceId: config.ttsResourceId,
-      hasApiKey: Boolean(config.apiKey),
-      keyStoredSecurely: safeStorage.isEncryptionAvailable(),
+      hasApiKey: config.hasApiKey,
+      keyStoredSecurely: config.keyStoredSecurely,
     };
   });
 

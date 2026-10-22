@@ -1,7 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { app, safeStorage } from 'electron';
+import { app } from 'electron';
+import { secretStorage } from './secret-storage.mjs';
+import { hasSupportedSecret } from './local-secrets.mjs';
 
 import { normalizeThinkingFormat, normalizeThinkingLevel } from '../services/thinking-level.mjs';
 import { normalizeOpenTarget as normalizeWorkspaceOpenTarget, WORKSPACE_OPEN_TARGETS } from '../services/workspace-open.mjs';
@@ -23,7 +25,7 @@ const DEFAULT_TEXT_MODEL_NAME = '';
 // 视觉目标裁决（含跨供应商解析）在 services/vision-model.mjs；这里只做
 // 存储读取与凭据解析（2026-10-07 起视觉配置以模型目录为唯一来源）。
 
-// 密钥只保留在本进程内存里：未走 safeStorage 加密前，绝不清空重读成空串。
+// 密钥只保留在本进程内存里：未完成本地加密前，绝不清空重读成空串。
 let inMemoryApiKey = '';
 let inMemoryTextModelApiKey = '';
 // 020：browser_act 的 Jev 决策端配置。2026-09-29 用户裁决：供应商改官方
@@ -45,10 +47,11 @@ async function readTextModelStore() {
   try {
     const raw = await readFile(textModelConfigFilePath(), 'utf8');
     const stored = JSON.parse(raw);
+    if (!hasSupportedSecret(secretStorage, stored.encryptedApiKey)) stored.encryptedApiKey = '';
     let apiKey = '';
 
-    if (stored.encryptedApiKey && safeStorage.isEncryptionAvailable()) {
-      apiKey = safeStorage.decryptString(
+    if (stored.encryptedApiKey && secretStorage.isEncryptionAvailable()) {
+      apiKey = secretStorage.decryptString(
         Buffer.from(stored.encryptedApiKey, 'base64'),
       );
     }
@@ -117,6 +120,7 @@ export async function resolveVisionModelConfig() {
     model: full.model,
     baseUrl: full.baseUrl ?? '',
     api: full.api ?? 'openai-completions',
+    ...(full.oauthProvider ? { oauthProvider: full.oauthProvider } : {}),
     apiKey: full.apiKey ?? '',
     providerId: full.providerId ?? null,
     providerName: full.name ?? null,
@@ -148,8 +152,8 @@ export async function saveTextModelStore(nextConfig) {
         : previous.thinkingLevel,
     thinkingFormat: normalizeThinkingFormat(nextConfig?.thinkingFormat) ?? previous.thinkingFormat,
     encryptedApiKey:
-      apiKey && safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(apiKey).toString('base64')
+      apiKey && secretStorage.isEncryptionAvailable()
+        ? secretStorage.encryptString(apiKey).toString('base64')
         : '',
   };
 
@@ -166,44 +170,48 @@ export async function saveTextModelStore(nextConfig) {
     thinkingLevel: stored.thinkingLevel,
     thinkingFormat: stored.thinkingFormat,
     hasApiKey: Boolean(apiKey),
-    keyStoredSecurely: Boolean(apiKey && safeStorage.isEncryptionAvailable()),
+    keyStoredSecurely: Boolean(apiKey && secretStorage.isEncryptionAvailable()),
   };
 }
 
 // web 检索 provider 配置（独立小文件，key 存储模式与 text-model 完全一致：
-// safeStorage 加密落盘 + 进程内存兜底 + 环境变量直通，重装系统/换机不丢明文）。
+// 应用本地加密落盘 + 进程内存兜底 + 环境变量直通，重装系统/换机不丢明文）。
 let inMemoryWebSearchApiKey = '';
 
 function webSearchConfigFilePath() {
   return path.join(app.getPath('userData'), 'web-search.json');
 }
 
-async function readWebSearchStore() {
+async function readWebSearchStore({ decryptSecrets = true } = {}) {
   try {
     const raw = await readFile(webSearchConfigFilePath(), 'utf8');
     const stored = JSON.parse(raw);
+    if (!hasSupportedSecret(secretStorage, stored.encryptedApiKey)) stored.encryptedApiKey = '';
     let apiKey = '';
-    if (stored.encryptedApiKey && safeStorage.isEncryptionAvailable()) {
-      apiKey = safeStorage.decryptString(Buffer.from(stored.encryptedApiKey, 'base64'));
+    if (decryptSecrets && stored.encryptedApiKey && secretStorage.isEncryptionAvailable()) {
+      apiKey = secretStorage.decryptString(Buffer.from(stored.encryptedApiKey, 'base64'));
     }
     return {
       apiKey: apiKey || inMemoryWebSearchApiKey,
+      encryptedApiKey: stored.encryptedApiKey || '',
+      hasApiKey: Boolean(apiKey || inMemoryWebSearchApiKey || (!decryptSecrets && stored.encryptedApiKey)),
       provider:
         typeof stored.provider === 'string' && stored.provider.trim()
           ? stored.provider.trim()
           : 'tavily',
     };
   } catch {
-    return { apiKey: inMemoryWebSearchApiKey, provider: 'tavily' };
+    return { apiKey: inMemoryWebSearchApiKey, encryptedApiKey: '', hasApiKey: Boolean(inMemoryWebSearchApiKey), provider: 'tavily' };
   }
 }
 
 /** web 检索统一出口：任务链挂扩展与设置页读写都走它。 */
-export async function resolveWebSearchConfig() {
-  const stored = await readWebSearchStore();
+export async function resolveWebSearchConfig(options) {
+  const stored = await readWebSearchStore(options);
   return {
     provider: stored.provider,
     apiKey: stored.apiKey,
+    hasApiKey: stored.hasApiKey,
   };
 }
 
@@ -212,35 +220,34 @@ export async function resolveWebSearchConfig() {
  * enabled 双条件：开关开（D-1 默认开）**且** key 已配置——免 key 不上场
  * （OpenClaw 哲学，同 web 检索），browser_* 兜底不受影响。
  */
-export async function resolveJevConfig() {
-  const stored = await readStoredConfig();
+export async function resolveJevConfig({ decryptSecrets = true } = {}) {
+  const stored = await readStoredConfig({ decryptSecrets });
   const apiKey = stored.jevApiKey || '';
+  const hasApiKey = decryptSecrets ? Boolean(apiKey) : stored.hasJevApiKey;
   return {
-    enabled: stored.browserActEnabled === true && Boolean(apiKey),
+    enabled: stored.browserActEnabled === true && hasApiKey,
     baseUrl: stored.jevBaseUrl,
     model: stored.jevModel,
     apiKey,
+    hasApiKey,
   };
 }
 
 export async function saveWebSearchStore(nextConfig) {
-  const previous = await readWebSearchStore();
-  // key 传空串＝显式清除；缺省＝保留原值（与 text-model 的「非空才覆盖」一致）。
-  const apiKey =
-    typeof nextConfig?.apiKey === 'string'
-      ? nextConfig.apiKey.trim()
-      : previous.apiKey;
-  inMemoryWebSearchApiKey = apiKey;
+  const previous = await readWebSearchStore({ decryptSecrets: false });
+  const newApiKey = typeof nextConfig?.apiKey === 'string' ? nextConfig.apiKey.trim() : '';
+  // web Key 的空串是显式清除；未传 Key 时原样保留密文，无需先解密。
+  const keyProvided = typeof nextConfig?.apiKey === 'string';
+  const encryptedApiKey = keyProvided
+    ? (newApiKey ? encryptNewApiKey(newApiKey) : '')
+    : previous.encryptedApiKey;
 
   const stored = {
     provider:
       typeof nextConfig?.provider === 'string' && nextConfig.provider.trim()
         ? nextConfig.provider.trim()
         : previous.provider,
-    encryptedApiKey:
-      apiKey && safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(apiKey).toString('base64')
-        : '',
+    encryptedApiKey,
   };
   await mkdir(path.dirname(webSearchConfigFilePath()), { recursive: true });
   await writeFile(
@@ -248,17 +255,24 @@ export async function saveWebSearchStore(nextConfig) {
     `${JSON.stringify(stored, null, 2)}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+  if (keyProvided) inMemoryWebSearchApiKey = newApiKey;
   return {
     provider: stored.provider,
-    hasApiKey: Boolean(apiKey),
-    keyStoredSecurely: Boolean(apiKey && safeStorage.isEncryptionAvailable()),
+    hasApiKey: Boolean(inMemoryWebSearchApiKey || encryptedApiKey),
+    keyStoredSecurely: Boolean(encryptedApiKey),
   };
 }
 
+function encryptNewApiKey(apiKey) {
+  if (!secretStorage.isEncryptionAvailable()) {
+    throw new Error('本机暂时无法加密保存密钥（本机存储不可用），请稍后重试。');
+  }
+  return secretStorage.encryptString(apiKey).toString('base64');
+}
+
+// 开发验证脚本使用的应用名称入口；不执行加密或访问任何凭据存储。
 export function initializeStableSafeStorageIdentity() {
-  if (!safeStorage.isEncryptionAvailable()) return;
-  const probe = safeStorage.encryptString('hemi-storage-probe');
-  safeStorage.decryptString(probe);
+  app.setName('hemi');
 }
 
 function normalizeFloatingPosition(value) {
@@ -269,20 +283,30 @@ function normalizeFloatingPosition(value) {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
-export async function readStoredConfig() {
+// 普通偏好/状态读取不解密。旧格式视为未配置，保留其余设置供用户重新填写；
+// 保存非密钥设置直接沿用有效的本地密文。
+export async function readStoredConfig({ decryptSecrets = false } = {}) {
   try {
     const raw = await readFile(configFilePath(), 'utf8');
     const stored = JSON.parse(raw);
+    for (const field of ['encryptedApiKey', 'jevEncryptedApiKey']) {
+      if (!hasSupportedSecret(secretStorage, stored[field])) stored[field] = '';
+    }
     let apiKey = '';
 
-    if (stored.encryptedApiKey && safeStorage.isEncryptionAvailable()) {
-      apiKey = safeStorage.decryptString(
-        Buffer.from(stored.encryptedApiKey, 'base64'),
-      );
+    if (decryptSecrets && stored.encryptedApiKey && secretStorage.isEncryptionAvailable()) {
+      try {
+        apiKey = secretStorage.decryptString(Buffer.from(stored.encryptedApiKey, 'base64'));
+      } catch { /* 密文不可用时保留其余设置。 */ }
     }
 
     return {
       apiKey: apiKey || inMemoryApiKey,
+      encryptedApiKey: stored.encryptedApiKey || '',
+      keyStoredSecurely: Boolean(stored.encryptedApiKey),
+      hasApiKey: Boolean(apiKey || inMemoryApiKey || (!decryptSecrets && stored.encryptedApiKey)),
+      jevEncryptedApiKey: stored.jevEncryptedApiKey || '',
+      hasJevApiKey: Boolean(inMemoryJevApiKey || stored.jevEncryptedApiKey),
       resourceId:
         typeof stored.resourceId === 'string' && stored.resourceId
           ? stored.resourceId
@@ -363,9 +387,9 @@ export async function readStoredConfig() {
           ? stored.jevModel.trim()
           : DEFAULT_JEV_MODEL,
       jevApiKey: (() => {
-        if (stored.jevEncryptedApiKey && safeStorage.isEncryptionAvailable()) {
+        if (decryptSecrets && stored.jevEncryptedApiKey && secretStorage.isEncryptionAvailable()) {
           try {
-            return safeStorage.decryptString(
+            return secretStorage.decryptString(
               Buffer.from(stored.jevEncryptedApiKey, 'base64'),
             );
           } catch {
@@ -380,6 +404,11 @@ export async function readStoredConfig() {
   } catch {
     return {
       apiKey: inMemoryApiKey,
+      encryptedApiKey: '',
+      keyStoredSecurely: false,
+      hasApiKey: Boolean(inMemoryApiKey),
+      jevEncryptedApiKey: '',
+      hasJevApiKey: Boolean(inMemoryJevApiKey),
       resourceId: DEFAULT_RESOURCE_ID,
       endpoint: DEFAULT_ENDPOINT,
       ttsEnabled: true,
@@ -405,11 +434,13 @@ export async function readStoredConfig() {
   }
 }
 
-export async function resolveConfig() {
-  const stored = await readStoredConfig();
+export async function resolveConfig({ decryptSecrets = true } = {}) {
+  const stored = await readStoredConfig({ decryptSecrets });
 
   return {
     apiKey: process.env.DOUBAO_API_KEY || stored.apiKey,
+    hasApiKey: Boolean(process.env.DOUBAO_API_KEY || stored.hasApiKey),
+    keyStoredSecurely: stored.keyStoredSecurely,
     resourceId: process.env.DOUBAO_RESOURCE_ID || stored.resourceId,
     endpoint: process.env.DOUBAO_ASR_ENDPOINT || stored.endpoint,
     ttsEnabled: stored.ttsEnabled,
@@ -423,12 +454,10 @@ export async function resolveConfig() {
 export async function saveStoredConfig(nextConfig) {
   noteActivity('stored-config-save');
   const previous = await readStoredConfig();
-  const apiKey =
-    typeof nextConfig.apiKey === 'string' && nextConfig.apiKey.trim()
-      ? nextConfig.apiKey.trim()
-      : previous.apiKey;
-
-  inMemoryApiKey = apiKey;
+  const newApiKey = typeof nextConfig.apiKey === 'string' ? nextConfig.apiKey.trim() : '';
+  const newJevApiKey = typeof nextConfig.jevApiKey === 'string' ? nextConfig.jevApiKey.trim() : '';
+  const encryptedApiKey = newApiKey ? encryptNewApiKey(newApiKey) : previous.encryptedApiKey;
+  const jevEncryptedApiKey = newJevApiKey ? encryptNewApiKey(newJevApiKey) : previous.jevEncryptedApiKey;
 
   const stored = {
     resourceId:
@@ -518,20 +547,8 @@ export async function saveStoredConfig(nextConfig) {
       typeof nextConfig.jevModel === 'string' && nextConfig.jevModel.trim()
         ? nextConfig.jevModel.trim()
         : previous.jevModel,
-    jevEncryptedApiKey: (() => {
-      const key =
-        typeof nextConfig.jevApiKey === 'string' && nextConfig.jevApiKey.trim()
-          ? nextConfig.jevApiKey.trim()
-          : previous.jevApiKey;
-      inMemoryJevApiKey = key;
-      return key && safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(key).toString('base64')
-        : '';
-    })(),
-    encryptedApiKey:
-      apiKey && safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(apiKey).toString('base64')
-        : '',
+    jevEncryptedApiKey,
+    encryptedApiKey,
     // 066：顶栏打开方式默认 target（未知值不写，保持旧值）。
     workspaceOpenTarget: WORKSPACE_OPEN_TARGETS.includes(nextConfig.workspaceOpenTarget)
       ? nextConfig.workspaceOpenTarget
@@ -543,6 +560,8 @@ export async function saveStoredConfig(nextConfig) {
     encoding: 'utf8',
     mode: 0o600,
   });
+  if (newApiKey) inMemoryApiKey = newApiKey;
+  if (newJevApiKey) inMemoryJevApiKey = newJevApiKey;
 
   return {
     resourceId: stored.resourceId,
@@ -551,10 +570,8 @@ export async function saveStoredConfig(nextConfig) {
     ttsVoice: stored.ttsVoice,
     ttsResourceId: stored.ttsResourceId,
     ttsEndpoint: stored.ttsEndpoint,
-    hasApiKey: Boolean(apiKey),
-    keyStoredSecurely: Boolean(
-      apiKey && safeStorage.isEncryptionAvailable(),
-    ),
+    hasApiKey: Boolean(encryptedApiKey || inMemoryApiKey),
+    keyStoredSecurely: Boolean(encryptedApiKey),
     floatingOrbEnabled: stored.floatingOrbEnabled,
     computerUseEnabled: stored.computerUseEnabled,
     primarySpeakerEnabled: stored.primarySpeakerEnabled,

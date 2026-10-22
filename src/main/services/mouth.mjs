@@ -45,6 +45,7 @@ export async function summarizeForSpeech({ config, question, answer, signal, kin
     apiKey: config.apiKey,
     model: config.model,
     api: config.api,
+    oauthProvider: config.oauthProvider,
     messages: [
       { role: 'system', content: MOUTH_SYSTEM_PROMPT },
       {

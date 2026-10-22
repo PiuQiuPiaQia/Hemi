@@ -211,7 +211,7 @@ export function ModelSelectorChip({
                       aria-checked={active}
                       disabled={disabled}
                       title={
-                        disabled ? '这个供应商还没配 API Key，到 设置 → 模型 补上后可选' : undefined
+                        disabled ? (provider.oauthProvider ? '账号未登录，到 设置 → 模型 重新登录后可选' : '这个供应商还没配 API Key，到 设置 → 模型 补上后可选') : undefined
                       }
                       onClick={() => {
                         setOpen(false)

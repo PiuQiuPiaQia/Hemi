@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { ipcMain, safeStorage, app } from 'electron';
+import { ipcMain, app } from 'electron';
 
 import { createOnboardingStore } from '../lib/onboarding-state.mjs';
+import { readStoredConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
 import { parseModelKey } from '../lib/model-profiles.mjs';
 import { getProfiles } from './llm.ipc.mjs';
@@ -12,7 +12,7 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 /**
  * 032 冷启动引导 IPC：主进程是引导进度的唯一权威，渲染层只拿快照与
  * 提交前进/完成意图。模型完整性按真实存储判定；语音配置只报告状态：
- * - 可选语音：doubao-asr.json 有可解密的密文 Key（环境变量/内存态不算）；
+ * - 可选语音：doubao-asr.json 有已保存的密文 Key（环境变量/内存态不算）；
  * - 必需模型：目录默认组的接口地址、型号、加密保存的 Key 完整。
  */
 
@@ -25,22 +25,9 @@ function onboardingFilePath() {
   return path.join(app.getPath('userData'), 'onboarding.json');
 }
 
-/** 语音服务密钥是否已**持久**保存（可解密的密文）。 */
+/** 状态查询只看已持久保存的密文；实际连接时再验证解密与服务凭据。 */
 async function hasPersistedAsrKey() {
-  try {
-    const raw = JSON.parse(
-      await readFile(path.join(app.getPath('userData'), 'doubao-asr.json'), 'utf8'),
-    );
-    if (typeof raw?.encryptedApiKey !== 'string' || !raw.encryptedApiKey) return false;
-    if (!safeStorage.isEncryptionAvailable()) return false;
-    try {
-      return safeStorage.decryptString(Buffer.from(raw.encryptedApiKey, 'base64')).length > 0;
-    } catch {
-      return false; // 密文解不开（换机/钥匙串变化）：不算已保存
-    }
-  } catch {
-    return false;
-  }
+  return (await readStoredConfig()).keyStoredSecurely;
 }
 
 /** 默认模型组是否字段完整且 Key 已加密保存（环境覆盖不参与判定）。 */

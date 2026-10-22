@@ -1127,7 +1127,7 @@ export function TextComposer({
               className="h24-model-item h63-panel-item"
               data-active={index === panelIndex ? 'true' : undefined}
               disabled={!entry.hasApiKey}
-              title={!entry.hasApiKey ? (entry.isAuto ? '自动路由未配置（模型路由弹窗里配主 agent）' : '这个供应商还没配 API Key，到 设置 → 模型 补上后可选') : undefined}
+              title={!entry.hasApiKey ? (entry.isAuto ? '自动路由未配置（模型路由弹窗里配主 agent）' : '供应商尚未连接，到 设置 → 模型 完成登录或密钥配置后可选') : undefined}
               onMouseEnter={() => { if (entry.hasApiKey) setPanelIndex(index); }}
               onClick={() => { if (entry.hasApiKey && activeToken) selectModel(activeToken, entry.modelKey); }}
             >

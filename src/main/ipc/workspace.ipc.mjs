@@ -4,7 +4,8 @@
 // 持有；conversation.ipc（会话绑定落盘时 touch 最近使用）与 task.ipc（任务
 // 受理时取快照）经 getWorkspaceService() 共享同一实例——读取发生在运行期，
 // 注册顺序上 workspace.ipc 先于两者（ipc/index.mjs）。
-import { app, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
+import { secretStorage } from '../lib/secret-storage.mjs';
 import path from 'node:path';
 
 import { IPC } from '../../shared/ipc-channels.mjs';
@@ -40,19 +41,18 @@ export function registerWorkspaceIpc() {
   const remoteService = createRemoteService({
     userDataDir,
     log,
-    // 「记住密码」（2026-10-12 用户裁决）：safeStorage＝系统钥匙串加密，与模型
-    // Key 同一保存方式；不可用时自动降级为仅内存（rememberPassword 内处理）。
+    // 「记住密码」与模型 Key 共用应用本地加密存储；旧密文需重新填写。
     crypto: {
       encrypt: (text) => {
         try {
-          return safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(text).toString('base64') : null;
+          return secretStorage.isEncryptionAvailable() ? secretStorage.encryptString(text).toString('base64') : null;
         } catch {
           return null;
         }
       },
       decrypt: (blob) => {
         try {
-          return safeStorage.decryptString(Buffer.from(String(blob), 'base64')) || null;
+          return secretStorage.decryptString(Buffer.from(String(blob), 'base64')) || null;
         } catch {
           return null;
         }

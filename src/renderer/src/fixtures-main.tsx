@@ -1837,6 +1837,7 @@ function stubModelV2(
   });
   stubExecutor({
     listModelProfiles: async () => directory,
+    getOAuthLoginState: async () => null,
     getRoleModels: async () => roleModels,
     saveRoleModel: async () => ({ ok: true, ...roleModels }),
   });
@@ -4532,6 +4533,28 @@ const scenes: Record<string, () => React.ReactElement> = {
     return <SettingsScreen {...settingsProps} initialPage='models' />;
   },
   // 047 添加页方式选择：默认 New API 站点登录（未开始，地址输入）。
+  'settings-model-add-oauth': () => {
+    stubModelV2({ view: { kind: 'add' }, add: { presetId: '', method: 'oauth' } });
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
+  'settings-oauth-device': () => {
+    stubModelV2({ view: { kind: 'add' }, add: { presetId: '', method: 'oauth' } });
+    let current: import('@/shared/types').OAuthLoginState = { id: 'fixture-oauth', revision: 1, provider: 'github-copilot', name: 'GitHub Copilot', phase: 'login', message: '在浏览器输入设备验证码并授权', userCode: 'HEMI-TEST', url: 'https://github.com/login/device', prompt: null };
+    stubExecutor({ getOAuthLoginState: async () => current, cancelOAuthLogin: async () => (current = { ...current, revision: current.revision + 1, phase: 'cancelled', message: '登录已取消', url: null, userCode: null }) });
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
+  'settings-oauth-error': () => {
+    stubModelV2({ view: { kind: 'add' }, add: { presetId: '', method: 'oauth' } });
+    let current: import('@/shared/types').OAuthLoginState | null = null;
+    stubExecutor({ getOAuthLoginState: async () => current, startOAuthLogin: async () => (current = { id: 'fixture-oauth', revision: (current?.revision ?? 0) + 1, provider: 'openai', name: 'ChatGPT', phase: 'failed', message: '尚未授权使用 ChatGPT 额度，请重新登录并同意该权限。', userCode: null, url: null, prompt: null }) });
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
+  'settings-oauth-code': () => {
+    stubModelV2({ view: { kind: 'add' }, add: { presetId: '', method: 'oauth' } });
+    let current: import('@/shared/types').OAuthLoginState = { id: 'fixture-oauth-code', revision: 1, provider: 'anthropic', name: 'Claude', phase: 'login', message: '请在浏览器完成账号登录和授权', userCode: null, url: 'https://claude.ai/oauth/authorize', prompt: { id: 'fixture-prompt', type: 'manual_code', message: '粘贴浏览器显示的授权码', placeholder: 'code#state' } };
+    stubExecutor({ getOAuthLoginState: async () => current, cancelOAuthLogin: async () => (current = { ...current, revision: current.revision + 1, phase: 'cancelled', message: '登录已取消', prompt: null }), answerOAuthLogin: async () => (current = { ...current, revision: current.revision + 1, prompt: null, message: '正在验证授权并获取账号模型…' }) });
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
   'settings-model-add-newapi': () => {
     stubModelV2({ view: { kind: 'add' } });
     setProviderImportFixtureState(null);
@@ -4550,7 +4573,7 @@ const scenes: Record<string, () => React.ReactElement> = {
     stubModelV2({ view: { kind: 'add' } });
     setProviderImportFixtureState(importFixtureState({
       phase: 'login', control: 'user',
-      loginMemoryError: '账号密码或登录状态未能加密保存，请检查本机钥匙串和存储权限',
+      loginMemoryError: '账号密码或登录状态未能加密保存，请检查本机存储权限',
     }));
     return <SettingsScreen {...settingsProps} initialPage='models' />;
   },

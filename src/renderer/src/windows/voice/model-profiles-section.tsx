@@ -41,6 +41,7 @@ import {
   type ProviderPreset,
 } from '@/windows/voice/lib/provider-presets';
 import { NewApiImportView, type ImportLock } from '@/windows/voice/newapi-import-section';
+import { OAuthAccountSection } from '@/windows/voice/oauth-account-section';
 import { copyTextViaBridge } from '@/lib/use-clipboard-copy';
 
 /**
@@ -60,7 +61,7 @@ export type ProviderStatus =
 type FixtureState = {
   view?: ModelView;
   statuses?: Record<string, ProviderStatus>;
-  add?: { presetId: string; apiKey?: string; status?: ProviderStatus };
+  add?: { presetId: string; method?: 'oauth' | 'newapi' | 'manual'; apiKey?: string; status?: ProviderStatus };
   /** 056 fixtures：预置模型路由视图（截图取证用）。 */
   roleModels?: RoleModelsView;
 };
@@ -117,7 +118,7 @@ function StatusBadge({
 }) {
   const slow = useDelayed(status?.state === 'testing');
   if (!provider.hasApiKey && !isLocalEndpoint(provider.baseUrl)) {
-    return <span className="h37-badge" data-tone="warn">未配 Key</span>;
+    return <span className="h37-badge" data-tone="warn">{provider.oauthProvider ? '未登录' : '未配 Key'}</span>;
   }
   if (!status) return detail ? <span className="h37-badge">未测试</span> : null;
   if (status.state === 'testing') {
@@ -692,7 +693,7 @@ export function ModelProfilesSection({
   useEffect(() => {
     if (!directory || fixtureDirectory || directory.corrupt) return;
     for (const provider of directory.providers) {
-      if (statusCache.has(provider.id) || provider.models.length === 0) continue;
+      if (provider.oauthProvider || statusCache.has(provider.id) || provider.models.length === 0) continue;
       if (!provider.hasApiKey && !isLocalEndpoint(provider.baseUrl)) continue;
       void testProvider(provider);
     }
@@ -1257,7 +1258,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
         </div>
       ) : null}
 
-      <section className="h37-section">
+      {provider.oauthProvider ? <OAuthAccountSection providers={directory.providers} onlyProvider={provider.oauthProvider} disabled={readOnly} onChanged={ctl.reload} onConnected={() => { ctl.setStatus(provider.id, { state: 'ok' }); }} /> : <section className="h37-section">
         <div className="h37-section-head">
           <h3>连接</h3>
         </div>
@@ -1296,7 +1297,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
                 disabled={readOnly}
                 placeholder={
                   provider.hasApiKey
-                    ? `••••••••••••（已保存${provider.keyStoredSecurely ? '在钥匙串' : ''}，粘贴新 Key 可更换）`
+                    ? `••••••••••••（已保存${provider.keyStoredSecurely ? '并已加密' : ''}，粘贴新 Key 可更换）`
                     : isLocalEndpoint(provider.baseUrl)
                       ? '本地服务不需要 Key'
                       : '粘贴 API Key'
@@ -1351,7 +1352,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
             </span>
           </div>
         </div>
-      </section>
+      </section>}
 
       <section className="h37-section">
         <div className="h37-section-head">
@@ -1574,7 +1575,7 @@ export function AddProviderScreen({
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const [method, setMethod] = useState<'newapi' | 'manual'>('newapi');
+  const [method, setMethod] = useState<'oauth' | 'newapi' | 'manual'>(initial?.method ?? (fixtureState ? initial?.presetId ? 'manual' : 'newapi' : 'oauth'));
   const [switchNote, setSwitchNote] = useState<string | null>(null);
   const lockRef = useRef<ImportLock>({ locked: false, reason: '' });
   const [childBusy, setChildBusy] = useState(false);
@@ -1583,7 +1584,7 @@ export function AddProviderScreen({
     onBusyChange?.(busy);
   }, [onBusyChange]);
 
-  const choose = (next: 'newapi' | 'manual') => {
+  const choose = (next: 'oauth' | 'newapi' | 'manual') => {
     if (next === method) return;
     if (childBusy) return;
     if (lockRef.current.locked) {
@@ -1600,6 +1601,7 @@ export function AddProviderScreen({
         type="button"
         className="h37-back"
         onClick={() => {
+          if (childBusy) return;
           if (lockRef.current.locked) {
             setSwitchNote(lockRef.current.reason);
             return;
@@ -1613,12 +1615,16 @@ export function AddProviderScreen({
       <div className="h37-page-head">
         <div>
           <h2>添加供应商</h2>
-          <p>从 New API 站点登录获取，或手动粘贴 Key 配置；两种方式最后进同一个供应商列表。</p>
+          <p>登录 ChatGPT、Claude 或 GitHub Copilot，也可从 New API 导入或手动配置。</p>
         </div>
       </div></>}
 
       <section className="h37-section">
         <div className="h47n-methods" role="radiogroup" aria-label="配置方式">
+          <button type="button" role="radio" disabled={childBusy} aria-checked={method === 'oauth'} className="h47n-method" data-on={method === 'oauth' ? 'true' : undefined} onClick={() => choose('oauth')}>
+            <span className="h37-tile h37m-tile-sm" data-tone={method === 'oauth' ? 'g' : undefined} aria-hidden><ExternalLink size={16} /></span>
+            <span className="h47n-method-text"><b>账号登录</b><span>ChatGPT · Claude · GitHub Copilot</span></span>
+          </button>
           <button
             type="button"
             role="radio"
@@ -1661,7 +1667,7 @@ export function AddProviderScreen({
         ) : null}
       </section>
 
-      {method === 'manual' ? (
+      {method === 'oauth' ? <OAuthAccountSection providers={ctl.directory.providers} disabled={ctl.readOnly} onChanged={ctl.reload} onConnected={onAdded} onBusyChange={reportBusy} /> : method === 'manual' ? (
         <AddProviderView ctl={ctl} initial={initial} onAdded={onAdded} onBusyChange={reportBusy} embedded />
       ) : (
         <NewApiImportView

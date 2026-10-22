@@ -20,22 +20,25 @@ const PROBE_TTL_MS = 30_000;
  * @param {object} deps
  * @param {string} deps.userDataDir 应用 userData（dev/生产隔离由此保证）
  * @param {object} [deps.crypto] 持久化加密器 { encrypt(text)→string|null,
- *        decrypt(blob)→string|null }——生产由 workspace.ipc 注入 safeStorage
- *        （系统钥匙串加密，与模型 Key 同一保存方式）；缺省＝不持久化只进内存。
+ *        decrypt(blob)→string|null }——生产由 workspace.ipc 注入应用本地加密存储
+ *        （与模型 Key 同一保存方式）；缺省＝不持久化只进内存。
  * @param {object} [deps.log]
  */
 export function createRemoteService({ userDataDir, crypto = null, log = null }) {
   /**
    * 密码池（2026-10-12 用户裁决：支持密码登录＋「记住密码」）：host → 密码。
-   * 勾了「记住密码」的经 crypto（safeStorage/系统钥匙串）加密后落
-   * userData/remote-passwords.json（0600），重启自动恢复；没勾的只在进程内存。
+   * 勾了「记住密码」的经 crypto（应用本地存储）加密后落
+   * userData/remote-passwords.json（0600），重启后首次使用时恢复；没勾的只在进程内存。
    */
   const passwordPool = new Map();
   const passwordFile = path.join(String(userDataDir), 'remote-passwords.json');
   /** 已持久化的 host 集合（forget 时同步清盘）。 */
   const persistedHosts = new Set();
+  let passwordsLoaded = false;
 
   function loadPersistedPasswords() {
+    if (passwordsLoaded) return;
+    passwordsLoaded = true;
     if (!crypto) return;
     let raw;
     try {
@@ -82,13 +85,17 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
     }
   }
 
-  loadPersistedPasswords();
+  // IPC 注册会创建服务；恢复密码延后到真实 SSH 操作，避免启动时访问钥匙串。
+  function passwordFor(host) {
+    loadPersistedPasswords();
+    return passwordPool.get(host) ?? null;
+  }
   // HEMI_SSH_BIN：自驱动/验收钩子（与 HEMI_USER_DATA_DIR 同级信任面）——
   // verify-049 用假 ssh 在本机沙箱跑通全链；生产不设即系统 ssh。
   const runner = createSshRunner({
     controlDir: path.join(String(userDataDir), 'ssh'),
     sshBin: process.env.HEMI_SSH_BIN || 'ssh',
-    passwordProvider: (host) => passwordPool.get(host) ?? null,
+    passwordProvider: passwordFor,
     log,
   });
   /** host → { at, promise } 探测去重与短缓存。 */
@@ -106,7 +113,7 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
     const cached = probeCache.get(key);
     if (cached && Date.now() - cached.at < PROBE_TTL_MS) return cached.promise;
     // 密码探测：优先显式传入（添加/重输），否则按池里的（重启后为空 → 走密钥）。
-    const promise = runner.probe({ host, dir, password: password ?? passwordPool.get(host) ?? null });
+    const promise = runner.probe({ host, dir, password: password ?? passwordFor(host) });
     probeCache.set(key, { at: Date.now(), promise });
     const result = await promise;
     if (!result.ok) probeCache.delete(key);
@@ -155,6 +162,7 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
   function rememberPassword(host, password, { remember = false } = {}) {
     const target = String(host ?? '').trim();
     if (!target || typeof password !== 'string' || !password) return;
+    loadPersistedPasswords();
     passwordPool.set(target, password);
     const hadPersisted = persistedHosts.has(target);
     if (remember && crypto) persistedHosts.add(target);
@@ -164,12 +172,14 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
   }
 
   function forgetPassword(host) {
+    loadPersistedPasswords();
     const target = String(host ?? '').trim();
     passwordPool.delete(target);
     if (persistedHosts.delete(target)) persistPasswords();
   }
 
   function hasPassword(host) {
+    loadPersistedPasswords();
     return passwordPool.has(String(host ?? '').trim());
   }
 

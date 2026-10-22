@@ -153,6 +153,8 @@ function anthropicPingUrl(baseUrl) {
 }
 
 async function pingTextModelRaw({
+  oauthProvider,
+  supportsVision,
   baseUrl,
   apiKey,
   model,
@@ -161,6 +163,16 @@ async function pingTextModelRaw({
   timeoutMs,
   fetchImpl = fetch,
 }) {
+  if (oauthProvider) {
+    const startedAt = Date.now();
+    const result = await chatTurn({ oauthProvider, baseUrl, apiKey, model, api, supportsVision,
+      fetchImpl, timeoutMs: timeoutMs ?? PING_ANTHROPIC_TIMEOUT_MS, maxPreStreamRetries: 0, thinkingLevel: 'off', maxTokens: 256,
+      messages: [{ role: 'user', content: requireTools ? 'Call hemi_connection_check with ok=true.' : 'Reply OK.' }],
+      ...(requireTools ? { tools: connectionTestTools(false).tools } : {}),
+    });
+    if (requireTools && !result.toolCalls?.some(call => { try { return call.function?.name === 'hemi_connection_check' && JSON.parse(call.function.arguments)?.ok === true; } catch { return false; } })) throw new Error('账号模型未返回有效工具调用');
+    return { ok: true, latencyMs: Date.now() - startedAt, resolvedModel: model, sample: result.content };
+  }
   const anthropic = api === 'anthropic-messages';
   const url = anthropic ? anthropicPingUrl(baseUrl) : normalizeBaseUrl(baseUrl);
   if (!url) throw new Error('文本模型端点未配置。');

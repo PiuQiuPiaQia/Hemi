@@ -18,6 +18,7 @@ import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messag
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import { piModelOf, reasoningLevelOf } from '../lib/pi-model.mjs';
+import { streamOAuthModel } from './oauth-models.mjs';
 import { describeHttpError } from './text-model.mjs';
 import { controlledStream } from '../agent-runtime/usage-ledger.mjs';
 
@@ -248,6 +249,7 @@ export function addHistoryCacheBreakpoint(params) {
  * 计时器不置 outputStarted（思考不上屏，自动路由切备用仍安全）。
  */
 export async function chatTurnPi({
+  oauthProvider,
   baseUrl,
   apiKey,
   model,
@@ -257,6 +259,7 @@ export async function chatTurnPi({
   thinkingLevel,
   thinkingFormat,
   supportsVision,
+  maxTokens,
   signal,
   onDelta,
   onEvent = null,
@@ -278,7 +281,8 @@ export async function chatTurnPi({
   const hasImage = turns.some(turn => Array.isArray(turn.content) && turn.content.some(block => block.type === 'image'));
   if (hasImage && supportsVision === false) throw Object.assign(new Error('当前模型不支持图像输入'), { kind: 'config' });
   // 直接调用此 API 的调用者可显式携带图片；已声明文本模型时必须拒绝，不能让 SDK 静默丢图。
-  const chatModel = piModelOf({ api: dialect, model, baseUrl, thinkingFormat, supportsVision: supportsVision ?? hasImage });
+  const candidate = { oauthProvider, api: oauthProvider ? api : dialect, model, baseUrl, thinkingFormat, supportsVision: supportsVision ?? hasImage };
+  const chatModel = piModelOf(candidate);
   const piTools = piToolsFrom(tools);
   const context = normalizeContext({
     ...(systemParts.length ? { systemPrompt: systemParts.join('\n\n') } : {}),
@@ -316,13 +320,15 @@ export async function chatTurnPi({
     const observed = onPayload ? await onPayload(prepared, payloadModel) : undefined;
     return observed !== undefined ? observed : prepared;
   };
-  const streamFn = runtimeExecution ? controlledStream(apiImpl.streamSimple, () => runtimeExecution) : apiImpl.streamSimple;
+  const transport = oauthProvider ? (_model, ctx, opts) => streamOAuthModel(candidate, ctx, opts) : apiImpl.streamSimple;
+  const streamFn = runtimeExecution ? controlledStream(transport, () => runtimeExecution) : transport;
   const stream = streamFn(chatModel, context, {
     apiKey,
     signal: controller.signal,
     ...(fetchImpl ? { fetch: fetchImpl } : {}),
     onPayload: payloadHook,
     maxRetries: maxPreStreamRetries,
+    ...(maxTokens ? { maxTokens } : {}),
     ...(reasoning ? { reasoning } : {}),
   });
 
