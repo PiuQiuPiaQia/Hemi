@@ -1,5 +1,6 @@
 import { withExecutionScope } from './execution-scope.mjs';
 import { createHash } from 'node:crypto';
+import { normalizeCommandDescription } from '../../shared/command-display.mjs';
 const overlap = (a, b) => a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`) || b.startsWith(a.endsWith('/') ? a : `${a}/`);
 const conflicts = (a, b) => a.host === b.host && (a.scope === '*' || b.scope === '*' || overlap(a.scope, b.scope)) && (a.mode === 'write' || b.mode === 'write');
 
@@ -68,7 +69,8 @@ export function resourceGateway({ factories, resolvePath, fileHost = 'local', br
       const resource = await resourceOf(definition.name, args ?? {});
       const startedAt = Date.now();
       const lease = resource ? await leases.acquire({ ...resource, owner: execution?.owner ?? browserOwner,
-        tool: definition.name, description: String(args?.command ?? args?.path ?? '').slice(0, 120),
+        tool: definition.name, description: ['bash', 'powershell'].includes(definition.name)
+          ? normalizeCommandDescription(args?.description) || '执行命令' : String(args?.path ?? '').slice(0, 120),
       }, signal, { onWait: blockers => onActivity?.({ toolCallId: id, tool: definition.name, since: startedAt, resource, blockers }) })
         .finally(() => onActivity?.({ toolCallId: id, finished: true })) : null;
       let observationId;

@@ -1626,6 +1626,7 @@ export type RunActivityView = {
   since: number | null;
   jobs: Array<{
     id: string; toolCallId?: string; command: string;
+    description?: string; commandTruncated?: boolean; lastOutputAt?: number | null;
     startedAt: number; endedAt: number | null; status: string;
     code: number | null; output: string;
   }>;

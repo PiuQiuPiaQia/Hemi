@@ -10,6 +10,7 @@ import path from 'node:path';
 import { atomicWriteWithin, openVerifiedRead } from './safe-path.mjs';
 import { runCommand, commandToolResult } from './command-execution.mjs';
 import { COMMAND_FOREGROUND_MS, COMMAND_TIMEOUT_MS } from './command-scope.mjs';
+import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
 
 const MAX_READ_BYTES = 512 * 1024;
 export const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
@@ -257,6 +258,7 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的命令' },
+        description: { type: 'string', description: '用简短中文说明本次操作的目的，如“检查 GitHub 构建状态”；用于界面展示，不写环境变量、命令全文或未经核实的结果' },
         timeout_ms: { type: 'number', description: '进程最长运行毫秒，超时终止（默认 1800000）' },
         yield_ms: { type: 'number', description: '前台等待毫秒，之后自动转后台（默认 10000，最多 120000）' },
         run_in_background: { type: 'boolean', description: '立即转后台；完成后自动继续原目标' },
@@ -269,6 +271,7 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
       const startedAt = Date.now();
       const out = await execute({
         command, cwd: access.cwd ?? access.workspaceDir ?? access.home,
+        description: normalizeCommandDescription(params?.description),
         timeoutMs: Number.isFinite(params?.timeout_ms) && params.timeout_ms > 0 ? Math.min(24 * 60 * 60_000, params.timeout_ms) : COMMAND_TIMEOUT_MS,
         foregroundMs: config.commands ? (Number.isFinite(params?.yield_ms) ? Math.max(0, Math.min(120_000, params.yield_ms)) : COMMAND_FOREGROUND_MS) : undefined,
         runInBackground: Boolean(config.commands && params?.run_in_background),

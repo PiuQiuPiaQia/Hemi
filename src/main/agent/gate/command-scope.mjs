@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { runCommand, commandToolResult } from './command-execution.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 import { processBirth } from '../../agent-runtime/owned-processes.mjs';
+import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
 
 export const COMMAND_FOREGROUND_MS = 10_000;
 export const COMMAND_TIMEOUT_MS = 30 * 60_000;
@@ -13,7 +14,8 @@ const outputTail = result => [result.stdout.slice(-2000), result.stderr.slice(-2
 export function createCommandScope({ onChange = () => {}, now = Date.now } = {}) {
   const active = new Set(), completed = [];
   const view = record => ({
-    id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 300),
+    id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 8000),
+    commandTruncated: record.command.length > 8000, description: record.description, lastOutputAt: record.lastOutputAt,
     startedAt: record.startedAt, endedAt: record.endedAt ?? null,
     status: record.result?.status ?? (record.error ? 'failed' : 'running'),
     code: record.result?.code ?? null, output: record.output,
@@ -31,24 +33,36 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
     const record = {
       id: `command-${randomUUID()}`, controller, owner: execution?.owner,
       toolCallId: scope?.toolCallId, command: options.command, startedAt: now(),
+      description: normalizeCommandDescription(options.description), lastOutputAt: null,
       background: false, output: '', promise: null, settled: false,
     };
     const token = randomUUID();
     let registered = false, ready;
     const started = new Promise(resolve => { ready = resolve; });
-    let lastProgress = 0;
+    let lastProgress = 0, progressTimer;
     active.add(record);
     record.promise = runCommand({ ...options, signal: controller.signal, ownerToken: token,
       onOutput: result => {
         record.output = outputTail(result);
+        record.lastOutputAt = now();
         options.onOutput?.(result);
-        if (record.background && now() - lastProgress >= 1000) { lastProgress = now(); publish(); }
+        if (record.background) {
+          const remaining = 1000 - (now() - lastProgress);
+          if (remaining <= 0) {
+            clearTimeout(progressTimer); progressTimer = null;
+            lastProgress = now(); publish();
+          } else if (!progressTimer) progressTimer = setTimeout(() => {
+            progressTimer = null;
+            lastProgress = now();
+            if (!record.settled) publish();
+          }, remaining);
+        }
       },
       onSpawn: async pid => {
         if (execution?.journal) {
           const birth = await processBirth(pid);
           await execution.journal.processStart({ id: record.id, token, pid, birth, owner: execution.owner,
-            command: options.command, cwd: options.cwd, toolCallId: record.toolCallId,
+            command: options.command, description: record.description, cwd: options.cwd, toolCallId: record.toolCallId,
           });
           registered = true;
         }
@@ -62,7 +76,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
         try {
           await execution.journal.processEnd(record.id, {
             state: result.cleanupConfirmed ? 'finished' : 'unknown', cleanupConfirmed: result.cleanupConfirmed,
-            status: result.status, code: result.code, output: record.output,
+            status: result.status, code: result.code, output: record.output, lastOutputAt: record.lastOutputAt,
           });
         } catch (error) {
           execution.fatalError = `命令退出事实保存失败：${error.message}`;
@@ -87,6 +101,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
       };
       return record.result;
     }).catch(error => { record.error = error; throw error; }).finally(() => {
+      clearTimeout(progressTimer);
       record.settled = true;
       record.endedAt = now();
       ready();

@@ -104,9 +104,17 @@ html.kb-nav .compact-shell .turn-activity-head:focus-visible {
   min-height: 24px;
 }
 
-.compact-shell .turn-activity-step > span {
+.compact-shell .turn-activity-step-copy {
+  flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.compact-shell .turn-activity-step-copy pre {
+  max-height: calc(var(--sp-32) * 4);
+  margin: var(--sp-4) 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
 }

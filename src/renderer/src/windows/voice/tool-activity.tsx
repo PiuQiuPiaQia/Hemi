@@ -1,5 +1,6 @@
 import { Check, ChevronRight, X, Square } from 'lucide-react';
 import { useTranscriptRowState } from './transcript-row-state';
+import { normalizeCommandDescription } from '@shared/command-display.mjs';
 
 import type { TurnToolCall } from '@/shared/types';
 
@@ -21,6 +22,7 @@ const TOOL_LABELS: Record<string, string> = {
   grep: '搜索内容',
   glob: '查找文件',
   bash: '执行命令',
+  powershell: '执行命令',
   web_search: '联网搜索',
   web_extract: '读取网页',
   browser_navigate: '打开网页',
@@ -51,6 +53,10 @@ const TOOL_LABELS: Record<string, string> = {
 export function describeToolCall(call: Pick<StreamingToolCall, 'tool' | 'args'>): string {
   const label = TOOL_LABELS[call.tool] ?? call.tool;
   const args = call.args ?? {};
+  if (call.tool === 'bash' || call.tool === 'powershell') {
+    const description = normalizeCommandDescription(args.description);
+    return description ? `${label} · ${description}` : label;
+  }
   const pick = (key: string) => (typeof args[key] === 'string' ? String(args[key]) : '');
   const detail =
     call.tool === 'task'
@@ -96,7 +102,11 @@ export function ToolActivity({ calls }: { calls: StreamingToolCall[] }) {
               ) : (
                 <Check aria-hidden="true" />
               )}
-              <span className="selectable">{describeToolCall(call)}</span>
+              <div className="h56-tool-copy">
+                <span className="selectable">{describeToolCall(call)}</span>
+                {['bash', 'powershell'].includes(call.tool) && typeof call.args.command === 'string'
+                  ? <pre className="selectable">{call.args.command}</pre> : null}
+              </div>
             </li>
           ))}
         </ol>

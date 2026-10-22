@@ -1220,7 +1220,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
-              <RunActivity activity={runActivity} onStop={onStopModelTurn} />
+              <RunActivity key={currentConversationId} activity={runActivity} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}

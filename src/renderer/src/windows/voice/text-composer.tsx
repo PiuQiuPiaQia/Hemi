@@ -953,7 +953,7 @@ export function TextComposer({
           rows={1}
           placeholder={
             busy && !value.trim()
-              ? waiting ? '任务等待中，可先写下一句…' : '正在回应，可先写下一句…'
+              ? waiting ? '可继续输入，发送后排队…' : '正在回应，可先写下一句…'
               : fresh
                 ? '问点什么，或交给 Hemi 一件事…'
                 : '继续聊聊，或交给 Hemi 一件事…'
