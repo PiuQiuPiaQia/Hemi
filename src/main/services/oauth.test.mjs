@@ -92,7 +92,8 @@ test('三家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
   }
   const disk = await readFile(f.filePath, 'utf8');
   assert.doesNotMatch(disk, /test-access|test-refresh|test-github-token/);
-  assert.equal((await stat(f.filePath)).mode & 0o777, 0o600);
+  // Windows does not honor POSIX permission bits, so the 0600 mode is best-effort there.
+  if (process.platform !== 'win32') assert.equal((await stat(f.filePath)).mode & 0o777, 0o600);
   const restarted = createOAuthCredentials({ filePath: f.filePath, safeStorage: f.safeStorage });
   assert.equal((await restarted.read('openai')).clientId, 'test-issued-client');
   assert.equal(await restarted.deviceId(), await f.credentials.deviceId());
