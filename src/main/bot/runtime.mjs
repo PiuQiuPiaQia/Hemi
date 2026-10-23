@@ -20,19 +20,25 @@ export async function validateCloudModel(config) {
   const temporary = await mkdtemp(
     path.join(os.tmpdir(), 'hemi-bot-validation-'),
   );
-  const session = createHemiSession({
-    cwd: temporary,
-    agentDir: temporary,
-    model: config,
-    tools: [],
-    appendSystem: ['你是 Hemi。仅验证模型连接，回复 OK。'],
-    features: {},
-    maxRunRequests: 1,
-    initTimeoutMs: 20000,
-    stallTimeoutMs: 30000,
-  });
+  const access = createPermissionService({dir: path.join(temporary, 'access-store')});
+  let session;
   let timer;
   try {
+    // Validation may finish before the default session's asynchronous store load.
+    // Own and await initialization so cleanup cannot race its pending writes.
+    await access.load();
+    session = createHemiSession({
+      cwd: temporary,
+      agentDir: temporary,
+      accessService: access,
+      model: config,
+      tools: [],
+      appendSystem: ['你是 Hemi。仅验证模型连接，回复 OK。'],
+      features: {},
+      maxRunRequests: 1,
+      initTimeoutMs: 20000,
+      stallTimeoutMs: 30000,
+    });
     const result = await Promise.race([
       (async () => {
         await session.ready();
@@ -47,7 +53,7 @@ export async function validateCloudModel(config) {
       throw new Error('模型验证失败', {cause:result.modelError || {aborted:result.aborted,textCount:result.texts.length}});
   } finally {
     clearTimeout(timer);
-    session.dispose();
+    session?.dispose();
     await rm(temporary, { recursive: true, force: true });
   }
 }
