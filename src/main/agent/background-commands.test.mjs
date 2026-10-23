@@ -67,11 +67,19 @@ async function fixture(t, command, toolOptions = {}) {
 }
 
 test('后台释放模型等待，独立会话可工作；完成结果在同一目标自动消费且只唤醒一次', posix, async t => {
-  const f = await fixture(t, dir => `printf started; until [ -f '${path.join(dir, 'release')}' ]; do sleep 0.02; done; printf BACKGROUND_ACTUAL_RESULT`);
+  const f = await fixture(t, dir => `export HEMI_TEST_LABEL=display\nprintf started; until [ -f '${path.join(dir, 'release')}' ]; do sleep 0.02; done; printf BACKGROUND_ACTUAL_RESULT\n# ${'display '.repeat(50)}`,
+    { description: '  检查构建状态\n并核对结果  ' });
   const { session } = await f.make();
   let settled = false;
   const result = session.prompt('BACKGROUND').then(value => { settled = true; return value; });
   await until(() => f.activities.some(a => a.phase === 'waiting-background'));
+  await until(() => f.activities.some(a => a.jobs[0]?.lastOutputAt != null));
+  const job = f.activities.findLast(a => a.jobs.length)?.jobs[0];
+  assert.equal(job.description, '检查构建状态 并核对结果');
+  assert.ok(job.lastOutputAt >= job.startedAt);
+  assert.match(job.command, /# display/);
+  assert.ok(job.command.length > 300, '详情保留实际命令，不能只剩环境准备行');
+  assert.equal(job.commandTruncated, false);
   assert.equal(session.isBusy(), true);
   assert.equal(settled, false, '模型生成结束不等于目标已完成');
   const count = f.requests.length;
@@ -92,6 +100,8 @@ test('后台释放模型等待，独立会话可工作；完成结果在同一�
   assert.equal(processes[0].background, true);
   assert.equal(processes[0].state, 'finished');
   assert.equal(processes[0].owner.rootRunId, 'run-first');
+  assert.equal(processes[0].description, '检查构建状态 并核对结果');
+  assert.ok(processes[0].lastOutputAt >= job.lastOutputAt);
   assert.equal(f.activities.at(-1).phase, 'running');
 });
 
@@ -100,6 +110,9 @@ test('等待后台时停止目标会清理真实进程树，旧完成不会唤�
   const { session, cancelOwnership } = await f.make();
   const pending = session.prompt('CANCEL');
   await until(() => f.activities.some(a => a.phase === 'waiting-background'));
+  const job = f.activities.findLast(a => a.jobs.length)?.jobs[0];
+  assert.equal(job.description, '', '没有说明的旧调用仍可执行');
+  assert.equal(job.lastOutputAt, null, '尚无输出不能冒充最近有输出');
   const count = f.requests.length;
   cancelOwnership();
   await session.abort();

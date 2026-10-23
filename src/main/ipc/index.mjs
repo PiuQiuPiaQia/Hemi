@@ -1,3 +1,4 @@
+import {registerBotIpc} from './bot.ipc.mjs';
 import { setAuxiliaryTransportObserver } from '../agent-runtime/auxiliary-transport.mjs';
 import { registerAppIpc } from './app.ipc.mjs';
 import { registerAppearanceIpc } from './appearance.ipc.mjs';
@@ -69,6 +70,7 @@ export async function registerAllIpcHandlers() {
   registerAccessIpc();
   // 033：工作区登记先于 task/conversation 注册（两者运行期共享同一实例）。
   registerWorkspaceIpc();
+  registerBotIpc();
   registerSkillsIpc();
   registerContextIpc();
   registerComposerIpc();

@@ -178,6 +178,8 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
     if (persistedHosts.delete(target)) persistPasswords();
   }
 
+  function passwordForHost(host) { loadPersistedPasswords();return passwordPool.get(String(host??'').trim())??null; }
+
   function hasPassword(host) {
     loadPersistedPasswords();
     return passwordPool.has(String(host ?? '').trim());
@@ -191,7 +193,7 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
     persistedHosts.clear();
   }
 
-  return { runner, probeWorkspace, conversationContextBlock, remoteFsFor, rememberPassword, forgetPassword, hasPassword, close };
+  return { runner, probeWorkspace, conversationContextBlock, remoteFsFor, rememberPassword, forgetPassword, hasPassword, passwordForHost, close };
 }
 
 /** 应用级单例（ipc/index.mjs 注册时初始化；测试直接建实例）。 */

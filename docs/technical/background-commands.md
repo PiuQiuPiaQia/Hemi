@@ -31,6 +31,28 @@ flow 的运行记录增加 `activity`，不新增第二个主运行或改变四�
 
 完整输出保存到受控上下文快照，模型收到有界尾部、真实退出状态及快照引用。内存中的完成队列只保留有界输出；UI 显示最近 2000 字符。子 agent 的停摆检测区分宿主明确的后台/资源等待与无响应模型流。
 
+## 展示与文案（2026-10-22）
+
+`bash` 增加可选 `description`，说明操作目的，供工具摘要、后台面板和工作区阻塞说明共同使用。宿主将其收成最多 80 字符的单行文本并登记到命令记录；它不代表操作成功。缺少说明的旧调用仍可执行，后台面板显示「后台命令」，对话工具摘要显示「执行命令」。不从 Shell 脚本推断外部服务的阶段或完成比例。
+
+每条后台命令只显示一处「已运行」，从其 `startedAt` 计时；资源等待才显示「已等待」，从进入资源等待时计时。多条命令分别计时。宿主从真实 stdout/stderr 事件记录 `lastOutputAt`，有该字段时显示「最近输出于…前」；无字段时不推测时间，空输出显示「尚无输出，正在等待命令返回」。输出推送保留每秒节流，并补发窗口内最后一次更新，避免命令随后静默时界面停留在旧输出。
+
+默认面板收成一行状态栏，只展示状态图标、操作说明、计时或命令数以及展开箭头；长标题省略，悬停和展开后可读完整内容。点击整行或键盘激活后，在有高度上限的滚动区域中查看等待提示、完整操作说明、最近输出和原命令。切换会话时恢复默认收起状态。命令展示最多 8000 字符，超过时明确标注；原始进程登记仍保存原命令。等待提示简化为「完成后自动继续」，输入框说明「可继续输入，发送后排队…」。停止操作统一使用输入框现有入口，状态面板不再增加重复按钮。
+
+本轮验证基线：`4e6f51707269cd4152ed7da9cd4fc00c21ca12c1` 加工作区改动。环境为 macOS 26.5.1 / arm64、Node.js 22.22.3、Electron 44.0.0（应用内 Node.js 24.18.1），应用代码版本 0.2.6。保留工作区已有的 `docs/requirements/cloud-bot.md`，没有变更依赖。
+
+- `npm ci`；本机 Electron 二进制未就绪时使用其官方 `node node_modules/electron/install.js` 安装脚本补齐。
+- `node --test src/main/agent/background-commands.test.mjs src/main/agent/gate/command-execution.test.mjs src/main/agent/gate/file-tools.test.mjs src/main/agent-runtime/resource-leases.test.mjs src/shared/conversation-status.test.mjs`：29 项通过。
+- `npm run build`、`node scripts/check-spacing.mjs`、`git diff --check`：通过。
+- `node scripts/verify-background-commands.mjs`。
+- `HEMI_DEV_PORT=5187 npm run dev:renderer`，然后 `VITE_DEV_SERVER_URL=http://127.0.0.1:5187 node scripts/verify-background-commands.mjs`。
+
+界面回归在全新临时 `HEMI_USER_DATA_DIR` 中，走真实 renderer → IPC → Pi SDK → 本机 Shell，外部模型由本地合成响应替代。覆盖说明与输出时间的传递、renderer 重载、后台结果续跑一次、资源等待、唯一停止入口回收进程、无说明与无输出回退、键盘展开详情以及 375/768/1440 宽度。多命令与超过一小时的计时使用明确的展示边界样本注入真实 flow/renderer，不冒充第二个真实命令或一小时实测。
+
+截图和两种 renderer 的结果位于 `.visual/workflow/vision/background-commands/{dev,built}/`，本轮视觉结论见 `.visual/workflow/vision-report-background-display.md`。开发性能浮层通过其现有移动控件移开后验证停止点击；未修改浮层。应用目前仅支持 light 模式，未做深色测试；未运行全套测试、Windows 真机验证、打包安装或发版。
+
+后续紧凑样式验证使用相同基线和环境：重新执行 `npm run build`、间距检查和两种 renderer 的真实命令回归。默认面板在 375/768/1440 宽度均为 34 CSS px；改动前分别为 136/100/100 CSS px。多命令与资源等待默认同样保持一行；展开总高度不超过 260 CSS px，切换会话不继承展开状态。前后截图与测量记录见 `.visual/workflow/vision/background-compact/before/`、两种 renderer 的 `report.json` 以及 `.visual/workflow/vision-report-background-compact.md`。本轮仅修改展示组件和验证，不重复运行前一轮已通过的后台执行测试。
+
 ## 验证
 
 基线及验证 HEAD：`e0b97054cf2845736c52dd434422a2d9430cd890` 加本次未提交改动。环境：macOS 26.5.1 (25F80)、arm64，Node.js 22.22.3，Electron 44.0.0（应用内 Node 24.18.1）。保留仓库已有其他未提交工作；没有新增依赖。

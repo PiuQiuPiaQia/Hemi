@@ -1,3 +1,4 @@
+import {useConversationBridge} from './lib/conversation-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ShieldCheck, ChevronDown } from 'lucide-react';
@@ -36,12 +37,13 @@ export function ScopePopover({
   /** 「管理访问授权」→ 设置 → 电脑与浏览器 → 访问授权。 */
   onManage?: () => void;
 } = {}) {
+  const bridge = useConversationBridge();
   const [open, setOpen] = useState(demoOpen);
   const [state, setState] = useState<AccessStateDto | null>(null);
   const revisionRef = useRef(-1);
 
   const refresh = useCallback(() => {
-    void window.hemiVoice
+    void bridge
       ?.accessGetState?.()
       .then((dto) => {
         if (!dto) return;
@@ -56,7 +58,7 @@ export function ScopePopover({
   // P1：触发键要显示授权数，状态常驻订阅（不再只在展开时读）。
   useEffect(() => {
     refresh();
-    return window.hemiVoice?.onAccessChanged?.(refresh);
+    return bridge?.onAccessChanged?.(refresh);
   }, [refresh]);
 
   useEffect(() => {

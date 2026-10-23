@@ -13,6 +13,7 @@ export const isSmokeTest = process.env.HEMI_SMOKE_TEST === '1';
  * windows/ 与 ipc/ 各模块都读写这里，避免模块间互相 import 造成的环。
  */
 export const state = {
+  conversationEnvironment: 'local',
   mainWindow: null,
   floatingWindow: null,
   floatingCaptionWindow: null,

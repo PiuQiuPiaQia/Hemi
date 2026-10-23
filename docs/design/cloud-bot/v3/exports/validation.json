@@ -1,0 +1,1094 @@
+{
+  "date": "2026-10-22",
+  "baselineCommit": "4e6f51707269cd4152ed7da9cd4fc00c21ca12c1",
+  "node": "v22.22.3",
+  "platform": "darwin",
+  "arch": "arm64",
+  "scope": "使用当前工作区实际对话组件的独立原型；数据/Host/模型/文件传输均模拟，不修改生产代码",
+  "artifactSha256": {
+    "index.html": "34bd93af48eb33c79e3f696e3026ba905a4348ee9c9cb3b413b7960e86ac8e93",
+    "main.jsx": "7ef495f058b1e259a026197869b83a51416e053fb6f9aedb5a90ea9c088e3c19",
+    "store.js": "9cd8030a74b5201e6ca0af95c9a1a4899b13633dd2a38081d0d21bb248a1905f",
+    "bot-panels.jsx": "79cccd684065e3ce90379611a7504c7110a8836188338f3496316cb5185e4f18",
+    "prototype.css": "f29162df92fe253e169113d61d1b3a9680556cc37cf9e667376541491be032ff",
+    "vite.config.mjs": "1d04b32ed6ec77fee196122ed1d8bd2786cebfb34165f9fc874c1335c1875233",
+    "serve.mjs": "12948244823f9bcd3dd45fde7f57af408ef5e0facb9ae81e151d14010e261f8b",
+    "verify.mjs": "13f599209c61aac2a3843d6f0cd4193cfd2cac8e34b099b2542d7e79c5ca3739"
+  },
+  "sharedComponentSha256": {
+    "voice-screen.tsx": "90f73c140be93c3f0d97e0a9c680b86793bb4c9a50d87c50d3eb2b566d87e226",
+    "sidebar.tsx": "7f00964afcad51e2504e7de68e49953f6821fcb71595d1f5de87194ffa924f3c",
+    "text-composer.tsx": "a06ba85081149b5cf000c4991d122d7b51cc49d9e4711ff0985d5b7954288bc5",
+    "model-selector.tsx": "bd5a4e571e8c829bcd3b34081030f6612be6a888f0197f3282e2f556fe0bf73f",
+    "thinking-level-strip.tsx": "643c4bd8f19cb9062ef1c059b93f35176f824555a65d72d88b826237abdd51c2",
+    "turn-queue-tray.tsx": "de3f0fc498d1bf874cd1c1fad7ceb66215d07b64469eba2a6c36531dde0d9a57",
+    "session-usage-view.tsx": "54b45633e67331016026edeba1a0a3c19a362eb9d9aa486c268b6182c6452cbb"
+  },
+  "urls": {
+    "dev": "http://127.0.0.1:5173",
+    "built": "http://127.0.0.1:62552"
+  },
+  "checks": [
+    {
+      "name": "新增样式复用产品 token，没有另造对话配色",
+      "status": "pass"
+    },
+    {
+      "name": "dev：直接使用现有 VoiceScreen / sidebar / TextComposer，Bot 无语音设备入口",
+      "status": "pass"
+    },
+    {
+      "name": "dev：普通消息复制和完整回答复制可用",
+      "status": "pass"
+    },
+    {
+      "name": "dev：共享侧栏重命名与历史会话列表保持一致",
+      "status": "pass"
+    },
+    {
+      "name": "dev：会话切换保留各自草稿",
+      "status": "pass"
+    },
+    {
+      "name": "dev：会话菜单复制 ID、删除两步确认生效",
+      "status": "pass"
+    },
+    {
+      "name": "dev：共享模型选择与思考强度可用",
+      "status": "pass"
+    },
+    {
+      "name": "dev：/model 和 @ 云端引用沿用真实候选组件",
+      "status": "pass"
+    },
+    {
+      "name": "dev：附件上传到就绪、跨会话归属和移除保留普通交互",
+      "status": "pass"
+    },
+    {
+      "name": "dev：目录从云端列表选择，旧交付物路径冻结且可预览/下载",
+      "status": "pass"
+    },
+    {
+      "name": "dev：执行中继续输入、队列编辑和按受理模型派发生效",
+      "status": "pass"
+    },
+    {
+      "name": "dev：编辑重发撤下旧后文，从新消息重新运行",
+      "status": "pass"
+    },
+    {
+      "name": "dev：失败重试使用普通错误入口",
+      "status": "pass"
+    },
+    {
+      "name": "dev：顶部手动同步只在云端确认后更新",
+      "status": "pass"
+    },
+    {
+      "name": "dev：失联保留快照和草稿，重连恢复云端真实结果",
+      "status": "pass"
+    },
+    {
+      "name": "dev：普通对话与 Bot 共用页面，数据和语音入口按环境切换",
+      "status": "pass"
+    },
+    {
+      "name": "built：直接使用现有 VoiceScreen / sidebar / TextComposer，Bot 无语音设备入口",
+      "status": "pass"
+    },
+    {
+      "name": "built：普通消息复制和完整回答复制可用",
+      "status": "pass"
+    },
+    {
+      "name": "built：共享侧栏重命名与历史会话列表保持一致",
+      "status": "pass"
+    },
+    {
+      "name": "built：会话切换保留各自草稿",
+      "status": "pass"
+    },
+    {
+      "name": "built：会话菜单复制 ID、删除两步确认生效",
+      "status": "pass"
+    },
+    {
+      "name": "built：共享模型选择与思考强度可用",
+      "status": "pass"
+    },
+    {
+      "name": "built：/model 和 @ 云端引用沿用真实候选组件",
+      "status": "pass"
+    },
+    {
+      "name": "built：附件上传到就绪、跨会话归属和移除保留普通交互",
+      "status": "pass"
+    },
+    {
+      "name": "built：目录从云端列表选择，旧交付物路径冻结且可预览/下载",
+      "status": "pass"
+    },
+    {
+      "name": "built：执行中继续输入、队列编辑和按受理模型派发生效",
+      "status": "pass"
+    },
+    {
+      "name": "built：编辑重发撤下旧后文，从新消息重新运行",
+      "status": "pass"
+    },
+    {
+      "name": "built：失败重试使用普通错误入口",
+      "status": "pass"
+    },
+    {
+      "name": "built：顶部手动同步只在云端确认后更新",
+      "status": "pass"
+    },
+    {
+      "name": "built：失联保留快照和草稿，重连恢复云端真实结果",
+      "status": "pass"
+    },
+    {
+      "name": "built：普通对话与 Bot 共用页面，数据和语音入口按环境切换",
+      "status": "pass"
+    },
+    {
+      "name": "同步中断保持旧模型目录，重连核对云端结果",
+      "status": "pass"
+    },
+    {
+      "name": "共用授权卡离线只读，重连拒绝不会误报执行成功",
+      "status": "pass"
+    },
+    {
+      "name": "首次引导核对指纹、选择本机模型和云端空间后初始化",
+      "status": "pass"
+    },
+    {
+      "name": "移除后换主机不串会话，重新连接原 Bot 恢复记录且保持停用",
+      "status": "pass"
+    },
+    {
+      "name": "四档真实组件布局、输入区和弹窗没有越界",
+      "status": "pass"
+    }
+  ],
+  "captures": [
+    {
+      "scene": "complete",
+      "width": 1440,
+      "height": 900,
+      "filename": "complete-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "ordinary",
+      "width": 1440,
+      "height": 900,
+      "filename": "ordinary-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "ready",
+      "width": 1440,
+      "height": 900,
+      "filename": "ready-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 466.28125,
+          "width": 720,
+          "height": 102,
+          "top": 466.28125,
+          "right": 1216.5,
+          "bottom": 568.28125,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "attachment",
+      "width": 1440,
+      "height": 900,
+      "filename": "attachment-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 718,
+          "width": 720,
+          "height": 162,
+          "top": 718,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "queued",
+      "width": 1440,
+      "height": 900,
+      "filename": "queued-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "folder",
+      "width": 1440,
+      "height": 900,
+      "filename": "folder-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 430,
+            "y": 214.15625,
+            "width": 580,
+            "height": 471.671875,
+            "top": 214.15625,
+            "right": 1010,
+            "bottom": 685.828125,
+            "left": 430
+          }
+        ]
+      }
+    },
+    {
+      "scene": "folder-error",
+      "width": 1440,
+      "height": 900,
+      "filename": "folder-error-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 430,
+            "y": 214.15625,
+            "width": 580,
+            "height": 471.671875,
+            "top": 214.15625,
+            "right": 1010,
+            "bottom": 685.828125,
+            "left": 430
+          }
+        ]
+      }
+    },
+    {
+      "scene": "sync",
+      "width": 1440,
+      "height": 900,
+      "filename": "sync-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 430,
+            "y": 172.84375,
+            "width": 580,
+            "height": 554.3125,
+            "top": 172.84375,
+            "right": 1010,
+            "bottom": 727.15625,
+            "left": 430
+          }
+        ]
+      }
+    },
+    {
+      "scene": "scope",
+      "width": 1440,
+      "height": 900,
+      "filename": "scope-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 430,
+            "y": 300.90625,
+            "width": 580,
+            "height": 298.171875,
+            "top": 300.90625,
+            "right": 1010,
+            "bottom": 599.078125,
+            "left": 430
+          }
+        ]
+      }
+    },
+    {
+      "scene": "offline",
+      "width": 1440,
+      "height": 900,
+      "filename": "offline-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 751.203125,
+          "width": 720,
+          "height": 128.796875,
+          "top": 751.203125,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "error",
+      "width": 1440,
+      "height": 900,
+      "filename": "error-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "settings",
+      "width": 1440,
+      "height": 900,
+      "filename": "settings-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 430,
+            "y": 242.765625,
+            "width": 580,
+            "height": 414.453125,
+            "top": 242.765625,
+            "right": 1010,
+            "bottom": 657.21875,
+            "left": 430
+          }
+        ]
+      }
+    },
+    {
+      "scene": "welcome",
+      "width": 1440,
+      "height": 900,
+      "filename": "welcome-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 490.890625,
+          "width": 720,
+          "height": 128.796875,
+          "top": 490.890625,
+          "right": 1216.5,
+          "bottom": 619.6875,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "history",
+      "width": 1440,
+      "height": 900,
+      "filename": "history-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": [
+          {
+            "x": 432,
+            "y": 339.1328125,
+            "width": 576,
+            "height": 221.734375,
+            "top": 339.1328125,
+            "right": 1008,
+            "bottom": 560.8671875,
+            "left": 432
+          }
+        ]
+      }
+    },
+    {
+      "scene": "model-picker",
+      "width": 1440,
+      "height": 900,
+      "filename": "model-picker-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "thinking",
+      "width": 1440,
+      "height": 900,
+      "filename": "thinking-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "message-edit",
+      "width": 1440,
+      "height": 900,
+      "filename": "message-edit-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "references",
+      "width": 1440,
+      "height": 900,
+      "filename": "references-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 751.203125,
+          "width": 720,
+          "height": 128.796875,
+          "top": 751.203125,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "preview",
+      "width": 1440,
+      "height": 900,
+      "filename": "preview-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 297,
+          "y": 778,
+          "width": 709,
+          "height": 102,
+          "top": 778,
+          "right": 1006,
+          "bottom": 880,
+          "left": 297
+        },
+        "dialogs": [
+          {
+            "x": 1030,
+            "y": 52,
+            "width": 410,
+            "height": 848,
+            "top": 52,
+            "right": 1440,
+            "bottom": 900,
+            "left": 1030
+          }
+        ]
+      }
+    },
+    {
+      "scene": "approval",
+      "width": 1440,
+      "height": 900,
+      "filename": "approval-1440.png",
+      "metrics": {
+        "width": 1440,
+        "body": 1440,
+        "rail": 48,
+        "composer": {
+          "x": 496.5,
+          "y": 778,
+          "width": 720,
+          "height": 102,
+          "top": 778,
+          "right": 1216.5,
+          "bottom": 880,
+          "left": 496.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "complete",
+      "width": 375,
+      "height": 812,
+      "filename": "complete-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "ready",
+      "width": 375,
+      "height": 812,
+      "filename": "ready-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 381.1875,
+          "width": 295,
+          "height": 102,
+          "top": 381.1875,
+          "right": 359,
+          "bottom": 483.1875,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "attachment",
+      "width": 375,
+      "height": 812,
+      "filename": "attachment-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 630,
+          "width": 295,
+          "height": 162,
+          "top": 630,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "queued",
+      "width": 375,
+      "height": 812,
+      "filename": "queued-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "folder",
+      "width": 375,
+      "height": 812,
+      "filename": "folder-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": [
+          {
+            "x": 16,
+            "y": 178.15625,
+            "width": 343,
+            "height": 455.671875,
+            "top": 178.15625,
+            "right": 359,
+            "bottom": 633.828125,
+            "left": 16
+          }
+        ]
+      }
+    },
+    {
+      "scene": "sync",
+      "width": 375,
+      "height": 812,
+      "filename": "sync-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": [
+          {
+            "x": 16,
+            "y": 126.640625,
+            "width": 343,
+            "height": 558.703125,
+            "top": 126.640625,
+            "right": 359,
+            "bottom": 685.34375,
+            "left": 16
+          }
+        ]
+      }
+    },
+    {
+      "scene": "offline",
+      "width": 375,
+      "height": 812,
+      "filename": "offline-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 663.203125,
+          "width": 295,
+          "height": 128.796875,
+          "top": 663.203125,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "model-picker",
+      "width": 375,
+      "height": 812,
+      "filename": "model-picker-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "history",
+      "width": 375,
+      "height": 812,
+      "filename": "history-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": [
+          {
+            "x": 0,
+            "y": 590.265625,
+            "width": 375,
+            "height": 221.734375,
+            "top": 590.265625,
+            "right": 375,
+            "bottom": 812,
+            "left": 0
+          }
+        ]
+      }
+    },
+    {
+      "scene": "preview",
+      "width": 375,
+      "height": 812,
+      "filename": "preview-375.png",
+      "metrics": {
+        "width": 375,
+        "body": 375,
+        "rail": 48,
+        "composer": {
+          "x": 64,
+          "y": 690,
+          "width": 295,
+          "height": 102,
+          "top": 690,
+          "right": 359,
+          "bottom": 792,
+          "left": 64
+        },
+        "dialogs": [
+          {
+            "x": 48,
+            "y": 52,
+            "width": 327,
+            "height": 760,
+            "top": 52,
+            "right": 375,
+            "bottom": 812,
+            "left": 48
+          }
+        ]
+      }
+    },
+    {
+      "scene": "complete",
+      "width": 768,
+      "height": 1024,
+      "filename": "complete-768.png",
+      "metrics": {
+        "width": 768,
+        "body": 768,
+        "rail": 48,
+        "composer": {
+          "x": 72,
+          "y": 902,
+          "width": 672,
+          "height": 102,
+          "top": 902,
+          "right": 744,
+          "bottom": 1004,
+          "left": 72
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "folder",
+      "width": 768,
+      "height": 1024,
+      "filename": "folder-768.png",
+      "metrics": {
+        "width": 768,
+        "body": 768,
+        "rail": 48,
+        "composer": {
+          "x": 72,
+          "y": 902,
+          "width": 672,
+          "height": 102,
+          "top": 902,
+          "right": 744,
+          "bottom": 1004,
+          "left": 72
+        },
+        "dialogs": [
+          {
+            "x": 94,
+            "y": 276.15625,
+            "width": 580,
+            "height": 471.671875,
+            "top": 276.15625,
+            "right": 674,
+            "bottom": 747.828125,
+            "left": 94
+          }
+        ]
+      }
+    },
+    {
+      "scene": "complete",
+      "width": 1180,
+      "height": 720,
+      "filename": "complete-1180.png",
+      "metrics": {
+        "width": 1180,
+        "body": 1180,
+        "rail": 48,
+        "composer": {
+          "x": 366.5,
+          "y": 598,
+          "width": 720,
+          "height": 102,
+          "top": 598,
+          "right": 1086.5,
+          "bottom": 700,
+          "left": 366.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "queued",
+      "width": 1180,
+      "height": 720,
+      "filename": "queued-1180.png",
+      "metrics": {
+        "width": 1180,
+        "body": 1180,
+        "rail": 48,
+        "composer": {
+          "x": 366.5,
+          "y": 598,
+          "width": 720,
+          "height": 102,
+          "top": 598,
+          "right": 1086.5,
+          "bottom": 700,
+          "left": 366.5
+        },
+        "dialogs": []
+      }
+    },
+    {
+      "scene": "sync",
+      "width": 1180,
+      "height": 720,
+      "filename": "sync-1180.png",
+      "metrics": {
+        "width": 1180,
+        "body": 1180,
+        "rail": 48,
+        "composer": {
+          "x": 366.5,
+          "y": 598,
+          "width": 720,
+          "height": 102,
+          "top": 598,
+          "right": 1086.5,
+          "bottom": 700,
+          "left": 366.5
+        },
+        "dialogs": [
+          {
+            "x": 300,
+            "y": 82.84375,
+            "width": 580,
+            "height": 554.3125,
+            "top": 82.84375,
+            "right": 880,
+            "bottom": 637.15625,
+            "left": 300
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [],
+  "externalRequests": []
+}

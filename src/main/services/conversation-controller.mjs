@@ -357,7 +357,9 @@ export function createConversationController({
     if (!snapshot.timeline.some((entry) => entry.kind === 'user' && entry.id === command.targetInputId)) {
       return { ok: false, code: 'not-found' };
     }
+    const frozen = runtime.freezeInput ? await runtime.freezeInput(command.input ?? {}) : {};
     const replacement = {
+      ...frozen,
       inputId: command.input?.inputId ?? makeId(`in-${++seq.input}`),
       editRevision: 0,
       text: command.input?.text ?? '',

@@ -12,6 +12,12 @@ export function flowDeliverableParts(snapshot: FlowSnapshotView): Map<string, Fl
   const artifacts = retainedDeliverables(snapshot);
   const byId = new Map(artifacts.map(a => [a.artifactId, a]));
   const byPath = new Map(artifacts.map(a => [a.path, a]));
+  const byRun = new Map<string, ConversationDeliverableView[]>();
+  for (const artifact of artifacts) for (const runId of new Set([artifact.producerRunId, ...(artifact.producers ?? []).map(p => p.runId)])) {
+    if (!runId) continue;
+    if (!byRun.has(runId)) byRun.set(runId, []);
+    byRun.get(runId)!.push(artifact);
+  }
   const result = new Map<string, FlowPart[]>();
   const tails = new Map<string, string>();
   const seen = new Map<string, Set<string>>();
@@ -58,7 +64,13 @@ export function flowDeliverableParts(snapshot: FlowSnapshotView): Map<string, Fl
       parts.push(delivery(artifact, `recovered:${part.partId}`));
     }
     for (const reference of references.files) {
-      const artifact = byPath.get(reference.path);
+      // Relative links belong to their producing run's directory, even after
+      // the conversation selects another directory with the same filenames.
+      const relative = !/^(?:[/\\]|[a-z]:[/\\]|file:)/i.test(reference.path);
+      const suffix = reference.path.replaceAll('\\', '/').replace(/^\.\//, '');
+      const produced = (byRun.get(item.runId) ?? []).filter(a =>
+        (a.path === reference.path || relative && a.path.replaceAll('\\', '/').endsWith('/' + suffix)));
+      const artifact = produced.at(-1) ?? byPath.get(reference.path);
       const key = artifact?.artifactId ?? reference.path;
       if (keys(item.runId).has(key)) continue;
       keys(item.runId).add(key);

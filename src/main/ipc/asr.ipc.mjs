@@ -42,6 +42,8 @@ async function stopActiveSession() {
   if (activeAsrSession === current) activeAsrSession = null;
 }
 
+export const stopAsrForBot = stopActiveSession;
+
 export function registerAsrIpc() {
   ipcMain.handle(IPC.asr.getConfig, async () => {
     const config = await resolveConfig({ decryptSecrets: false });
@@ -58,6 +60,7 @@ export function registerAsrIpc() {
   });
 
   ipcMain.handle(IPC.asr.start, async (_event, mode) => {
+    if (state.conversationEnvironment === 'bot') return {ok:false,code:'BOT_VOICE_DISABLED',message:'Bot 使用文字对话。'};
     await stopActiveSession();
     const config = await resolveConfig();
     // 2026-10-07：hold 断句静音延长至 1.5s，并开启 bigmodel_async 的句末

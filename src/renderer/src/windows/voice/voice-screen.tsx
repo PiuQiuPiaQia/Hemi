@@ -1,3 +1,4 @@
+import {useConversationBridge,useConversationEnvironment} from './lib/conversation-bridge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -107,6 +108,12 @@ function formatTime(timestamp: number) {
 }
 
 type VoiceScreenProps = {
+  /** Host-specific controls occupy existing conversation slots. */
+  topBarActions?: import('react').ReactNode;
+  workspaceControl?: import('react').ReactNode;
+  scopeControl?: import('react').ReactNode;
+  composerBanner?: import('react').ReactNode;
+
   sessionState: SessionState;
   /** True when the session is a call, i.e. it keeps listening without holding. */
   callActive: boolean;
@@ -325,6 +332,7 @@ const EMPTY_SUGGESTIONS = [
 ] as const
 
 export function VoiceScreen({
+  topBarActions, workspaceControl, scopeControl, composerBanner,
   sessionState,
   callActive,
   turnPhase,
@@ -447,6 +455,8 @@ export function VoiceScreen({
   onWorkspaceRetryRemote,
   onWorkspaceRemove,
 }: VoiceScreenProps) {
+  const bridge = useConversationBridge();
+  const botEnvironment = useConversationEnvironment() === 'bot';
   // Global tasks still feed permission/unread controls. The timeline only consumes its own tasks.
   const taskView = useRef<{ scope: string; values: Record<string, TaskStateSnapshot>; signatures: Map<string, string> }>({ scope: '', values: {}, signatures: new Map() });
   const taskSnaps = useMemo(() => {
@@ -730,7 +740,7 @@ export function VoiceScreen({
   const openLocalFileLink = useCallback(
     (href: string) => {
       if (!currentConversationId) return;
-      void window.hemiVoice
+      void bridge
         ?.resolveConversationLink(currentConversationId, href)
         .then((result) => {
           if (result?.ok && result.artifactId) {
@@ -931,7 +941,7 @@ export function VoiceScreen({
              顶栏不重复——仅当通话条收起时留一个可点回的状态 chip。
              结束通话在通话条的挂断键。
              066：最右是本机项目工作区的「打开目录」split 按钮。 */
-          workflowStudioOpen ? <div id="h59-editor-actions-slot" /> : (
+          topBarActions ?? (workflowStudioOpen ? <div id="h59-editor-actions-slot" /> : (
             <>
               {!voiceModelReady || (callActive && !dockCollapsed) ? null : (
                 <button
@@ -957,7 +967,7 @@ export function VoiceScreen({
               )}
               {openWorkspaceView ? <TopbarOpenWorkspace view={openWorkspaceView} fixtureOpen={topbarOpenFixtureOpen} /> : null}
             </>
-          )
+          ))
         }
       />
 
@@ -1136,6 +1146,7 @@ export function VoiceScreen({
             </div>
 
             {/* 037：记忆提示（「记住了：…」/「已忘记：…」+ 查看 / 撤销），每条自带 role=status。 */}
+            {composerBanner}
             {typeof memoryNotice === 'string' && memoryNotice ? (
               <p className="h24-memory-notice" data-legacy="true" role="status">
                 {memoryNotice}
@@ -1157,7 +1168,7 @@ export function VoiceScreen({
               <div className="h24-empty" aria-label="功能引导">
                 <span className="h37-orb" data-live="true" style={{ '--orb': '40px' } as CSSProperties} aria-hidden="true"><SkinWelcomeAvatar /></span>
                 <p className="h24-empty-greeting">今天想做什么？</p>
-                <p className="h24-empty-hint">直接说，或交给 Hemi 一件事——语音、文字都行。</p>
+                <p className="h24-empty-hint">{botEnvironment?'交给 Hemi 一件事，文件与命令在云服务器上运行。':'直接说，或交给 Hemi 一件事——语音、文字都行。'}</p>
               </div>
             ) : null}
 
@@ -1220,7 +1231,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
-              <RunActivity activity={runActivity} onStop={onStopModelTurn} />
+              <RunActivity key={currentConversationId} activity={runActivity} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}
@@ -1316,7 +1327,7 @@ export function VoiceScreen({
                     <AttachmentAddButton busy={contextBusy} error={contextError} onAttach={onAttachContext} />
                     <span className="h37-tool-sep" aria-hidden="true" />
                     {/* 033：工作区——发送前可见当前任务在哪个目录工作（v2 默认优先）。 */}
-                    <WorkspaceBar
+                    {workspaceControl ?? <WorkspaceBar
                       state={workspaceState}
                       current={workspaceCurrent}
                       sendBlocked={workspaceSendBlocked}
@@ -1332,7 +1343,7 @@ export function VoiceScreen({
                       }
                       onRetryRemote={(id) => onWorkspaceRetryRemote?.(id)}
                       onRemove={(id) => onWorkspaceRemove?.(id)}
-                    />
+                    />}
                     {/* 033：思考强度拨盘（设置页「正在使用」同源）。041：全局一档，自动路由下也可改。 */}
                     <ThinkingLevelStrip
                       level={thinkingLevel}
@@ -1340,10 +1351,10 @@ export function VoiceScreen({
                     />
                     {/* 042：访问范围浮层（盾牌只读入口，替换 005 三档拨盘）；
                         只列持续授权＋进行中任务的本任务授权，「管理」直达设置访问授权区。 */}
-                    <ScopePopover
+                    {scopeControl ?? <ScopePopover
                       activeTaskIds={activeTaskIds}
                       onManage={onOpenAccessSettings ?? onOpenSettings}
-                    />
+                    />}
                   </>
                 }
               />
@@ -1351,7 +1362,7 @@ export function VoiceScreen({
               <SessionUsage records={usageRecords} running={usageRunning} />
               {conversationEmpty ? (
                 <div className="h24-suggestions" aria-label="可以这样开始">
-                  {EMPTY_SUGGESTIONS.map(({ icon: Icon, text }) => (
+                  {(botEnvironment?[{icon:FolderInput,text:'查看当前目录的项目结构'},{icon:CloudSun,text:'检查服务器的磁盘使用情况'},{icon:Table2,text:'整理项目说明文档'}]:EMPTY_SUGGESTIONS).map(({ icon: Icon, text }) => (
                     <button
                       key={text}
                       type="button"

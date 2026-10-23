@@ -1,3 +1,4 @@
+import {useConversationBridge} from './lib/conversation-bridge';
 'use client';
 
 import { useCallback, useState } from 'react';
@@ -42,6 +43,7 @@ export function ConversationHistoryDialog({
   triggerLabel?: string;
   onShow?: () => void;
 }) {
+  const bridge = useConversationBridge();
   const [open, setOpen] = useState(false);
   const { list, error, setError, loadList } = useConversationList(open);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export function ConversationHistoryDialog({
     async (id: string) => {
       setBusyId(id);
       try {
-        await window.hemiVoice?.removeConversation(id);
+        await bridge?.removeConversation(id);
         onRemoved(id);
         await loadList();
       } catch (deleteError) {
@@ -94,7 +96,7 @@ export function ConversationHistoryDialog({
     async (id: string, title: string) => {
       setEditingId(null);
       try {
-        const result = await window.hemiVoice?.renameConversation?.(id, title);
+        const result = await bridge?.renameConversation?.(id, title);
         if (result?.ok) onRenamed?.(id, result.session.title);
       } catch {
         // 落盘失败：列表重载即回到旧标题，不打断用户

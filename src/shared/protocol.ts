@@ -1626,6 +1626,7 @@ export type RunActivityView = {
   since: number | null;
   jobs: Array<{
     id: string; toolCallId?: string; command: string;
+    description?: string; commandTruncated?: boolean; lastOutputAt?: number | null;
     startedAt: number; endedAt: number | null; status: string;
     code: number | null; output: string;
   }>;
@@ -1728,7 +1729,8 @@ export type ConversationDeliverableView = {
 /** 062：会话交付物受控读取结果（unsupported＝文件信息＋系统打开，不冒充预览成功）。 */
 export type ConversationDeliverableReadResult = {
   ok: boolean;
-  kind?: 'text' | 'image' | 'video' | 'unsupported';
+  kind?: 'text' | 'image' | 'video' | 'unsupported' | 'document';
+  document?: AttachmentDocumentPreview;
   mediaUrl?: string;
   markdown?: boolean;
   text?: string;
@@ -2030,6 +2032,7 @@ export type ProviderImportPendingItem = {
 };
 
 export type HemiVoiceBridge = {
+  bot: import('./bot').BotBridge;
   getAppearanceBootstrap: () => AppearanceBootstrap | null;
   getAppearance: () => Promise<AppearanceSnapshot>;
   setAppearance: (request:AppearanceSetRequest) => Promise<AppearanceSetResult>;
@@ -2579,6 +2582,7 @@ export type HemiVoiceBridge = {
     artifactId: string,
     linkPath?: string | null,
   ) => Promise<ConversationDeliverableReadResult>;
+  readConversationDeliverableText?: (conversationId:string,artifactId:string) => ReturnType<HemiVoiceBridge['readAttachmentPreview']>;
   /** 062：会话交付物受控打开（预览栏路径点击；范围外格式走系统应用）。 */
   openConversationDeliverable: (
     conversationId: string,

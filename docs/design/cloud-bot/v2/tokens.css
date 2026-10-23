@@ -1,0 +1,234 @@
+/**
+ * 037 视觉系统 · 设计 token 唯一来源（2026-10-03）。
+ * 取值来自 requirements/040-visual-system/designs/ 各稿的 :root；
+ * 旧的 shadcn / --hemi-* / --h24-* 变量在 globals.css 里一律别名到这里，
+ * 新样式只用本文件的变量，不再写 hex。
+ */
+
+:root {
+  /* 中性色（P2 2026-10-08，对标 Codex desktop）：近中性灰，只留一丝暖——原暖灰
+     （f7f6f3 / 1c1e1b 一族）配鼠尾草绿整体发黄发灰。次要字 ≥4.5:1、占位 ≥3:1。 */
+  --n-0: #ffffff;
+  --n-25: #fcfcfc;
+  --n-50: #f8f8f7;
+  --n-100: #f2f2f1;
+  --n-150: #e9e9e7;
+  --n-200: #dfdfdc;
+  --n-300: #c6c6c3;
+  --n-400: #8b8b88;
+  --n-500: #696966;
+  --n-600: #4e4e4c;
+  --n-800: #2d2d2c;
+  --n-900: #1a1a19;
+
+  /* 品牌色：低饱和鼠尾草绿——P2 起只用于品牌形象（Orb）、开关/勾选等选中态与运行中；
+     输入区的主操作（发送）改用墨色实心（--fill-primary），界面主体回到黑白灰。 */
+  --g-50: #f2f5f1;
+  --g-100: #e4ebe3;
+  --g-200: #cfdcd1;
+  --g-300: #bccbbd;
+  --g-500: #8fa794;
+  --g-600: #74907b;
+  --g-700: #566e5d;
+  --g-800: #4b6152;
+  --g-900: #3e5044;
+
+  /* Business status stays recognizable when the brand palette changes. */
+  --state-50: #f2f5f1;
+  --state-100: #e4ebe3;
+  --state-200: #cfdcd1;
+  --state-500: #8fa794;
+  --state-600: #74907b;
+  --state-700: #566e5d;
+
+  --danger: #b4483d;
+  --danger-50: #fbefed;
+  --danger-200: #ecd0cb;
+  --warn: #a2701c;
+  --warn-50: #faf3e6;
+  --warn-200: #ead9b4;
+  --conversation-unread: #0ea5e9; /* 与 ZCode 的 sky-500 未读圆点一致。 */
+
+  /* 语义映射 */
+  /* 窗口外框（顶栏 + 图标栏 + 会话栏）同一张浅灰底，主区是压在上面的白色内容面板 */
+  --bg-navrail: var(--bg-rail);
+  --bg-rail: #f6f6f5;
+  --bg-canvas: #ffffff;
+  --bg-surface: var(--n-0);
+  --bg-subtle: var(--n-100);
+  --bg-hover: rgb(26 26 25 / 4.5%);
+  --bg-active: rgb(26 26 25 / 7%);
+  --bg-scrim: rgb(26 26 25 / 28%);
+  --ink: var(--n-900);
+  /* 正文/列表项用近墨色：层级靠字重与位置，不靠把主内容调灰（P2） */
+  --body: var(--n-800);
+  --muted: var(--n-500);
+  --faint: var(--n-400);
+  --line: var(--n-150);
+  --line-strong: var(--n-200);
+  /* 实心主操作用 g-700（白字 5.5:1）；g-600 白字只有 3.5:1，降为装饰/图形色 */
+  --accent: var(--g-700);
+  --accent-hover: var(--g-800);
+  --accent-press: var(--g-900);
+  --accent-soft: var(--g-50);
+  --accent-text: var(--g-700);
+  --focus-ring: 0 0 0 3px rgb(116 144 123 / 22%);
+  /* 主操作实心（发送等）：墨色底白字 */
+  --fill-primary: var(--n-900);
+  --fill-primary-hover: var(--n-800);
+  --on-primary: var(--n-0);
+
+  /* 字号 8 级、字重 3 档 */
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px; /* 对话正文（P2：14 偏小，主流桌面对话 15–16） */
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-24: 24px; /* 空态问候（中文字面密，28 显笨重） */
+  --fs-28: 28px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* 圆角 5 级 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px; /* 输入框、内容面板 */
+  --r-full: 999px;
+
+  /* 阴影 2 级（含 1px 描边，替代 border 叠框） */
+  --shadow-1: 0 1px 2px rgb(26 26 25 / 5%), 0 0 0 1px var(--line);
+  --shadow-2: 0 1px 2px rgb(26 26 25 / 4%), 0 8px 24px -8px rgb(26 26 25 / 12%), 0 0 0 1px var(--line);
+
+  /* 动效：5 档时长、3 条曲线（颜色类过渡一律 linear） */
+  --dur-1: 80ms; /* 即时：悬停底色、按压 */
+  --dur-2: 140ms; /* 快：开关、勾选、chip；所有「退出」 */
+  --dur-3: 200ms; /* 标准：菜单、页面淡入、行增删、状态 badge */
+  --dur-4: 280ms; /* 结构：下钻、通话条、预览栏、首启换步 */
+  --dur-5: 400ms; /* 数值：Orb 状态过渡、完成色变 */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); /* 进入、出现 */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* 退出、消失 */
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1); /* 位置/尺寸在屏内变化 */
+
+  /* Orb 色环（品牌形象专用，不作 UI 色） */
+  --orb-base: #9bb5a5;
+  --orb-1: #7fa08d;
+  --orb-2: #c3d8cb;
+  --orb-3: #eee2c8;
+  --orb-4: #d7b4a2;
+
+  /* 间距档位：gap / margin / padding 只用这一套（名字即 px 值）。
+     2–12 用于控件内部与紧邻元素，16 起用于容器内边距与区块间距。 */
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-6: 6px;
+  --sp-8: 8px;
+  --sp-10: 10px;
+  --sp-12: 12px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+  --sp-40: 40px;
+  --sp-48: 48px;
+  --sp-64: 64px;
+
+  /* 语义间距（优先用这些，没有对应语义再用档位） */
+  --gap-row: var(--sp-2); /* 带底色的行上下相邻：悬停底与选中底不相贴 */
+  --gap-head: var(--sp-8); /* 分组标题 ↔ 它下面的卡片 */
+  --gap-section: var(--sp-32); /* 分组 ↔ 分组 */
+  --pad-card: var(--sp-16); /* 卡片 / 行 / 表单的左右内边距 */
+  --pad-page: var(--sp-24); /* 页面与弹窗的左右留白（≤600 为 --sp-16） */
+
+  /* 列表行（会话栏、新建对话、设置导航、菜单项、模型/添加菜单）：同一套高度、
+     内边距、图标间距与字号，行间留 --gap-row；规范见 040 designs/README.md。 */
+  --row-h: 32px;
+  --row-h-lg: 36px; /* 入口行（新建对话）：上下各留约 11px，32 在悬停底下显得贴边 */
+  --row-pad-x: var(--sp-12); /* 文字离行底边缘：10 在悬停底下显得贴边 */
+  --row-gap: var(--sp-8); /* 行内图标 ↔ 文字 */
+  --row-fs: var(--fs-13);
+  --row-icon-stroke: 1.75; /* 行内 16px 线图标：lucide 默认 2 配 13px 常规字偏重 */
+  /* 行上下紧挨（间距 2px），外扩焦点环会压到邻行：行一律用内嵌环 */
+  --focus-ring-inset: inset 0 0 0 2px var(--g-300);
+
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* 高度展开直接过渡到 auto（Electron 44 的 Chromium 已支持） */
+:root {
+  interpolate-size: allow-keywords;
+}
+
+/* —— 通用进出场 keyframes（各组件共用，不再各写一份）—— */
+@keyframes hemi-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes hemi-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes hemi-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+}
+@keyframes hemi-drill {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes hemi-sheet {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes hemi-flash {
+  from {
+    background-color: var(--g-100);
+  }
+}
+@keyframes hemi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes hemi-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 减弱动态效果：位移归零，只留不超过 140ms 的交叉淡入，循环动画停住 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 059 视觉稿几何，沿用 1440／375 主稿。 */
+:root {
+  --h59-library-max: 1000px;
+  --h59-edge-width: 1.5px; /* 059 稿：定义连线 */
+  --h59-icon-sm: 14px; /* 059 稿：紧凑能力与来源图标 */
+  --h59-node-w: 252px;
+  --h59-inspector-w: 380px;
+  --h59-row-min: 92px;
+  --h59-field-h: 36px;
+  --h59-symbol: 52px;
+}

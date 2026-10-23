@@ -1,3 +1,4 @@
+import {useConversationBridge,useConversationEnvironment,useConversationOnline} from './lib/conversation-bridge';
 import {Dialog as PreviewDialog} from '@base-ui/react/dialog';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -172,6 +173,9 @@ export function FilePreviewPanel({
   /** 056：执行过程 Tab 的任务操作（停止）。 */
   onTaskAction?: (action: TaskActionName, payload?: { taskId?: string; taskKey?: string }) => void;
 }) {
+  const bridge = useConversationBridge();
+  const bot = useConversationEnvironment() === 'bot';
+  const runtimeOnline = useConversationOnline();
   const activeTab = tabs.find((tab) => previewTabKey(tab) === activeKey) ?? tabs[0] ?? null;
   const tabKeys = tabs.map(previewTabKey).join('\u0000');
   const [workflowNames, setWorkflowNames] = useState<Record<string, string>>({});
@@ -182,9 +186,9 @@ export function FilePreviewPanel({
       const key = previewTabKey(tab);
       if (workflowNamesRef.current[key]) continue;
       const request = tab.kind === 'workflow-run'
-        ? window.hemiVoice.workflowGetInvocation(tab.invocationId)
+        ? bridge.workflowGetInvocation(tab.invocationId)
         : tab.kind === 'workflow-definition'
-          ? window.hemiVoice.workflowGetRevision(tab.workflowId, tab.revision) : null;
+          ? bridge.workflowGetRevision(tab.workflowId, tab.revision) : null;
       if (request) void request.then(record => {
         const name = (record as {name?:string} | null)?.name;
         if (!alive || !name) return;
@@ -233,6 +237,7 @@ export function FilePreviewPanel({
 
   const load = useCallback(
     (tab: PreviewTabId) => {
+      if (bot && !runtimeOnline) return;
       // 报告与执行过程 Tab 的数据都来自快照，无文件读取。
       if (tab.kind === 'attachment') {
         // 附件 Tab：按身份受控读取；重启后登记表为空时，带档案冻结的暂存路径
@@ -246,8 +251,8 @@ export function FilePreviewPanel({
         const isDocument = /\.(pdf|docx|xlsx|pptx)$/i.test(meta?.name ?? '');
         if (isDocument) documentKeys.current.add(key);
         const request: Promise<PreviewResult> | undefined = isDocument
-          ? window.hemiVoice?.readAttachmentDocument(tab.conversationId, tab.attachmentId).then((document) => ({ ok: document.ok, kind: 'document', document, message: document.message }))
-          : window.hemiVoice?.readAttachmentPreview(
+          ? bridge?.readAttachmentDocument(tab.conversationId, tab.attachmentId).then((document) => ({ ok: document.ok, kind: 'document', document, message: document.message }))
+          : bridge?.readAttachmentPreview(
           tab.conversationId,
           tab.attachmentId,
           stagedPath,
@@ -256,6 +261,7 @@ export function FilePreviewPanel({
         void request
           ?.then((value) => {
             if (loadTicks.current.get(key) !== tick) return;
+            if (value?.kind === 'document') documentKeys.current.add(key);
             applyResult(key, value ?? { ok: false, message: '读取不可用' });
           })
           .catch(() => {
@@ -271,7 +277,7 @@ export function FilePreviewPanel({
         const tick = (loadTicks.current.get(key) ?? 0) + 1;
         loadTicks.current.set(key, tick);
         applyResult(key, null);
-        const request = window.hemiVoice?.readConversationDeliverable?.(
+        const request = bridge?.readConversationDeliverable?.(
           tab.conversationId,
           tab.artifactId,
           tab.linkPath ?? null,
@@ -280,6 +286,7 @@ export function FilePreviewPanel({
         void request
           ?.then((value) => {
             if (loadTicks.current.get(key) !== tick) return;
+            if (value?.kind === 'document') documentKeys.current.add(key);
             applyResult(key, value ?? { ok: false, message: '读取不可用' });
           })
           .catch(() => {
@@ -293,7 +300,7 @@ export function FilePreviewPanel({
       const tick = (loadTicks.current.get(key) ?? 0) + 1;
       loadTicks.current.set(key, tick);
       applyResult(key, null);
-      const request = window.hemiVoice?.readArtifactPreview(tab.taskId, tab.artifactId);
+      const request = bridge?.readArtifactPreview(tab.taskId, tab.artifactId);
       if (!request) { applyResult(key, { ok: false, message: '读取通道不可用，请重启应用后再试' }); return; }
       void request
         ?.then((value) => {
@@ -305,7 +312,7 @@ export function FilePreviewPanel({
           applyResult(key, { ok: false, message: '读取失败，可重试' });
         });
     },
-    [applyResult, attachmentMetaOf],
+    [applyResult, attachmentMetaOf,bridge,bot,runtimeOnline],
   );
 
   // Document bytes can be much larger than text previews. Release closed tabs
@@ -376,7 +383,7 @@ export function FilePreviewPanel({
     if (saving) return;
     setSaving(true);
     try {
-      const result = await window.hemiVoice?.saveDeliveryReport(taskId);
+      const result = await bridge?.saveDeliveryReport(taskId);
       if (result?.ok) setToast(`已保存到 ${result.path ?? '所选位置'}`);
       else if (!result?.canceled) setToast(result?.message || '没有保存成功');
     } catch {
@@ -389,10 +396,10 @@ export function FilePreviewPanel({
   const openInBrowser = useCallback((tab: PreviewTabId) => {
     if (tab.kind === 'process' || (tab.kind === 'workflow-definition' || tab.kind === 'workflow-run')) return; // 过程/定义页没有磁盘对象，入口本就不渲染。
     const request = tab.kind === 'attachment'
-      ? window.hemiVoice?.openAttachmentSource(tab.conversationId, tab.attachmentId)
+      ? bridge?.openAttachmentSource(tab.conversationId, tab.attachmentId)
       : tab.kind === 'deliverable'
-        ? window.hemiVoice?.openConversationDeliverable(tab.conversationId, tab.artifactId, tab.linkPath ?? null)
-        : window.hemiVoice?.openArtifactPreviewFile(tab.taskId, tab.artifactId ?? '');
+        ? bridge?.openConversationDeliverable(tab.conversationId, tab.artifactId, tab.linkPath ?? null)
+        : bridge?.openArtifactPreviewFile(tab.taskId, tab.artifactId ?? '');
     void request
       .then((result) => {
         if (!result?.ok) setToast(result?.message || '打开失败');
@@ -776,6 +783,8 @@ export function FilePreviewPanel({
             >
               <RotateCcw className="size-3.5" aria-hidden="true" />
             </button>
+            {bot && activeTab?.kind === 'deliverable' ? <button type="button" className="h24-preview-tool" aria-label="下载云端文件" title={runtimeOnline ? '下载云端文件' : '恢复连接后才能下载'} disabled={!runtimeOnline} onClick={() => void bridge.openConversationDeliverable(activeTab.conversationId,activeTab.artifactId).then(result=>{if(result.ok)setToast('已下载到本机');else if(!result.canceled)setToast(result.message||'下载未完成，请重试。');}).catch(error => setToast(error instanceof Error?error.message:'下载失败，请重试。'))}><Download className="size-3.5" aria-hidden="true" /></button> : null}
+            {bot && !runtimeOnline ? <span className="muted">{activeResult?.ok?'缓存预览':'恢复连接后可读取文件'}</span> : null}
             {currentAttachment?.source === 'paste' ? (
               // 粘贴图片没有原文件路径：展示来源说明，不放可点击路径（028 R-03）。
               <span className="h24-preview-path" title="粘贴的图片，没有原文件路径">
@@ -855,7 +864,7 @@ export function FilePreviewPanel({
             </article>
           )
         ) : !activeResult ? (
-          <p className="h24-preview-status">正在读取…</p>
+          <p className="h24-preview-status">{bot&&!runtimeOnline?'连接已断开，恢复连接后可读取文件。':'正在读取…'}</p>
         ) : !activeResult.ok ? (
           // R-06：失败原位说明 + 重试；交付记录保留，不弹系统错误。
           <div className="h37-note h24-preview-error" data-tone="warn" role="note">
@@ -888,9 +897,9 @@ export function FilePreviewPanel({
               </button>
             ) : null}
           </div>
-        ) : activeResult.kind === 'document' && activeResult.document && activeTab.kind === 'attachment' ? (
+        ) : activeResult.kind === 'document' && activeResult.document && (activeTab.kind === 'attachment'||activeTab.kind==='deliverable') ? (
           <Suspense fallback={<p className="h24-preview-status" role="status">正在打开文档…</p>}>
-            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? '文档'} readText={() => window.hemiVoice.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId)} />
+            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? '文档'} readText={() => activeTab.kind==='attachment'?bridge.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId):bridge.readConversationDeliverableText?.(activeTab.conversationId,activeTab.artifactId)??Promise.resolve({ok:false,message:'暂无法读取文档文字'})} />
           </Suspense>
         ) : activeResult.kind === 'video' && activeResult.mediaUrl ? (
           <VideoPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? '预览视频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />

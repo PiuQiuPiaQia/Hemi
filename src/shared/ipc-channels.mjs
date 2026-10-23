@@ -7,6 +7,7 @@
  * 不漂移。新增通道时：先加到这里，再写 preload 与主进程两侧。
  */
 export const IPC = {
+  bot: {state:'bot:state',connect:'bot:connect',initialize:'bot:initialize',models:'bot:models',directory:'bot:directory',command:'bot:command',upload:'bot:upload',download:'bot:download',environment:'bot:environment',changed:'bot:changed'},
   appearance: {
     bootstrap:'appearance:bootstrap',get:'appearance:get',set:'appearance:set',changed:'appearance:changed',
     applied:'appearance:applied',visualReady:'appearance:visual-ready',activity:'appearance:activity',

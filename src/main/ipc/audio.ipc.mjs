@@ -52,6 +52,7 @@ export function getDuplexHost() {
 
 export function registerAudioIpc() {
   ipcMain.handle(IPC.duplex.start, async () => {
+    if (state.conversationEnvironment === 'bot') return {ok:false,message:'Bot 使用文字对话。'};
     const result = await ensureHost().start();
     if (!result.ok) audioLog.warn(`duplex 启动失败（${result.reason}），渲染层将回退浏览器链路`);
     return result;

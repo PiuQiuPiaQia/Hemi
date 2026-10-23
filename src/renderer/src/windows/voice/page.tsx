@@ -1,3 +1,6 @@
+import {BotPage} from '../bot/page';
+import {ApplicationNavigationContext, type ApplicationPage} from './lib/conversation-bridge';
+import {confirmMemoryLeave} from './memory-section';
 import {confirmWorkflowLeave} from "./workflow-leave-guard";
 import {setAppearanceScene} from '@/appearance/scene';
 import type { ChatTurnReceipt, ConversationDeliverableView, ConversationTurnState, SkillSelectionView } from '@shared/protocol';
@@ -159,6 +162,9 @@ function logChain(message: string) {
 }
 
 export default function Home() {
+  const [botOpen, setBotOpen] = useState(false);
+  const botOpenRef = useRef(false);
+  const navigationPendingRef = useRef(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   // 032：首启判定以主进程引导状态为权威（phase=in_progress 才呈现引导页）；
   // 已完成的用户配置缺失/权限被收回都不再回引导，改在主界面就近修复。
@@ -775,7 +781,7 @@ export default function Home() {
   const startSpeakForTurn = useCallback(
     async (turnId: number, text: string) => {
       stopTtsPlayback();
-      if (!ttsForm.ttsEnabled || !ttsForm.hasApiKey) {
+      if (botOpenRef.current || !ttsForm.ttsEnabled || !ttsForm.hasApiKey) {
         // 静默降级为 002 形态：不报错，只是不说话。
         settleReply();
         return;
@@ -2466,6 +2472,7 @@ export default function Home() {
   }, []);
 
   const startSession = useCallback(async (mode: ListenMode) => {
+    if (botOpenRef.current) return;
     if (!window.hemiVoice) {
       setErrorMessage('请从 Hemi 客户端中启动。');
       setSessionState('error');
@@ -2675,6 +2682,7 @@ export default function Home() {
   }, [startAudioCapture, startDuplexCapture, stopAudioCapture, updateConfigForm]);
 
   const handleHoldStart = useCallback(() => {
+    if (botOpenRef.current) return;
     // A call owns the microphone; push-to-talk must not hijack it.
     if (sessionModeRef.current === 'continuous') return;
     if (activeRef.current) return;
@@ -2727,6 +2735,7 @@ export default function Home() {
   }, [stopSession]);
 
   const handleToggleCall = useCallback(() => {
+    if (botOpenRef.current) return;
     if (sessionModeRef.current === 'continuous') {
       // 结束通话：作废在途请求与定时器（旧计时器不得重新唤醒通话），
       // 停掉播报，但不清对话——「结束不是清空」。
@@ -3566,6 +3575,7 @@ export default function Home() {
     // 字幕条按「一句一行」显示，临时结果那一行会被它自己在原地改写。
     // 早先这里把临时结果混进 recentLines，字幕条分不出句子，新句子一来就是
     // 两行一起换掉，看起来像文字在不断往上堆。
+    if (botOpenRef.current) return;
     const recentSegments = transcripts
       .slice(-2)
       .map((item) => ({ id: `${conversationId}:${item.id}`, text: item.text, author: item.author }))
@@ -3684,6 +3694,39 @@ export default function Home() {
 
   useEffect(()=>{setAppearanceScene({appReady:!bootstrapping});if(bootstrapping||setupRequired||settingsOpen)setAppearanceScene({view:'other',inputActive:false});},[bootstrapping,setupRequired,settingsOpen]);
 
+  const applicationPage: ApplicationPage = botOpen ? 'bot' : settingsOpen ? 'settings'
+    : skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : 'home';
+  const navigate = useCallback(async (next: ApplicationPage, settingsPage?: 'general' | 'models') => {
+    if (navigationPendingRef.current || next === applicationPage) return;
+    navigationPendingRef.current = true;
+    const wasBot = botOpenRef.current;
+    try {
+      if (settingsOpen && !await confirmMemoryLeave()) return;
+      if (!await confirmWorkflowLeave()) return;
+      if (next === 'bot') {
+        botOpenRef.current = true;
+        stopTtsPlayback();
+        await stopSession({ submit: false });
+        await window.hemiVoice.bot.environment('bot');
+      } else if (wasBot) {
+        await window.hemiVoice.bot.environment('local');
+      }
+      botOpenRef.current = next === 'bot';
+      setBotOpen(next === 'bot');
+      setSkillMarketOpen(next === 'skills');
+      setWorkflowStudioOpen(next === 'workflows');
+      setSettingsOpen(next === 'settings');
+      setSettingsTarget(next === 'settings' && settingsPage ? {page: settingsPage} : null);
+    } catch (error) {
+      botOpenRef.current = wasBot;
+      setTurnError(messageFromError(error, '无法切换页面。'));
+    } finally {
+      navigationPendingRef.current = false;
+    }
+  }, [applicationPage, settingsOpen, stopSession, stopTtsPlayback]);
+  const navigation = {page: applicationPage, navigate: (next: ApplicationPage) => void navigate(next)};
+  if (botOpen) return <ApplicationNavigationContext.Provider value={navigation}><BotPage onOpenSettings={(models=false) => {void navigate('settings', models ? 'models' : 'general');}} /></ApplicationNavigationContext.Provider>;
+
   if (bootstrapping) {
     return (
       <main className="setup-shell flex min-h-dvh items-center justify-center">
@@ -3720,7 +3763,7 @@ export default function Home() {
 
   if (settingsOpen) {
     return (
-      <SettingsScreen
+      <ApplicationNavigationContext.Provider value={navigation}><SettingsScreen
         saving={savingConfig}
         config={configForm}
         modelConfig={modelForm}
@@ -3752,7 +3795,7 @@ export default function Home() {
         }
         onCallExpand={handleExpandDock}
         onCallEnd={handleToggleCall}
-      />
+      /></ApplicationNavigationContext.Provider>
     );
   }
 
@@ -3766,7 +3809,7 @@ export default function Home() {
     (turnPhase === 'listening' && lastTranscript?.author === 'user' && lastTranscript.kind !== 'task');
 
   return (
-    <>
+    <ApplicationNavigationContext.Provider value={navigation}>
       <VoiceScreen
         skillMarketOpen={skillMarketOpen}
         onOpenSkillMarket={async () => {
@@ -3937,6 +3980,6 @@ export default function Home() {
           onSubmit={(password, remember) => void submitRemotePassword(password, remember)}
         />
       ) : null}
-    </>
+    </ApplicationNavigationContext.Provider>
   );
 }

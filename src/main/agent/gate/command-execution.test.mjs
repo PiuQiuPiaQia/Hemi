@@ -53,6 +53,23 @@ test('060 已取消信号不启动命令，不留下副作用', posix, async () 
   assert.equal(commandToolResult(out).isError, true);
 });
 
+test('后台短时间连续输出的最后一条仍推送到界面，不把无输出期误记为旧进度', posix, async () => {
+  const views = [];
+  const commands = createCommandScope({ onChange: jobs => views.push(jobs) });
+  try {
+    await commands.run({ command: 'printf first; sleep 0.1; printf second; sleep 30', runInBackground: true });
+    const deadline = Date.now() + 3000;
+    while (!views.some(jobs => jobs[0]?.output.includes('second'))) {
+      assert.ok(Date.now() < deadline, '最后一次输出应在节流窗口后送达');
+      await pause(20);
+    }
+    const first = views.find(jobs => jobs[0]?.output === 'first')?.[0];
+    const latest = views.find(jobs => jobs[0]?.output.includes('second'))?.[0];
+    assert.ok(first, '真实进程先产生首条输出');
+    assert.ok(latest.lastOutputAt > first.lastOutputAt);
+  } finally { await commands.abort(); }
+});
+
 test('064 命令在进程身份持久化前不执行，登记失败或等待中取消无副作用', posix, async () => {
   const dir=await mkdtemp(path.join(os.tmpdir(),'hemi064-start-gate-'));
   try {

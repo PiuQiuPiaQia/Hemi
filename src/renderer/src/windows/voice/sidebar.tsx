@@ -1,3 +1,4 @@
+import {useConversationBridge} from './lib/conversation-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
 import {SkinWatermark} from '@/components/skin-watermark';
@@ -86,6 +87,7 @@ export function ConversationSidebar({
   onHistoryOpen?: () => void;
   interactionProps?: Pick<ComponentProps<'aside'>, 'id' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
 }) {
+  const bridge = useConversationBridge();
   const { list, setList, error, setError, loadList } = useConversationList(true, conversationVisible ? currentConversationId : null);
   /** 行内重命名：editingId 命中的行渲染输入框。 */
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -119,7 +121,7 @@ export function ConversationSidebar({
     async (id: string, title: string) => {
       setEditingId(null);
       try {
-        const result = await window.hemiVoice?.renameConversation?.(id, title);
+        const result = await bridge?.renameConversation?.(id, title);
         if (result?.ok) onConversationRenamed?.(id, result.session.title);
       } catch {
         // 落盘失败：列表重载即回到旧标题，不打断用户
@@ -135,7 +137,7 @@ export function ConversationSidebar({
   const commitDelete = useCallback(
     async (id: string) => {
       try {
-        await window.hemiVoice?.removeConversation(id);
+        await bridge?.removeConversation(id);
         onConversationRemoved(id);
         setError('');
       } catch (deleteError) {
@@ -160,7 +162,7 @@ export function ConversationSidebar({
       const byId = new Map(list.sessions.map((session) => [session.id, session]));
       const next = nextIds.map((id) => byId.get(id)!);
       setList((prev) => ({ ...prev, sessions: next })); // 乐观更新，落盘失败靠 focus 刷新兜底
-      void window.hemiVoice?.reorderConversations?.(nextIds);
+      void bridge?.reorderConversations?.(nextIds);
     },
     [list.sessions],
   );
@@ -175,7 +177,7 @@ export function ConversationSidebar({
   const groups = groupByRecency(recents);
   const notice = error || list.storageError;
   // 043：快捷键提示平台化（mac ⌘N / Windows Ctrl+N），键盘处理语义不变。
-  const platform = window.hemiVoice?.platform ?? 'darwin';
+  const platform = bridge?.platform ?? 'darwin';
   const newShortcut = newConversationShortcut(platform);
 
   const historyTrigger = (

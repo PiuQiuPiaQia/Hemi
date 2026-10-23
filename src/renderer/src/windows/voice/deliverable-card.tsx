@@ -1,5 +1,6 @@
+import {useConversationBridge,useConversationEnvironment,useConversationOnline} from './lib/conversation-bridge';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { AppWindow, FileArchive, FileCode2, FileSpreadsheet, FileText, FolderOpen, ImageIcon, Presentation, RotateCcw, Video } from 'lucide-react';
+import { AppWindow, FileArchive, FileCode2, FileSpreadsheet, FileText, Download, FolderOpen, ImageIcon, Presentation, RotateCcw, Video } from 'lucide-react';
 import type { ConversationDeliverableReadResult, FileOpenApplicationsResult, TurnPart } from '@shared/protocol';
 import { Menu, MenuGroup, MenuSeparator } from '@/components/menu';
 
@@ -52,6 +53,9 @@ export function DeliverableCards({ files, onOpen }: { files: FilePart[]; onOpen?
 
 function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?: (artifactId: string, name: string) => void;
   onResolved: (key: string, identity: string) => void }) {
+  const bridge = useConversationBridge();
+  const bot = useConversationEnvironment() === 'bot';
+  const runtimeOnline = useConversationOnline();
   const context = useContext(DeliverableContext);
   const conversationId = file.conversationId ?? context?.conversationId;
   const key = JSON.stringify([conversationId, file.artifactId, file.linkPath, file.contentVersion]);
@@ -80,17 +84,18 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
 
   useEffect(() => {
     if (!visible || !conversationId) return;
+    if (bot && !runtimeOnline) return;
     let disposed = false;
     setPreview(null);
     const load = async () => {
       // Resolve all link forms once at the host (including file URLs and relative paths).
-      const target = file.linkPath ? await window.hemiVoice.resolveConversationLink(conversationId, file.linkPath) : null;
+      const target = file.linkPath ? await bridge.resolveConversationLink(conversationId, file.linkPath) : null;
       if (disposed) return null;
       if (target && !target.ok) return target;
       const id = target?.artifactId ?? file.artifactId;
       onResolved(JSON.stringify([file.conversationId, file.artifactId || file.linkPath]), `${file.conversationId}:${id}`);
       if (!isImage) return target ?? { ok: true };
-      return window.hemiVoice.readConversationDeliverable(conversationId, id, target?.path ?? null);
+      return bridge.readConversationDeliverable(conversationId, id, target?.path ?? null);
     };
     void load().then(value => {
       if (!disposed && value) setPreview({ key, result: value });
@@ -98,17 +103,17 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
       if (!disposed) setPreview({ key, result: { ok: false, message: '文件读取失败，可重试' } });
     });
     return () => { disposed = true; };
-  }, [visible, conversationId, key, file.conversationId, file.artifactId, file.linkPath, isImage, attempt, onResolved]);
+  }, [visible, conversationId, key, file.conversationId, file.artifactId, file.linkPath, isImage, attempt, onResolved, bridge, bot, runtimeOnline]);
 
   const menuOpen = menuPoint !== null;
   useEffect(() => {
     if (!menuOpen || !conversationId) return;
     let disposed = false;
     const load = async (): Promise<FileOpenApplicationsResult> => {
-      const target = file.linkPath ? await window.hemiVoice.resolveConversationLink(conversationId, file.linkPath) : null;
+      const target = file.linkPath ? await bridge.resolveConversationLink(conversationId, file.linkPath) : null;
       if (target && !target.ok) return { ok: false, applications: [], message: target.message };
       if (disposed) return { ok: false, applications: [] };
-      return window.hemiVoice.listConversationDeliverableApplications(conversationId, target?.artifactId ?? file.artifactId, target?.path ?? null);
+      return bridge.listConversationDeliverableApplications(conversationId, target?.artifactId ?? file.artifactId, target?.path ?? null);
     };
     void load().then(result => {
       if (!disposed) setApplications({ key, result });
@@ -127,13 +132,15 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
   };
   const openMenu = (point: { x: number; y: number }) => { setApplications(null); setMenuPoint(point); };
   const appResult = applications?.key === key ? applications.result : null;
-  const act = async (intent: 'reveal' | 'application', applicationId: string | null = null) => {
+  const act = async (intent: 'reveal' | 'application' | 'download', applicationId: string | null = null) => {
     setMenuPoint(null); setActionError(null);
     if (!conversationId) return;
     try {
-      const target = file.linkPath ? await window.hemiVoice.resolveConversationLink(conversationId, file.linkPath) : null;
+      const target = file.linkPath ? await bridge.resolveConversationLink(conversationId, file.linkPath) : null;
       if (target && !target.ok) { setActionError(target.message || '文件不可用'); return; }
-      const outcome = await window.hemiVoice.openConversationDeliverable(conversationId, target?.artifactId ?? file.artifactId, target?.path ?? null, intent, applicationId);
+      const outcome: {ok:boolean;message?:string} = intent === 'download'
+        ? await bridge.bot.download(conversationId,target?.artifactId ?? file.artifactId)
+        : await bridge.openConversationDeliverable(conversationId, target?.artifactId ?? file.artifactId, target?.path ?? null, intent, applicationId);
       if (!outcome.ok) setActionError(outcome.message || '文件操作失败');
     } catch { setActionError('文件操作失败，可稍后重试'); }
   };
@@ -162,6 +169,7 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
     </div> : null}
     {actionError ? <div className="h62-deliverable-error" role="status">{actionError}</div> : null}
     <Menu open={menuOpen} onClose={() => setMenuPoint(null)} placement="fixed" position={menuPoint ? { ...menuPoint } : undefined}>
+      {bot ? <button type="button" role="menuitem" className="h37-menu-item" disabled={!runtimeOnline} onClick={() => void act('download')}><Download aria-hidden="true" /><span>下载云端文件</span></button> : <>
       <MenuGroup label="打开方式" />
       <div className="h62-file-applications" aria-busy={!appResult}>
         {appResult?.applications.map(application => <button key={application.id} type="button" role="menuitem" className="h37-menu-item" tabIndex={-1}
@@ -176,6 +184,7 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
       </div>
       <MenuSeparator />
       <button type="button" role="menuitem" className="h37-menu-item" tabIndex={-1} disabled={Boolean(file.host)} onClick={() => void act('reveal')}><FolderOpen aria-hidden="true" /><span>打开所在目录</span></button>
+      </>}
     </Menu>
   </div>;
 }

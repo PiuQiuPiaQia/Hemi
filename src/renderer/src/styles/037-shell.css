@@ -142,6 +142,10 @@ html.kb-nav .compact-shell .h65-open-more:focus-visible {
 }
 
 /* —— 图标栏 —— */
+.compact-shell .h24-frame {
+  height: calc(100dvh - var(--hemi-topbar-h));
+}
+
 .compact-shell .h24-navrail {
   gap: var(--sp-4);
   padding: var(--sp-4) 0 var(--sp-12);
@@ -150,9 +154,38 @@ html.kb-nav .compact-shell .h65-open-more:focus-visible {
   background: var(--bg-navrail);
 }
 
+.compact-shell .h24-navrail-pages,
+.compact-shell .h24-navrail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+
+.compact-shell .h24-navrail-pages {
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  flex-shrink: 1;
+}
+
+.compact-shell .h24-navrail-divider {
+  width: var(--sp-16);
+  height: 1px;
+  flex-shrink: 0;
+  margin: var(--sp-4) 0;
+  background: var(--line);
+}
+
+.compact-shell .h24-navrail-spacer {
+  flex: 1 0 var(--sp-12);
+}
+
 .compact-shell .h24-navrail-item {
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
   border-radius: var(--r-sm);
   color: var(--muted);
   transition:
@@ -162,6 +195,11 @@ html.kb-nav .compact-shell .h65-open-more:focus-visible {
 }
 
 .compact-shell .h24-navrail-item:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h24-navrail-tools .h24-navrail-item[aria-expanded='true'] {
   background: var(--bg-hover);
   color: var(--ink);
 }

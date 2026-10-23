@@ -1,3 +1,4 @@
+import {getBotService} from './ipc/bot.ipc.mjs';
 import { app, Menu, nativeImage, powerMonitor, protocol, session } from 'electron';
 import path from 'node:path';
 
@@ -272,6 +273,7 @@ process.on('unhandledRejection', (error) => {
 });
 
 app.on('before-quit', () => {
+  void getBotService()?.close();
   state.isQuitting = true;
   logSessionEnd();
   eventLoopMonitor?.stop();

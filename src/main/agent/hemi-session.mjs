@@ -212,6 +212,7 @@ export function createHemiSession({
   grantScopeId = null,
   accessService = null,
   accessWorkspaceDir = null,
+  controlRoots = null,
   remote = null,
   boundary = null,
   extraExtensions = [],
@@ -223,6 +224,7 @@ export function createHemiSession({
   log,
   initTimeoutMs = INIT_TIMEOUT_MS,
   stallTimeoutMs = STALL_TIMEOUT_MS,
+  permissionTimeoutMs = undefined,
   abortGraceMs = ABORT_GRACE_MS,
 }) {
   const emitter = new EventEmitter();
@@ -297,8 +299,10 @@ export function createHemiSession({
           timeoutMs: typeof opts.timeout === 'number' ? opts.timeout : null,
         });
         // 扩展侧兜底计时（005 D-7：必须大于宿主 30s 主计时）。
-        const backstop = setTimeout(() => resolve(undefined), (opts.timeout ?? 35_000) + 5_000);
-        backstop.unref?.();
+        if (permissionTimeoutMs !== 0) {
+          const backstop = setTimeout(() => resolve(undefined), permissionTimeoutMs ?? (opts.timeout ?? 35_000) + 5_000);
+          backstop.unref?.();
+        }
       }).finally(() => pendingPermissions.delete(id));
     };
     return {
@@ -365,6 +369,7 @@ export function createHemiSession({
         workspaceDir: grantWorkspaceDir,
         cwd: typeof cwd === 'string' && cwd ? cwd : null,
         skillRoots,
+        controlRoots,
         listAppWindows: (o) => cua.listAppWindows(o),
         log,
       });

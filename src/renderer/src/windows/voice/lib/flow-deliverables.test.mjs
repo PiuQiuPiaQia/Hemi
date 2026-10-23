@@ -45,3 +45,9 @@ test('相同快照的成果行缓存稳定，版本变化后重新投影；回�
   assert.notStrictEqual(first[0], updated[0]);
   assert.equal(project({ ...flow, timeline: [] }).transcripts.length, 0);
 });
+
+test('relative delivery links resolve to their own producing run after a directory switch',()=>{
+ const a={artifactId:'old-report',kind:'file',name:'report.md',path:'/old/report.md',producerRunId:'r1'},b={...a,artifactId:'new-report',path:'/new/report.md',producerRunId:'r2'};
+ const flow={...snapshot([row('old','r1',[text('[报告](report.md)')]),row('new','r2',[text('[报告](report.md)')])]),artifacts:{a,b}};
+ const parts=flowDeliverableParts(flow);assert.deepEqual(parts.get('old').filter(p=>p.kind==='deliverable').map(p=>p.artifactId),['old-report']);assert.deepEqual(parts.get('new').filter(p=>p.kind==='deliverable').map(p=>p.artifactId),['new-report']);
+});

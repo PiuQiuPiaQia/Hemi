@@ -13,7 +13,22 @@ ipcRenderer.on('appearance:activity', (_event, activity) => {
 });
 try { appearanceBootstrap = ipcRenderer.sendSync('appearance:bootstrap'); } catch {}
 
+async function botInvoke(channel, payload) { const value = await ipcRenderer.invoke(channel, payload); if (!value.ok) { const error = new Error(value.message); error.code = value.code; throw error; } return value.result; }
+
 contextBridge.exposeInMainWorld('hemiVoice', {
+  bot: {
+    getState: () => botInvoke('bot:state'),
+    connect: (payload) => botInvoke('bot:connect', payload),
+    initialize: (payload) => botInvoke('bot:initialize', payload),
+    models: () => botInvoke('bot:models'),
+    directory: (candidateId, path) => botInvoke('bot:directory', { candidateId, path }),
+    command: (method, params) => botInvoke('bot:command', { method, params }),
+    upload: (payload) => botInvoke('bot:upload', payload),
+    download: (id, artifactId) => botInvoke('bot:download', { id, artifactId }),
+    environment: (environment) => botInvoke('bot:environment', { environment }),
+    onChanged: (callback) => { const fn = (_event, value) => callback(value); ipcRenderer.on('bot:changed', fn); return () => ipcRenderer.removeListener('bot:changed', fn); },
+  },
+
   getAppearanceBootstrap: () => appearanceBootstrap,
   getAppearance: () => ipcRenderer.invoke('appearance:get'),
   setAppearance: (request) => ipcRenderer.invoke('appearance:set', request),

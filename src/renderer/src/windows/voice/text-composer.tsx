@@ -1,3 +1,4 @@
+import {useConversationBridge,useConversationEnvironment} from './lib/conversation-bridge';
 import { modelPolicyView } from '@shared/model-policy-view.mjs';
 import { AttachmentCard } from './attachment-card';
 import {
@@ -229,6 +230,9 @@ export function TextComposer({
   queueEditSaving = false,
   onCancelQueueEdit,
 }: TextComposerProps) {
+  const bridge = useConversationBridge();
+  const botEnvironment=useConversationEnvironment() === 'bot';
+  const composerHint = botEnvironment ? 'Enter 发送，Shift+Enter 换行' : COMPOSER_HINT;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   /** 上次见过的 token（null＝尚未观察）；挂载初值不算变化，不触发聚焦。 */
@@ -314,12 +318,12 @@ export function TextComposer({
 
   // slash 面板打开 → 拉候选（按会话缓存；失败不缓存——重开可重试）。
   useEffect(() => {
-    if (panel?.kind !== 'slash' || !window.hemiVoice?.listSlashCandidates) return;
+    if (panel?.kind !== 'slash' || !bridge?.listSlashCandidates) return;
     const conversationId = conversationIdRefForMention.current;
     if (slashResult && slashResult.conversationId === conversationId && !slashResult.result.skillsError) return;
     let cancelled = false;
     setSlashLoading(true);
-    window.hemiVoice
+    bridge
       .listSlashCandidates(conversationId ?? '')
       .then((result) => {
         if (!cancelled) setSlashResult({ conversationId, result });
@@ -345,7 +349,7 @@ export function TextComposer({
     const query = activeToken.query;
     setMentionLoading(true);
     const timer = window.setTimeout(() => {
-      void window.hemiVoice
+      void bridge
         ?.listReferences(conversationId, query, mentionWorkspaceId ?? undefined)
         .then((result) => {
           setMentionItems(result?.candidates ?? []);
@@ -386,7 +390,7 @@ export function TextComposer({
     const out: Array<{ modelKey: string; model: string; providerName: string; hasApiKey: boolean; isAuto?: boolean }> = [];
     const directory = modelProfiles;
     const { ready: autoReady, hint: autoHint } = modelPolicyView(directory);
-    if (!keyword || `自动路由 auto ${autoHint}`.toLowerCase().includes(keyword)) {
+    if (!botEnvironment && (!keyword || `自动路由 auto ${autoHint}`.toLowerCase().includes(keyword))) {
       out.push({ modelKey: 'auto', model: `自动路由 · ${autoHint}`, providerName: '', hasApiKey: autoReady, isAuto: true });
     }
     for (const provider of directory?.providers ?? []) {
@@ -396,7 +400,7 @@ export function TextComposer({
       }
     }
     return out;
-  }, [panel?.kind, modelQuery, modelProfiles]);
+  }, [panel?.kind, modelQuery, modelProfiles,botEnvironment]);
 
   /** 面板可选择条目（禁用项留位但键盘跳过；跨分组顺序＝展示顺序）。 */
   const panelItems = useMemo<PanelItem[]>(() => {
@@ -766,7 +770,7 @@ export function TextComposer({
     const file = event.dataTransfer?.files?.[0];
     if (!file) return;
     event.preventDefault();
-    const raw = window.hemiVoice?.pathForFile?.(file) ?? '';
+    const raw = bridge?.pathForFile?.(file) ?? '';
     const filePath = typeof raw === 'string' ? raw : '';
     if (filePath) onAttachDrop(filePath);
   };
@@ -953,7 +957,7 @@ export function TextComposer({
           rows={1}
           placeholder={
             busy && !value.trim()
-              ? waiting ? '任务等待中，可先写下一句…' : '正在回应，可先写下一句…'
+              ? waiting ? '可继续输入，发送后排队…' : '正在回应，可先写下一句…'
               : fresh
                 ? '问点什么，或交给 Hemi 一件事…'
                 : '继续聊聊，或交给 Hemi 一件事…'
@@ -989,7 +993,7 @@ export function TextComposer({
         <button type="button" className={`text-composer-send${primaryIsStop ? ' is-stop' : ''}`}
           data-action={primaryIsStop ? 'stop' : queueEditing ? 'save' : 'send'}
           onClick={primaryIsStop ? onStopTurn : handleSendClick} disabled={primaryIsStop ? false : !canSend}
-          aria-label={panelOpen ? PANEL_OPEN_SEND_HINT : primaryLabel} title={queueEditing ? 'Enter 保存修改，保留原队列位置' : primaryIsStop ? '停止当前任务及其所属工作' : busy ? '加入待发送队列' : COMPOSER_HINT}>
+          aria-label={panelOpen ? PANEL_OPEN_SEND_HINT : primaryLabel} title={queueEditing ? 'Enter 保存修改，保留原队列位置' : primaryIsStop ? '停止当前任务及其所属工作' : busy ? '加入待发送队列' : composerHint}>
           {primaryIsStop ? <Square className="size-3.5 fill-current" aria-hidden="true" /> : queueEditing ? <Check className="size-4" aria-hidden="true" /> : <ArrowUp className="size-4" aria-hidden="true" />}
         </button>
       </div>
@@ -1140,7 +1144,7 @@ export function TextComposer({
         </div>
       ) : null}
       <span id="text-composer-desc" className="sr-only">
-        {COMPOSER_HINT}
+        {composerHint}
       </span>
     </div>
   );

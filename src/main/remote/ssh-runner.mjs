@@ -72,7 +72,7 @@ export function effectiveControlDir(controlDir, log = null) {
  *        取会话内存里的密码（remote-service 注入；null＝无密码，走密钥免密）
  * @param {object} [deps.log]
  */
-export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider = null, log = null }) {
+export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider = null, log = null, strictHostKeyChecking = false }) {
   if (!controlDir) throw new Error('ssh-runner 缺少 controlDir');
   // ControlPath 长度守卫：深 userData + %C 超套接字上限时回落短目录（见函数注）。
   const socketDir = effectiveControlDir(controlDir, log);
@@ -87,6 +87,7 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
       // StrictHostKeyChecking=yes 让未知指纹硬失败（走「终端确认指纹」口径）。
       // 无密码时维持 BatchMode（密钥/agent 免密，未知指纹同样硬失败）。
       '-o', password ? 'StrictHostKeyChecking=yes' : 'BatchMode=yes',
+      ...(strictHostKeyChecking ? ['-o', 'StrictHostKeyChecking=yes'] : []),
       '-o', 'ControlMaster=auto',
       '-o', `ControlPath=${socketDir}/%C`,
       '-o', 'ControlPersist=10m',

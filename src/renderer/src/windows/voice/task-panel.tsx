@@ -1,3 +1,4 @@
+import {useConversationBridge} from './lib/conversation-bridge';
 import { useEffect, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 
@@ -10,12 +11,13 @@ import type { TaskHistoryRecord, TaskPermissionChoice, TaskStateSnapshot } from 
  */
 
 export function useTaskArchive(taskId: string | null, expanded: boolean) {
+  const bridge = useConversationBridge();
   const [record, setRecord] = useState<TaskHistoryRecord | null>(null);
 
   useEffect(() => {
     if (!expanded || !taskId) return;
     let cancelled = false;
-    window.hemiVoice
+    bridge
       ?.getTaskHistoryRecord(taskId)
       .then((result) => {
         if (!cancelled) setRecord(result);
@@ -93,11 +95,15 @@ export function PermissionCard({
   onDecide,
   onStop,
   queuedTitles = [],
+  persistentWait = false,
+  onChooseOption,
 }: {
   snap: TaskStateSnapshot;
   onDecide: (choice: TaskPermissionChoice) => void;
   onStop: () => void;
   queuedTitles?: string[];
+  persistentWait?: boolean;
+  onChooseOption?: (option:string)=>void;
 }) {
   const permission = snap.permission;
   const legacyCard = Boolean(permission) && !permission?.kind;
@@ -165,18 +171,18 @@ export function PermissionCard({
           Hemi 需要你的允许
         </span>
         <span className="count-label">
-          <span data-count>{seconds}</span> 秒
+          {persistentWait ? '等待确认' : <><span data-count>{seconds}</span> 秒</>}
         </span>
         <button type="button" className="text-btn" onClick={onStop}>
           停止任务
         </button>
       </div>
-      <div className="countdown-track">
+      {!persistentWait && <div className="countdown-track">
         <div
           className="countdown-fill"
           style={{ width: `${Math.max(0, Math.min(100, permission.remainingMs / 300))}%` }}
         />
-      </div>
+      </div>}
       <div className="permission-body">
         {snap.taskText ? (
           <span className="perm-task" title={`属于任务：${snap.taskText}`}>
@@ -199,7 +205,7 @@ export function PermissionCard({
             key={option}
             type="button"
             className={`tbtn${option === primaryOption ? ' primary' : ''}`}
-            onClick={() => onDecide(choiceOf(option))}
+            onClick={() => onChooseOption ? onChooseOption(option) : onDecide(choiceOf(option))}
           >
             {option}
           </button>

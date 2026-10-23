@@ -83,6 +83,10 @@ function ToolStep({ call }: { call: TurnToolCall }) {
     {state === 'running' ? <i className="h37-spinner" aria-label="正在执行" />
       : state === 'error' ? <X aria-label="失败" /> : state === 'stopped' ? <Square aria-label="已停止" />
       : <ToolIcon tool={call.tool} />}
-    <span className="selectable" title={describeToolCall(call)}>{describeActivityCall(call)}</span>
+    <div className="turn-activity-step-copy">
+      <span className="selectable" title={describeToolCall(call)}>{describeActivityCall(call)}</span>
+      {['bash', 'powershell'].includes(call.tool) && typeof call.args.command === 'string'
+        ? <pre className="selectable">{call.args.command}</pre> : null}
+    </div>
   </div>;
 }

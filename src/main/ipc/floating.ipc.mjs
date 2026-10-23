@@ -23,6 +23,7 @@ function isFloatingSender(event) {
  * 全局键盘钩子走同一条 floating:command 链路，主窗口渲染层只有一种语义）。
  */
 export function sendFloatingHoldStart() {
+  if (state.conversationEnvironment === 'bot') return;
   if (!state.mainWindow || state.mainWindow.isDestroyed()) return;
   finishFloatingDrag(false);
   state.mainWindow.webContents.send(IPC.floating.command, 'hold-start');

@@ -1,3 +1,4 @@
+import {useConversationEnvironment} from './lib/conversation-bridge';
 import { modelPolicyView } from '@shared/model-policy-view.mjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Cpu, Settings2, Sparkles } from 'lucide-react'
@@ -33,6 +34,7 @@ export function ModelSelectorChip({
   /** fixtures 用：初始即展开下拉（静态截图取证）。 */
   fixtureOpen?: boolean
 }) {
+  const bot = useConversationEnvironment() === 'bot';
   const [open, setOpen] = useState(Boolean(fixtureOpen))
   /** 056：模型路由弹窗（菜单齿轮打开；关闭后让 page 重读目录刷新「自动」就绪）。 */
   const [routingOpen, setRoutingOpen] = useState(false)
@@ -43,7 +45,7 @@ export function ModelSelectorChip({
   const isAuto = currentProfileId === 'auto'
   const { ready: autoReady, hint: autoHint } = modelPolicyView(directory)
   const keyword = filter.trim().toLowerCase()
-  const showAuto = !keyword || `自动路由 auto ${autoHint}`.toLowerCase().includes(keyword)
+  const showAuto = !bot && (!keyword || `自动路由 auto ${autoHint}`.toLowerCase().includes(keyword))
   const current = useMemo(() => {
     if (!directory || isAuto) return null
     for (const provider of directory.providers) {

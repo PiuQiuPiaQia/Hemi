@@ -91,6 +91,7 @@ export function registerTtsIpc() {
 
   // 单飞：新播报让位旧播报（关旧会话）；音频/状态经事件推给渲染层。
   ipcMain.handle(IPC.tts.speak, async (_event, payload) => {
+    if (state.conversationEnvironment === 'bot') return {ok:false,message:'Bot 不启动语音播报。'};
     const turnId = Number(payload?.turnId) || 0;
     const text =
       typeof payload?.text === 'string' ? payload.text.trim() : '';

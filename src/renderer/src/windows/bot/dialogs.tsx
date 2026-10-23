@@ -1,0 +1,688 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  ArrowUp,
+  ChevronRight,
+  ChevronDown,
+  Folder,
+  RefreshCw,
+  Server,
+  Search,
+  X,
+} from 'lucide-react';
+import type {
+  BotBridge,
+  BotDirectory,
+  BotModelCandidate,
+  BotState,
+} from '@shared/bot';
+
+export function BotDialog({
+  title,
+  children,
+  footer,
+  busy = false,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  busy?: boolean;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    ref.current?.showModal();
+    return () => {
+      if (before?.isConnected) before.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="h-bot-dialog"
+      aria-label={title}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <div className="h-bot-dialog-head">
+        <h2>{title}</h2>
+        <button
+          className="icon-btn"
+          aria-label="关闭弹窗"
+          disabled={busy}
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="h-bot-dialog-body">{children}</div>
+      {footer && <div className="h-bot-dialog-foot">{footer}</div>}
+    </dialog>
+  );
+}
+export function BotButton({
+  primary = false,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={
+        'h-bot-btn' +
+        (primary ? ' primary' : '') +
+        ' ' +
+        (props.className ?? '')
+      }
+    />
+  );
+}
+export function BotFolderPicker({
+  host,
+  initial,
+  defaultDir,
+  recent = [],
+  load,
+  onPick,
+  onClose,
+  online = true,
+}: {
+  host: string;
+  initial: string;
+  defaultDir?: string;
+  recent?: string[];
+  online?: boolean;
+  load: (path: string) => Promise<BotDirectory>;
+  onPick: (path: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [address, setAddress] = useState(initial),
+    [result, setResult] = useState<BotDirectory | null>(null),
+    [busy, setBusy] = useState(true),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState('');
+  const epoch = useRef(0),
+    alive = useRef(true),
+    addressRevision = useRef(0),
+    input = useRef<HTMLInputElement>(null);
+  const parentPath = result?.parent ?? (() => {
+    const value = address.trim().replace(/\/+$/, '');
+    return value.slice(0, value.lastIndexOf('/')) || (value.startsWith('~') ? '~' : '/');
+  })();
+  async function browse(path: string) {
+    if (saving || !online) return;
+    const addressAtStart = ++addressRevision.current;
+    const seq = ++epoch.current;
+    setAddress(path);
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const next = await load(path);
+      if (alive.current && seq === epoch.current) {
+        setResult(next);
+        if (addressRevision.current === addressAtStart) setAddress(next.path);
+        requestAnimationFrame(() => {
+          if (
+            document.activeElement === document.body ||
+            document.activeElement === input.current?.closest('dialog')
+          )
+            input.current?.focus();
+        });
+      }
+    } catch (e) {
+      if (alive.current && seq === epoch.current)
+        setError(e instanceof Error ? e.message : '服务器目录读取失败');
+    } finally {
+      if (alive.current && seq === epoch.current) setBusy(false);
+    }
+  }
+  useEffect(() => {
+    alive.current = true;
+    void browse(initial);
+    return () => {
+      alive.current = false;
+      epoch.current++;
+    };
+  }, []);
+  useEffect(() => {
+    if (!online) {
+      epoch.current++;
+      setResult(null);
+      setBusy(false);
+      setError('连接已断开，恢复连接后重新读取目录。');
+    }
+  }, [online]);
+  async function commit() {
+    if (!result || address !== result.path) return;
+    setSaving(true);
+    try {
+      await onPick(result.path);
+      if (alive.current) onClose();
+    } catch (e) {
+      if (alive.current) {
+        setError(e instanceof Error ? e.message : '设置目录失败');
+        setSaving(false);
+      }
+    }
+  }
+  return (
+    <BotDialog
+      title="选择云端文件夹"
+      busy={saving}
+      onClose={onClose}
+      footer={
+        <>
+          <BotButton disabled={saving} onClick={onClose}>
+            取消
+          </BotButton>
+          <BotButton
+            primary
+            disabled={
+              busy ||
+              saving ||
+              !!error ||
+              !result ||
+              address !== result.path ||
+              !online
+            }
+            onClick={() => void commit()}
+          >
+            {saving ? '正在设置…' : '使用此文件夹'}
+          </BotButton>
+        </>
+      }
+    >
+      <p className="h-bot-host">
+        <Server size={14} />
+        {host}
+      </p>
+      <form
+        className="h-bot-address"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void browse(address);
+        }}
+      >
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="上级目录"
+          disabled={saving || busy || !online || result?.path === '/'}
+          onClick={() => void browse(parentPath)}
+        >
+          <ArrowUp size={16} />
+        </button>
+        <input
+          ref={input}
+          aria-label="云端文件夹路径"
+          value={address}
+          disabled={saving}
+          onChange={(e) => {
+            addressRevision.current++;
+            setAddress(e.target.value);
+          }}
+        />
+        <BotButton disabled={saving || !online} onClick={() => void browse(address)}>
+          前往
+        </BotButton>
+      </form>
+      <div className="h-bot-shortcuts">
+        {defaultDir ? <BotButton disabled={saving || !online} onClick={() => void browse(defaultDir)}>
+          默认空间
+        </BotButton> : null}
+        <BotButton
+          disabled={saving || !online}
+          onClick={() => void browse(result?.home ?? '~')}
+        >
+          主目录
+        </BotButton>
+        {recent.slice(0, 3).map((dir) => (
+          <BotButton
+            key={dir}
+            disabled={saving || !online}
+            title={dir}
+            onClick={() => void browse(dir)}
+          >
+            {dir.split('/').at(-1)}
+          </BotButton>
+        ))}
+      </div>
+      <div className="h-bot-folders" aria-label="云端目录列表" aria-busy={busy}>
+        {busy ? (
+          <p role="status">
+            <RefreshCw size={16} className="h-bot-spin" />
+            正在读取服务器文件夹…
+          </p>
+        ) : error ? (
+          <div role="alert">
+            <p>{error}</p>
+            <BotButton disabled={!online} onClick={() => void browse(address)}>重试</BotButton>
+          </div>
+        ) : result?.folders.length ? (
+          result.folders.map((folder) => (
+            <button key={folder.path} onClick={() => void browse(folder.path)}>
+              <Folder size={16} />
+              <span>{folder.name}</span>
+              <ChevronRight size={14} />
+            </button>
+          ))
+        ) : (
+          <p>此文件夹没有子文件夹</p>
+        )}
+      </div>
+    </BotDialog>
+  );
+}
+export function BotModelPicker({
+  models,
+  selected,
+  onChange,
+  disabled = false,
+}: {
+  models: BotModelCandidate[];
+  selected: string[];
+  onChange: (keys: string[]) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false), [query, setQuery] = useState('');
+  const panelId = useId(), root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  const chosen = models.filter(m => selected.includes(m.key));
+  const filtered = models.filter(m => `${m.name} ${m.provider} ${m.key}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const expanded = open && !disabled;
+  useEffect(() => {
+    if (!expanded) return;
+    search.current?.focus();
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [expanded]);
+  return (
+    <div className="h-bot-model-picker" ref={root} onBlurCapture={event => {
+      const next = event.relatedTarget;
+      // On macOS, pressing a label first blurs its search input to the native
+      // dialog, before the label forwards a click to its checkbox. Keep it mounted.
+      if (next === event.currentTarget.closest('dialog') || next === document.body) return;
+      if (next instanceof Node && !event.currentTarget.contains(next)) setOpen(false);
+    }} onKeyDown={event => {
+      if (event.key !== 'Escape' || !expanded) return;
+      event.preventDefault(); event.stopPropagation();
+      setOpen(false); trigger.current?.focus();
+    }}>
+      <span className="h-bot-model-label">同步模型</span>
+      <button type="button" ref={trigger} className="h-bot-model-trigger" aria-label="选择同步模型"
+        aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
+        disabled={disabled || !models.length} onClick={() => {setQuery(''); setOpen(value => !value);}}>
+        <span>{chosen.length ? chosen[0].name : '选择本机模型'}</span>
+        {chosen.length > 1 ? <small>+{chosen.length - 1}</small> : null}
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      {expanded ? <div id={panelId} className="h-bot-model-panel" role="group" aria-label="本机模型">
+        <div className="h-bot-model-search"><Search size={14} aria-hidden="true" /><input ref={search}
+          aria-label="搜索本机模型" placeholder="搜索模型或供应商" value={query} onChange={e => setQuery(e.target.value)} /></div>
+        <div className="h-bot-models">
+      {filtered.map((m, index) => (
+        <label key={m.key}>
+          <input
+            type="checkbox"
+            aria-label={m.name}
+            aria-describedby={`${panelId}-model-${index} ${panelId}-status-${index}`}
+            checked={selected.includes(m.key)}
+            disabled={disabled || !m.canSync}
+            onChange={(e) =>
+              onChange(
+                e.target.checked
+                  ? [...selected, m.key]
+                  : selected.filter((k) => k !== m.key),
+              )
+            }
+          />
+          <span>
+            <strong>{m.name}</strong>
+            <small id={`${panelId}-model-${index}`}>
+              {m.provider} · {m.auth}
+            </small>
+          </span>
+          <em id={`${panelId}-status-${index}`}>
+            {m.reason ||
+              (m.status === 'synced'
+                ? '已同步'
+                : m.status === 'update'
+                  ? '有更新'
+                  : '未同步')}
+          </em>
+        </label>
+      ))}
+        {!filtered.length ? <p className="h-bot-small">没有找到匹配的模型</p> : null}
+        </div>
+      </div> : null}
+    </div>
+  );
+}
+export function BotSyncModels({
+  api,
+  onClose,
+}: {
+  api: BotBridge;
+  onClose: () => void;
+}) {
+  const [models, setModels] = useState<BotModelCandidate[]>([]),
+    [selected, setSelected] = useState<string[]>([]),
+    [busy, setBusy] = useState(false),
+    [loaded, setLoaded] = useState(false),
+    [error, setError] = useState(''),
+    [done, setDone] = useState(false);
+  const operation = useRef('sync-' + crypto.randomUUID());
+  useEffect(() => {
+    let alive = true;
+    void api
+      .models()
+      .then((list) => {
+        if (alive) {
+          setModels(list);
+          setSelected([]);
+          setLoaded(true);
+        }
+      })
+      .catch((e) => {
+        if (alive) setError(e.message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+  async function sync() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api.command<{
+        results: Array<{ ok: boolean; message?: string }>;
+      }>('models.sync', { keys: selected, requestId: operation.current });
+      const failed = result.results.filter((r) => !r.ok);
+      if (failed.length) {
+        setError(failed.map((r) => r.message).join('；'));
+        operation.current = 'sync-' + crypto.randomUUID();
+      } else setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '同步结果待核对，请重新连接。');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <BotDialog
+      title="同步本机模型"
+      busy={busy}
+      onClose={onClose}
+      footer={
+        <>
+          <BotButton onClick={onClose} disabled={busy}>
+            {done ? '完成' : '取消'}
+          </BotButton>
+          {!done && (
+            <BotButton
+              primary
+              disabled={busy || !selected.length}
+              onClick={() => void sync()}
+            >
+              {busy ? '正在同步…' : '同步到 Bot'}
+            </BotButton>
+          )}
+        </>
+      }
+    >
+      {!loaded && !error ? <p role="status">正在读取本机模型…</p> : null}
+      {loaded && !models.length ? <p>暂无本机模型，请先在设置中添加。</p> : null}
+      <BotModelPicker
+        models={models}
+        selected={selected}
+        onChange={(keys) => {
+          operation.current = 'sync-' + crypto.randomUUID();
+          setSelected(keys);
+        }}
+        disabled={busy || done}
+      />
+      <p className="h-bot-small">
+        将所选模型配置与 API Key 保存到服务器，验证可能产生少量调用费用。
+      </p>
+      {done && <p role="status">同步完成</p>}
+      {error && (
+        <p role="alert" className="h-bot-error">
+          {error}
+        </p>
+      )}
+    </BotDialog>
+  );
+}
+export function BotSetup({
+  api,
+  state,
+  onDone,
+  onOpenModels,
+}: {
+  api: BotBridge;
+  state: BotState;
+  onDone: () => void;
+  onOpenModels: () => void;
+}) {
+  const [open, setOpen] = useState(false),
+    [step, setStep] = useState<'connect' | 'configure'>('connect'),
+    [host, setHost] = useState(''),
+    [password, setPassword] = useState(''),
+    [remember, setRemember] = useState(false),
+    [models, setModels] = useState<BotModelCandidate[]>([]),
+    [keys, setKeys] = useState<string[]>([]),
+    [error, setError] = useState(''),
+    [phase, setPhase] = useState('');
+  const initializeRequest = useRef('initialize-' + crypto.randomUUID());
+  const busy = !!state.busy || !!phase,
+    candidate = state.candidate;
+  async function connect() {
+    setPhase('正在连接并检查服务器环境…');
+    setError('');
+    try {
+      initializeRequest.current = 'initialize-' + crypto.randomUUID();
+      await api.connect({
+        host,
+        password,
+        rememberPassword: remember,
+      });
+      setPassword('');
+      const list = await api.models();
+      setModels(list);
+      const selected = list
+        .filter((m) => m.canSync)
+        .slice(0, 1)
+        .map((m) => m.key);
+      setKeys(selected);
+      setStep('configure');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '连接失败');
+    } finally {
+      setPhase('');
+    }
+  }
+  async function initialize(existing = false) {
+    if (!candidate) return;
+    setPhase(
+      existing ? '正在恢复已有 Bot…' : '正在部署、验证模型并初始化常驻服务…',
+    );
+    setError('');
+    try {
+      await api.initialize({
+        candidateId: candidate.id,
+        modelKeys: keys,
+        existing,
+        requestId: initializeRequest.current,
+      });
+      setOpen(false);
+      onDone();
+    } catch (e) {
+      if (
+        !['needs-review', 'offline'].includes(
+          (e as { code?: string }).code ?? '',
+        )
+      )
+        initializeRequest.current = 'initialize-' + crypto.randomUUID();
+      setError(
+        (e instanceof Error ? e.message : '初始化未能确认。') +
+          ' 可返回并重新检测服务器，原安装与数据会保留。',
+      );
+    } finally {
+      setPhase('');
+    }
+  }
+  return (
+    <>
+      <div className="h-bot-welcome">
+        <Server size={26} />
+        <h1>让 Hemi 在云端持续工作</h1>
+        <p>连接 Linux 云服务器。Bot 在服务器常驻，关闭本机后也能继续工作。</p>
+        <BotButton primary onClick={() => setOpen(true)}>
+          创建连接
+        </BotButton>
+      </div>
+      {open && (
+        <BotDialog
+          title={step === 'connect' ? '连接云服务器' : '配置云端 Bot'}
+          busy={busy}
+          onClose={() => setOpen(false)}
+          footer={
+            <>
+              {busy && step === 'configure' && (
+                <BotButton
+                  onClick={() =>
+                    void api
+                      .command('initialization.cancel')
+                      .then(() =>
+                        setError('已停止等待，请重新连接核对云端状态。'),
+                      )
+                  }
+                >
+                  停止等待
+                </BotButton>
+              )}
+              {step === 'configure' && !busy && (
+                <BotButton onClick={() => setStep('connect')}>返回</BotButton>
+              )}
+              <BotButton
+                primary
+                disabled={
+                  busy ||
+                  (step === 'connect' && !host.trim()) ||
+                  (step === 'configure' &&
+                    !candidate?.info.bot?.configured &&
+                    !keys.length) ||
+                  !!candidate?.info.serviceError
+                }
+                onClick={() =>
+                  void (step === 'connect'
+                    ? connect()
+                    : initialize(!!candidate?.info.bot?.configured))
+                }
+              >
+                {busy
+                  ? '正在处理…'
+                  : step === 'connect'
+                    ? '连接并继续'
+                    : candidate?.info.bot?.configured
+                      ? '连接已有 Bot'
+                      : '初始化并开始使用'}
+              </BotButton>
+            </>
+          }
+        >
+          {step === 'connect' ? (
+            <>
+              <label className="h-bot-field">
+                SSH 地址
+                <input
+                  value={host}
+                  disabled={busy}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="ubuntu@服务器地址或 SSH Host"
+                />
+              </label>
+              <label className="h-bot-field">
+                密码（可选）
+                <input
+                  type="password"
+                  value={password}
+                  disabled={busy}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="h-bot-check">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                在本机记住密码
+              </label>
+            </>
+          ) : candidate?.info.serviceError ? (
+            <>
+              <p role="alert">{candidate.info.serviceError}</p>
+              <BotButton
+                onClick={() =>
+                  void api
+                    .command('candidate.start')
+                    .then(() => setError(''))
+                    .catch((e) => setError(e.message))
+                }
+              >
+                启动已安装服务并重新检测
+              </BotButton>
+            </>
+          ) : candidate?.info.bot?.configured ? (
+            <p>检测到服务器上已有 Bot，将恢复原会话和模型。</p>
+          ) : (
+            <>
+              <BotModelPicker
+                models={models}
+                selected={keys}
+                onChange={(values) => {
+                  setKeys(values);
+                  initializeRequest.current =
+                    'initialize-' + crypto.randomUUID();
+                }}
+                disabled={busy}
+              />
+              {!models.length && (
+                <BotButton onClick={onOpenModels}>去配置本机模型</BotButton>
+              )}
+              <p className="h-bot-small">
+                将所选模型配置与 API Key 保存到服务器，验证可能产生少量调用费用。
+              </p>
+            </>
+          )}
+          {(phase || state.busy) && (
+            <p role="status">
+              {(
+                {
+                  probe: '正在连接并检查服务器环境…',
+                  deploy: '正在部署云端运行环境与 Host…',
+                  models: '正在从云端验证所选模型…',
+                  'verify-residency': '正在验证 SSH 断开后的常驻状态…',
+                } as Record<string, string>
+              )[state.busy] ?? phase}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="h-bot-error">
+              {error}
+            </p>
+          )}
+        </BotDialog>
+      )}
+    </>
+  );
+}
