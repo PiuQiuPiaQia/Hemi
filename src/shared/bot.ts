@@ -3,6 +3,7 @@ import type {
   MessageAttachmentView,
   MessageReferenceView,
   SkillSelectionView,
+  ModelProviderSaveInput,
 } from './protocol';
 export type BotModel = {
   key: string;
@@ -158,6 +159,9 @@ export type BotMethod =
   | 'references'
   | 'skills'
   | 'models.sync'
+  | 'models.add'
+  | 'models.test'
+  | 'models.list'
   | 'connection.reconnect'
   | 'connection.disconnect'
   | 'connection.remove'
@@ -185,6 +189,7 @@ export type BotBridge = {
   initialize: (p: {
     candidateId: string;
     modelKeys?: string[];
+    provider?: ModelProviderSaveInput;
     existing?: boolean;
     requestId?: string;
   }) => Promise<BotState>;

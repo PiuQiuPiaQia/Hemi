@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { shq, sshFailureCopy } from '../remote/ssh-runner.mjs';
 import { BOT_PROTOCOL, fail, botRpcTimeout } from './storage.mjs';
 import { NODE_RUNTIME } from './node-runtime.mjs';
+import { INSTALL_FAILURE_MARKER } from './install-dependencies.mjs';
 const ROOT = '"$HOME/.local/share/hemi-bot"';
 const probeScript = String.raw`set -eu
 [ "$(uname -s)" = Linux ] || { echo '需要 Linux 服务器' >&2; exit 1; }
@@ -74,7 +75,26 @@ export function createBotTransport({ runner, archivePath }) {
         '连接等待已结束，操作结果待核对；请重新连接查看云端状态。',
         'needs-review',
       );
-    if (r.code !== 0)
+    if (r.code !== 0) {
+      const marker = String(r.stderr).split('\n').findLast(line => line.startsWith(INSTALL_FAILURE_MARKER));
+      if (marker) {
+        let detail;
+        try { detail = JSON.parse(marker.slice(INSTALL_FAILURE_MARKER.length)); } catch {}
+        if (detail) {
+          const reasons = {
+            network: '服务器下载 Bot 依赖失败，请检查 npm 源、网络或代理后重试。',
+            npm: 'npm 安装进程异常，自动重试后仍未成功。',
+            cache: 'Bot 依赖包校验失败，请检查服务器的 npm 源后重试。',
+            disk: '服务器磁盘空间不足，请释放空间后重试。',
+            permission: 'Bot 安装目录无法写入，请检查服务器账号权限。',
+            lock: 'Bot 安装包的依赖清单不一致，请更新 Hemi 后重试。',
+            timeout: 'Bot 依赖安装超时，请检查服务器网络后重试。',
+            other: 'Bot 依赖安装失败，请查看服务器上的安装日志。',
+          };
+          const log = typeof detail.logFile === 'string' && detail.logFile.startsWith('/') ? ` 日志：${detail.logFile}` : '';
+          fail((reasons[detail.kind] ?? reasons.other) + log, 'unsupported');
+        }
+      }
       fail(
         '服务器操作失败：' +
           String(r.stderr)
@@ -88,6 +108,7 @@ export function createBotTransport({ runner, archivePath }) {
             .slice(-800),
         'unsupported',
       );
+    }
     return r.stdout.toString('utf8');
   }
   async function rpc(host, method, params = {}, options = {}) {
@@ -225,10 +246,10 @@ trap 'rmdir "$r/install.lock" 2>/dev/null || true' EXIT HUP INT TERM
 mkdir -p "$r/releases/${release}" "$HOME/.config/systemd/user"
 cat > "$r/releases/${release}/runtime.tgz"
 printf '%s  %s\\n' ${shq(digest)} "$r/releases/${release}/runtime.tgz" | sha256sum -c -
-${runtime}export PATH="$r/runtime/bin:$PATH"
+${runtime}export PATH=${shq(path.posix.dirname(info.nodeBin))}:"$r/runtime/bin:$PATH"
 tar -xzf "$r/releases/${release}/runtime.tgz" -C "$r/releases/${release}"
 cd "$r/releases/${release}"
-npm ci --omit=dev --ignore-scripts --no-audit --no-fund >&2
+${shq(info.nodeBin)} src/main/bot/install-dependencies.mjs "$r"
 ${shq(info.nodeBin)} --check src/main/bot/cli.mjs
 old=$(readlink "$r/current" || true)
 printf %s "$old" > "$r/previous-release"

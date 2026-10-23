@@ -179,6 +179,7 @@ export function restoreFlowSnapshot(flow) {
     const run = snapshot.runs?.[snapshot.activeRunId];
     if (run && !run.closedAt) {
       run.outcome = run.outcome ?? 'interrupted';
+      if (run.recovery && !['expired','recovered'].includes(run.recovery.phase)) run.recovery = { ...run.recovery, phase: 'stopped', nextRetryAt: null, summary: '应用重启，自动恢复已停止。' };
       run.closedAt = Date.now();
     }
     snapshot.activeRunId = null;

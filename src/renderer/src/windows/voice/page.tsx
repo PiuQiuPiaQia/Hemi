@@ -3905,7 +3905,7 @@ export default function Home() {
                 ? { kind: 'view', view: { id: 'default', type: 'default', name: '默认空间', dir: '', status: 'ok' } }
                 : { kind: 'view', view: { id: conversationWorkspaceId, type: 'project', name: '（已移除的项目）', dir: '', status: 'missing', message: '项目不在列表里（可能已被移除），请重新选择' } }
         }
-        workspaceSendBlocked={workspaceMissing}
+        workspaceSendBlocked={['waiting','offline','connecting'].includes(flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.recovery?.phase ?? '') || workspaceMissing}
         onWorkspaceSelect={handleWorkspaceSelect}
         onWorkspaceClear={handleWorkspaceClear}
         onWorkspacePickFolder={() => void handleWorkspacePickFolder()}

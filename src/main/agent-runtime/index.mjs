@@ -169,6 +169,7 @@ export function createAgentRuntime({
   getWorkflowService = null,
   history,
   onModelUsage = null,
+  isOnline = () => true,
   scheduleExtraction = null,
   onTaskState,
   onDeliveryDeclared = null,
@@ -185,7 +186,7 @@ export function createAgentRuntime({
   void journalReady.catch(error => log?.error?.(error.message));
   const dispatchInFlight = new Map();
   const ownerOf = ctx => ({ conversationId: ctx.conversationId, rootRunId: ctx.runId, generation: ctx.generation ?? 0 });
-  const executionFor = (ctx, plan, purpose = 'main') => ({ journal, contextStore, store: getProfiles(), owner: ownerOf(ctx), plan,
+  const executionFor = (ctx, plan, purpose = 'main') => ({ isOnline, journal, contextStore, store: getProfiles(), owner: ownerOf(ctx), plan,
     validateConversationSource: source => conversationHistory?.validateSource(source) ?? false,
     budgets: ctx.policySnapshot.budgets, sessionRef: ctx.sessionRef, purpose, onRequestRecorded: () => onModelUsage?.({ conversationId: ctx.conversationId }), allowedRefs: null, cancelled: () => Boolean(ctx.cancelled),
     persistSession: async (payload, execution) => {

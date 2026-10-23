@@ -253,6 +253,8 @@ export function createHemiSession({
   let overrun = false;
   let activeTools = 0;
   let stallTimer = null;
+  let modelRecoveryActive = false;
+  let modelRecoveryControl = null;
   /** tool-start 的参数按 toolCallId 存档——end 事件本体不回传参数。 */
   const startArgsByCall = new Map();
   /** 确认环在途请求：id → resolve（宿主经 respondPermission 应答）。 */
@@ -261,7 +263,7 @@ export function createHemiSession({
   const touchStallWatchdog = () => {
     clearTimeout(stallTimer);
     stallTimer = null;
-    if (!stallTimeoutMs || !busy || activeTools > 0 || resourceWaits.size > 0) return;
+    if (!stallTimeoutMs || !busy || activeTools > 0 || resourceWaits.size > 0 || modelRecoveryActive) return;
     stallTimer = setTimeout(() => {
       log?.warn?.(`[${label}] 静默超过 ${Math.round(stallTimeoutMs / 60000)} 分钟，按停止收口`);
       void abort();
@@ -673,7 +675,7 @@ export function createHemiSession({
     if (disposed) throw new AgentSessionError('exited', '会话已释放');
     let initAbandoned = false;
     const initStartedAt = Date.now();
-    const settingsManager = SettingsManager.inMemory(sessionSettingsOf({ routing: routing ? { ...routing, maxRetryDelayMs: executionContext?.budgets.maxRetryDelayMs ?? 10000 } : false, settings: executionContext ? { ...settings, retry: { ...(settings.retry ?? {}), enabled: false, provider: { ...(settings.retry?.provider ?? {}), maxRetries: 0 } } } : settings }));
+    const settingsManager = SettingsManager.inMemory(sessionSettingsOf({ managedRecovery: Boolean(executionContext), routing: routing ? { ...routing, maxRetryDelayMs: executionContext?.budgets.maxRetryDelayMs ?? 10000 } : false, settings: executionContext ? { ...settings, retry: { ...(settings.retry ?? {}), enabled: false, provider: { ...(settings.retry?.provider ?? {}), maxRetries: 0 } } } : settings }));
     const build = (async () => {
       const sessionCwd = remoteInfo ? ensureRemoteCwdPlaceholder(agentDir) : cwd;
       const skillFiles = skills.map((skill) => path.join(skill.path, 'SKILL.md'));
@@ -746,6 +748,14 @@ export function createHemiSession({
     if (executionContext) session.agent.streamFunction = controlledStream(session.agent.streamFunction, () => runtimeExecution ? {
       ...runtimeExecution, compacting: () => compacting, onCandidateSelected: candidate => { runtimeExecution.actualCandidate = candidate; },
       beforeRequest: async () => runtimeExecution.persistSession?.(await exportEntries(), runtimeExecution),
+      onRequestStart: () => emitter.emit('stream', { type: 'hemi_request_start' }),
+      onRequestReset: () => emitter.emit('stream', { type: 'hemi_request_reset' }),
+      onRecoveryControl: control => { modelRecoveryControl = control; if (!control) { modelRecoveryActive = false; touchStallWatchdog(); } },
+      onRecovery: recovery => {
+        modelRecoveryActive = ['waiting','offline','connecting'].includes(recovery.phase);
+        touchStallWatchdog();
+        emitter.emit('recovery', recovery);
+      },
     } : null);
     const finishTurn = session.agent.finishTurn;
     session.agent.finishTurn = async (turn, signal) => {
@@ -1011,6 +1021,7 @@ export function createHemiSession({
 
   return {
     ready,
+    retryConnection: id => modelRecoveryControl?.tryNow(id) ?? false,
     setExecutionContext: value => { runtimeExecution = value; },
     persistExecution: async () => runtimeExecution?.persistSession?.(await exportEntries(), runtimeExecution),
     prompt,

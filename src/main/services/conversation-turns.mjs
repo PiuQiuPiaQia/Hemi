@@ -44,6 +44,9 @@ export function createConversationTurns({ onState = () => {}, now = Date.now } =
     if (!current(token)) return false;
     const snapshot = states.get(scopeOf(token.conversationId))?.snapshot;
     if (!snapshot || snapshot.requestId !== token.requestId) return false;
+    const entry = states.get(scopeOf(token.conversationId));
+    if (event.kind === 'request-start') entry.requestCheckpoint = structuredClone({ parts: snapshot.parts, text: snapshot.text, thinking: snapshot.thinking });
+    if (event.kind === 'request-reset' && entry.requestCheckpoint) Object.assign(snapshot, structuredClone(entry.requestCheckpoint));
     // 056：按到达顺序成段（导航后接回时渲染层照段还原对话流）。
     snapshot.parts = reduceTurnParts(snapshot.parts, event, now());
     if (event.kind === 'restart') { snapshot.text = ''; snapshot.thinking = null; }

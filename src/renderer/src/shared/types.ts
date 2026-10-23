@@ -49,6 +49,7 @@ export const DOUBAO_CONSOLE_API_KEY_URL =
 export const HEMI_RELEASES_PAGE_URL = 'https://github.com/PiuQiuPiaQia/Hemi/releases';
 
 export type TranscriptItem = {
+  recovery?: import('@hemi/conversation-flow').ModelRecoveryView;
   /** 060：纯投影的渲染身份，供真机全结构校验；不由客户端生成正式消息。 */
   flow?: { runId: string; itemId: string; inputId?: string; partIds: string[] };
   live?: boolean;

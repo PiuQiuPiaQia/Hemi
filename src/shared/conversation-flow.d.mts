@@ -23,6 +23,7 @@ export type FlowInput = {
 
 export type FlowRunSummary = {
   runId: string;
+  recovery?: import('@hemi/conversation-flow').ModelRecoveryView;
   generation: number;
   source: 'user' | 'queue' | 'event';
   inputIds: string[];

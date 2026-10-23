@@ -736,6 +736,7 @@ export function VoiceScreen({
   );
   // Model failures live at their timeline position, including after a restart.
   // Keep the composer notice for speech/pre-dispatch failures only.
+  const recoveryInProgress = transcripts.some(item => item.live && ['waiting','offline','connecting'].includes(item.recovery?.phase ?? ''));
   const isError = sessionState === 'error' || (turnPhase === 'error' && !latestError && !textModelBusy);
   const errorCopy = sessionState === 'error'
     ? errorMessage || '语音服务中断了，可以稍后再试'
@@ -1075,7 +1076,7 @@ export function VoiceScreen({
                 focusToken={(composerFocusToken ?? 0) + suggestionFocus}
                 sendBlocked={workspaceSendBlocked}
                 sendBlockedHint={
-                  workspaceCurrent?.kind === 'view' && workspaceCurrent.view.host
+                  recoveryInProgress ? '停止重连后可发送' : workspaceCurrent?.kind === 'view' && workspaceCurrent.view.host
                     ? '连不上服务器，恢复连接后才能发送'
                     : undefined
                 }

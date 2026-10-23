@@ -22,4 +22,5 @@ export function projectConversationQueue(snapshot: FlowSnapshotView | null, oper
   };
 }
 
-export const queueStoppedIdle = (snapshot: FlowSnapshotView | null) => snapshot?.phase === 'idle' && snapshot.queuePaused && snapshot.pending.length === 0;
+export const queueStoppedIdle = (snapshot: FlowSnapshotView | null) => snapshot?.phase === 'idle' && snapshot.queuePaused && snapshot.pending.length === 0
+  && !['expired', 'failed'].includes(Object.values(snapshot.runs).at(-1)?.recovery?.phase ?? '');

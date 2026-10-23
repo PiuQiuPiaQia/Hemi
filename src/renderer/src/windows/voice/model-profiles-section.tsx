@@ -19,6 +19,7 @@ import type {
   ModelProviderView,
   ModelTestResult,
   ThinkingLevel,
+  HemiVoiceBridge,
 } from '@/shared/types';
 import { SaveIndicator, useDelayed, type SaveState } from '@/components/save-indicator';
 import { ModelRoutingDialog } from '@/windows/voice/model-routing-dialog';
@@ -1688,12 +1689,16 @@ export function AddProviderScreen({
   }
 }
 
-function AddProviderView({
+export type ManualProviderServices = Partial<Pick<HemiVoiceBridge, 'testModelProfile' | 'listRemoteModels'>>;
+
+export function AddProviderView({
   ctl,
   initial,
   onAdded,
   embedded = false,
   onBusyChange,
+  services,
+  submitLabel,
 }: {
   ctl: ProviderSetupController;
   initial: FixtureState['add'] | null;
@@ -1701,8 +1706,11 @@ function AddProviderView({
   /** 047：嵌入 AddProviderScreen 时由外框出返回/标题（方式选择页）。 */
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
+  services?: ManualProviderServices;
+  submitLabel?: (count: number) => string;
 }) {
   const { directory } = ctl;
+  const formServices = services ?? window.hemiVoice;
   const existingNames = directory.providers.map((provider) => provider.name);
   const initialPreset = presetById(initial?.presetId);
   const [presetId, setPresetId] = useState<string | null>(initialPreset?.id ?? null);
@@ -1725,7 +1733,7 @@ function AddProviderView({
     setRemoteBusy(true);
     setRemoteError('');
     try {
-      const result = await window.hemiVoice?.listRemoteModels({
+      const result = await formServices.listRemoteModels?.({
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
       });
@@ -1743,9 +1751,9 @@ function AddProviderView({
   const [linkNote, setLinkNote] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
-    onBusyChange?.(submitting);
+    onBusyChange?.(submitting || remoteBusy);
     return () => onBusyChange?.(false);
-  }, [submitting, onBusyChange]);
+  }, [submitting, remoteBusy, onBusyChange]);
   const skipFirstTest = useRef(Boolean(initial?.status));
   const generation = useRef(0);
   const slowTest = useDelayed(test?.state === 'testing');
@@ -1780,11 +1788,11 @@ function AddProviderView({
     const url = baseUrl.trim();
     const gen = ++generation.current;
     setTest(null);
-    if (!key || !url || !probeModel || !window.hemiVoice?.testModelProfile) return;
+    const testModel = formServices.testModelProfile;
+    if (!key || !url || !probeModel || !testModel) return;
     const timer = window.setTimeout(() => {
       setTest({ state: 'testing' });
-      window.hemiVoice
-        .testModelProfile({ baseUrl: url, apiKey: key, model: probeModel, api })
+      testModel({ baseUrl: url, apiKey: key, model: probeModel, api })
         .then((result) => {
           if (gen !== generation.current) return;
           setTest(result.ok ? { state: 'ok', latencyMs: result.latencyMs } : { state: 'fail', error: testError(result) });
@@ -1793,8 +1801,8 @@ function AddProviderView({
           if (gen === generation.current) setTest({ state: 'fail', error: errorText(reason) });
         });
     }, 600);
-    return () => window.clearTimeout(timer);
-  }, [presetId, apiKey, baseUrl, keyless, probeModel, api]);
+    return () => { window.clearTimeout(timer); generation.current++; };
+  }, [presetId, apiKey, baseUrl, keyless, probeModel, api, formServices.testModelProfile]);
 
   const toggle = (id: string) => {
     setError(null);
@@ -1946,7 +1954,7 @@ function AddProviderView({
                     spellCheck={false}
                     className="h37-input h37m-mono"
                     value={apiKey}
-                    placeholder={keyless ? '本地服务不需要 Key（可留空）' : '粘贴后自动测试'}
+                    placeholder={keyless ? '本地服务不需要 Key（可留空）' : formServices.testModelProfile ? '粘贴后自动测试' : '粘贴 API Key'}
                     autoFocus={!initial}
                     onChange={(event) => {
                       setApiKey(event.target.value);
@@ -2014,14 +2022,14 @@ function AddProviderView({
             <div className="h37-section-head">
               <h3>3 · 勾选要用的型号</h3>
               <span className="h37-actions">
-                <button
+                {formServices.listRemoteModels ? <button
                   type="button"
                   className="h37-btn h37-btn-secondary h37-btn-sm"
                   disabled={!preset || remoteBusy || submitting}
                   onClick={() => void fetchRemote()}
                 >
                   {remoteBusy ? '拉取中…' : '从服务拉取'}
-                </button>
+                </button> : null}
                 <span className="h37-count">已选 {ordered.length}</span>
               </span>
             </div>
@@ -2089,7 +2097,7 @@ function AddProviderView({
               onClick={() => void submit()}
             >
               {slowSubmit ? <span className="h37-spinner" aria-hidden /> : null}
-              添加 {ordered.length} 个模型
+              {submitLabel ? submitLabel(ordered.length) : `添加 ${ordered.length} 个模型`}
             </button>
           </div>
         </div>

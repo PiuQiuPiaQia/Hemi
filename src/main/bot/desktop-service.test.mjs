@@ -119,6 +119,62 @@ test('manual sync uses local credentials only in main/Host, model status is stab
   );
   assert.equal(JSON.stringify(models).includes('NOT_A_REAL_KEY'), false);
 });
+
+test('a delayed toast acknowledgement cannot dismiss a newer model result', async t => {
+  const f = await fixture(t);
+  await f.client.command('models.sync', { keys: ['p/m'], requestId: 'toast-first' });
+  await f.client.command('models.sync', { keys: ['p/m'], requestId: 'toast-second' });
+  await f.client.command('models.dismiss', { requestId: 'toast-first' });
+  assert.equal(f.client.getState().syncStatus.requestId, 'toast-second');
+  await f.client.command('models.dismiss', { requestId: 'toast-second' });
+  assert.equal(f.client.getState().syncStatus, null);
+});
+test('manual providers are added only on the Host, retries reuse model IDs and local receipts contain no credentials', async t => {
+  const f = await fixture(t);
+  const provider = { name: 'Bot 专用接口', baseUrl: 'https://bot.example.test/v1', api: 'anthropic-messages', apiKey: 'BOT-MANUAL-SECRET', models: [{ model: 'cloud-only', supportsVision: true }, { model: 'cloud-second' }] };
+  const result = await f.client.command('models.add', { provider, requestId: 'manual-add-fixture' });
+  assert.ok(result.providerId.startsWith('bot-'));
+  assert.equal(result.modelKeys.length, 2);
+  const again = await f.client.command('models.add', { provider, requestId: 'manual-add-fixture' });
+  assert.deepEqual(again, result);
+  const models = f.client.getState().cache.models;
+  assert.equal(models.length, 3);
+  assert.equal(models.find(model => model.model === 'cloud-only').api, 'anthropic-messages');
+  assert.equal(models.find(model => model.model === 'cloud-only').supportsVision, true);
+  assert.equal((await f.client.modelCandidates()).length, 1);
+  for (const name of await fs.readdir(path.join(f.root, 'desktop/bot'))) {
+    assert.ok(!(await fs.readFile(path.join(f.root, 'desktop/bot', name), 'utf8')).includes(provider.apiKey), name);
+  }
+  assert.ok(!JSON.stringify(f.client.getState()).includes(provider.apiKey));
+  assert.ok((await fs.readFile(path.join(f.root, 'cloud/data/state.json'), 'utf8')).includes(provider.apiKey));
+});
+
+test('manual model initialization needs no matching local model; malformed providers do not change cloud models', async t => {
+  const f = await fixture(t);
+  const candidate = await f.client.connect({ host: 'fixture-cloud' });
+  const provider = { name: '独立 Bot 配置', baseUrl: 'https://manual.example.test/v1', apiKey: 'SETUP-SECRET', models: [{ model: 'setup-only' }] };
+  await f.client.initialize({ candidateId: candidate.candidate.id, provider, requestId: 'manual-initialize' });
+  assert.ok(f.client.getState().cache.models.some(model => model.model === 'setup-only'));
+  assert.equal((await f.client.modelCandidates()).length, 1);
+  const count = f.client.getState().cache.models.length;
+  for (const patch of [{ apiKey: '' }, { models: [] }, { baseUrl: 'file:///private/key' }, { models: [{ model: '' }] }]) {
+    await assert.rejects(f.client.command('models.add', { provider: { ...provider, ...patch }, requestId: 'invalid-manual' }));
+  }
+  assert.equal(f.client.getState().cache.models.length, count);
+});
+
+test('a lost manual-add receipt reconciles after restart without persisting or resending the API Key', async t => {
+  const f = await fixture(t);
+  const provider = { name: 'Pending', baseUrl: 'https://pending.example.test/v1', apiKey: 'PENDING-MANUAL-SECRET', models: [{ model: 'pending-model' }] };
+  f.dropReply('model.sync');
+  await assert.rejects(f.client.command('models.add', { provider, requestId: 'pending-manual-add' }), /lost receipt/);
+  assert.equal(f.client.getState().syncStatus.phase, 'unknown');
+  assert.ok(!(await fs.readFile(path.join(f.root, 'desktop/bot/model-sync.json'), 'utf8')).includes(provider.apiKey));
+  await f.restart();
+  await f.client.command('models.reconcile');
+  assert.equal(f.client.getState().syncStatus.phase, 'confirmed');
+  assert.equal(f.client.getState().cache.models.filter(model => model.model === 'pending-model').length, 1);
+});
 test('offline drafts persist separately and reconcile into their original cloud conversation after restart', async (t) => {
   const f = await fixture(t),
     session = await f.client.command('session.create');

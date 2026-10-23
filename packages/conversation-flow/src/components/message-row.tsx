@@ -18,6 +18,7 @@ import { CompactDelegation } from "./compact-delegation.js";
 import { TaskResultBlock } from "./result-view.js";
 import { WaitingStatus } from "./waiting-status.js";
 import { AttachmentCard } from "./attachment-card.js";
+import { ModelRecoveryNotice } from "./model-recovery-notice.js";
 import { TurnErrorNotice } from "./turn-error-notice.js";
 const isEditableMessage = (item: TranscriptItem) =>
   item.author === "user" && item.kind !== "task";
@@ -187,6 +188,7 @@ export function ChatTurnItem({
   onRetry,
   retryBusy,
   retryBlocked,
+  onRecoveryAction,
 }: {
   item: TranscriptItem;
   /** 056：回复段里的 task 调用原地渲染子 agent 一行。 */
@@ -196,6 +198,7 @@ export function ChatTurnItem({
   /** 062：交付文件入口点击 → 右侧预览。 */
   onOpenDeliverable?: (artifactId: string, name: string) => void;
   onRetry?: () => void;
+  onRecoveryAction?: (action: "stop" | "retry", recoveryId: string) => void;
   retryBusy?: boolean;
   retryBlocked?: string;
   /** 连续 Hemi 消息的续条：不重复头像行（受理/简报/终态各自入流时合并）。 */
@@ -422,12 +425,12 @@ export function ChatTurnItem({
         data-continuation={continuation ? "true" : undefined}
         data-lead={lead ? "true" : undefined}
       >
-        <TurnErrorNotice
+        {item.recovery ? <ModelRecoveryNotice recovery={item.recovery} onAction={onRecoveryAction} onRestart={onRetry} failureText={item.text} /> : <TurnErrorNotice
           message={item.text}
           onRetry={onRetry}
           busy={retryBusy}
           blocked={onRetry ? retryBlocked : undefined}
-        />
+        />}
       </article>
     );
   }
@@ -447,11 +450,11 @@ export function ChatTurnItem({
             未完成 · 已停止
           </span>
         ) : null}
-        {streaming && !item.parts?.length && !item.text ? (
+        {streaming && !item.recovery && !item.parts?.length && !item.text ? (
           <WaitingStatus />
         ) : null}
         {streaming &&
-        item.text &&
+        !item.recovery && item.text &&
         !item.parts?.some((part) => part.type !== "text") ? (
           <span className="h24-reply-status" role="status">
             回应中
@@ -483,6 +486,7 @@ export function ChatTurnItem({
             ) : null}
           </>
         )}
+        {item.recovery ? <ModelRecoveryNotice recovery={item.recovery} onAction={onRecoveryAction} /> : null}
       </article>
       {copyToastNode}
     </>

@@ -1,5 +1,5 @@
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
-import { ipcMain, app, shell, dialog } from 'electron';
+import { ipcMain, app, shell, dialog, net } from 'electron';
 import { createLocalFileActions } from '../services/local-file-actions.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
@@ -234,6 +234,7 @@ function getConversationDeliverableIo() {
 export function getAgentRuntime() {
   if (runtime) return runtime;
   runtime = createAgentRuntime({
+    isOnline: () => net.isOnline(),
     loadArchiveAgent: getConversationAgent,
     loadArchiveTurns: getConversationTurnsRaw,
     loadArchiveSession: getConversationSession,
@@ -474,7 +475,7 @@ function createLlmFlowRuntime(conversationId) {
             for (const fact of projector.handle(event)) bufferFact(fact);
             // 派单锚点必须先于子任务快照可见。仅正文增量合批；短任务可能在
             // 150ms 内收口，否则 publisher 会把尚未入流的调用当作已撤回而丢弃。
-            if (event?.kind === 'tool_start' && event.tool === 'task') flushFacts();
+            if ((event?.kind === 'tool_start' && event.tool === 'task') || ['recovery','request-reset'].includes(event?.kind)) flushFacts();
           },
         });
         for (const fact of projector.finish()) bufferFact(fact);
@@ -516,6 +517,7 @@ function createLlmFlowRuntime(conversationId) {
         controller.applyFact({ type: 'run-closed', runId, outcome: cancelled ? 'stopped' : failedOutcome, at: Date.now(), generation });
         // 057 口径：已派发的输入不因执行失败自动重排（R-07 重试需用户操作）；
         // 失败事实进 flow（notice part＋failed 运行），渲染层从快照派生。
+        if (!cancelled) controller.applyFact({ type: 'queue-paused', generation });
         if (cancelled) {
           completeInput(envelope?.inputId, null, { aborted: true });
           return { aborted: true, modelUsed: null, result: null };
@@ -533,6 +535,10 @@ function createLlmFlowRuntime(conversationId) {
       return { modelUsed: null };
     },
 
+    async retryRecovery({ runId, recoveryId }) {
+      if (controllerOf().getSnapshot().activeRunId !== runId) return { ok: false, code: 'run-changed' };
+      return { ok: Boolean(runtime?.get(conversationId)?.retryConnection(recoveryId)) };
+    },
     async withdraw({input}) {
       if(input.workflow)await workflowFlowRouter?.withdraw?.(input.workflow);
     },
@@ -872,7 +878,12 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     let thinkingMs = 0;
     let thinkingText = '';
     const onStream = (assistantEvent) => {
-      if (assistantEvent?.type === 'text_start') {
+      if (assistantEvent?.type === 'hemi_request_start') {
+        streamEvent({ kind: 'request-start' });
+      } else if (assistantEvent?.type === 'hemi_request_reset') {
+        thinkingStartedAt = null;
+        streamEvent({ kind: 'request-reset' });
+      } else if (assistantEvent?.type === 'text_start') {
         // 后台收口仍在同一业务目标内，但新一次模型正文须保留段落边界。
         if (conversationTurns.getState(conversationId)?.parts?.at(-1)?.type === 'text') streamEvent({ kind: 'text', text: '\n\n' });
       } else if (assistantEvent?.type === 'text_delta') {
@@ -912,6 +923,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     };
     const calls = [];
     const onActivity = activity => streamEvent({ kind: 'activity', activity });
+    const onRecovery = recovery => streamEvent({ kind: 'recovery', recovery });
     const onModelCall = (call) => {
       if (call.usageDetail) calls.push({ model: call.model, detail: call.usageDetail });
     };
@@ -922,6 +934,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         agent.on('progress', onProgress);
         agent.on('model-call', onModelCall);
         agent.on('activity', onActivity);
+        agent.on('recovery', onRecovery);
         // 056：备用接替/回到主模型要留痕——之前静默切换，日志一直写着主模型，实际跑的是备用。
         const onModelRoute = (event) => {
           llmLog.info(`turn ${turnId} 模型切换 → ${event?.to?.model ?? '?'}${event?.fallbackUsed ? '（主模型失败，本回合由备用接替）' : '（回到主模型）'}`);
@@ -937,6 +950,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           agent.off('progress', onProgress);
           agent.off('model-call', onModelCall);
           agent.off('activity', onActivity);
+          agent.off('recovery', onRecovery);
           agent.off('model-route', onModelRoute);
         }
         if (run.aborted || runToken.controller.signal.aborted) throw new Error('回合已取消。');

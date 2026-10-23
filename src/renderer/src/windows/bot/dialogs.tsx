@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowUp,
   ChevronRight,
@@ -15,6 +15,8 @@ import type {
   BotModelCandidate,
   BotState,
 } from '@shared/bot';
+import type { ModelProfilesDirectory, ModelProviderSaveInput } from '@shared/protocol';
+import { AddProviderView, type ManualProviderServices, type ProviderSetupController } from '../voice/model-profiles-section';
 
 export function BotDialog({
   title,
@@ -22,12 +24,14 @@ export function BotDialog({
   footer,
   busy = false,
   onClose,
+  className = '',
 }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
   busy?: boolean;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -40,7 +44,7 @@ export function BotDialog({
   return (
     <dialog
       ref={ref}
-      className="h-bot-dialog"
+      className={'h-bot-dialog ' + className}
       aria-label={title}
       onCancel={(e) => {
         e.preventDefault();
@@ -291,21 +295,34 @@ export function BotModelPicker({
   const [open, setOpen] = useState(false), [query, setQuery] = useState('');
   const panelId = useId(), root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const outsidePress = useRef(false);
   const chosen = models.filter(m => selected.includes(m.key));
   const filtered = models.filter(m => `${m.name} ${m.provider} ${m.key}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const expanded = open && !disabled;
   useEffect(() => {
     if (!expanded) return;
     search.current?.focus();
-    const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+    const press = (event: PointerEvent) => {
+      outsidePress.current = event.target instanceof Node && !root.current?.contains(event.target);
     };
-    document.addEventListener('pointerdown', outside, true);
-    return () => document.removeEventListener('pointerdown', outside, true);
+    const outside = (event: MouseEvent) => {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+      outsidePress.current = false;
+    };
+    // Close after the clicked action runs; collapsing this in-flow panel on
+    // pointerdown would move the import button before it receives its click.
+    document.addEventListener('pointerdown', press, true);
+    document.addEventListener('click', outside);
+    return () => {
+      document.removeEventListener('pointerdown', press, true);
+      document.removeEventListener('click', outside);
+      outsidePress.current = false;
+    };
   }, [expanded]);
   return (
     <div className="h-bot-model-picker" ref={root} onBlurCapture={event => {
       const next = event.relatedTarget;
+      if (outsidePress.current) return;
       // On macOS, pressing a label first blurs its search input to the native
       // dialog, before the label forwards a click to its checkbox. Keep it mounted.
       if (next === event.currentTarget.closest('dialog') || next === document.body) return;
@@ -315,8 +332,8 @@ export function BotModelPicker({
       event.preventDefault(); event.stopPropagation();
       setOpen(false); trigger.current?.focus();
     }}>
-      <span className="h-bot-model-label">同步模型</span>
-      <button type="button" ref={trigger} className="h-bot-model-trigger" aria-label="选择同步模型"
+      <span className="h-bot-model-label">本机模型</span>
+      <button type="button" ref={trigger} className="h-bot-model-trigger" aria-label="选择导入模型"
         aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
         disabled={disabled || !models.length} onClick={() => {setQuery(''); setOpen(value => !value);}}>
         <span>{chosen.length ? chosen[0].name : '选择本机模型'}</span>
@@ -365,28 +382,42 @@ export function BotModelPicker({
     </div>
   );
 }
-export function BotSyncModels({
+export function BotModelSetup({
   api,
-  onClose,
+  state,
+  candidateId,
+  busy = false,
+  onDone,
+  onCancel,
+  onBusyChange,
 }: {
   api: BotBridge;
-  onClose: () => void;
+  state: BotState;
+  candidateId?: string;
+  busy?: boolean;
+  onDone: () => void;
+  onCancel: () => void;
+  onBusyChange: (busy: boolean) => void;
 }) {
+  const [tab, setTab] = useState<'manual' | 'import'>('manual');
   const [models, setModels] = useState<BotModelCandidate[]>([]),
     [selected, setSelected] = useState<string[]>([]),
-    [busy, setBusy] = useState(false),
+    [saving, setSaving] = useState(false),
     [loaded, setLoaded] = useState(false),
-    [error, setError] = useState(''),
-    [done, setDone] = useState(false);
-  const operation = useRef('sync-' + crypto.randomUUID());
+    [error, setError] = useState('');
+  const locked = busy || saving;
+  const tabsId = useId();
+  const operation = useRef('models-' + crypto.randomUUID());
+  const reportBusy = useCallback((value: boolean) => { setSaving(value); onBusyChange(value); }, [onBusyChange]);
   useEffect(() => {
+    if (tab !== 'import' || loaded) return;
     let alive = true;
+    setError('');
     void api
       .models()
       .then((list) => {
         if (alive) {
           setModels(list);
-          setSelected([]);
           setLoaded(true);
         }
       })
@@ -396,49 +427,70 @@ export function BotSyncModels({
     return () => {
       alive = false;
     };
-  }, [api]);
-  async function sync() {
-    setBusy(true);
-    setError('');
+  }, [api, tab, loaded]);
+  const services = useMemo<ManualProviderServices>(() => candidateId ? {} : ({
+    testModelProfile: config => api.command('models.test', { config }),
+    listRemoteModels: config => api.command('models.list', { config }),
+  }), [api, candidateId]);
+  async function save(provider?: ModelProviderSaveInput) {
     try {
+      if (candidateId) {
+        const result = await api.initialize({ candidateId, ...(provider ? { provider } : { modelKeys: selected }), requestId: operation.current });
+        return { providerId: result.cache?.models.at(-1)?.providerId ?? 'bot', modelKeys: result.cache?.models.map(model => model.key) ?? [] };
+      }
       const result = await api.command<{
-        results: Array<{ ok: boolean; message?: string }>;
-      }>('models.sync', { keys: selected, requestId: operation.current });
+        results: Array<{ key: string; ok: boolean; message?: string }>;
+        providerId?: string;
+        modelKeys?: string[];
+      }>(provider ? 'models.add' : 'models.sync', { ...(provider ? { provider } : { keys: selected }), requestId: operation.current });
       const failed = result.results.filter((r) => !r.ok);
-      if (failed.length) {
-        setError(failed.map((r) => r.message).join('；'));
-        operation.current = 'sync-' + crypto.randomUUID();
-      } else setDone(true);
+      if (failed.length) throw new Error(failed.map(result => result.message).join('；'));
+      return { providerId: result.providerId ?? 'bot', modelKeys: result.modelKeys ?? result.results.map(model => model.key) };
     } catch (e) {
-      setError(e instanceof Error ? e.message : '同步结果待核对，请重新连接。');
-    } finally {
-      setBusy(false);
+      if (!['offline', 'needs-review'].includes((e as { code?: string }).code ?? '')) operation.current = 'models-' + crypto.randomUUID();
+      throw e;
     }
   }
+  async function importModels() {
+    reportBusy(true);
+    setError('');
+    try { await save(); onDone(); } catch (error) {
+      setError(error instanceof Error ? error.message : '导入结果待核对，请重新连接。');
+    } finally {
+      reportBusy(false);
+    }
+  }
+  const directory: ModelProfilesDirectory = { version: 2, defaultModelId: null, providers: Array.from(new Map((state.cache?.models ?? []).map(model => [model.providerId, {
+    id: model.providerId, name: model.name, baseUrl: model.baseUrl, api: 'openai-completions' as const,
+    hasApiKey: true, keyStoredSecurely: true, updatedAt: 0, models: [],
+  }])).values()) };
+  const ctl: ProviderSetupController = {
+    directory, readOnly: locked, saveProvider: save,
+    mutate: async (_next, action) => { try { await action(directory); return null; } catch (error) { return error instanceof Error ? error.message : '添加失败，请重试。'; } },
+    setStatus: () => {}, reload: async () => null, back: onCancel,
+  };
   return (
-    <BotDialog
-      title="同步本机模型"
-      busy={busy}
-      onClose={onClose}
-      footer={
-        <>
-          <BotButton onClick={onClose} disabled={busy}>
-            {done ? '完成' : '取消'}
-          </BotButton>
-          {!done && (
-            <BotButton
-              primary
-              disabled={busy || !selected.length}
-              onClick={() => void sync()}
-            >
-              {busy ? '正在同步…' : '同步到 Bot'}
-            </BotButton>
-          )}
-        </>
-      }
-    >
+    <div className="h-bot-model-setup">
+      <div className="h37-seg" role="tablist" aria-label="添加模型方式">
+        {(['manual', 'import'] as const).map((value, index, values) => <button type="button" role="tab" key={value}
+          id={`${tabsId}-${value}-tab`} aria-controls={`${tabsId}-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1}
+          disabled={locked} onClick={() => { setTab(value); setError(''); }} onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 'manual' : event.key === 'End' ? 'import' : values[(index + 1) % values.length];
+            setTab(next); document.getElementById(`${tabsId}-${next}-tab`)?.focus();
+          }}>{value === 'manual' ? '手动添加' : '从本机导入'}</button>)}
+      </div>
+      <p className="h-bot-small">模型配置与 API Key 保存到 Bot，保存时由服务器验证连接。</p>
+      <div role="tabpanel" id={`${tabsId}-manual`} aria-labelledby={`${tabsId}-manual-tab`} hidden={tab !== 'manual'}>
+        <fieldset className="h-bot-model-form" disabled={locked}>
+          <AddProviderView ctl={ctl} initial={null} embedded services={services} onAdded={onDone} onBusyChange={reportBusy}
+            submitLabel={candidateId ? () => '初始化并开始使用' : undefined} />
+        </fieldset>
+      </div>
+      <div role="tabpanel" id={`${tabsId}-import`} aria-labelledby={`${tabsId}-import-tab`} hidden={tab !== 'import'}>
       {!loaded && !error ? <p role="status">正在读取本机模型…</p> : null}
-      {loaded && !models.length ? <p>暂无本机模型，请先在设置中添加。</p> : null}
+      {loaded && !models.length ? <p>暂无本机模型，可切换到“手动添加”直接配置。</p> : null}
       <BotModelPicker
         models={models}
         selected={selected}
@@ -446,42 +498,52 @@ export function BotSyncModels({
           operation.current = 'sync-' + crypto.randomUUID();
           setSelected(keys);
         }}
-        disabled={busy || done}
+        disabled={locked}
       />
       <p className="h-bot-small">
-        将所选模型配置与 API Key 保存到服务器，验证可能产生少量调用费用。
+        选择本机已有的 API Key 模型导入，验证可能产生少量调用费用。
       </p>
-      {done && <p role="status">同步完成</p>}
       {error && (
         <p role="alert" className="h-bot-error">
           {error}
         </p>
       )}
-    </BotDialog>
+      <div className="h37m-add-foot">
+        <BotButton disabled={locked} onClick={onCancel}>取消</BotButton>
+        <BotButton primary disabled={locked || !selected.length} onClick={() => void importModels()}>
+          {saving ? '正在导入…' : candidateId ? '初始化并开始使用' : '导入到 Bot'}
+        </BotButton>
+      </div>
+      </div>
+    </div>
   );
+}
+
+export function BotAddModels({ api, state, onClose }: { api: BotBridge; state: BotState; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return <BotDialog title="添加模型" className="h-bot-model-dialog" busy={busy} onClose={onClose}>
+    <BotModelSetup api={api} state={state} onDone={onClose} onCancel={onClose} onBusyChange={setBusy} />
+  </BotDialog>;
 }
 export function BotSetup({
   api,
   state,
   onDone,
-  onOpenModels,
 }: {
   api: BotBridge;
   state: BotState;
   onDone: () => void;
-  onOpenModels: () => void;
 }) {
   const [open, setOpen] = useState(false),
     [step, setStep] = useState<'connect' | 'configure'>('connect'),
     [host, setHost] = useState(''),
     [password, setPassword] = useState(''),
     [remember, setRemember] = useState(false),
-    [models, setModels] = useState<BotModelCandidate[]>([]),
-    [keys, setKeys] = useState<string[]>([]),
+    [modelBusy, setModelBusy] = useState(false),
     [error, setError] = useState(''),
     [phase, setPhase] = useState('');
   const initializeRequest = useRef('initialize-' + crypto.randomUUID());
-  const busy = !!state.busy || !!phase,
+  const busy = !!state.busy || !!phase || modelBusy,
     candidate = state.candidate;
   async function connect() {
     setPhase('正在连接并检查服务器环境…');
@@ -494,13 +556,6 @@ export function BotSetup({
         rememberPassword: remember,
       });
       setPassword('');
-      const list = await api.models();
-      setModels(list);
-      const selected = list
-        .filter((m) => m.canSync)
-        .slice(0, 1)
-        .map((m) => m.key);
-      setKeys(selected);
       setStep('configure');
     } catch (e) {
       setError(e instanceof Error ? e.message : '连接失败');
@@ -517,7 +572,6 @@ export function BotSetup({
     try {
       await api.initialize({
         candidateId: candidate.id,
-        modelKeys: keys,
         existing,
         requestId: initializeRequest.current,
       });
@@ -551,6 +605,7 @@ export function BotSetup({
       {open && (
         <BotDialog
           title={step === 'connect' ? '连接云服务器' : '配置云端 Bot'}
+          className={step === 'configure' && !candidate?.info.bot?.configured ? 'h-bot-model-dialog' : ''}
           busy={busy}
           onClose={() => setOpen(false)}
           footer={
@@ -571,14 +626,11 @@ export function BotSetup({
               {step === 'configure' && !busy && (
                 <BotButton onClick={() => setStep('connect')}>返回</BotButton>
               )}
-              <BotButton
+              {(step === 'connect' || candidate?.info.bot?.configured || candidate?.info.serviceError) && <BotButton
                 primary
                 disabled={
                   busy ||
                   (step === 'connect' && !host.trim()) ||
-                  (step === 'configure' &&
-                    !candidate?.info.bot?.configured &&
-                    !keys.length) ||
                   !!candidate?.info.serviceError
                 }
                 onClick={() =>
@@ -594,7 +646,7 @@ export function BotSetup({
                     : candidate?.info.bot?.configured
                       ? '连接已有 Bot'
                       : '初始化并开始使用'}
-              </BotButton>
+              </BotButton>}
             </>
           }
         >
@@ -645,24 +697,9 @@ export function BotSetup({
           ) : candidate?.info.bot?.configured ? (
             <p>检测到服务器上已有 Bot，将恢复原会话和模型。</p>
           ) : (
-            <>
-              <BotModelPicker
-                models={models}
-                selected={keys}
-                onChange={(values) => {
-                  setKeys(values);
-                  initializeRequest.current =
-                    'initialize-' + crypto.randomUUID();
-                }}
-                disabled={busy}
-              />
-              {!models.length && (
-                <BotButton onClick={onOpenModels}>去配置本机模型</BotButton>
-              )}
-              <p className="h-bot-small">
-                将所选模型配置与 API Key 保存到服务器，验证可能产生少量调用费用。
-              </p>
-            </>
+            <BotModelSetup api={api} state={state} candidateId={candidate?.id} busy={!!state.busy || !!phase}
+              onBusyChange={setModelBusy} onCancel={() => setStep('connect')}
+              onDone={() => { setOpen(false); onDone(); }} />
           )}
           {(phase || state.busy) && (
             <p role="status">

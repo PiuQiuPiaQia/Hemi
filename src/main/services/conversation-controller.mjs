@@ -81,7 +81,7 @@ export function createConversationController({
       previousActivity?.phase !== fact.activity?.phase
       || JSON.stringify(previousActivity?.jobs?.map(job => job.id)) !== JSON.stringify(fact.activity?.jobs?.map(job => job.id))
     );
-    if (fact.type === 'input-delivered' || fact.type === 'run-closed' || activityChanged) {
+    if (fact.type === 'input-delivered' || fact.type === 'run-closed' || fact.type === 'run-recovery' || activityChanged) {
       // 派发与收口是持久事实：长任务／退出前也必须保存正式输入，不能只留下
       // preparing 快照，让 turns 已有用户项而 flow 缺项。文本流不逐 token 写盘。
       void store.update(conversationId, { revision: snapshot.revision }).catch(() => {});
@@ -293,7 +293,8 @@ export function createConversationController({
   }
 
   async function commandSend(command) {
-    return handleSend(command.input ?? {}, { preempt: command.preempt ?? 'none' });
+    const recovering = ['waiting','offline','connecting'].includes(snapshot.runs[snapshot.activeRunId]?.recovery?.phase);
+    return handleSend(command.input ?? {}, { preempt: recovering ? 'none' : command.preempt ?? 'none' });
   }
 
   async function commandStop(command) {
@@ -413,6 +414,11 @@ export function createConversationController({
     async command(command) {
       switch (command.type) {
         case 'send': return commandSend(command);
+        case 'retryRecovery': {
+          const run = snapshot.runs[snapshot.activeRunId];
+          if (!run || command.targetRunId !== run.runId || command.recoveryId !== run.recovery?.id || !['waiting','offline'].includes(run.recovery.phase)) return { ok: false, code: 'run-changed' };
+          return runtime.retryRecovery?.({ runId: run.runId, recoveryId: command.recoveryId }) ?? { ok: false, code: 'unsupported' };
+        }
         case 'reorderInput': {
           const result = commit({ type: 'input-reordered', inputId: command.inputId, overInputId: command.overInputId,
             expectedInputIds: command.expectedInputIds, generation: snapshot.generation });

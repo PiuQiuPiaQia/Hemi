@@ -28,7 +28,7 @@ async function resize(width){await app.evaluate(({BrowserWindow},w)=>{const win=
 const shot = async name => {await fs.mkdir(path.join(evidence,mode),{recursive:true});await page.screenshot({path:path.join(evidence,mode,name+'.png'),scale:'css'});};
 const state = () => page.evaluate(()=>window.hemiVoice.bot.getState());
 const modal = name => page.getByRole('dialog',{name,exact:true});
-const modelTrigger = () => page.getByRole('button',{name:'选择同步模型',exact:true});
+const modelTrigger = () => page.getByRole('button',{name:'选择导入模型',exact:true});
 async function folderChecks(){
  const id=(await state()).cache.selectedId;
  await page.getByRole('button',{name:'默认空间',exact:true}).click();
@@ -83,7 +83,8 @@ async function compactChecks(dialogName){
  await input.fill('');
  assert.equal(await dialog.getByRole('checkbox').count(),80);
  const list=await dialog.locator('.h-bot-models').evaluate(n=>({height:n.clientHeight,scroll:n.scrollHeight}));
- assert.ok(list.height<=240&&list.scroll>list.height,'model list scrolls inside a bounded panel');
+ const limit=await page.evaluate(()=>Math.min(420,Math.max(120,innerHeight-460)));
+ assert.ok(list.height<=limit+1&&list.scroll>list.height,'model list shows more rows inside a viewport-bounded panel');
  await shot(dialogName==='配置云端 Bot'?'setup-search-list':'sync-search-list');
  await input.fill('no-such-model');await dialog.getByText('没有找到匹配的模型',{exact:true}).waitFor();
  await input.press('Escape');await dialog.waitFor();
@@ -107,6 +108,7 @@ async function launch(){
  await page.getByRole('button',{name:'Bot',exact:true}).click();await page.getByRole('button',{name:'创建连接',exact:true}).click();
  await page.getByRole('textbox',{name:'SSH 地址',exact:true}).fill(target);
  await page.getByRole('button',{name:'连接并继续',exact:true}).click();await modal('配置云端 Bot').waitFor();
+  await page.getByRole('tab',{name:'从本机导入',exact:true}).click();
  await modelTrigger().waitFor();
  assert.equal((await state()).candidate.info.runtimeNeeded,true);
 }
@@ -137,19 +139,23 @@ try{
    await docker('exec',container,'mv','/usr/local/bin/node.saved','/usr/local/bin/node');
    if(mode==='dev')await docker('exec','-d','-u','hemi',container,'node','/tmp/model-server.mjs');
    await modal('配置云端 Bot').getByRole('button',{name:'返回',exact:true}).click();
-   await page.getByRole('button',{name:'连接并继续',exact:true}).click();await modelTrigger().waitFor();
+   await page.getByRole('button',{name:'连接并继续',exact:true}).click();
+   await page.getByRole('tab',{name:'从本机导入',exact:true}).click();await modelTrigger().click();
+   await page.getByRole('textbox',{name:'搜索本机模型',exact:true}).fill('model-79');
+   await page.getByRole('checkbox',{name:'model-79',exact:true}).check();
+   await page.getByRole('textbox',{name:'搜索本机模型',exact:true}).press('Escape');
    await page.getByRole('button',{name:'初始化并开始使用',exact:true}).click();
    console.log(mode,'installing isolated resident Host');
    await page.locator('textarea.text-composer-input').waitFor({timeout:180000});
    await wait(async()=>!!(await state()).online,'Bot online');
    assert.equal((await state()).cache.defaultDir,'/home/hemi/hemi-workspace');
    check('wizard only chooses models; Host automatically creates its built-in workspace through real IPC/SDK initialization');
-   await page.getByRole('button',{name:'同步本机模型',exact:true}).click();await modal('同步本机模型').waitFor();await modelTrigger().waitFor();
-   await compactChecks('同步本机模型');await resize(375);await shot('sync-375');await resize(1440);
-   await page.getByRole('button',{name:'同步到 Bot',exact:true}).click();await page.getByText('同步完成',{exact:true}).waitFor({timeout:90000});
+   await page.getByRole('button',{name:'添加模型',exact:true}).click();await modal('添加模型').waitFor();
+   await page.getByRole('tab',{name:'从本机导入',exact:true}).click();await modelTrigger().waitFor();
+   await compactChecks('添加模型');await resize(375);await shot('sync-375');await resize(1440);
+   await page.getByRole('button',{name:'导入到 Bot',exact:true}).click();await modal('添加模型').waitFor({state:'hidden',timeout:90000});
    assert.ok((await state()).cache.models.some(m=>m.model==='model-79'));
    check('manual multi-select synchronizes only chosen models and receives the actual cloud validation result');
-   await page.getByRole('button',{name:'完成',exact:true}).click();
    await page.getByRole('button',{name:'Bot 设置',exact:true}).click();
    assert.equal(await modal('Bot 设置').getByRole('button',{name:'新会话默认设置',exact:true}).count(),0);
    await page.getByRole('button',{name:'完成',exact:true}).click();

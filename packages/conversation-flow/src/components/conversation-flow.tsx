@@ -428,6 +428,9 @@ function ConversationFlowBody({
                     })
                 : undefined
             }
+            onRecoveryAction={runtime.actionable ? (action, recoveryId) => open(action === 'stop'
+              ? { type: 'run.stop', targetId: view.runId ?? '' }
+              : { type: 'recovery.retry', targetId: item.id, runId: view.runId ?? '', recoveryId }) : undefined}
             retryBusy={state?.retryBusy || state?.busy || busy}
             retryBlocked={state?.retryBlocked}
           />

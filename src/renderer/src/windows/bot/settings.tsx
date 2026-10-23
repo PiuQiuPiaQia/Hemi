@@ -138,7 +138,7 @@ export function BotSettings({
             <dd>
               <code>{state.cache?.defaultDir}</code>
             </dd>
-            <dt>已同步模型</dt>
+            <dt>可用模型</dt>
             <dd>{state.cache?.models.length ?? 0} 个</dd>
             <dt>组件版本</dt>
             <dd>{state.binding?.version}</dd>
@@ -151,7 +151,7 @@ export function BotSettings({
           </dl>
           <div className="h-bot-setting-actions">
             <BotButton disabled={busy || !state.online} onClick={onSync}>
-              同步模型
+              添加模型
             </BotButton>
             <BotButton disabled={busy} onClick={() => setScreen('address')}>
               修改连接地址

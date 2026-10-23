@@ -321,6 +321,14 @@ export function applyFlowFact(snapshot, fact) {
         applied: true,
       };
     }
+    case 'run-recovery': {
+      if (snapshot.activeRunId !== fact.runId || !runAccepts(snapshot, fact.runId) || snapshot.phase === 'stopping') return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
+      const recovery = fact.recovery;
+      if (!recovery?.id || !['waiting','connecting','offline','recovered','expired','stopped'].includes(recovery.phase)) return { snapshot, patch: null, applied: false };
+      const run = { ...snapshot.runs[fact.runId], recovery };
+      const next = { ...snapshot, revision: snapshot.revision + 1, runs: { ...snapshot.runs, [fact.runId]: run } };
+      return { snapshot: next, patch: { kind: 'runs', runs: next.runs }, applied: true };
+    }
     case 'run-activity': {
       if (snapshot.activeRunId !== fact.runId || !runAccepts(snapshot, fact.runId) || snapshot.phase === 'stopping') {
         return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
@@ -355,6 +363,7 @@ export function applyFlowFact(snapshot, fact) {
         endedAt: fact.at ?? null,
         closedAt: fact.at ?? null,
         outcome: fact.outcome ?? 'unknown',
+        ...(snapshot.runs[fact.runId].recovery && !['expired','recovered'].includes(snapshot.runs[fact.runId].recovery.phase) ? { recovery: { ...snapshot.runs[fact.runId].recovery, phase: fact.outcome === 'stopped' ? 'stopped' : 'failed', nextRetryAt: null } } : {}),
         activity: null,
         ...(fact.usage ? { usage: fact.usage } : {}),
       };

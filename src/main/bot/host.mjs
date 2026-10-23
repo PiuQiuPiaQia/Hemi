@@ -31,6 +31,8 @@ import {
 } from './storage.mjs';
 import { cloudDirectory, listCloudDirectories } from './directories.mjs';
 import { createBotExecutor, validateCloudModel } from './runtime.mjs';
+import { modelEndpoint } from './models.mjs';
+import { listRemoteModels } from '../services/text-model.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
@@ -581,7 +583,7 @@ export async function createBotHost({
                 !['https:', 'http:'].includes(endpoint.protocol) ||
                 endpoint.username ||
                 endpoint.password ||
-                (!allowLoopbackModels &&
+                (!allowLoopbackModels && p.source !== 'manual' &&
                   /^(localhost|127\.|\[?::1\]?$|0\.0\.0\.0)/i.test(
                     endpoint.hostname,
                   ))
@@ -602,6 +604,13 @@ export async function createBotHost({
           await Promise.all(
             Array.from({ length: Math.min(4, rawModels.length) }, worker),
           );
+          // The manual form saves one provider as a unit, like local setup.
+          // A retry after one failed model must not leave duplicate providers.
+          if (p.source === 'manual' && results.some(result => !result.ok)) {
+            return { results: results.map(result => result.ok ? {
+              key: result.key, ok: false, message: '同组有型号未通过验证，本组模型尚未添加。',
+            } : result) };
+          }
           for (const item of validated) {
             if (!item) continue;
             state.versions[item.revision] = item.config;
@@ -934,6 +943,22 @@ export async function createBotHost({
         revision: state.revision,
         notModified: true,
       };
+    if (method === 'model.test' || method === 'model.list') {
+      const config = syncModelConfig(p.config ?? {});
+      // This draft is entered explicitly for the Bot: localhost names the
+      // server. Importing desktop profiles keeps the original loopback guard.
+      modelEndpoint(config, { allowLoopback: true });
+      if (!config.apiKey) fail('请填写 API Key。');
+      try {
+        if (method === 'model.list') return { ok: true, ...(await listRemoteModels(config)) };
+        if (!config.model) fail('请填写模型型号。');
+        const start = Date.now();
+        await validateModel(config);
+        return { ok: true, latencyMs: Date.now() - start };
+      } catch {
+        return { ok: false, error: method === 'model.list' ? '服务器无法拉取模型列表，请检查接口地址和 API Key，或手动填写型号。' : '服务器未能验证模型连接，请检查接口地址、API Key 和型号。' };
+      }
+    }
     if (method === 'snapshot')
       return {
         instanceId: state.instanceId,

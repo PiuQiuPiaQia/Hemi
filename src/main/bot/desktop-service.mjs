@@ -10,6 +10,7 @@ import {
 } from './storage.mjs';
 import { createBotTransport } from './transport.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
+import { manualProviderModels } from './models.mjs';
 
 const METHODS = new Set([
   'snapshot',
@@ -418,15 +419,28 @@ export function createBotDesktopService({
       params.expectedInstanceId !== binding?.instanceId
     )
       fail('Bot 连接已更换，旧操作已取消。', 'conflict');
-    if (method === 'models.sync') {
-      if (!online) fail('恢复连接后才能同步模型。', 'offline');
+    if (method === 'models.test' || method === 'models.list') {
+      if (!online) fail('恢复连接后才能验证模型。', 'offline');
+      // Draft credentials go straight to the Host; never persist them in local
+      // operation receipts, diagnostics, the model directory or Bot cache.
+      try {
+        return await direct(method === 'models.test' ? 'model.test' : 'model.list', { config: params.config });
+      } catch (error) {
+        if (error.code !== 'unsupported') throw error;
+        return { ok: false, error: '请先在 Bot 设置中重新部署云端组件，再测试连接或拉取型号；也可手动填写型号后直接添加。' };
+      }
+    }
+    if (method === 'models.sync' || method === 'models.add') {
+      if (!online) fail('恢复连接后才能添加模型。', 'offline');
       if (syncInFlight || syncStatus?.phase === 'unknown')
         fail('请先核对上次模型同步结果。', 'needs-review');
       const identity = binding.instanceId;
+      const requestId = params.requestId ?? 'sync-' + randomUUID();
+      const manual = method === 'models.add' ? manualProviderModels(params.provider, requestId) : null;
       syncStatus = {
         instanceId: identity,
-        requestId: params.requestId ?? 'sync-' + randomUUID(),
-        keys: params.keys,
+        requestId,
+        keys: manual ? manual.map(model => model.modelKey) : params.keys,
         phase: 'sending',
         at: Date.now(),
       };
@@ -434,7 +448,9 @@ export function createBotDesktopService({
       atomicJson(syncFile, syncStatus);
       publish();
       try {
-        const result = await sync(
+        const result = manual ? await transport.rpc(binding.host, 'model.sync', {
+          instanceId: identity, requestId, models: manual, source: 'manual',
+        }) : await sync(
           binding.host,
           identity,
           params.keys,
@@ -450,7 +466,7 @@ export function createBotDesktopService({
         }
         await refresh();
         record('models.sync', 'confirmed');
-        return result;
+        return { ...result, ...(manual ? { providerId: manual[0].providerId, modelKeys: manual.map(model => model.modelKey) } : {}) };
       } catch (e) {
         record('models.sync', 'failed', e.code ?? 'failed');
         if (binding?.instanceId === identity) {
@@ -470,6 +486,7 @@ export function createBotDesktopService({
     }
     if (method === 'models.reconcile') return refresh();
     if (method === 'models.dismiss') {
+      if (params.requestId && params.requestId !== syncStatus?.requestId) return { ok: true };
       if (syncInFlight || syncStatus?.phase === 'unknown')
         fail('请先核对同步结果。', 'needs-review');
       syncStatus = null;
@@ -704,12 +721,15 @@ export function createBotDesktopService({
     async initialize({
       candidateId,
       modelKeys,
+      provider,
       existing = false,
       requestId,
     } = {}) {
       if (!candidate || candidate.id !== candidateId)
         fail('连接信息已过期，请重新探测。', 'conflict');
       if (busy) fail('正在初始化，请稍候。', 'busy');
+      const operationId = requestId ?? 'initialize-' + randomUUID();
+      const manual = !existing && provider ? manualProviderModels(provider, operationId) : null;
       const selected = candidate;
       const cancellation = new AbortController();
       initializationAbort = cancellation;
@@ -737,7 +757,9 @@ export function createBotDesktopService({
             fail('云端版本不兼容。', 'unsupported');
           busy = 'models';
           publish();
-          const result = await sync(
+          const result = manual ? await transport.rpc(selected.host, 'model.sync', {
+            instanceId: info.instanceId, requestId: operationId, models: manual, source: 'manual',
+          }, { signal: cancellation.signal }) : await sync(
             selected.host,
             info.instanceId,
             modelKeys,

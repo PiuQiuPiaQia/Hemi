@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import http from 'node:http';
 import { createBotHost } from './host.mjs';
 const tick = () => new Promise((r) => setTimeout(r, 30));
 async function fixture(t) {
@@ -88,6 +89,51 @@ test('cloud sessions, models and credentials are isolated; duplicate request ret
     (await fs.stat(path.join(f.root, 'data/state.json'))).mode & 0o777,
     0o600,
   );
+});
+
+test('draft model probes run on the Host without saving credentials or operations; list failures are safe', async t => {
+  const f = await fixture(t);
+  const before = await fs.readFile(path.join(f.root, 'data/state.json'), 'utf8');
+  const headers = [];
+  const server = http.createServer((request, response) => {
+    headers.push(request.headers.authorization);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ data: [{ id: 'remote-only' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const config = { ...f.config, baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'DRAFT-ONLY-SECRET' };
+  assert.deepEqual(await f.req('model.list', { config }), { ok: true, models: ['remote-only'] });
+  assert.deepEqual(headers, ['Bearer DRAFT-ONLY-SECRET']);
+  assert.equal((await f.req('model.test', { config })).ok, true);
+  assert.equal(await fs.readFile(path.join(f.root, 'data/state.json'), 'utf8'), before);
+  await assert.rejects(f.req('model.test', { config: { ...config, baseUrl: 'file:///tmp/example' } }), /地址无效/);
+});
+
+test('manual server-local models are accepted while imported desktop loopback URLs are rejected', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-loopback-'));
+  const host = await createBotHost({ dataDir: path.join(root, 'data'), defaultDir: path.join(root, 'workspace'), validateModel: async () => {} });
+  t.after(async () => { await host.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const info = await host.request('handshake');
+  const models = [{ modelKey: 'ollama/model', providerId: 'ollama', name: 'Server Ollama', model: 'qwen', api: 'openai-completions', baseUrl: 'http://localhost:11434/v1', apiKey: 'ollama' }];
+  const imported = await host.request('model.sync', { instanceId: info.instanceId, requestId: 'loopback-import', models });
+  assert.equal(imported.results[0].ok, false);
+  const manual = await host.request('model.sync', { instanceId: info.instanceId, requestId: 'loopback-manual', models, source: 'manual' });
+  assert.equal(manual.results[0].ok, true);
+});
+
+test('manual providers save atomically when one model fails, so corrected retries create no duplicates', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-manual-batch-'));
+  const host = await createBotHost({ dataDir: path.join(root, 'data'), defaultDir: path.join(root, 'workspace'), validateModel: async config => { if (config.model === 'bad') throw new Error('fixture failure'); } });
+  t.after(async () => { await host.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const info = await host.request('handshake');
+  const config = { providerId: 'manual', name: 'Manual', api: 'openai-completions', baseUrl: 'https://model.example.test/v1', apiKey: 'BATCH-SECRET' };
+  const models = ['good', 'bad'].map(model => ({ ...config, model, modelKey: 'manual/' + model }));
+  const result = await host.request('model.sync', { instanceId: info.instanceId, requestId: 'manual-batch-fails', source: 'manual', models });
+  assert.ok(result.results.every(result => result.ok === false));
+  assert.equal((await host.request('snapshot', { instanceId: info.instanceId })).models.length, 0);
+  await host.request('model.sync', { instanceId: info.instanceId, requestId: 'manual-batch-fixed', source: 'manual', models: [models[0]] });
+  assert.equal((await host.request('snapshot', { instanceId: info.instanceId })).models.length, 1);
 });
 test('host owns one serial execution slot, frozen per-input model and directory survive selection changes', async (t) => {
   const f = await fixture(t),

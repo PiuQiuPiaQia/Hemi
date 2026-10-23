@@ -511,3 +511,38 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 /* 067: positioning is internal to the existing reading column. Child margins stay unchanged. */
 .h67-virtual-transcript { position: relative; width: 100%; overflow-anchor: none; }
 .h67-virtual-row { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-direction: column; }
+
+/* Model recovery uses the approved compact inline presentation. */
+.compact-shell .model-recovery-notice { padding: var(--sp-4) 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.6; }
+.compact-shell .model-recovery-row { display: flex; align-items: center; gap: var(--sp-8); min-height: 32px; width: fit-content; max-width: 100%; }
+.compact-shell .model-recovery-icon { flex: none; color: var(--state-700); }
+.compact-shell .model-recovery-title { font-size: var(--fs-13); white-space: nowrap; }
+.compact-shell .model-recovery-countdown { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.compact-shell .model-recovery-notice[data-phase='expired'] .model-recovery-icon,
+.compact-shell .model-recovery-notice[data-phase='failed'] .model-recovery-icon { color: var(--warn); }
+.compact-shell .model-recovery-notice[data-phase='offline'] .model-recovery-icon,
+.compact-shell .model-recovery-notice[data-phase='stopped'] .model-recovery-icon { color: var(--muted); }
+.compact-shell .model-recovery-action { display: inline-flex; align-items: center; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); padding: var(--sp-4); min-height: 28px; font-size: var(--fs-12); white-space: nowrap; }
+.compact-shell .model-recovery-action.primary { color: var(--ink); font-weight: var(--fw-medium); }
+.compact-shell .model-recovery-action:hover:not(:disabled), .compact-shell .model-recovery-toggle:hover { background: var(--n-100); color: var(--ink); }
+.compact-shell .model-recovery-toggle { display: grid; place-items: center; flex: none; width: 24px; min-height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); }
+.compact-shell .model-recovery-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
+.compact-shell .model-recovery-action:disabled { opacity: .5; }
+.compact-shell .model-recovery-details { margin: var(--sp-8) 0 var(--sp-4) var(--sp-20); padding: var(--sp-8) 0 var(--sp-8) var(--sp-12); border-left: 1px solid var(--line); overflow-wrap: anywhere; }
+.compact-shell .model-recovery-details p { margin: 0 0 var(--sp-4); }
+.compact-shell .model-recovery-details ol { list-style: none; padding: 0; margin: var(--sp-8) 0 0; }
+.compact-shell .model-recovery-details li { display: flex; gap: var(--sp-16); padding: var(--sp-2) 0; }
+.compact-shell .model-recovery-details time { flex: none; font-variant-numeric: tabular-nums; }
+.compact-shell .model-recovery-notice[data-phase='connecting'] .model-recovery-icon { animation: model-recovery-spin 1.2s linear infinite; }
+@keyframes model-recovery-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .compact-shell .model-recovery-notice .model-recovery-icon { animation: none; } }
+@media (pointer: coarse) { .compact-shell .model-recovery-action, .compact-shell .model-recovery-toggle { min-height: 44px; } }
+
+html.kb-nav .compact-shell .model-recovery-action:focus-visible, html.kb-nav .compact-shell .model-recovery-toggle:focus-visible { outline: 2px solid var(--g-700); outline-offset: 2px; }
+@media (pointer: coarse) { .compact-shell .model-recovery-toggle { width: 44px; } }
+@media (max-width: 360px) { .compact-shell .model-recovery-row { gap: var(--sp-4); } }
+
+.compact-shell .turn-error-notice.model-recovery-notice { display: block; }
+
+.compact-shell .turn-error-notice .turn-error-details:not([open]) { display: none; }
+.compact-shell .model-recovery-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-12)/1.6 var(--mono); margin: var(--sp-8) 0 0; }

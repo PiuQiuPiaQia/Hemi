@@ -209,6 +209,14 @@ export function DesktopConversationFlow(props: Props) {
           case "message.edit":
             p.onEdit(action.targetId, action.nextText);
             break;
+          case "run.stop":
+          case "recovery.retry": {
+            const result = await bridge.flowCommand(p.conversationId!, action.type === 'recovery.retry'
+              ? { type: 'retryRecovery', targetRunId: action.runId, recoveryId: action.recoveryId }
+              : { type: 'stop', targetRunId: action.targetId });
+            if (!result?.ok) return { ok: false, error: { code: 'failed', message: result?.message ?? '恢复状态已变化，请稍后重试。' } };
+            break;
+          }
           case "message.retry":
             p.onRetry();
             break;

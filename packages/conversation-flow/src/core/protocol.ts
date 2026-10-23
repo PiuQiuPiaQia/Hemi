@@ -1,5 +1,5 @@
 /** Shared client protocol. Runtime transport and server execution are supplied by the host. */
-import type {MessageAttachmentView, MessageReferenceView, SkillSelectionView, RunActivityView} from '../types/presentation.js';
+import type {MessageAttachmentView, MessageReferenceView, SkillSelectionView, RunActivityView, ModelRecoveryView} from '../types/presentation.js';
 export type FlowPhase = 'idle' | 'preparing' | 'running' | 'stopping';
 export type TurnQueueItemView = {
   /** Present only for a client outbox item that upstream has not accepted. */
@@ -32,7 +32,7 @@ export type FlowSnapshotView = {
   queuePaused: boolean;
   pending: FlowInputView[];
   timeline: FlowItemView[];
-  runs: Record<string, Record<string, unknown> & { activity?: RunActivityView | null }>;
+  runs: Record<string, Record<string, unknown> & { activity?: RunActivityView | null; recovery?: ModelRecoveryView }>;
   tasks: Record<string, Record<string, unknown>>;
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;

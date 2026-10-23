@@ -1647,7 +1647,7 @@ export type FlowSnapshotView = {
   queuePaused: boolean;
   pending: FlowInputView[];
   timeline: FlowItemView[];
-  runs: Record<string, Record<string, unknown> & { activity?: RunActivityView | null }>;
+  runs: Record<string, Record<string, unknown> & { activity?: RunActivityView | null; recovery?: import('@hemi/conversation-flow').ModelRecoveryView }>;
   tasks: Record<string, Record<string, unknown>>;
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;

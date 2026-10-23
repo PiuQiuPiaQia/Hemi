@@ -267,13 +267,17 @@ try {
       .getByRole('textbox', { name: 'SSH 地址', exact: true })
       .fill('hemi-bot-ui');
     await page.getByRole('button', { name: '连接并继续', exact: true }).click();
+    await page.getByRole('tab', { name: '从本机导入', exact: true }).click();
+    await page.getByRole('button', { name: '选择导入模型', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'fixture-model', exact: true }).check();
+    await page.getByRole('textbox', { name: '搜索本机模型', exact: true }).press('Escape');
     await page
       .getByRole('button', { name: '初始化并开始使用', exact: true })
       .waitFor({ timeout: 90000 });
     assert.equal((await state()).candidate.info.runtimeNeeded, true);
     check('实际引导探测 Linux，识别服务器缺少 Node/npm');
     assert.equal(await page.getByRole('dialog', {name:'配置云端 Bot',exact:true}).getByRole('combobox').count(),0);
-    check('初始化只需选择同步模型，默认空间由 Bot 自动准备');
+    check('初始化可从本机导入模型，默认空间由 Bot 自动准备');
     await shot('setup-configure');
     await page
       .getByRole('button', { name: '初始化并开始使用', exact: true })
@@ -585,20 +589,20 @@ try {
     .getByRole('button', { name: '收起预览，返回对话', exact: true })
     .click();
   check('实际云端 PDF 交付通过共用阅读器渲染');
-  await page.getByRole('button', { name: '同步本机模型', exact: true }).click();
+  await page.getByRole('button', { name: '添加模型', exact: true }).click();
   await page
-    .getByRole('dialog', { name: '同步本机模型', exact: true })
+    .getByRole('dialog', { name: '添加模型', exact: true })
     .waitFor();
+  await page.getByRole('tab', { name: '从本机导入', exact: true }).click();
   await shot('manual-model-sync');
-  await page.getByRole('button', {name:'选择同步模型', exact:true}).click();
+  await page.getByRole('button', {name:'选择导入模型', exact:true}).click();
   await page
-    .getByRole('dialog', { name: '同步本机模型', exact: true })
+    .getByRole('dialog', { name: '添加模型', exact: true })
     .getByRole('checkbox')
     .first()
     .check();
-  await page.getByRole('button', { name: '同步到 Bot', exact: true }).click();
-  await page.getByText('同步完成', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: '导入到 Bot', exact: true }).click();
+  await page.getByRole('dialog', { name: '添加模型', exact: true }).waitFor({ state: 'hidden' });
   check('手动勾选模型后通过实际 IPC 同步，并从云端验证回执');
   await page.getByRole('button', { name: 'Bot 设置', exact: true }).click();
   await shot('bot-settings');

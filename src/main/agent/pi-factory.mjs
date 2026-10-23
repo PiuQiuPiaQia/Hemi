@@ -144,7 +144,9 @@ export function settledRoutingError(message, { routing, state, aborted = false, 
  * compaction 是否打开由调用方经 settings 决定（主 agent 开——历史由 SDK
  * 自动压缩管理；子 agent 维持 SDK 默认）。
  */
-export function sessionSettingsOf({ routing = false, settings = {} } = {}) {
+export function sessionSettingsOf({ routing = false, settings = {}, managedRecovery = false } = {}) {
+  // Host recovery owns the absolute deadline; SDK/fallback retries cannot start a fresh window.
+  if (managedRecovery) return { ...settings, retry: { ...settings.retry, enabled: false, provider: { ...settings.retry?.provider, maxRetries: 0 } } };
   if (!routing) return settings;
   return {
     ...settings,

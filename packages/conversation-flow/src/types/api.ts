@@ -1,3 +1,4 @@
+export type {ModelRecoveryView} from "./presentation.js";
 import type { CSSProperties, Ref } from "react";
 import type {
   TranscriptItem,
@@ -166,6 +167,7 @@ export interface MessageView {
   itemId?: string;
   partIds?: string[];
   live?: boolean;
+  recovery?: TranscriptItem["recovery"];
   streaming?: boolean;
   kind?: "task" | "error";
   task?: TaskView;
@@ -214,6 +216,7 @@ export type FlowAction = BaseAction &
     | { type: "message.edit"; nextText: string }
     | { type: "message.edit-state"; state: "begin" | "cancel" }
     | { type: "message.retry"; runId?: string }
+    | { type: "recovery.retry"; runId: string; recoveryId: string }
     | { type: "run.stop" | "task.stop" }
     | { type: "permission.decide"; choice: TaskPermissionChoice }
     | {

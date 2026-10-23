@@ -149,6 +149,10 @@ export function projectFlowTimeline(
         ...(run.usage || legacy.legacyUsage ? { usage: (run.usage ?? legacy.legacyUsage) as TranscriptItem['usage'] } : {}),
       });
     }
+    if (isTailItem && run.recovery && transcripts.length > rowStart) {
+      const index = transcripts.length - 1;
+      transcripts[index] = { ...transcripts[index], recovery: run.recovery as TranscriptItem['recovery'], ...(['waiting','connecting','offline'].includes(String((run.recovery as TranscriptItem['recovery'])?.phase)) ? { streaming: false } : {}) };
+    }
     remember();
   }
   if (cache) for (const key of cache.keys()) if (!validKeys.has(key)) cache.delete(key);
@@ -156,7 +160,7 @@ export function projectFlowTimeline(
   const active = snapshot.activeRunId;
   if (active && !timeline.some((item) => item.kind === 'assistant' && item.runId === active)) {
     transcripts.push({ id: `${active}:a:${String((runs[active]?.inputIds as string[] | undefined)?.[0] ?? 'root')}`, author: 'hemi', text: '', createdAt: Number(runs[active]?.startedAt) || 0,
-      live: true, flow: { runId: active, itemId: `${active}:a:${String((runs[active]?.inputIds as string[] | undefined)?.[0] ?? 'root')}`, partIds: [] } });
+      live: true, recovery: runs[active]?.recovery, flow: { runId: active, itemId: `${active}:a:${String((runs[active]?.inputIds as string[] | undefined)?.[0] ?? 'root')}`, partIds: [] } });
   }
   return { transcripts, leftoverTurns: 0, source: 'flow' };
 }

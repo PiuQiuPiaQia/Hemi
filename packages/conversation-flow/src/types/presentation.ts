@@ -1,5 +1,19 @@
+export type ModelRecoveryView = {
+  id: string;
+  phase: 'waiting' | 'offline' | 'connecting' | 'recovered' | 'expired' | 'stopped' | 'failed';
+  attempt: number;
+  attemptsMade?: number;
+  firstFailureAt: number;
+  deadlineAt: number;
+  updatedAt: number;
+  nextRetryAt: number | null;
+  notBefore?: number;
+  summary?: string;
+  history?: Array<{ at: number; phase: string; attempt: number; summary?: string }>;
+};
 /** Display-only contracts extracted from Hemi; no runtime or service imports. */
 export type TranscriptItem = {
+  recovery?: ModelRecoveryView;
   /** 060：纯投影的渲染身份，供真机全结构校验；不由客户端生成正式消息。 */
   flow?: { runId: string; itemId: string; inputId?: string; partIds: string[] };
   live?: boolean;

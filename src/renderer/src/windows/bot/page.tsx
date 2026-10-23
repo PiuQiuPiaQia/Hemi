@@ -1,6 +1,7 @@
 import { retainedDeliverables } from '../voice/lib/retained-deliverables';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Folder, RefreshCw, Server, Settings, ShieldCheck } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, Folder, Plus, Server, Settings, ShieldCheck } from 'lucide-react';
 import type {
   BotBridge,
   BotDetail,
@@ -36,7 +37,7 @@ import {
   BotDialog,
   BotFolderPicker,
   BotSetup,
-  BotSyncModels,
+  BotAddModels,
 } from './dialogs';
 import { BotSettings } from './settings';
 import './styles.css';
@@ -57,6 +58,24 @@ const emptyDraft = (): BotDraft => ({
   attachmentIds: [],
 });
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+function ModelSavedToast({ api, instanceId, requestId }: { api: BotBridge; instanceId: string; requestId: string }) {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setVisible(false);
+      // A late acknowledgement must not clear a newer model operation.
+      void api.command('models.dismiss', { expectedInstanceId: instanceId, requestId }).catch(() => {});
+    }, 2600);
+    return () => window.clearTimeout(timer);
+  }, [api, instanceId, requestId]);
+  return visible ? createPortal(
+    <div className="h37-toast h37-toast-card" role="status">
+      <Check aria-hidden="true" />
+      <span>模型已保存</span>
+    </div>, document.body,
+  ) : null;
+}
 
 export function BotPage({
   onOpenSettings,
@@ -634,6 +653,8 @@ export function BotPage({
   const permissions = Object.values(current?.permissions ?? {}).filter(
     (p) => p.status === 'pending',
   );
+  const modelsSaved = state.syncStatus?.phase === 'confirmed' &&
+    !!state.syncStatus.results?.length && state.syncStatus.results.every(result => result.ok);
   const actions = (
     <div className="h-bot-top-actions">
       <span
@@ -651,13 +672,13 @@ export function BotPage({
       </span>
       <button
         className="h-bot-sync"
-        aria-label="同步本机模型"
-        title="同步本机模型"
+        aria-label="添加模型"
+        title="添加模型"
         disabled={!state.online}
         onClick={() => setPanel('sync')}
       >
-        <RefreshCw size={14} />
-        <span>同步模型</span>
+        <Plus size={14} />
+        <span>添加模型</span>
       </button>
       <button
         className="icon-btn"
@@ -670,7 +691,7 @@ export function BotPage({
   );
   const banner = (
     <>
-      {state.syncStatus && state.syncStatus.phase !== 'sending' && (
+      {state.syncStatus && state.syncStatus.phase !== 'sending' && !modelsSaved && (
         <div className="h-bot-banner" role="status">
           <span>
             {state.syncStatus.phase === 'unknown'
@@ -681,7 +702,7 @@ export function BotPage({
                   ? '云端未受理上次模型同步，可以重新选择同步。'
                   : state.syncStatus.results?.some((r) => !r.ok)
                     ? '部分模型未通过云端验证，原配置保留。'
-                    : '模型已同步。'}
+                    : '模型同步结果待核对。'}
           </span>
           {state.syncStatus.phase === 'unknown' ? (
             <BotButton
@@ -829,6 +850,10 @@ export function BotPage({
       <ConversationEnvironmentIdContext.Provider value={`bot:${state.binding?.instanceId ?? 'unbound'}`}>
       <ConversationOnlineContext.Provider value={state.online}>
         <ConversationBridgeContext.Provider value={bridge}>
+          {modelsSaved && state.syncStatus ? <ModelSavedToast
+            key={`${state.syncStatus.instanceId}:${state.syncStatus.requestId}`}
+            api={api} instanceId={state.syncStatus.instanceId} requestId={state.syncStatus.requestId}
+          /> : null}
           {state.binding && current ? (
             <VoiceScreen
               key={state.binding.instanceId}
@@ -1066,7 +1091,6 @@ export function BotPage({
                       api={api}
                       state={state}
                       onDone={() => setId(null)}
-                      onOpenModels={() => onOpenSettings(true)}
                     />
                   ) : (
                     <p role="status">正在读取 Bot 连接…</p>
@@ -1081,7 +1105,7 @@ export function BotPage({
             </main>
           )}
           {panel === 'sync' && (
-            <BotSyncModels api={api} onClose={() => setPanel(null)} />
+            <BotAddModels api={api} state={state} onClose={() => setPanel(null)} />
           )}
           {panel === 'folder' && id && (
             <BotFolderPicker

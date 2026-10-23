@@ -1,0 +1,163 @@
+{
+  "date": "2026-10-23",
+  "scope": "30-minute backoff policy and compact recovery-row design prototype; no production recovery implementation",
+  "commit": "b31c949bc4f3920e961881cf979e5f1693ca8a38",
+  "workingTree": true,
+  "environment": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "command": "node docs/design/session-recovery/v1/verify.mjs",
+  "checks": [
+    {
+      "mode": "source",
+      "name": "Token colors and spacing; reduced-motion rule; one icon library",
+      "status": "pass"
+    },
+    {
+      "mode": "policy",
+      "name": "Virtual 30-minute window: 34 attempts; later 60s cadence; deadline/offline-resume/Retry-After boundaries",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Stop during connection cancels the late success timer; draft remains editable and send reopens",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Countdown → connection → reconciliation → resumed → collapsed history; no duplicate input or completed step",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Offline check stays offline until network simulation; online event reconciles before resuming",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Invalid config cannot continue; keyboard focus is trapped, Escape restores focus; corrected config can retry",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Exhausted recovery has an explicit model-change return path",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Unknown action outcome waits for result query and explicit continue",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Keyboard can expand and collapse diagnostic history",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Late failures show 60s backoff; deadline exposes explicit restart of a fresh cycle",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Component-sheet actions open the matching interactive state and execute their named action",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Seven scenes fit 1440/768/375, each collapsed recovery row is at most 40px high",
+      "status": "pass"
+    },
+    {
+      "mode": "dev",
+      "name": "Reduced motion stops spinner animation; dark preference retains the declared Hemi light palette",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Stop during connection cancels the late success timer; draft remains editable and send reopens",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Countdown → connection → reconciliation → resumed → collapsed history; no duplicate input or completed step",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Offline check stays offline until network simulation; online event reconciles before resuming",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Invalid config cannot continue; keyboard focus is trapped, Escape restores focus; corrected config can retry",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Exhausted recovery has an explicit model-change return path",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Unknown action outcome waits for result query and explicit continue",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Keyboard can expand and collapse diagnostic history",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Late failures show 60s backoff; deadline exposes explicit restart of a fresh cycle",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Component-sheet actions open the matching interactive state and execute their named action",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Seven scenes fit 1440/768/375, each collapsed recovery row is at most 40px high",
+      "status": "pass"
+    },
+    {
+      "mode": "built",
+      "name": "Reduced motion stops spinner animation; dark preference retains the declared Hemi light palette",
+      "status": "pass"
+    }
+  ],
+  "screenshots": [
+    "verify-result-dialog.png",
+    "overview.png",
+    "component-states.png",
+    "waiting-1440.png",
+    "backoff-1440.png",
+    "offline-1440.png",
+    "exhausted-1440.png",
+    "auth-1440.png",
+    "uncertain-1440.png",
+    "recovered-1440.png",
+    "component-states-768.png",
+    "waiting-375.png",
+    "overview-375.png",
+    "backoff-375.png",
+    "offline-375.png",
+    "exhausted-375.png",
+    "auth-375.png",
+    "uncertain-375.png",
+    "recovered-375.png",
+    "reduced-motion-dark-preference.png"
+  ],
+  "errors": [],
+  "gaps": [
+    "This prototype script does not exercise production IPC/provider/persistence; see docs/technical/model-recovery.md for application verification.",
+    "No raster reference was supplied; screenshots establish the v1 baseline, no pixel-diff claim.",
+    "Hemi tokens declare a light theme; dark system preference retains this palette."
+  ],
+  "verdict": "PASS"
+}

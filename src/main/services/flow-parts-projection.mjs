@@ -31,6 +31,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   let seq = 0;
   let textPart = null;
   let thinkingPart = null;
+  let requestParts = [];
   /** toolCallId → { partId, kind } */
   const toolParts = new Map();
   const nextId = (kind) => `${runId}:${kind}${(seq += 1)}`;
@@ -47,6 +48,16 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   function handle(event) {
     const facts = [];
     switch (event?.kind) {
+      case 'recovery':
+        return [{ type: 'run-recovery', runId, recovery: event.recovery, ...gen() }];
+      case 'request-start':
+        requestParts = [];
+        return closeOpenParts();
+      case 'request-reset': {
+        const resets = requestParts.map(partId => ({ type: 'part-updated', runId, partId, patch: { content: '' }, ...gen() }));
+        textPart = null; thinkingPart = null; requestParts = [];
+        return resets;
+      }
       case 'activity':
         return [{ type: 'run-activity', runId, activity: event.activity, ...gen() }];
       case 'text': {
@@ -54,6 +65,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         if (!delta) return facts;
         if (!textPart) {
           textPart = { partId: nextId('t'), content: delta };
+          requestParts.push(textPart.partId);
           facts.push({ type: 'part-appended', runId, part: { partId: textPart.partId, kind: 'text', content: delta }, ...gen() });
         } else {
           textPart.content += delta;
@@ -68,6 +80,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         if (!delta) return facts;
         if (!thinkingPart) {
           thinkingPart = { partId: nextId('k'), content: delta, startedAt: now() };
+          requestParts.push(thinkingPart.partId);
           facts.push({ type: 'part-appended', runId, part: { partId: thinkingPart.partId, kind: 'thinking', content: delta, startedAt: thinkingPart.startedAt }, ...gen() });
         } else {
           thinkingPart.content += delta;

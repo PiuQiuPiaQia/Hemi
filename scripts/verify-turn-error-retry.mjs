@@ -27,7 +27,7 @@ const wait = async (predicate, label, timeout = 25000) => {
 };
 const requests = [], held = new Set();
 let failProvider = true;
-const diagnostic = 'Connection error. ' + 'upstream connection closed; '.repeat(30) + 'END_OF_ORIGINAL_DIAGNOSTIC';
+const diagnostic = 'Unauthorized. ' + 'upstream connection closed; '.repeat(30) + 'END_OF_ORIGINAL_DIAGNOSTIC';
 const server = http.createServer(async (req, res) => {
   try {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -35,7 +35,7 @@ const server = http.createServer(async (req, res) => {
     const main = body.tools?.length > 0;
     if (main) requests.push(body);
     if (main && failProvider) {
-      res.writeHead(503, { 'content-type': 'application/json' });
+      res.writeHead(401, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { message: diagnostic, type: 'api_error' } })); return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -112,7 +112,7 @@ try {
   assert.equal(original.attachmentIds.length, 1);
   assert.equal(await page.locator('.h24-turn-error').count(), 0, 'same model error must not repeat above the composer');
   assert.equal(await lastNotice().locator('details[open]').count(), 0);
-  assert.match(await lastNotice().innerText(), /连接模型失败/);
+  assert.match(await lastNotice().innerText(), /模型访问未通过验证/);
   assert.doesNotMatch(await lastNotice().innerText(), /END_OF_ORIGINAL_DIAGNOSTIC/);
   check('真实模型失败只显示一处简短提示，完整诊断默认折叠');
   for (const width of [1440, 768, 375]) {
@@ -121,7 +121,7 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await screenshot(`error-${width}`);
   }
-  const summary = lastNotice().locator('summary');
+  const summary = lastNotice().getByRole('button', { name: '错误详情', exact: true });
   await page.keyboard.press('Tab'); await summary.focus(); await page.keyboard.press('Enter');
   assert.equal(await lastNotice().locator('details[open]').count(), 1);
   assert.match(await lastNotice().locator('pre').innerText(), /END_OF_ORIGINAL_DIAGNOSTIC/);

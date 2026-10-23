@@ -91,6 +91,21 @@
 .h-bot-dialog::backdrop {
   background: var(--bg-scrim);
 }
+.h-bot-model-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+.h-bot-model-setup > .h37-seg {
+  margin-bottom: var(--sp-16);
+}
+.h-bot-model-form {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.h-bot-model-form > .h37-section:first-child {
+  margin-top: var(--sp-20);
+}
 .h-bot-dialog-head {
   display: flex;
   justify-content: space-between;
@@ -298,8 +313,12 @@
   color: var(--ink);
   font: inherit;
 }
+.h-bot-model-search input:focus {
+  outline: none;
+  box-shadow: none;
+}
 .h-bot-models {
-  max-height: min(240px, 30dvh);
+  max-height: min(420px, max(120px, calc(100dvh - 460px)));
   overflow-y: auto;
   overscroll-behavior: contain;
   border-top: 1px solid var(--line);

@@ -31,7 +31,8 @@ export function createConversationActionHandler(client: ConversationClient, fall
     let command: Record<string, unknown>;
     const snapshot = client.getSnapshot().snapshot;
     if (action.type === 'message.edit-state') return { ok: true, value: { receipt: 'completed' } };
-    if (action.type === 'run.stop') command = { type: 'stop', targetRunId: action.targetId || snapshot?.activeRunId };
+    if (action.type === 'recovery.retry') command = { type: 'retryRecovery', targetRunId: action.runId, recoveryId: action.recoveryId };
+    else if (action.type === 'run.stop') command = { type: 'stop', targetRunId: action.targetId || snapshot?.activeRunId };
     else if (action.type === 'message.edit') {
       const source = snapshot?.timeline.find(item => item.kind === 'user' && item.id === action.targetId);
       if (!source || source.kind !== 'user') return { ok: false, error: { code: 'not-found', message: '消息已不存在' } };
