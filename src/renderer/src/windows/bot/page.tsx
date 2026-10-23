@@ -26,6 +26,7 @@ import { PermissionCard } from '../voice/task-panel';
 import {
   ConversationBridgeContext,
   ConversationEnvironmentContext,
+  ConversationEnvironmentIdContext,
   ConversationOnlineContext,
 } from '../voice/lib/conversation-bridge';
 import { createFlowTimelineProjector } from '../voice/lib/flow-timeline-view';
@@ -825,6 +826,7 @@ export function BotPage({
   );
   return (
     <ConversationEnvironmentContext.Provider value="bot">
+      <ConversationEnvironmentIdContext.Provider value={`bot:${state.binding?.instanceId ?? 'unbound'}`}>
       <ConversationOnlineContext.Provider value={state.online}>
         <ConversationBridgeContext.Provider value={bridge}>
           {state.binding && current ? (
@@ -1140,6 +1142,7 @@ export function BotPage({
           )}
         </ConversationBridgeContext.Provider>
       </ConversationOnlineContext.Provider>
+      </ConversationEnvironmentIdContext.Provider>
     </ConversationEnvironmentContext.Provider>
   );
 }

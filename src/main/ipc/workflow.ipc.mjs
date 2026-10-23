@@ -45,7 +45,13 @@ export function registerWorkflowIpc() {
   ipcMain.handle(IPC.workflow.abandon, (_e, params) => serviceOf().abandonPreparation(params));
   ipcMain.handle(IPC.workflow.continue, (_e,params)=>serviceOf().continueWaiting(params));
   ipcMain.handle(IPC.workflow.submitInteraction, (_e, params) => serviceOf().submitInteraction(params ?? {}));
-  ipcMain.handle(IPC.workflow.saveInteractionDraft, (_e, params) => serviceOf().saveInteractionDraft(params ?? {}));
+  ipcMain.handle(IPC.workflow.saveInteractionDraft, async (_e, params) => {
+    try { return await serviceOf().saveInteractionDraft(params ?? {}); }
+    catch(error) {
+      if(error?.code === 'stale-revision')return {ok:false,code:'conflict',message:error.message};
+      throw error;
+    }
+  });
   ipcMain.handle(IPC.workflow.stop, (_e, { workflowRunId } = {}) => serviceOf().stop({ workflowRunId }));
   ipcMain.handle(IPC.workflow.getInvocation, (_e, { invocationId } = {}) => serviceOf().getInvocation(invocationId));
 }

@@ -436,7 +436,7 @@ export function createInvocationStore({
   }
 
   /** 草稿（跨重启恢复用，HI-R08）：只许写 open 请求；每次保存递增 revision 供提交 CAS。 */
-  function saveInteractionDraft(invocationId, { interactionId, values }) {
+  function saveInteractionDraft(invocationId, { interactionId, values, expectedRevision }) {
     return mutate(invocationId, (current) => {
       const interaction = current.run?.interactions?.[interactionId];
       if (!interaction)
@@ -446,6 +446,8 @@ export function createInvocationStore({
           "invalid-state",
           `请求已${interaction.status === "responded" ? "提交" : interaction.status === "expired" ? "超时" : "取消"}，草稿不再修改`,
         );
+      if (expectedRevision != null && expectedRevision !== interaction.revision)
+        throw workflowError('stale-revision', '表单已更新，请重新核对后提交');
       const next = structuredClone(current);
       next.run.interactions[interactionId] = {
         ...interaction,

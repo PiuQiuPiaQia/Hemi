@@ -193,6 +193,15 @@ app.whenReady().then(async () => {
     await wait("窗口就绪", `document.readyState === 'complete'`);
     await wait("应用挂载", `!!document.querySelector('button[title="工作流"]')`, 60000);
 
+    // Configure the controlled endpoint through the current production profile/secret API.
+    await js(`window.hemiVoice.saveModelProfile(${JSON.stringify({id:'review',name:'本地回归',api:'openai-completions',baseUrl,apiKey:'local-test',models:[{id:'a',model:'model-A',thinkingLevel:'default',supportsVision:false}],makeDefault:true})})`);
+    const reloaded = new Promise((resolve,reject) => {
+      const timer=setTimeout(()=>reject(new Error('配置模型后重载超时')),45000);
+      win.webContents.once('dom-ready',()=>{clearTimeout(timer);resolve();});
+    });
+    win.reload(); await reloaded;
+    await wait('模型配置后应用挂载',`!!document.querySelector('button[title="工作流"]')`,60000);
+
     // ── 编辑器走查 ──
     await js(`document.querySelector('button[title="工作流"]').click()`);
     await wait("工作室页", `!!document.querySelector('[data-testid="workflow-row"], .h59-empty') || document.body.textContent.includes('工作流')`);
@@ -311,6 +320,16 @@ app.whenReady().then(async () => {
       `[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='开始运行'&&!b.disabled)`,
       30000,
     );
+    // Smoke mode starts hidden; interactive SDK popovers intentionally close while inactive.
+    win.show();win.focus();
+    await wait('SDK 展示实例活跃',`!!document.querySelector('[data-hemi-conversation-flow]:not([data-hcf-part]):not([data-hcf-active="false"])')`);
+    await js(`document.querySelector('[data-testid="workflow-card"] .h24-model-chip').click()`);
+    await wait('SDK 模型菜单打开',`!!document.querySelector('[aria-label="配置模型路由"]')`);
+    await js(`document.querySelector('[aria-label="配置模型路由"]').click()`);
+    await wait('宿主模型路由弹窗打开',`!!document.querySelector('.h64-route-dialog')`);
+    check('SDK 模型设置动作打开原有宿主弹窗',true);
+    await js(`document.querySelector('.h64-route-dialog [aria-label="关闭"]').click()`);
+    await wait('宿主模型路由弹窗关闭',`!document.querySelector('.h64-route-dialog')`);
     await click("开始运行");
     try {
       await wait("挂起表单出现", `!!document.querySelector('[data-testid="workflow-interaction"]')`, 60000);
@@ -327,6 +346,8 @@ app.whenReady().then(async () => {
     check("上游真实输出代入表单内容", formState.content.includes(`唯一结果·${marker}`), formState.content);
     check("选项冻结为配置列表", JSON.stringify(formState.options) === JSON.stringify(["方案甲","方案乙"]), formState.options);
     check("动作按钮按配置渲染（含去向）", formState.buttons.join(",").startsWith("通过") && formState.buttons.join(",").includes("再改一版"), formState.buttons);
+    const staleDraft = await js(`(async()=>{const list=await window.hemiVoice.workflowListInvocations();const inv=await window.hemiVoice.workflowGetInvocation(list[list.length-1].invocationId);const id=inv.run.currentInteractionId;const revision=inv.run.interactions[id].revision;return window.hemiVoice.workflowSaveInteractionDraft({invocationId:inv.invocationId,interactionId:id,expectedRevision:revision-1,values:{comment:'旧草稿不得写入'}});})()`);
+    check('真实 IPC 将旧草稿版本拒绝为 conflict',staleDraft.ok===false&&staleDraft.code==='conflict');
     // 填写：方案乙（radio 组点选）＋批注＋真实文件路径
     await js(`(()=>{const label=[...document.querySelectorAll('.h59-hi-option')].find(o=>o.textContent.trim()==='方案乙');if(!label)return false;label.querySelector('input[type="radio"]').click();return true;})()`) || (await js(`(()=>{throw Error('方案乙 radio 不存在')})()`));
     await sleep(60);

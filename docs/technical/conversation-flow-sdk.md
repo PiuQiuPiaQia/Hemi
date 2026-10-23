@@ -2,15 +2,17 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | 1.0 |
-| 日期 | 2026-10-22，Asia/Shanghai |
-| 状态 | 设计草案，接口名称为实现起点 |
+| 版本 | 1.1 |
+| 日期 | 2026-10-23，Asia/Shanghai |
+| 状态 | 首版已实现；实际接口以 SDK 类型为准 |
 | 需求 | [对话流 SDK 抽离需求](../requirements/conversation-flow-sdk.md) |
 | 基线 | `4e6f51707269cd4152ed7da9cd4fc00c21ca12c1` 加当前工作树，不能只从 HEAD 复制组件 |
 
-采用一个 React Web 组件包承载现有对话流。包内保留展示组件、纯展示变换、局部状态、虚拟滚动和样式；包外由宿主提供展示数据、Host 能力及业务动作处理。现有桌面也通过同一接口接入，使后续 Web、iOS 和 Android 使用相同实现。
+实施结果、目录、验证证据与移动端剩余工作见[实施记录](conversation-flow-sdk-implementation.md)。
 
-## 1 依赖方向
+采用一个包承载完整前端会话 SDK：`/core` 管理会话状态、草稿、待发送队列、恢复及投影，`/react` 提供生命周期和订阅，原有入口继续提供受控展示。通信、存储、生命周期与系统能力通过宿主接口注入。具体会话核心方案与验收见 [会话核心实施说明](conversation-flow-sdk-session-core.md)。
+
+## 1 依赖方向（受控展示入口）
 
 ```mermaid
 flowchart TD
@@ -55,7 +57,9 @@ Hemi 数据适配器还负责旧档兼容、同任务简报、回复复制范围
 ```text
 packages/conversation-flow/
   src/
-    components/       消息、过程、确认卡、工作流卡、资源卡、菜单
+    core/             会话、草稿、快照追平、待发送记录、队列与消息投影
+    react.ts          React 生命周期与外部状态订阅
+    components/       消息、队列、过程、确认卡、工作流卡、资源卡、菜单
     presentation/     分组、复制内容、摘要、展示计时和局部状态
     host/             Host 类型与 Provider
     types/            公开展示数据、动作、结果
@@ -65,16 +69,15 @@ packages/conversation-flow/
   LICENSE
   THIRD-PARTY-NOTICES.md
 
-src/renderer/src/conversation-flow/
-  hemi-view-adapter.ts
-  electron-host.ts
-  hemi-action-handler.ts
+src/renderer/src/windows/voice/
+  conversation-flow.tsx               展示数据投影、工作流查询与动作处理
+  lib/conversation-flow-host.ts        Electron 能力适配
 
 examples/conversation-flow/
   独立消费示例和合成数据，不引用 Hemi 应用源码
 ```
 
-以上目录为拟新增结构，不在设计阶段创建生产实现。首版以一个包承载 SDK，不拆出模型客户端、连接客户端或 Node 服务包。宿主适配器留在各自应用，SDK 只导出它们必须遵循的类型。
+以上目录现已实现；组件与适配器按实际文件组织。以一个包承载 UI 与会话核心，不另设 Bot Client 包或 Node 服务包。宿主适配器留在各自应用，SDK 只导出它们必须遵循的类型。
 
 React 和 React DOM 以当前 19 系列为首个 peer 兼容基线，实际范围经安装验证后写入清单。Markdown、GFM、图标、虚拟列表和必要的前端菜单依赖从当前锁定版本起步，按实际打包方式声明依赖和版权。包内只保留实际使用的前端组件，不引入工作流画布、Electron、Node 内置模块或 PDF／Office 解码依赖。
 
@@ -172,7 +175,7 @@ MessageView 和 Part 的身份由适配器提供。旧档可确定性补齐身�
 
 公开类型使用判别联合及明确字段。tool 显示参数和表单值允许 JSON 值；这不意味着允许把整份服务配置或对象实例透传。未知 part 保留顺序并显示可识别的不支持内容提示，通过诊断通知宿主，不因一个新 part 清空整段消息。
 
-MessageView 的 revision 供编辑冲突校验与展示失效使用，不取代 Bot 网络协议的版本。SDK 不判断两份消息快照谁是服务端最新状态，宿主负责同步和旧回执过滤。
+MessageView 的 revision 供编辑冲突校验与展示失效使用，不取代 Bot 网络协议的版本。受控展示入口不自行比较网络快照；会话核心使用 revision／generation 追平、过滤过期响应，再产生 MessageView。
 
 远端时间与本机时间可能不同。宿主将权限剩余时长和计时基准转换为可在本机展示的参考时间，SDK 不自行猜测服务器时钟；倒计时结束只能禁用前端入口，不能产生业务决定。
 
@@ -345,9 +348,9 @@ expectedRevision 用于有版本语义的交互，不给纯预览强加业务锁
 
 同一个有效键可以共用在途读取和有上限的缓存。缓存记录引用计数，最后一个使用方退出时释放；旧版本、不再使用的 URL 和失败重试结果不能无限保留。虚拟行卸载不等于整个会话销毁，缓存与展开状态各自有明确所有者。SDK 不撤销宿主拥有但未作为 lease 转交的 URL。
 
-展开、菜单、错误详情、编辑草稿和人工输入草稿按 scope／message／part 保存，沿用当前 TranscriptRowState 的生命周期。移除消息、换代或卸载时回收；多个 SDK 实例不共享模块级可变存储。业务消息不保存到 localStorage 或数据库。
+展开、菜单、错误详情、编辑草稿和人工输入草稿按 scope／message／part 保存，沿用当前 TranscriptRowState 的生命周期。移除消息、换代或卸载时回收；多个 SDK 实例不共享模块级可变存储。展示组件不直接访问 localStorage 或数据库；会话核心通过注入存储接口管理草稿、待发送记录与可选历史缓存。
 
-活跃运行共用一个可见展示时钟。active 为 false 时暂停非必要定时更新；恢复时按当前时间与宿主提供的基准重算。可见性变化不发起连接、不重放动作、不创建任务，也不将“页面隐藏”解释为任务停止。
+活跃运行共用一个可见展示时钟。active 为 false 时暂停非必要定时更新；恢复时按当前时间与宿主提供的基准重算。展示 active 只控制计时与测量；会话核心通过单独 lifecycle 接口在恢复前台时重新同步和核对回执，不把页面隐藏解释为任务停止，也不自动重放结果未知的动作。
 
 ## 9 样式与多端布局
 

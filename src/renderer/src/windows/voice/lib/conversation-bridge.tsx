@@ -23,6 +23,11 @@ export const ConversationEnvironmentContext = createContext<'local' | 'bot'>(
 export const useConversationEnvironment = () =>
   useContext(ConversationEnvironmentContext);
 
+/** Stable runtime identity isolates SDK resources across Bot replacements. */
+export const ConversationEnvironmentIdContext = createContext('desktop-local');
+export const useConversationEnvironmentId = () =>
+  useContext(ConversationEnvironmentIdContext);
+
 export const ConversationOnlineContext = createContext(true);
 export const useConversationOnline = () =>
   useContext(ConversationOnlineContext);

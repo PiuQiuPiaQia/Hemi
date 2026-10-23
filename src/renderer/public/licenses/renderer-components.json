@@ -1,6 +1,6 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "d0c83573580a7d31ac8cd2440c477f1ed655b539de3d3bb53e58ff002fc0b05e",
+  "lockfileSha256": "d3624be80b10de8f3bca0914eeceb1dab19425c89f28815898329491065b1a13",
   "components": [
     {
       "name": "@aiden0z/pptx-renderer",
@@ -2294,6 +2294,7 @@
         "node_modules/lucide-react/dist/esm/createLucideIcon.mjs",
         "node_modules/lucide-react/dist/esm/defaultAttributes.mjs",
         "node_modules/lucide-react/dist/esm/icons/activity.mjs",
+        "node_modules/lucide-react/dist/esm/icons/app-window.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-down-to-line.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-down.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-left.mjs",
@@ -2322,7 +2323,10 @@
         "node_modules/lucide-react/dist/esm/icons/ellipsis.mjs",
         "node_modules/lucide-react/dist/esm/icons/external-link.mjs",
         "node_modules/lucide-react/dist/esm/icons/eye.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file-archive.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file-code-corner.mjs",
         "node_modules/lucide-react/dist/esm/icons/file-pen-line.mjs",
+        "node_modules/lucide-react/dist/esm/icons/file-spreadsheet.mjs",
         "node_modules/lucide-react/dist/esm/icons/file-text.mjs",
         "node_modules/lucide-react/dist/esm/icons/file.mjs",
         "node_modules/lucide-react/dist/esm/icons/folder-input.mjs",

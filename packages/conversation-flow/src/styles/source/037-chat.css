@@ -1,0 +1,513 @@
+/**
+ * 037 视觉系统 · 对话流（main-window 稿「空闲 / 消息」）。
+ * 阅读列左右 24（≤600 为 16）；用户气泡右对齐；Hemi 回复与任务卡不挂头像，
+ * 顶到阅读列左缘（走查裁决：去掉对话流 Orb 头像）。叠在 globals.css 旧规则之后。
+ */
+
+/* Model errors are one compact system notice, with raw diagnostics folded away. */
+.compact-shell .turn-error-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-10);
+  padding: var(--sp-12) var(--sp-16);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+}
+.compact-shell .turn-error-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: var(--sp-8);
+  color: var(--danger);
+  stroke-width: 1.75;
+}
+.compact-shell .turn-error-content { flex: 1; min-width: 0; }
+.compact-shell .turn-error-heading { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8) var(--sp-16); min-height: 32px; }
+.compact-shell .turn-error-title { flex: 1; margin: 0; color: var(--ink); font-size: var(--fs-13); font-weight: var(--fw-medium); line-height: 1.5; }
+.compact-shell .turn-error-description,
+.compact-shell .turn-error-blocked { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.6; }
+.compact-shell .turn-error-blocked { color: var(--danger); }
+.compact-shell .turn-error-retry {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  min-height: 32px;
+  padding: var(--sp-4) var(--sp-10);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  transition: background var(--dur-2) linear, border-color var(--dur-2) linear;
+}
+.compact-shell .turn-error-retry svg { width: 13px; height: 13px; stroke-width: 1.75; }
+.compact-shell .turn-error-retry:hover:not(:disabled) { background: var(--n-100); border-color: var(--muted); }
+.compact-shell .turn-error-retry:active:not(:disabled) { background: var(--n-200); }
+.compact-shell .turn-error-retry:disabled { opacity: .5; }
+.compact-shell .turn-error-details { margin-top: var(--sp-8); color: var(--muted); font-size: var(--fs-12); }
+.compact-shell .turn-error-details summary { width: fit-content; border-radius: var(--r-sm); line-height: 1.6; }
+.compact-shell .turn-error-details summary:hover { color: var(--ink); }
+.compact-shell .turn-error-details pre {
+  max-height: 12em;
+  overflow: auto;
+  margin: var(--sp-8) 0 0;
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-sm);
+  background: var(--n-50);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+html.kb-nav .compact-shell .turn-error-retry:focus-visible,
+html.kb-nav .compact-shell .turn-error-details summary:focus-visible { outline: 2px solid var(--g-500); outline-offset: 2px; }
+.compact-shell .h24-turn-error { display: block; padding: 0; border: 0; background: none; }
+@media (prefers-reduced-motion: reduce) {
+  .compact-shell .turn-error-retry { transition: none; }
+}
+
+.compact-shell .h24-reading {
+  max-width: calc(var(--h24-read-w) + 48px);
+  padding: var(--sp-16) var(--sp-24) var(--sp-24);
+}
+
+/* —— 空闲：引导 + 输入框 + 示例任务成组居中（P1）——
+   h24-main 是纵向 flex：上方滚动区（flex 1）与输入区后的 spacer 平分余量，
+   这一组就落在正中；有内容后 spacer 的 flex-grow 过渡到 0，输入框平滑沉底。 */
+.compact-shell .h24-empty-spacer {
+  flex: 0 0 0;
+  transition: flex-grow var(--dur-4) var(--ease-move);
+}
+
+.compact-shell .h24-main[data-empty='true'] > .h24-empty-spacer {
+  flex-grow: 1;
+}
+
+.compact-shell .h24-empty {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: calc(var(--h24-read-w) + 48px);
+  margin: 0 auto;
+  padding: 0 var(--sp-24) var(--sp-24);
+  text-align: center;
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+.compact-shell .h24-empty > .h37-orb {
+  margin-bottom: var(--sp-16);
+}
+
+.compact-shell .h24-empty-greeting {
+  margin: 0;
+  font-size: var(--fs-24);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.compact-shell .h24-empty-hint {
+  max-width: 460px;
+  margin: var(--sp-8) 0 0;
+  text-wrap: balance;
+  font-size: var(--fs-14);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* 示例任务：输入框下方一行胶囊，点了只填入草稿 */
+.compact-shell .h24-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-8);
+  padding-top: var(--sp-16);
+  animation: hemi-fade var(--dur-3) var(--ease-out);
+}
+
+.compact-shell .h24-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 32px;
+  padding: 0 var(--sp-12);
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--body);
+  font: inherit;
+  font-size: var(--fs-13);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-suggestion:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h24-suggestion > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--faint);
+}
+
+html.kb-nav .compact-shell .h24-suggestion:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 1px var(--line), var(--focus-ring);
+}
+
+/* —— 用户消息 —— */
+.compact-shell .h24-user-message {
+  margin: 0 0 var(--sp-8);
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+.compact-shell .h24-user-bubble {
+  max-width: 72%;
+  padding: var(--sp-8) var(--sp-16);
+  border: 0;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--bg-subtle);
+  color: var(--ink);
+  font-size: var(--fs-15);
+  line-height: 1.6;
+}
+
+.compact-shell .h24-user-bubble.is-interim {
+  color: var(--muted);
+}
+
+/* 气泡下的操作：悬停或聚焦时才出现（状态文字始终可见） */
+.compact-shell .h24-user-actions {
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  margin-top: var(--sp-4);
+}
+
+.compact-shell .h24-user-actions > button {
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+}
+
+.compact-shell .h24-user-message:hover .h24-user-actions > button,
+.compact-shell .h24-user-actions > button:focus-visible {
+  opacity: 1;
+}
+
+/* —— Hemi 消息 —— */
+.compact-shell .h24-hemi-message,
+.compact-shell .chat-task-inline {
+  position: relative;
+  margin: 0 0 var(--sp-8);
+  padding-left: 0;
+}
+
+/* 消息自带 24px 悬停操作行，已经撑出间距；任务卡没有，单独补到稿件的回合间距
+   （050 稿 .task-inline/.task-result 下距 32）。 */
+.compact-shell .chat-task-inline {
+  margin-bottom: var(--sp-32);
+}
+
+/* 050 稿：应承句紧贴自己的任务（.msg-hemi + .task-result 间距 16）——「好，交给我。」
+   这类应承不挂复制操作行（文字仍可选中复制），任务卡/结果读作它的下文。 */
+.compact-shell .h24-hemi-message:has(+ .chat-task-inline) {
+  margin-bottom: var(--sp-16);
+}
+
+.compact-shell .h24-hemi-message:has(+ .chat-task-inline) .h24-msg-actions {
+  display: none;
+}
+
+.compact-shell .h24-hemi-message {
+  animation: hemi-fade-up var(--dur-3) var(--ease-out);
+}
+
+.compact-shell .h24-hemi-message[data-continuation='true'] {
+  margin-top: calc(var(--sp-8) * -1);
+}
+
+.compact-shell .h24-hemi-message .chat-copy {
+  padding-top: 0;
+  color: var(--ink);
+  font-size: var(--fs-15);
+  line-height: 1.75;
+}
+
+/* 050 续问稿：回复里的列表序号/圆点与正文同色（globals 的 .md 标记是 g-500 绿） */
+.compact-shell .h24-hemi-message .chat-copy .md li::marker {
+  color: inherit;
+}
+
+.compact-shell .h24-reply-status {
+  margin-bottom: var(--sp-4);
+  color: var(--faint);
+}
+
+/* 048 续：等待首个事件的占位，与思考折叠头同位同形（24 高、13 号 muted
+   中字重、同款明暗流动、下距同 .h48-thinking），thinking_start 到来原地换头不跳版。 */
+.compact-shell .h24-waiting-status {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin-bottom: var(--sp-6);
+  color: var(--muted);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: h48-sheen 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compact-shell .h24-waiting-status {
+    animation: none;
+  }
+}
+
+.compact-shell .h24-task-relation {
+  height: 20px;
+  margin-bottom: var(--sp-6);
+  padding: 0 var(--sp-6);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--body);
+}
+
+/* 026 R-09 阶段简报时间线（2026-10-09 用户反馈 conv-mv0nx45i）：同任务的连续
+   简报收成一组——小圆点＋细竖线，正文 14 号 muted，弱于正式回答；运行中最新
+   一条转正文色、圆点带绿晕。紧跟自己任务卡时收近（卡下距 32 → 12），读作卡的下文。 */
+.compact-shell .h24-hemi-message[data-after-card='true'] {
+  margin-top: calc(var(--sp-20) * -1);
+}
+
+.compact-shell .h24-stage-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compact-shell .h24-stage-item {
+  position: relative;
+  padding: 0 0 var(--sp-4) var(--sp-20);
+  color: var(--muted);
+  font-size: var(--fs-14);
+  line-height: 1.65;
+}
+
+.compact-shell .h24-stage-item:last-child {
+  padding-bottom: 0;
+}
+
+/* 圆点：中心对齐首行（14 × 1.65 ≈ 23 高，圆点 7 → 顶 8）。 */
+.compact-shell .h24-stage-item::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--n-300);
+}
+
+/* 竖线：本点下沿留 3 → 下一点上沿留 3（下一条圆点顶 8）。 */
+.compact-shell .h24-stage-item::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: -5px;
+  left: 4px;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+.compact-shell .h24-stage-item:last-child::before {
+  display: none;
+}
+
+.compact-shell .h24-stage-item[data-current='true'] {
+  color: var(--body);
+}
+
+.compact-shell .h24-stage-item[data-current='true']::after {
+  background: var(--state-500);
+  box-shadow: 0 0 0 3px var(--state-100);
+}
+
+.compact-shell .h24-stage-item .md p {
+  margin: 0;
+}
+
+/* 折叠行：箭头落在圆点列，文字与简报正文同列。 */
+.compact-shell .h24-stage-fold {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin: 0 0 var(--sp-2);
+  padding: 0 var(--sp-8) 0 var(--sp-20);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--fs-13);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h24-stage-fold:hover {
+  background: var(--bg-hover);
+  color: var(--muted);
+}
+
+.compact-shell .h24-stage-fold svg {
+  position: absolute;
+  top: 6px;
+  left: -1px;
+  width: 12px;
+  height: 12px;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+
+.compact-shell .h24-stage-fold[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.compact-shell .thinking-dots i {
+  background: var(--state-500);
+}
+
+/* 消息下的复制：悬停才出现 */
+.compact-shell .h24-msg-actions {
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  margin-top: var(--sp-4);
+  margin-left: -5px; /* sp-ok：图标钮 24 内图标 14，左移 5 让图标与正文左缘对齐 */
+  opacity: 0;
+  transition: opacity var(--dur-2) linear;
+}
+
+.compact-shell .h24-hemi-message:hover .h24-msg-actions,
+.compact-shell .h24-msg-actions:focus-within {
+  opacity: 1;
+}
+
+/* 回答按运行身份收口，只有最后一个显示条目带整轮复制。 */
+.compact-shell [data-reply-end='true'] > .h24-hemi-message {
+  margin-bottom: 0;
+}
+
+.compact-shell .h24-reply-actions {
+  margin-bottom: var(--sp-8);
+}
+
+.compact-shell .h24-reply-actions .h24-msg-copy {
+  opacity: 1;
+}
+
+.compact-shell [data-reply-end='true']:hover > .h24-reply-actions {
+  opacity: 1;
+}
+
+/* 消息操作：复制 / 编辑 = 24px 方形图标钮。
+   同一高度、同一悬停底、图标统一 14px（旧规则的 margin-top / underline 一并清掉）。 */
+.compact-shell .h24-msg-copy,
+.compact-shell .h24-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  height: 24px;
+  margin: 0;
+  padding: 0 var(--sp-6);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+  text-decoration: none;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear,
+    opacity var(--dur-2) linear;
+}
+
+.compact-shell .h24-msg-copy,
+.compact-shell .h24-edit-btn {
+  width: 24px;
+  padding: 0;
+}
+
+.compact-shell .h24-msg-copy svg,
+.compact-shell .h24-edit-btn svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.compact-shell .h24-msg-copy:hover,
+.compact-shell .h24-edit-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.compact-shell .h24-msg-copy[data-copied='true'] {
+  color: var(--accent-text);
+}
+
+html.kb-nav .compact-shell .h24-msg-copy:focus-visible,
+html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.compact-shell .h24-user-status {
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-12);
+  line-height: 24px;
+  color: var(--faint);
+}
+
+.compact-shell .h24-user-status.is-pending {
+  color: var(--warn);
+}
+
+@media (max-width: 600px) {
+  .compact-shell .h24-reading {
+    padding: var(--sp-12) var(--sp-16) var(--sp-20);
+  }
+
+  .compact-shell .h24-empty-greeting {
+    font-size: var(--fs-20);
+  }
+
+  .compact-shell .h24-user-bubble {
+    max-width: 86%;
+  }
+}
+
+/* 对话流恢复滚动条（globals 里整块隐藏，长对话没有位置感）：走 037-controls 的浮出胶囊 */
+.compact-shell .transcript-scroll [data-slot='scroll-area-scrollbar'] {
+  display: flex;
+}
+
+/* 067: positioning is internal to the existing reading column. Child margins stay unchanged. */
+.h67-virtual-transcript { position: relative; width: 100%; overflow-anchor: none; }
+.h67-virtual-row { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-direction: column; }

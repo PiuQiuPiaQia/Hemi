@@ -514,3 +514,15 @@ test("超时由期限裁决：用户迟到提交拒收，超时来源落 expired
   const replay = await store.respondInteraction(id, { interactionId: "hi-sample-1", requestId: "timeout-hi-sample-1", source: "timeout" });
   assert.equal(replay.replayed, true);
 });
+
+
+test('草稿保存校验宿主版本，旧回执不能覆盖新草稿', async () => {
+  const { store } = makeStore();
+  const id = await startedRun(store);
+  await store.openInteraction(id, sampleInteraction());
+  await store.saveInteractionDraft(id, { interactionId: 'hi-sample-1', expectedRevision: 1, values: { comment: '新草稿' } });
+  await assert.rejects(store.saveInteractionDraft(id, { interactionId: 'hi-sample-1', expectedRevision: 1, values: { comment: '旧草稿' } }), error => error.code === 'stale-revision');
+  const saved = await store.get(id);
+  assert.equal(saved.run.interactions['hi-sample-1'].draft.values.comment, '新草稿');
+  assert.equal(saved.run.interactions['hi-sample-1'].revision, 2);
+});

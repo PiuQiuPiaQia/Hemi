@@ -1276,10 +1276,11 @@ export function initWorkflowService({
   }
 
   /** 保存草稿（跨重启恢复，HI-R08）：只透传 store 的 open 校验，返回新 revision。 */
-  async function saveInteractionDraft({ invocationId, interactionId, values }) {
+  async function saveInteractionDraft({ invocationId, interactionId, values, expectedRevision }) {
     const updated = await invocationStore.saveInteractionDraft(invocationId, {
       interactionId,
       values,
+      expectedRevision,
     });
     return {
       ok: true,

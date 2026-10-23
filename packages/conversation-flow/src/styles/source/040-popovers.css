@@ -1,0 +1,153 @@
+/* 信息浮层与菜单使用同一组 040 token。生命周期交给 Base UI，退出后才卸载。
+   位移／缩放只作用于弹出内容，定位外层保持稳定。 */
+.h37-info-positioner {
+  z-index: 80;
+  max-width: calc(100vw - var(--sp-24));
+}
+
+.h37-info-popover {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - var(--sp-24));
+  max-height: min(70dvh, var(--available-height));
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  color: var(--body);
+  overflow: hidden;
+  transform-origin: var(--transform-origin);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+}
+
+.h37-info-popover[data-starting-style],
+.h37-info-popover[data-ending-style] {
+  opacity: 0;
+  transform: translateY(var(--popover-offset, 4px)) scale(.97);
+}
+
+.h37-info-popover[data-side='bottom'] {
+  --popover-offset: -4px;
+}
+
+.h37-info-popover[data-ending-style],
+.h37-info-scrim[data-ending-style] {
+  transition-duration: var(--dur-2);
+  transition-timing-function: var(--ease-in);
+}
+
+.h37-info-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--pad-card) var(--gap-head);
+}
+
+.h37-info-heading {
+  min-width: 0;
+}
+
+.h37-info-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+
+.h37-info-description {
+  margin-top: var(--sp-4);
+  color: var(--muted);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.h37-info-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition: background-color var(--dur-1) linear, color var(--dur-1) linear;
+}
+
+.h37-info-close:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.h37-info-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.h37-info-body {
+  min-height: 0;
+  padding: 0 var(--pad-card) var(--sp-16);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.h37-info-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  background: var(--bg-scrim);
+  opacity: 1;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+
+.h37-info-scrim[data-starting-style],
+.h37-info-scrim[data-ending-style] {
+  opacity: 0;
+}
+
+@media (max-width: 600px) {
+  .h37-info-positioner:not(.h37-info-hover-positioner) {
+    position: fixed !important;
+    inset: auto 0 0 !important;
+    width: 100%;
+    max-width: none;
+    transform: none !important;
+  }
+
+  .h37-info-popover:not(.h37-info-hover) {
+    width: 100%;
+    max-width: none;
+    max-height: 78dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    transform-origin: bottom center;
+  }
+
+  .h37-info-popover:not(.h37-info-hover)[data-starting-style],
+  .h37-info-popover:not(.h37-info-hover)[data-ending-style] {
+    transform: translateY(var(--sp-12));
+  }
+
+  .h37-info-body {
+    padding-bottom: max(var(--sp-16), env(safe-area-inset-bottom));
+  }
+
+  .h37-info-scrim {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h37-info-popover,
+  .h37-info-popover[data-starting-style],
+  .h37-info-popover[data-ending-style] {
+    transform: none;
+    transition-duration: var(--dur-2);
+  }
+}
+
+.h37-scope-panel .scope-popover-foot {
+  flex-wrap: wrap;
+}

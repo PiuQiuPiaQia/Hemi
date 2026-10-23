@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -54,3 +55,10 @@ next-env.d.ts
 
 # Generated deployable Cloud Bot runtime
 /build/hemi-bot-runtime.tgz
+# Built conversation SDK and standalone example
+/packages/conversation-flow/dist/
+/examples/conversation-flow/dist/
+
+# Mobile build outputs and generated npm notices
+/apps/mobile/dist/
+/apps/mobile/public/licenses/

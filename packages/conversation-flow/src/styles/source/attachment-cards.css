@@ -1,0 +1,130 @@
+/* Draft and sent attachments share the screenshot's 48px thumbnail cards.
+   Scoped classes leave the legacy reference chips unchanged. */
+.h-attachment-file-icon {
+  display: block;
+  flex: none;
+  width: var(--sp-16);
+  height: var(--sp-16);
+}
+
+.compact-shell .h24-attach-tray.h-attachment-tray {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-8);
+}
+
+.compact-shell .h24-attach-card.h-attachment-card {
+  position: relative;
+  flex: none;
+  width: fit-content;
+  max-width: 100%;
+  height: var(--sp-48);
+  padding: 0;
+  gap: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--sp-8);
+  background: color-mix(in srgb, var(--ink) 3%, var(--bg-surface));
+}
+
+.compact-shell .h-attachment-card .h24-attach-open {
+  max-width: none;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-24) var(--sp-6) var(--sp-6);
+  border: none;
+  background: transparent;
+  border-radius: inherit;
+  color: var(--ink);
+}
+
+.compact-shell .h-attachment-card .h24-attach-open:hover .h24-attach-name {
+  text-decoration: none;
+}
+
+.compact-shell .h-attachment-card:has(.h24-attach-open:hover) {
+  background: var(--bg-hover);
+}
+
+.compact-shell .h-attachment-icon-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(var(--sp-32) + var(--sp-4));
+  height: calc(var(--sp-32) + var(--sp-4));
+}
+
+.compact-shell .h-attachment-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: calc(var(--sp-40) * 4);
+}
+
+.compact-shell .h-attachment-card .h24-attach-name {
+  display: block;
+  font-size: var(--fs-14);
+  font-weight: 500;
+  line-height: var(--sp-20);
+}
+
+.compact-shell .h-attachment-card .h24-attach-meta,
+.compact-shell .h-attachment-card .h24-attach-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  font-weight: 400;
+  line-height: var(--sp-16);
+  color: var(--muted);
+}
+
+.compact-shell .h-attachment-card .h24-attach-status { color: var(--danger); }
+
+.compact-shell .h-attachment-card.h24-attach-card-image {
+  width: var(--sp-48);
+}
+
+.compact-shell .h-attachment-card.h24-attach-card-image .h24-attach-open {
+  justify-content: center;
+  padding: 0;
+}
+
+.compact-shell .h-attachment-card .h24-attach-thumb {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: inherit;
+}
+
+.compact-shell .h-attachment-card .h24-attach-remove {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 2;
+  width: var(--fs-14);
+  height: var(--fs-14);
+  padding: 0;
+  border-radius: var(--r-full);
+  background: var(--ink);
+  color: var(--bg-surface);
+  opacity: 0;
+}
+
+.compact-shell .h-attachment-card:hover .h24-attach-remove,
+.compact-shell .h-attachment-card:focus-within .h24-attach-remove { opacity: 1; }
+.compact-shell .h-attachment-card .h24-attach-remove:hover { background: var(--danger); color: var(--bg-surface); }
+html.kb-nav .compact-shell .h-attachment-card .h24-attach-open:focus-visible,
+html.kb-nav .compact-shell .h-attachment-card .h24-attach-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.compact-shell .h-attachment-tray .h24-attach-error { flex-basis: 100%; }
+
+.compact-shell .h24-msg-attachments.h-attachment-sent-tray {
+  max-width: 100%;
+  gap: var(--sp-8);
+  margin-top: 0;
+  margin-bottom: var(--sp-8);
+}
+
+@media (hover: none) {
+  .compact-shell .h-attachment-card .h24-attach-remove { opacity: 1; }
+}

@@ -53,6 +53,12 @@ const server = http.createServer(async (req, res) => {
       chunk({ reasoning_content: 'STOP_PRIVATE_THINKING：核对资料与执行边界。' });
       await hold('stop'); if (!res.destroyed) done(); return;
     }
+    const lastUser = JSON.stringify(body.messages.filter(message => message.role === 'user').at(-1)?.content ?? '');
+    if (lastUser.includes('SDK_CORE_')) {
+      chunk({content: 'SDK_CORE_REPLY：' + (lastUser.match(/SDK_CORE_(QUEUE|ONE|TWO)/)?.[0] ?? '已处理')});
+      if (lastUser.includes('SDK_CORE_QUEUE')) await hold('core-queue');
+      if (!res.destroyed) done(); return;
+    }
     const count = body.messages.filter(message => message.role === 'tool').length;
     if (count === 0) {
       chunk({ content: '我会先读取资料，再运行检查命令。' });
@@ -102,13 +108,13 @@ try {
     HEMI_USER_DATA_DIR: userData, HEMI_TEST_MIC_GRANT: '1', HEMI_LLM_API_KEY: 'TEST_ONLY',
     HEMI_LLM_BASE_URL: baseUrl, HEMI_LLM_MODEL: 'stage-test' } });
   await wait(() => { page = app.windows().find(p => /^(http|file):/.test(p.url()) && !new URL(p.url()).searchParams.has('mode')); return !!page; }, 'main window');
-  report.rendererUrl = page.url(); page.setDefaultTimeout(15000);
+  report.rendererUrl = page.url(); page.setDefaultTimeout(Number(process.env.HEMI_UI_TIMEOUT_MS ?? 15000));
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
   await page.locator('textarea.text-composer-input').waitFor();
   await page.evaluate(baseUrl => window.hemiVoice.saveModelProfile({ id: 'stage', name: '阶段验证', api: 'openai-completions', baseUrl,
     apiKey: 'TEST_ONLY', models: [{ id: 'main', model: 'stage-test', thinkingLevel: 'default', supportsVision: false }], makeDefault: true }), baseUrl);
-  await page.reload(); await page.locator('textarea.text-composer-input').waitFor();
+  await page.reload({waitUntil:'domcontentloaded'}); await page.locator('textarea.text-composer-input').waitFor();
   await resize(1440);
   await page.locator('textarea.text-composer-input').fill('STAGE_FLOW：请读取资料并运行检查。');
   await page.locator('.text-composer-send:not(.is-stop)').click();
@@ -200,7 +206,7 @@ try {
   await groups().first().locator('.turn-activity-head').click();
   await shot('expanded-1440-dark-preference');
   const beforeReload = requests.length;
-  await page.reload(); await page.locator('.turn-activity').first().waitFor();
+  await page.reload({waitUntil:'domcontentloaded'}); await page.locator('.turn-activity').first().waitFor();
   assert.equal(await groups().count(), 2);
   assert.equal(await groups().first().locator('.turn-activity-head').getAttribute('aria-expanded'), 'false');
   assert.deepEqual((await flow(conversationId)).timeline, snapshot.timeline);
@@ -219,6 +225,36 @@ try {
   assert.equal(await page.locator('.turn-activity-preview, .turn-activity-timer').count(), 0);
   assert.equal(await page.locator('.turn-activity-list').count(), 0);
   check('停止思考后过程退出运行态，未完成回复明确标为已停止');
+  const stopConversation = await page.evaluate(async () => (await window.hemiVoice.listConversations()).sessions[0].id);
+  await page.evaluate(id => window.hemiVoice.renameConversation(id, 'SDK 草稿恢复验证'), stopConversation);
+  const composer = page.locator('textarea.text-composer-input');
+  await composer.fill('SDK_CORE_DRAFT：切换与重载必须保留');
+  await wait(async () => (await page.evaluate(id => window.hemiVoice.getDraft(id), stopConversation))?.text === 'SDK_CORE_DRAFT：切换与重载必须保留', 'SDK draft persisted through real IPC');
+  await page.getByRole('button', {name: '新建对话', exact: true}).click();
+  await wait(async () => await composer.inputValue() === '', 'new conversation clears its slot');
+  await page.locator('.h24-sidebar-open').filter({hasText:'SDK 草稿恢复验证'}).click();
+  await wait(async () => await composer.inputValue() === 'SDK_CORE_DRAFT：切换与重载必须保留', 'SDK draft restores on navigation');
+  await page.reload({waitUntil:'domcontentloaded'}); await composer.waitFor();
+  await wait(async () => await composer.inputValue() === 'SDK_CORE_DRAFT：切换与重载必须保留', 'SDK draft restores after reload');
+  check('SDK 草稿通过真实 IPC 自动保存，切换会话与 renderer 重载后恢复');
+  await page.getByRole('button', {name: '新建对话', exact: true}).click();
+  await composer.fill('SDK_CORE_QUEUE：等待我放行。');
+  await page.locator('.text-composer-send:not(.is-stop)').click();
+  await wait(() => releases.has('core-queue'), 'held main run');
+  for (const text of ['SDK_CORE_ONE：队列一', 'SDK_CORE_TWO：队列二']) {
+    await composer.fill(text);
+    await composer.press('Enter');
+    await wait(async () => await composer.inputValue() === '', 'queued input accepted');
+  }
+  await page.getByText('待发送消息（2）', {exact:true}).waitFor();
+  assert.equal(await page.locator('.h24-user-bubble').filter({hasText:'SDK_CORE_ONE'}).count(),0);
+  await shot('sdk-core-queue');
+  releases.get('core-queue')(); releases.delete('core-queue');
+  await wait(async () => await page.locator('.h24-user-bubble').filter({hasText:'SDK_CORE_TWO'}).count()===1 && await page.locator('.text-composer-send.is-stop').count()===0, 'queued runs complete');
+  const inputs = await page.locator('.h24-user-bubble').allTextContents();
+  assert.deepEqual(inputs.map(text => text.match(/SDK_CORE_(QUEUE|ONE|TWO)/)?.[1]).filter(Boolean), ['QUEUE','ONE','TWO']);
+  assert.equal(await page.locator('.h24-queue-tray').count(),0);
+  check('SDK 队列组件通过生产控制器受理两条输入，依次转正且没有重复消息');
   const saved = await page.evaluate(async () => {
     const turns = Array.from({ length: 150 }, (_, index) => ({ id: `stage-history-${index}`,
       author: index % 2 ? 'hemi' : 'user', createdAt: Date.now() - (150 - index) * 1000,

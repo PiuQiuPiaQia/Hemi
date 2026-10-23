@@ -1,0 +1,561 @@
+/**
+ * 037 视觉系统 · 模型页 v2（文本 tab）：正在使用 / 供应商摘要 / 供应商详情 / 添加供应商，
+ * 以及「权限与控制 · 桌面操控」组。控件全部用 037-controls.css 的 h37-*；
+ * 这里只补本页特有的布局与共用层没有的几样（pick 选择器、预设卡、菜单定位、返回动效）。
+ * 只用 tokens.css 变量，不写 hex。类名前缀 h37m-。
+ */
+
+.h37m {
+  min-width: 0;
+}
+
+/* P2：模型名、端点等展示文字用正文字体＋等宽数字（等宽字体夹在中文里显得像终端）；
+   只有需要逐字核对的输入框（Key、端点、型号 ID）保留等宽。 */
+.h37m-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+.h37-input.h37m-mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.h37m-note {
+  margin-bottom: var(--sp-16);
+}
+
+.h37m-note-after {
+  margin-top: var(--sp-8);
+}
+
+.h37m .h37-back svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 添加页第 2、3 步包在进场容器里：首个分组不能吃掉 h37-section 的上边距。 */
+.h37m-steps > .h37-section:first-child {
+  margin-top: var(--gap-section);
+}
+
+/* 下钻后外壳的「模型」页头、文本/语音分段、「其他」组都让位（稿：详情/添加页只有返回链接）。
+   外壳没接 onViewChange 之前用 :has() 兜底。 */
+form:has([data-h37-model-view='provider'], [data-h37-model-view='add']) > .h37-page-head,
+.h37-settings-stack:has([data-h37-model-view='provider'], [data-h37-model-view='add'])
+  > :not(.settings-form-section):not(:has([data-h37-model-view])) {
+  display: none;
+}
+
+/* —— 正在使用：pick 选择器（可见值＋副标题，透明原生 select 叠在上面）—— */
+.h37m-pick {
+  position: relative;
+  width: 260px;
+  max-width: 100%;
+}
+
+html.kb-nav .h37m-pick:has(select:focus-visible) {
+  box-shadow:
+    inset 0 0 0 1px var(--g-500),
+    0 0 0 3px var(--g-100);
+}
+
+.h37m-pick[data-disabled='true'] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.h37m-pick-v {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.h37m-pick-v > .h37m-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.h37m-pick-sub {
+  flex: none;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h37m-pick-chev {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--faint);
+}
+
+.h37m-pick-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  opacity: 0;
+  font: inherit;
+  appearance: none;
+}
+
+.h37m-pick-native:disabled {
+  cursor: default;
+}
+
+.h37m-seg > button {
+  padding: 0 var(--sp-10);
+}
+
+/* —— 供应商摘要行 —— */
+.h37m-models-inline .h37m-mono {
+  color: var(--muted);
+}
+
+.h37m-provider-row .h37-row-text > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* —— 详情页 —— */
+.h37m-head {
+  align-items: center;
+}
+
+.h37m-head > .h37-actions {
+  align-items: center;
+}
+
+.h37m-head-text {
+  min-width: 0;
+}
+
+.h37m-head-text h2 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.h37m-tile-lg {
+  width: 40px;
+  height: 40px;
+  font-size: var(--fs-14);
+}
+
+.h37m-tile-sm {
+  width: 28px;
+  height: 28px;
+}
+
+.h37m-form-row {
+  align-items: center;
+}
+
+.h37m-lbl {
+  width: 96px;
+  flex: none;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.h37m-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.h37m-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--body);
+}
+
+.h37-row-text > .h37m-url {
+  font-size: 12.5px;
+  color: var(--body);
+}
+
+.h37m-model-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: var(--fw-medium);
+}
+
+.h37m-sub-fail {
+  color: var(--danger);
+}
+
+.h37m-add-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-16);
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.h37m-add-row > .h37-input {
+  flex: 1;
+  height: 30px;
+}
+
+.h37m-add-error {
+  padding: 0 var(--sp-16) var(--sp-10);
+}
+
+/* 041 模型行内「能看图」开关：小标签＋开关，与用量 badge/更多菜单同排。 */
+.h37m-vision-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.h37m-vision-lbl {
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+/* 041 拉取模型列表：按钮＋说明一行；结果 chips 换行、超高内滚（大列表不撑爆页面）。 */
+.h37m-fetch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-16);
+}
+
+.h37m-fetch-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  max-height: 216px;
+  overflow-y: auto;
+  padding: var(--sp-8) var(--sp-16) var(--sp-12);
+}
+
+.h37m-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-16) var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h37m-chip-sm {
+  height: 24px;
+  font-size: var(--fs-12);
+}
+
+/* 「更多」菜单：挂在 body 上 fixed 定位（分组 overflow:hidden 会裁掉）。 */
+.h37m-menu {
+  position: fixed;
+  min-width: 184px;
+}
+
+.h37m-menu-label {
+  padding: var(--sp-6) var(--sp-10) var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h37m-menu-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.h37m-menu .h37-menu-item:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.h37m-menu .h37-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--body);
+}
+
+.h37m-dialog-pick {
+  margin-top: var(--sp-12);
+}
+
+.h37m-dialog-pick .h37m-pick {
+  width: 100%;
+}
+
+.h37-dialog p.h37m-dialog-error {
+  margin-top: var(--sp-8);
+  color: var(--danger);
+}
+
+/* —— 添加供应商 —— */
+.h37m-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-8);
+}
+
+.h37m-preset {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  min-width: 0;
+  padding: var(--sp-10) var(--sp-12);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  font: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  color: var(--ink);
+  transition:
+    box-shadow var(--dur-2) linear,
+    background-color var(--dur-1) linear;
+}
+
+.h37m-preset:hover {
+  background: var(--n-25);
+}
+
+html.kb-nav .h37m-preset:focus-visible {
+  outline: 0;
+  box-shadow:
+    var(--shadow-1),
+    var(--focus-ring);
+}
+
+.h37m-preset[aria-checked='true'] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--g-500),
+    0 0 0 3px var(--g-100);
+}
+
+.h37m-preset-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.h37m-preset-text > b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: var(--fw-medium);
+}
+
+.h37m-preset-text > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.h37m-ext {
+  width: 12px;
+  height: 12px;
+}
+
+.h37m-test-slot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.h37m-test-slot:empty {
+  display: none;
+}
+
+.h37m-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+
+.h37m-chip-tag {
+  height: 18px;
+  font-size: 11px;
+}
+
+.h37m-chip-ghost {
+  box-shadow: inset 0 0 0 1px transparent;
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -1px;
+  color: var(--muted);
+}
+
+html.kb-nav .h37m-chip-ghost:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.h37m-other-input {
+  width: 200px;
+  height: 28px;
+  border-radius: var(--r-full);
+}
+
+.h37m-add-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+  margin-top: var(--sp-24);
+}
+
+/* —— 下钻 / 返回：View Transitions 优先（出 140ms ease-in、进 280ms 自 24px），否则退回类名动画 —— */
+.h37m-drill-back {
+  animation: h37m-in-left var(--dur-4) var(--ease-out);
+}
+
+:root[data-h37m-vt] .h37m-pane {
+  view-transition-name: h37m-pane;
+}
+
+:root[data-h37m-vt]::view-transition-old(root),
+:root[data-h37m-vt]::view-transition-new(root),
+:root[data-h37m-vt]::view-transition-group(h37m-pane) {
+  animation: none;
+}
+
+:root[data-h37m-vt='forward']::view-transition-old(h37m-pane) {
+  animation: h37m-out-left var(--dur-2) var(--ease-in) both;
+}
+
+:root[data-h37m-vt='forward']::view-transition-new(h37m-pane) {
+  animation: hemi-drill var(--dur-4) var(--ease-out) both;
+}
+
+:root[data-h37m-vt='back']::view-transition-old(h37m-pane) {
+  animation: h37m-out-right var(--dur-2) var(--ease-in) both;
+}
+
+:root[data-h37m-vt='back']::view-transition-new(h37m-pane) {
+  animation: h37m-in-left var(--dur-4) var(--ease-out) both;
+}
+
+@keyframes h37m-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+@keyframes h37m-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+@keyframes h37m-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+/* —— 权限与控制 · 桌面操控（vision-section）—— */
+.h37m-perm-collapse > div > .h37-row:first-child {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.h37m-perm-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-6);
+}
+
+.h37m-perm-foot .h37-link {
+  font-size: var(--fs-12);
+}
+
+.h37m-perm-foot .h37m-dot {
+  color: var(--faint);
+}
+
+/* —— 断点：1180 / 880 / 600 —— */
+@media (max-width: 880px) {
+  .h37m-pick {
+    width: 240px;
+  }
+}
+
+@media (max-width: 600px) {
+  .h37m-use-row {
+    flex-wrap: wrap;
+  }
+
+  .h37m-use-row > .h37-row-end {
+    width: 100%;
+  }
+
+  .h37m-use-row .h37m-pick,
+  .h37m-use-row .h37-seg {
+    width: 100%;
+  }
+
+  .h37m-use-row .h37-seg > button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .h37m-form-row {
+    flex-wrap: wrap;
+    gap: var(--sp-6);
+  }
+
+  .h37m-lbl {
+    width: 100%;
+  }
+
+  .h37m-preset-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .h37m-head {
+    flex-wrap: nowrap;
+  }
+
+  .h37m-head > .h37-actions {
+    display: none;
+  }
+
+  .h37m-hide-sm {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h37m-pane,
+  .h37m-drill-back {
+    animation: none;
+  }
+}
+
+/* 038：自动路由角色行——失败说明与重试（行内次要信息，不新增面板）。 */
+.h37m-auto-error {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 0 var(--pad-card) var(--sp-10);
+  font-size: var(--fs-xs);
+  color: var(--warn);
+}
+
+.h37m-auto-error .h37-btn {
+  padding-block: var(--sp-1);
+}
