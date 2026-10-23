@@ -1,0 +1,883 @@
+/**
+ * 037 视觉系统 · 输入区（main-window 稿「输入框」）。
+ * 一个容器装下：通话条（通话中）→ 输入 → 工具行。工具行从左到右：
+ * 附加 | 工作区 · 模型 · 思考 · 权限 …… 按住说话 · 发送。
+ * 叠在 globals.css 旧规则之后；只用 tokens.css 变量。
+ */
+
+/* —— 输入区外框与列宽 —— */
+.compact-shell .h24-main {
+  padding: 0;
+  background: var(--bg-canvas);
+}
+
+.compact-shell .h24-composer {
+  max-width: calc(var(--h24-read-w) + 48px);
+  padding: var(--sp-8) var(--sp-24) var(--sp-20);
+}
+
+.compact-shell .text-composer {
+  position: relative;
+  min-height: 0;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xl);
+  background: var(--bg-surface);
+  /* P2：一圈细描边＋极轻投影（原 shadow-2 的 24px 散影让输入框像浮起的卡片） */
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--n-900) 4%, transparent),
+    0 4px 16px -8px color-mix(in srgb, var(--n-900) 10%, transparent),
+    0 0 0 1px var(--line-strong);
+  transition: box-shadow var(--dur-2) linear;
+}
+
+.compact-shell .text-composer:focus-within {
+  border-color: transparent;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--n-900) 4%, transparent),
+    0 4px 16px -8px color-mix(in srgb, var(--n-900) 12%, transparent),
+    0 0 0 1px var(--n-300);
+}
+
+.compact-shell .text-composer.is-drag-over {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 1px var(--g-500),
+    0 0 0 4px var(--g-100);
+}
+
+.compact-shell .text-composer-hint {
+  margin: 0;
+  padding: var(--sp-10) var(--sp-16) 0;
+  color: var(--muted);
+}
+
+.compact-shell .text-composer-hint-link {
+  color: var(--accent-text);
+}
+
+.compact-shell .text-composer .h24-attach-tray {
+  margin: 0;
+  padding: var(--sp-12) var(--sp-12) 0;
+}
+
+.compact-shell .text-composer-input {
+  min-height: 56px;
+  padding: var(--sp-16) var(--sp-16) var(--sp-4);
+  color: var(--ink);
+  font-size: var(--fs-14);
+  line-height: 1.6;
+}
+
+.compact-shell .text-composer-input::placeholder {
+  color: var(--faint);
+}
+
+/* —— 工具行 —— */
+.compact-shell .text-composer-toolbar {
+  gap: 0;
+  min-height: 0;
+  margin-top: 0;
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
+}
+
+.compact-shell .text-composer-tools {
+  gap: var(--sp-2);
+}
+
+.compact-shell .h37-tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 28px;
+  max-width: 180px;
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--body);
+  font: inherit;
+  font-size: var(--fs-13);
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h37-tool:hover:not(:disabled),
+.compact-shell .h37-tool[aria-expanded='true'] {
+  border-color: transparent;
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+html.kb-nav .compact-shell .h37-tool:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.compact-shell .h37-tool:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.compact-shell .h37-tool > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted);
+}
+
+.compact-shell .h37-tool > .h37-tool-chev {
+  width: 12px;
+  height: 12px;
+  margin-left: -1px;
+  opacity: 0.6;
+}
+
+.compact-shell .h37-tool-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* P1 视觉收敛：取默认值的工具只留图标（思考自动、访问范围无授权），非默认才露文字 */
+.compact-shell .h37-tool[data-compact='true'] {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+}
+
+.compact-shell .h37-tool[data-compact='true'] > .h37-tool-label,
+.compact-shell .h37-tool[data-compact='true'] > .h37-tool-chev {
+  display: none;
+}
+
+.compact-shell .h37-tool[data-mode='full'] {
+  color: var(--danger);
+}
+
+.compact-shell .h37-tool-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--sp-4);
+  background: var(--line);
+}
+
+/* 工作区芯片进工具行：去掉原上下文栏的占行与边距 */
+.compact-shell .text-composer-tools .h33-workspace-bar {
+  gap: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+.compact-shell .text-composer-tools .h33-workspace-note {
+  display: none;
+}
+
+.compact-shell .text-composer-tools .h33-workspace-chip[data-missing='true'],
+.compact-shell .text-composer-tools .h33-workspace-bar[data-missing='true'] .h33-workspace-chip {
+  color: var(--warn);
+}
+
+.compact-shell .h33-workspace-clear:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h37-workspace-alert-slot:empty {
+  display: none;
+}
+
+/* 工具行里的浮层：锚各自触发钮左缘、向上弹；统一表面与进场 */
+.compact-shell .text-composer-tools .h24-model-menu,
+.compact-shell .text-composer-tools .permission-popover,
+.compact-shell .text-composer-tools .h37-thinking-menu,
+.compact-shell .text-composer-tools .h37-model-menu,
+.compact-shell .text-composer-tools .h37-workspace-menu,
+.compact-shell .text-composer-tools .h37-attach-menu {
+  left: 0;
+  right: auto;
+  bottom: calc(100% + 8px);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  transform-origin: bottom left;
+  animation: hemi-pop var(--dur-3) var(--ease-out);
+}
+
+/* 附加菜单条目：图标＋标题一行、说明一行（说明与标题文字左缘对齐：14 图标＋8 间距）。 */
+.h37-menu-item.h37-attach-item {
+  flex-direction: column;
+  align-items: flex-start;
+  height: auto;
+  padding: var(--sp-6) var(--sp-10);
+}
+
+.h37-attach-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+}
+
+.h37-attach-item-head > svg {
+  flex-shrink: 0;
+}
+
+.h37-attach-item-hint {
+  width: 100%;
+  padding-left: calc(var(--sp-16) + var(--sp-6));
+  font-size: var(--fs-12);
+  color: var(--muted);
+  text-align: left;
+}
+
+.compact-shell .text-composer-tools .thinking-auto-mark {
+  display: none;
+}
+
+.compact-shell .h37-star {
+  fill: var(--warn);
+  color: var(--warn);
+}
+
+/* —— 按住说话 —— */
+.compact-shell .h24-shortcut-hint {
+  flex: none;
+  gap: var(--sp-6);
+  height: 32px;
+  margin: 0;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+}
+
+.compact-shell .h24-shortcut-hint > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compact-shell .h24-shortcut-hint kbd {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  color: inherit;
+}
+
+/* —— 发送 / 停止 —— */
+.compact-shell .text-composer-send {
+  width: 32px;
+  height: 32px;
+  margin-left: var(--sp-6);
+  background: var(--fill-primary);
+  color: var(--on-primary);
+  transition:
+    background-color var(--dur-2) linear,
+    color var(--dur-2) linear;
+}
+
+.compact-shell .text-composer-send:hover:not(:disabled) {
+  background: var(--fill-primary-hover);
+}
+
+.compact-shell .text-composer-send:active:not(:disabled) {
+  background: var(--fill-primary);
+  transform: scale(0.96);
+}
+
+.compact-shell .text-composer-send:disabled {
+  background: var(--bg-subtle);
+  color: var(--faint);
+}
+
+html.kb-nav .compact-shell .text-composer-send:focus-visible,
+html.kb-nav .compact-shell .text-composer-stop:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.compact-shell .text-composer-send.is-stop {
+  border: 0;
+  background: var(--fill-primary);
+  color: var(--on-primary);
+}
+
+.compact-shell .text-composer-send.is-stop:hover:not(:disabled) {
+  background: var(--fill-primary-hover);
+  color: var(--on-primary);
+}
+
+.compact-shell .text-composer-stop {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--r-full);
+  margin-left: var(--sp-6);
+  transition:
+    background-color var(--dur-2) linear,
+    color var(--dur-2) linear;
+}
+
+/* —— 通话条：嵌在输入框顶部，280ms 展开 —— */
+.compact-shell .h24-call-dock.h37-call-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: var(--sp-10) var(--sp-12) var(--sp-10) var(--sp-16);
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--g-100);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: linear-gradient(90deg, var(--g-50), color-mix(in srgb, var(--g-50) 40%, transparent));
+  animation: h37-strip-in var(--dur-4) var(--ease-out);
+}
+
+@keyframes h37-strip-in {
+  from {
+    height: 0;
+    padding-block: 0;
+    opacity: 0;
+  }
+}
+
+.compact-shell .h37-call-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.compact-shell .h37-call-who > b {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--accent-text);
+  animation: hemi-fade var(--dur-3) linear;
+}
+
+.compact-shell .h37-call-who > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.compact-shell .h37-call-who em {
+  font-style: normal;
+}
+
+.compact-shell .h37-call-strip .h37-call-activity {
+  margin-left: auto;
+  margin-right: var(--sp-4);
+  color: var(--g-500);
+}
+
+.compact-shell .h37-call-strip .h24-call-dock-mute {
+  flex: none;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-sm);
+  color: var(--body);
+}
+
+.compact-shell .h37-call-strip .h24-call-dock-mute svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compact-shell .h37-call-strip .h24-call-dock-mute:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.compact-shell .h37-call-strip .h24-call-dock-mute[data-muted='true'] {
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+}
+
+.compact-shell .h37-call-hangup {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--danger-50);
+  color: var(--danger);
+  transition:
+    background-color var(--dur-1) linear,
+    color var(--dur-1) linear;
+}
+
+.compact-shell .h37-call-hangup svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compact-shell .h37-call-hangup:hover {
+  background: var(--danger);
+  color: var(--n-0);
+}
+
+html.kb-nav .compact-shell .h37-call-hangup:focus-visible,
+html.kb-nav .compact-shell .h37-call-strip .h24-call-dock-mute:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* —— 输入区上方的条：修复条 / 回合错误 —— */
+.compact-shell .h24-repair-strip {
+  min-height: 0;
+  margin-bottom: var(--sp-8);
+  padding: var(--sp-10) var(--sp-16);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--warn-50);
+}
+
+.compact-shell .h24-turn-error {
+  max-width: var(--h24-read-w);
+}
+
+/* —— 主列变窄：工具只留图标，浮层改锚工具行左缘 —— */
+@container (max-width: 640px) {
+  .compact-shell .text-composer-tools .h37-tool-label,
+  .compact-shell .text-composer-tools .h37-tool-chev {
+    display: none;
+  }
+
+  .compact-shell .text-composer-tools .h37-tool {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .compact-shell .text-composer-tools .h33-workspace,
+  .compact-shell .text-composer-tools .h24-model-select,
+  .compact-shell .text-composer-tools > .relative {
+    position: static;
+  }
+
+  .compact-shell .text-composer-tools .h24-model-menu,
+  .compact-shell .text-composer-tools .permission-popover {
+    left: 8px;
+    bottom: calc(100% - 2px);
+    max-width: calc(100% - 16px);
+  }
+
+  .compact-shell .text-composer-submit .h37-tool-label,
+  .compact-shell .text-composer-submit .h37-tool-chev {
+    display: none;
+  }
+
+  .compact-shell .text-composer-submit .h37-tool {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  /* 038 AC-08：375 保留「自动」文字（物理型号仍收图标，全值在 title）。 */
+  .compact-shell .text-composer-submit .h24-model-chip[data-auto='true'] {
+    width: auto;
+    padding: 0 var(--sp-8);
+    justify-content: flex-start;
+  }
+
+  .compact-shell .text-composer-submit .h24-model-chip[data-auto='true'] .h37-tool-label,
+  .compact-shell .text-composer-submit .h24-model-chip[data-auto='true'] .h37-tool-chev {
+    display: inline;
+  }
+}
+
+@media (max-width: 600px) {
+  .compact-shell .h24-composer {
+    padding: var(--sp-8) var(--sp-16) var(--sp-16);
+  }
+
+  .compact-shell .h37-call-who em,
+  .compact-shell .h37-call-strip .h24-call-dock-mute > span {
+    display: none;
+  }
+
+  .compact-shell .h24-shortcut-hint > span {
+    display: none;
+  }
+}
+
+/* —— @ 提及菜单和 /model 命令菜单：统一样式（2026-10-06） —— */
+.h24-mention-menu,
+.h24-command-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-4);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  z-index: 80;
+  animation: hemi-pop var(--dur-3) var(--ease-out);
+  transform-origin: bottom left;
+}
+
+.h24-command-hint {
+  font-size: var(--fs-12);
+  color: var(--faint);
+  padding: var(--sp-4) var(--sp-10) var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.h24-model-item {
+  display: flex;
+  align-items: center;
+  gap: var(--row-gap);
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--row-fs);
+  text-align: left;
+  transition: background var(--dur-2);
+}
+
+.h24-model-item:hover:not(:disabled),
+.h24-model-item[data-active='true'] {
+  background: var(--bg-hover);
+}
+
+.h24-model-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.h24-model-item-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.h24-model-item-model {
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h24-model-item small {
+  font-size: var(--fs-12);
+  color: var(--danger);
+}
+
+/* —— P2 提交簇（031 用户裁决：模型选择在工具行右端、发送键左侧；对标 Codex）——
+   模型菜单向上弹、右缘对齐，窄窗不溢出。 */
+.compact-shell .text-composer-submit {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.compact-shell .text-composer-submit .h37-model-menu {
+  left: auto;
+  right: 0;
+  bottom: calc(100% + 8px);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  transform-origin: bottom right;
+  animation: hemi-pop var(--dur-3) var(--ease-out);
+}
+
+/* 060：次级停止与主发送视觉分层，编辑共用输入框。 */
+.compact-shell .text-composer-stop {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+.compact-shell .text-composer-stop:hover { background: var(--bg-subtle); }
+.compact-shell .queue-composer-editing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-16);
+  color: var(--muted);
+  font-size: var(--fs-12);
+  border-bottom: 1px solid var(--border);
+}
+.compact-shell .queue-composer-editing button { color: var(--accent-text); }
+
+
+/* —— 060 队列：拖拽手柄、正文、明确的运行入口；顺序归宿主保存 —— */
+.compact-shell .h24-queue-tray {
+  margin-bottom: var(--sp-8);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  padding: var(--sp-4);
+}
+.compact-shell .h24-queue-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  width: 100%;
+  padding: var(--sp-6) var(--sp-8);
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  text-align: left;
+}
+.compact-shell .h24-queue-head small { color: var(--warn); font-size: inherit; }
+.compact-shell .h24-queue-body {
+  display: flex;
+  flex-direction: column;
+  /* 待发送区有独立滚动边界：窗口变矮或排满时，仍给执行中的对话留出空间。 */
+  max-height: min(24dvh, calc(var(--sp-32) * 6 + var(--sp-2) * 5));
+}
+.compact-shell .h24-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.compact-shell .h24-queue-paused {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-6) var(--sp-8);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warn-200) 12%, transparent);
+  color: var(--warn);
+  font-size: var(--fs-12);
+}
+.compact-shell .h24-queue-resume {
+  flex: none;
+  padding: var(--sp-4) var(--sp-10);
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--n-0);
+  font-size: var(--fs-12);
+}
+/* 2026-10-18 用户裁决：停止后无新任务＝只放一个「继续任务」按钮，不做托盘。 */
+.compact-shell .h24-queue-resume-only {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-8);
+}
+.compact-shell .h24-queue-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sp-24) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--sp-6);
+  min-height: var(--sp-32);
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: var(--r-md);
+  background: transparent;
+}
+.compact-shell .h24-queue-item:hover { background: var(--bg-hover); }
+.compact-shell .h24-queue-item[data-dragging='true'] { z-index: 1; background: var(--bg-surface); box-shadow: var(--shadow-1); }
+.compact-shell .h24-queue-content { min-width: 0; }
+.compact-shell .h24-queue-text {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: var(--fs-12);
+}
+.compact-shell .h24-queue-source { color: var(--muted); font-size: var(--fs-11); }
+.compact-shell .h24-queue-item-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.compact-shell .h24-queue-tool {
+  display: grid;
+  place-items: center;
+  width: var(--sp-24);
+  height: var(--sp-24);
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+}
+.compact-shell .h24-queue-drag { touch-action: none; }
+.compact-shell .h24-queue-tool:hover:not(:disabled) { color: var(--ink); background: var(--bg-hover); }
+.compact-shell .h24-queue-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  min-height: var(--sp-24);
+  padding: var(--sp-4) var(--sp-8);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  line-height: 1;
+  white-space: nowrap;
+}
+.compact-shell .h24-queue-run:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--line-strong); }
+.compact-shell .h24-queue-tool:disabled, .compact-shell .h24-queue-run:disabled { opacity: 0.4; }
+.compact-shell .h24-queue-run[data-waiting='true']:disabled { opacity: 1; color: var(--muted); background: var(--bg-canvas); }
+.compact-shell .h24-queue-status, .compact-shell .h24-queue-error {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.compact-shell .h24-queue-error { color: var(--danger); }
+html.kb-nav .compact-shell .h24-queue-tool:focus-visible,
+html.kb-nav .compact-shell .h24-queue-run:focus-visible,
+html.kb-nav .compact-shell .h24-queue-head:focus-visible,
+html.kb-nav .compact-shell .h24-queue-resume:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+
+/* —— 063 · 输入框行内标签（技能＋四类引用）与 slash/@ 候选面板 —— */
+
+/* 编辑位（textarea 在流内定高，镜像层铺满其下）。 */
+.compact-shell .text-composer-edit {
+  position: relative;
+}
+
+/* 镜像层：与输入框同类名同排版；文字透明、只画标签高亮（不改变任何文本
+   度量——chip 视觉用背景＋外扩 box-shadow 实现，零布局位移）。
+   选择器必须压过下方 .text-composer-input 的 relative（镜像同时挂两个类，
+   同优先级时后写的规则会把它盖回文档流——2026-10-18 真机钓出）。 */
+.compact-shell .text-composer-input.text-composer-mirror {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 0;
+}
+
+.compact-shell .text-composer-input {
+  position: relative;
+  z-index: 1;
+}
+
+/* 输入框镜像里的行内标签：底色＋柔和外扩，不动布局。 */
+.compact-shell .text-composer-mirror .composer-inline-tag {
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--n-500) 10%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--n-500) 10%, transparent);
+}
+.compact-shell .text-composer-mirror .composer-inline-tag[data-kind='skill'] {
+  background: color-mix(in srgb, var(--g-500) 14%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--g-500) 14%, transparent);
+}
+
+/* 消息气泡/队列行里的标签：真实内联 chip（可带 padding，不受镜像约束）。 */
+.h63-msg-tag {
+  display: inline;
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--n-500) 8%, transparent);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.h63-msg-tag[data-kind='skill'] {
+  background: color-mix(in srgb, var(--g-500) 14%, transparent);
+}
+.h63-msg-tag[data-kind='workflow'],
+.h63-msg-tag[data-kind='file'],
+.h63-msg-tag[data-kind='folder'],
+.h63-msg-tag[data-kind='conversation'] {
+  background: color-mix(in srgb, var(--n-500) 10%, transparent);
+}
+
+/* /model 本地切换的轻量反馈（输入区短暂提示，不进对话时间线）。 */
+.compact-shell .text-composer-model-notice {
+  color: var(--accent-text);
+}
+
+/* 候选面板的分组头/状态/搜索框（沿用 h24-command-menu 容器样式）。 */
+.h63-panel-group {
+  padding: var(--sp-2) 0;
+}
+.h63-panel-group + .h63-panel-group {
+  border-top: 1px solid var(--line);
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-4);
+}
+.h63-panel-group::before {
+  content: attr(data-group);
+  display: block;
+  padding: var(--sp-2) var(--row-pad-x) var(--sp-2);
+  color: var(--faint);
+  font-size: var(--fs-11);
+}
+.h63-panel-group:not([data-group])::before {
+  content: none;
+}
+.h63-panel-status {
+  margin: 0;
+  padding: var(--sp-8) var(--row-pad-x);
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+.h63-panel-search {
+  padding: var(--sp-4) var(--sp-8) var(--sp-4);
+}
+.h63-panel-search input {
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--sp-8);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-13);
+}
+.h63-panel-search input:focus {
+  outline: none;
+  border-color: var(--n-300);
+}
+html.kb-nav .h63-panel-search input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}

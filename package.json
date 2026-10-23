@@ -18,7 +18,7 @@
     "build:skill-market": "node scripts/build-skill-market.mjs",
     "build:icons": "node scripts/generate-app-icons.mjs",
     "build:icon-dev": "node scripts/generate-dev-icon.mjs",
-    "build": "npm run typecheck && npm run build:renderer",
+    "build": "npm run build:sdk && npm run typecheck && npm run build:renderer",
     "release": "node scripts/release.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "start": "electron .",
@@ -27,8 +27,17 @@
     "dist:mac": "npm run build && electron-builder --publish never",
     "prebuild": "node scripts/generate-appearance.mjs",
     "prebuild:renderer": "node scripts/generate-appearance.mjs",
-    "predev": "node scripts/generate-appearance.mjs",
-    "predev:renderer": "node scripts/generate-appearance.mjs"
+    "predev": "node scripts/generate-appearance.mjs && npm run build:sdk",
+    "predev:renderer": "node scripts/generate-appearance.mjs && npm run build:sdk",
+    "build:sdk": "npm run build --workspace @hemi/conversation-flow",
+    "test:sdk": "npm test --workspace @hemi/conversation-flow",
+    "pretest": "npm run build:sdk",
+    "dev:mobile": "npm run build:sdk && npm run dev --workspace @hemi/mobile",
+    "build:mobile": "npm run build:sdk && npm run build --workspace @hemi/mobile",
+    "sync:mobile": "npm run build:mobile && npm run sync --workspace @hemi/mobile",
+    "ios:mobile": "npm run sync:mobile && npm run ios --workspace @hemi/mobile",
+    "android:mobile": "npm run sync:mobile && npm run android --workspace @hemi/mobile",
+    "verify:mobile": "node scripts/verify-mobile.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.3.0",
@@ -41,7 +50,8 @@
     "playwright-core": "1.64.1",
     "uiohook-napi": "^1.5.5",
     "unpdf": "1.9.1",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "@hemi/conversation-flow": "file:packages/conversation-flow"
   },
   "devDependencies": {
     "@aiden0z/pptx-renderer": "1.2.4",
@@ -79,7 +89,9 @@
     "typescript": "5.9.3",
     "unified": "11.0.5",
     "vite": "8.0.16",
-    "wait-on": "9.1.0"
+    "wait-on": "9.1.0",
+    "esbuild": "0.28.2",
+    "postcss": "8.5.26"
   },
   "build": {
     "appId": "ai.hemi.desktop",
@@ -157,5 +169,9 @@
     "asarUnpack": [
       "**/node_modules/@earendil-works/**"
     ]
-  }
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }

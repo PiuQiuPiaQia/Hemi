@@ -1,3 +1,4 @@
+import { DesktopConversationFlow } from './conversation-flow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -67,7 +68,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { AppTopBar } from '@/windows/voice/app-top-bar';
 import { CallActivityIndicator, CallDock } from '@/windows/voice/call-dock';
 import { formatCallElapsed } from '@/windows/voice/lib/call-dock-state';
-import { PermissionCard } from '@/windows/voice/task-panel';
 import { ScopePopover } from '@/windows/voice/scope-popover';
 import { ThinkingLevelStrip } from '@/windows/voice/thinking-level-strip';
 import { ConversationSidebar } from '@/windows/voice/sidebar';
@@ -78,11 +78,6 @@ import {useThemeScene} from '@/appearance/scene';
 import { SKILLS_TOPBAR_SLOT_ID, SkillMarket } from '@/windows/voice/skill-market';
 import { WorkflowStudio } from '@/windows/voice/workflow-studio';
 import { TextComposer } from '@/windows/voice/text-composer';
-import { ThinkingBlock } from '@/windows/voice/thinking-block';
-import { TurnParts } from '@/windows/voice/turn-parts';
-import { CompactDelegation } from '@/windows/voice/compact-delegation';
-import { TaskResultBlock } from '@/windows/voice/result-view';
-import { WaitingStatus } from '@/windows/voice/waiting-status';
 import { SessionUsage } from '@/windows/voice/session-usage-view';
 import type { ConversationDeliverableView, UsageRecord } from '@shared/protocol';
 import { DeliverableContext } from './deliverable-card';
@@ -90,13 +85,7 @@ import { ModelSelectorChip } from '@/windows/voice/model-selector';
 import { WorkspaceBar, type WorkspaceBarValue } from '@/windows/voice/workspace-bar';
 import { TopbarOpenWorkspace } from '@/windows/voice/topbar-open-workspace';
 import { TurnQueueTray } from '@/windows/voice/turn-queue-tray';
-import { isEditableMessage } from '@/windows/voice/lib/message-edit';
-import { groupStageBriefs, visibleStageCount } from '@/windows/voice/lib/stage-briefs';
-import { replyCopyTargets } from '@/windows/voice/lib/reply-copy';
-import { TranscriptBoundary } from './transcript-boundary';
 import { markdownPlainText } from '@/shared/markdown-plain-text';
-import { VirtualTranscript, type VirtualTranscriptHandle } from './virtual-transcript';
-import { useTranscriptRowState } from './transcript-row-state';
 
 function formatTime(timestamp: number) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -589,91 +578,16 @@ export function VoiceScreen({
     });
   }, [transcripts, taskSnaps]);
   // 026 R-09：同任务的连续阶段简报收成一条进展时间线（只动视觉密度）。
-  const transcriptEntries = useMemo(() => groupStageBriefs(visibleTranscripts), [visibleTranscripts]);
-  const replyCopies = useMemo(() => replyCopyTargets(visibleTranscripts), [visibleTranscripts]);
+  const flowTaskSnaps = useMemo(() => {
+    const frozen = Object.fromEntries(transcripts.flatMap(item => item.taskSnap ? [[item.taskSnap.taskId ?? item.taskSnap.key ?? item.id, item.taskSnap]] : []));
+    return { ...frozen, ...taskSnaps };
+  }, [transcripts, taskSnaps]);
   const latestError = transcripts.at(-1)?.kind === 'error' ? transcripts.at(-1) : null;
 
   /** 060 S2（R-07/R-09）：统一有序渲染——已删除「回合中途任务卡沉底、用户插话提上、
    *  收口后恢复原位」的按作者/出生时间重分区（该规则会让运行中与完成后顺序不一致）。
    *  历史条目一律按 timeline 原序渲染；流式块只作为「当前回合的最新尾部」追加在
    *  末尾（收口投影后由顺序门槛接续，不换位）。 */
-
-  /** 渲染一段转录条目（分区后各段独立判定连续头侧行，不跨流式元素）。 */
-  function renderTranscriptEntry(index: number) {
-      const entries = transcriptEntries;
-      const entry = entries[index];
-      // 连续 Hemi 消息只在首条出头侧行（受理语/阶段简报/终态交代
-      // 会各自入流，逐条挂头像在视觉上碎；设计稿无此场景，按聊天
-      // 惯例合并——任务卡插入即断组）。简报组按组内首条参与判定。
-      const item = entry.type === 'stages' ? entry.items[0] : entry.item;
-      const prevEntry = index > 0 ? entries[index - 1] : null;
-      const prev = prevEntry ? (prevEntry.type === 'stages' ? prevEntry.items[0] : prevEntry.item) : null;
-      const continuation =
-        item.author === 'hemi' &&
-        item.kind !== 'task' &&
-        Boolean(prev && prev.author === 'hemi' && prev.kind !== 'task');
-      // 037：标记一段 Hemi 输出（回复/任务卡）的首条（data-lead；头像已按走查裁决去掉）。
-      const lead = (item.author === 'hemi' || item.kind === 'task') &&
-        !(prev && (prev.author === 'hemi' || prev.kind === 'task'));
-      if (entry.type === 'stages') {
-        const stageSnap = taskSnaps?.[entry.taskId];
-        const copyText = replyCopies.get(entry.items[entry.items.length - 1].id);
-        return (
-          <div key={entry.key} className="contents" data-reply-end={copyText ? 'true' : undefined}>
-          <StageBriefsItem
-            items={entry.items}
-            showRelation={entry.showRelation}
-            current={entry.latest && Boolean(stageSnap) && stageSnap?.phase !== 'terminal'}
-            afterCard={prev?.kind === 'task'}
-            continuation={continuation}
-            lead={lead}
-            taskTitle={stageSnap?.taskText}
-          />
-          {copyText ? <ReplyCopyActions text={copyText} /> : null}
-          </div>
-        );
-      }
-      const copyText = replyCopies.get(item.id);
-      return <div key={item.id} className="contents" data-flow-row={item.id}
-        data-flow-kind={item.kind ?? item.author} data-run-id={item.flow?.runId}
-        data-input-id={item.flow?.inputId} data-item-id={item.flow?.itemId}
-        data-part-ids={JSON.stringify(item.flow?.partIds ?? [])}
-        data-task-id={item.taskId} data-task-run={item.taskSnap?.runs}
-        data-reply-end={copyText ? 'true' : undefined}
-      >{item.kind === 'task' ? (
-        <TaskTranscriptItem
-          key={item.id}
-          item={item}
-          taskSnaps={taskSnaps}
-          onTaskAction={onTaskAction}
-          onOpenProcess={openProcessTab}
-          onOpenArtifact={onOpenArtifact}
-          onOpenPreview={(taskId, artifactId) => openPreviewTab({ kind: 'artifact', taskId, artifactId })}
-          onOpenReportPreview={(snap) => openPreviewTab({ kind: 'artifact', taskId: snap.taskId ?? '', artifactId: null })}
-        />
-      ) : (
-        <ChatTurnItem
-          key={item.id}
-          item={item}
-          continuation={continuation}
-          lead={lead}
-          showRelation={entry.showRelation}
-          taskTitleOf={(taskId) => taskSnaps?.[taskId]?.taskText}
-          editing={editingMessageId === item.id}
-          busy={textModelBusy}
-          onStartEdit={onStartEditMessage}
-          onCancelEdit={onCancelEditMessage}
-          onEditResend={onEditResendMessage}
-          onPreviewAttachment={openAttachmentPreview}
-          renderText={renderReplyTextWithLinks}
-          renderTask={renderTaskCall}
-          onOpenDeliverable={openDeliverablePreview}
-          onRetry={item.id === latestError?.id ? onRetryTurn : undefined}
-          retryBusy={retryTurnBusy || textModelBusy}
-          retryBlocked={retryTurnBlocked}
-        />
-      )}{copyText ? <ReplyCopyActions text={copyText} /> : null}</div>;
-  }
 
   const attachmentMetaMap = useMemo(() => {
     const map = new Map<string, MessageAttachmentView>();
@@ -749,10 +663,6 @@ export function VoiceScreen({
     },
     [currentConversationId, openPreviewTab],
   );
-  const renderReplyTextWithLinks = useCallback(
-    (text: string) => renderReplyText(text, { onLocalLink: openLocalFileLink }),
-    [openLocalFileLink],
-  );
   /** 028：附件预览入口（草稿托盘、历史 chip、＋ 菜单共用）——进同一宿主队列。 */
   const openAttachmentPreview = useCallback(
     (conversationId: string, attachmentId: string) => {
@@ -780,22 +690,6 @@ export function VoiceScreen({
   }, [attachmentMetaMap]);
   // 056（2026-10-15 用户反馈「对话流顺序错位」）：子 agent 按发起它的 task 调用原地显示——
   // toolCallId → 快照；续用同一会话时快照的 toolCallId 换成新那次调用，旧调用处不再显示。
-  const snapByToolCall = useMemo(() => {
-    const map = new Map<string, TaskStateSnapshot>();
-    // 档案里的冻结快照先放（重启后实时快照表里可能没有旧任务），实时快照覆盖。
-    for (const item of transcripts) {
-      if (item.kind === 'task' && item.taskSnap?.toolCallId) map.set(item.taskSnap.toolCallId, item.taskSnap);
-    }
-    for (const snap of Object.values(taskSnaps ?? {})) if (snap.toolCallId) map.set(snap.toolCallId, snap);
-    return map;
-  }, [taskSnaps, transcripts]);
-  const renderTaskCall = useCallback((call: { id: string }) => {
-    const snap = snapByToolCall.get(call.id);
-    return snap ? (
-      <CompactDelegation snap={snap} onAction={onTaskAction} onOpenProcess={() => openProcessTab(snap)} />
-    ) : null;
-  }, [snapByToolCall, onTaskAction, openProcessTab]);
-
   // 021 口径（2026-10-07 泄漏修复＋同日补洞）：确认卡只属于任务自己的会话——
   // 与任务卡入列（page.tsx）、语音授权提醒同过滤。无会话身份的任务（新对话
   // 首轮链路未带 id）跟着当前视图走；别的会话的等待不在此弹卡，改走下方
@@ -838,17 +732,6 @@ export function VoiceScreen({
 
   // 017 R-08：并行任务各自可能等确认——确认卡一次只出一张（最早等待的
   // 先出），其余收成一行「在等」提示（只报名字，各自独立倒计时）。
-
-  const transcriptVirtual = useRef<VirtualTranscriptHandle>(null);
-  const [transcriptPinned, setTranscriptPinned] = useState(true);
-  const lastUserItemId = useMemo(() => [...transcripts].reverse().find(item => item.author === 'user')?.id ?? null, [transcripts]);
-  const rowIdsRef = useRef<string[]>([]);
-  const transcriptRowIds = useMemo(() => {
-    const next = [...transcriptEntries.map(entry => entry.type === 'stages' ? entry.key : entry.item.id), ...(interimText ? ['interim-speech'] : [])];
-    if (next.length === rowIdsRef.current.length && next.every((id, index) => id === rowIdsRef.current[index])) return rowIdsRef.current;
-    rowIdsRef.current = next;
-    return next;
-  }, [transcriptEntries, Boolean(interimText)]);
 
   // 037：顶栏标题旁的工作区名（旧会话无绑定＝家目录）。P1：默认空间不报——输入区
   // 芯片已写着它，顶栏只在绑了项目（或旧会话家目录）时补这层上下文。
@@ -1058,82 +941,25 @@ export function VoiceScreen({
                 </button>
               </div>
             ) : null}
-            {waitingTasks.length ? (
-              <PermissionCard
-                snap={waitingTasks[0]}
-                queuedTitles={waitingTasks.slice(1).map((task) => task.taskText)}
-                onDecide={(choice) =>
-                  onTaskAction('decide', {
-                    choice,
-                    taskId: waitingTasks[0].taskId ?? waitingTasks[0].key ?? undefined,
-                  })
-                }
-                onStop={() =>
-                  onTaskAction('stop', {
-                    taskId: waitingTasks[0].taskId ?? waitingTasks[0].key ?? undefined,
-                  })
-                }
-              />
-            ) : null}
-
-            {/* 滚动区与「回到底部」按钮同层包装——跳底按钮锚到这里，悬在输入区上方。
-                is-empty：设计稿 blank 态把引导推到画布底部、紧贴输入区。 */}
-            <div className="relative flex min-h-0 flex-1 flex-col h24-stream-wrap">
-              <ScrollArea
-                className="transcript-scroll min-h-0 flex-1"
-                data-transcript-scroll
-              >
-                {timelineNotice ? <p className="h24-reply-status" role="status">{timelineNotice}</p> : null}
-                <div className="conversation-list h24-reading">
-                  <TranscriptBoundary key={`${currentConversationId}:${timelineGeneration}`}><VirtualTranscript
-                    key={`${currentConversationId ?? 'new'}:${timelineGeneration}`}
-                    ref={transcriptVirtual}
-                    rowIds={transcriptRowIds}
-                    editingId={editingMessageId}
-                    onPinnedChange={setTranscriptPinned}
-                    lastUserId={lastUserItemId}
-                    loading={conversationLoading}
-                    getRowText={(index, state) => {
-                      const entry = transcriptEntries[index];
-                      if (!entry) return interimText;
-                      if (entry.type === 'stages') return entry.items.map(item => markdownPlainText(item.text)).join('\n\n');
-                      const item = entry.item;
-                      if (item.author === 'user' || item.kind === 'task') return item.text;
-                      if (!item.parts?.length) return markdownPlainText(item.text);
-                      return item.parts.flatMap((part, index) => {
-                        if (part.type === 'text') return [markdownPlainText(part.text)];
-                        const key = (part as { partId?: string }).partId ?? `${part.type}-${index}`;
-                        if (part.type === 'thinking' && state?.get(`${key}/thinking-expanded`)) return [part.text];
-                        if (part.type === 'file-delivery') return [part.name];
-                        return [];
-                      }).join('\n\n');
-                    }}
-                    renderRow={index => index < transcriptEntries.length ? renderTranscriptEntry(index) : (
-                      <article className="h24-user-message" aria-live="polite">
-                        <p className="h24-user-bubble is-interim">
-                          {interimText}<span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
-                        </p>
-                      </article>
-                    )}
-                  /></TranscriptBoundary>
-                </div>
-              </ScrollArea>
-
-              <button
-                type="button"
-                className="jump-btn panel-jump"
-                data-visible={transcriptPinned ? 'false' : 'true'}
-                onClick={() => transcriptVirtual.current?.scrollToBottom()}
-                tabIndex={transcriptPinned ? -1 : 0}
-              >
-                <ArrowDown className="size-3.5" />
-                回到底部
-              </button>
-
-              {/* 等授权时对话流蒙高斯模糊（2026-10-07 用户裁决）——聚焦授权卡，
-                  替代旧「任务卡降不透明度」；只做视觉，滚动等交互不禁用。 */}
-              {waitingTasks.length ? <div className="h37-perm-frost" aria-hidden="true" /> : null}
-            </div>
+            <DesktopConversationFlow
+              environmentId={workspaceCurrent?.kind === 'view' ? workspaceCurrent.view.host ?? 'desktop' : 'desktop'}
+              conversationId={currentConversationId} generation={timelineGeneration ?? 0}
+              messages={visibleTranscripts} taskSnaps={flowTaskSnaps} waitingTasks={waitingTasks}
+              loading={conversationLoading} notice={timelineNotice} interimText={interimText}
+              busy={textModelBusy} retryBusy={retryTurnBusy} retryBlocked={retryTurnBlocked}
+              editingMessageId={editingMessageId} models={modelProfiles}
+              active={!skillMarketOpen && !workflowStudioOpen}
+              onTaskAction={onTaskAction} onStartEdit={onStartEditMessage} onCancelEdit={onCancelEditMessage}
+              onEdit={onEditResendMessage} onRetry={onRetryTurn} onOpenProcess={openProcessTab}
+              onOpenLink={openLocalFileLink} onModelSettings={onOpenAutoRoutingSettings}
+              onPreview={target => {
+                if (target.kind === 'attachment' && currentConversationId) openAttachmentPreview(currentConversationId, target.id);
+                else if (target.kind === 'artifact' && target.taskId) {
+                  if (target.intent === 'open' || target.intent === 'reveal') onOpenArtifact?.(target.taskId, target.id, target.intent);
+                  else openPreviewTab({ kind: 'artifact', taskId: target.taskId, artifactId: target.id || null });
+                } else openDeliverablePreview(target.id);
+              }}
+            />
 
             {/* 037：记忆提示（「记住了：…」/「已忘记：…」+ 查看 / 撤销），每条自带 role=status。 */}
             {typeof memoryNotice === 'string' && memoryNotice ? (
@@ -1220,7 +1046,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
-              <RunActivity key={currentConversationId} activity={runActivity} />
+              <RunActivity key={currentConversationId} active={!skillMarketOpen && !workflowStudioOpen} activity={runActivity} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}
@@ -1555,439 +1381,4 @@ function AttachmentAddButton({
       )}
     </div>
   )
-}
-
-/** 026 R-09：轻量同任务标识（任务名胶囊；查不到退通用词）。 */
-function TaskRelation({ title }: { title?: string }) {
-  return (
-    <span className="h24-task-relation" title="属于这个任务">
-      <Link2 className="size-3" aria-hidden="true" />
-      {title?.trim() || '所属任务'}
-    </span>
-  );
-}
-
-/**
- * 026 R-09：同一任务的连续阶段简报收成一条进展时间线——每条一行、弱于正式
- * 回答；运行中最新一条高亮为「当前」。超过 STAGE_FOLD_AT 条只留最近几条，
- * 更早的折叠可展开。复制入口统一由回答末尾承载。
- */
-function StageBriefsItem({
-  items,
-  showRelation,
-  current,
-  afterCard,
-  continuation,
-  lead,
-  taskTitle,
-}: {
-  items: TranscriptItem[];
-  showRelation: boolean;
-  current: boolean;
-  /** 紧跟自己的任务卡：收近间距，读作卡的下文。 */
-  afterCard: boolean;
-  continuation: boolean;
-  lead: boolean;
-  taskTitle?: string;
-}) {
-  const [expanded, setExpanded] = useTranscriptRowState<boolean>("stage-expanded", false);
-  const shown = visibleStageCount(items.length, expanded);
-  const hidden = items.length - shown;
-  return (
-      <article
-        className="h24-hemi-message h24-stage-briefs"
-        data-after-card={afterCard && !showRelation ? 'true' : undefined}
-        data-continuation={continuation ? 'true' : undefined}
-        data-lead={lead ? 'true' : undefined}
-      >
-        {showRelation ? <TaskRelation title={taskTitle} /> : null}
-        {hidden > 0 || expanded ? (
-          <button
-            type="button"
-            className="h24-stage-fold"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            <ChevronRight aria-hidden="true" />
-            {expanded ? '收起较早的进展' : `更早 ${hidden} 条进展`}
-          </button>
-        ) : null}
-        <ol className="h24-stage-list" aria-label="任务进展">
-          {items.slice(items.length - shown).map((item, index, list) => (
-            <li
-              key={item.id}
-              className="h24-stage-item"
-              data-current={current && index === list.length - 1 ? 'true' : undefined}
-              title={new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour12: false })}
-            >
-              <Markdown text={item.text} />
-            </li>
-          ))}
-        </ol>
-      </article>
-  );
-}
-
-/** 复制整轮正文，沿用剪贴板桥、成功图标和失败提示。 */
-function ReplyCopyActions({ text }: { text: string }) {
-  const { copy, toastNode } = useClipboardCopy();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  return <>
-    <div className="h24-msg-actions h24-reply-actions">
-      <button
-        type="button"
-        className="h24-msg-copy"
-        aria-label={copied ? '已复制' : '复制完整回答'}
-        title={copied ? '已复制' : '复制完整回答'}
-        data-copied={copied ? 'true' : undefined}
-        onClick={() => void copy(text).then(setCopied)}
-      >
-        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-      </button>
-    </div>
-    {toastNode}
-  </>;
-}
-
-/**
- * 024 消息形态（设计稿 v4 定稿）：用户消息为右对齐气泡（无头像行，气泡下
- * 「编辑」与状态），Hemi 回复为绿底 H 方块头像 + 名字行 + 开放正文。
- * 编辑框原位替换气泡（右对齐同形）；「重新发送」＝回卷重跑（2026-10-10 仿
- * zcode 语义改版）：这条之后的内容整段撤下、从这条重新提问（lib/message-edit.ts）。
- */
-/** 回复正文：Markdown＋末尾证据脚注弱化（050）；062 起可带本地文件链接处理。 */
-function renderReplyText(text: string, { onLocalLink }: { onLocalLink?: (href: string) => void } = {}) {
-  const { body, note } = splitEvidenceNote(text);
-  return (
-    <>
-      <Markdown text={body} onLocalLink={onLocalLink} />
-      {note ? <p className="h50-evidence-note">{note}</p> : null}
-    </>
-  );
-}
-
-/**
- * 050 R-15：续问依据行（模型按 system 路由规则写在回复末行）——拆出正文，
- * 按 12 号淡色常显；正文里没有这行时原样返回。
- */
-function splitEvidenceNote(text: string): { body: string; note: string | null } {
-  const raw = String(text ?? '');
-  const match = raw.match(/\n?\s*(依据上面「[^」]+」的结果整理，未重新查询)\s*$/);
-  if (!match) return { body: raw, note: null };
-  return { body: raw.slice(0, match.index).trimEnd(), note: match[1] };
-}
-
-function ChatTurnItem({
-  item,
-  continuation = false,
-  lead = false,
-  showRelation = true,
-  taskTitleOf,
-  editing,
-  busy,
-  onStartEdit,
-  onCancelEdit,
-  onEditResend,
-  onPreviewAttachment,
-  renderText,
-  renderTask,
-  onOpenDeliverable,
-  onRetry,
-  retryBusy,
-  retryBlocked,
-}: {
-  item: TranscriptItem;
-  /** 056：回复段里的 task 调用原地渲染子 agent 一行。 */
-  renderTask?: (call: { id: string }) => ReactNode;
-  /** 062 回复正文渲染（默认无链接态；带 onLocalLink 的版本由 VoiceScreen 注入）。 */
-  renderText?: (text: string) => ReactNode;
-  /** 062：交付文件入口点击 → 右侧预览。 */
-  onOpenDeliverable?: (artifactId: string, name: string) => void;
-  onRetry?: () => void;
-  retryBusy?: boolean;
-  retryBlocked?: string;
-  /** 连续 Hemi 消息的续条：不重复头像行（受理/简报/终态各自入流时合并）。 */
-  continuation?: boolean;
-  /** 037：一段 Hemi 输出的首条（data-lead）。 */
-  lead?: boolean;
-  /** 026 R-09：上一条已属同一任务（紧跟任务卡/同任务简报）时不重复挂标识。 */
-  showRelation?: boolean;
-  /** 026 R-09：按 taskId 取任务名（渲染轻量同任务标识；查不到退通用词）。 */
-  taskTitleOf?: (taskId: string) => string | undefined;
-  editing: boolean;
-  busy: boolean;
-  onStartEdit: (id: string) => void;
-  onCancelEdit: () => void;
-  onEditResend: (id: string, nextText: string) => void;
-  /** 028：历史附件 chip 点击 → 预览宿主（与草稿附件同一入口）。 */
-  onPreviewAttachment?: (conversationId: string, attachmentId: string) => void;
-}) {
-  const [editDraft, setEditDraft] = useTranscriptRowState<string>("edit-draft", item.text);
-  // 进入编辑时以当前文本为底稿；消息文本被并发改写（罕见）时同步一次。
-  const wasEditing = useRef(editing);
-  useEffect(() => {
-    if (editing !== wasEditing.current) setEditDraft(item.text);
-    wasEditing.current = editing;
-  }, [editing, item.text, setEditDraft]);
-  // 026 R-11：就近复制（用户/助手消息通用）——反馈短暂可见，不打断选中与编辑。
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  // 2026-10-08：复制走主进程桥（页面剪贴板被权限闸门拦，此前复制是坏的），
-  // 并补 toast 成/败反馈——只有图标变化不够醒，失败时更是完全无感。
-  const { copy: copyViaToast, toastNode: copyToastNode } = useClipboardCopy();
-  const copyMessage = async () => {
-    const ok = await copyViaToast(item.text);
-    setCopied(ok);
-  };
-
-  const editable = isEditableMessage(item) && !busy && !editing;
-  const streaming = item.live && item.streaming !== false;
-
-  // —— 用户消息：右对齐气泡（设计稿 user-message）——
-  if (item.author === 'user') {
-    return (
-      <>
-        <article className="h24-user-message">
-        {editing ? (
-          <div className="h24-edit-form">
-            <textarea
-              className="h24-edit-input"
-              value={editDraft}
-              rows={3}
-              aria-label="编辑消息"
-              spellCheck={false}
-              onChange={(event) => setEditDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  onCancelEdit();
-                }
-              }}
-            />
-            <div className="h24-edit-footer">
-              <span className="h24-edit-note">重新发送会把这条之后的内容撤掉，从这条重新开始。</span>
-              <div className="h24-edit-actions">
-                <button type="button" className="h24-edit-cancel" onClick={onCancelEdit}>
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="h24-resend-btn"
-                  disabled={!editDraft.trim()}
-                  onClick={() => onEditResend(item.id, editDraft)}
-                >
-                  重新发送
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {item.attachments?.length ? (
-              <div className="h24-msg-attachments h-attachment-sent-tray" aria-label="本条消息的附件">
-                {item.attachments.map((attachment) => <AttachmentCard
-                  key={attachment.attachmentId}
-                  attachment={attachment}
-                  sent
-                  onOpen={onPreviewAttachment ? () => onPreviewAttachment(attachment.conversationId, attachment.attachmentId) : undefined}
-                />)}
-              </div>
-            ) : null}
-            {/* 063：行内标签（技能＋四类引用）随正文原位回显；旧三类引用芯片在下方。 */}
-            {item.text.trim() ? <p className="h24-user-bubble">
-              {segmentTaggedText(item.text, { skills: item.skills ?? [], references: item.references ?? [] }).map((segment, index) =>
-                segment.type === 'text' ? (
-                  <span key={index}>{segment.text}</span>
-                ) : (
-                  <span
-                    key={index}
-                    className="composer-inline-tag h63-msg-tag"
-                    data-kind={segment.type === 'skill' ? 'skill' : segment.reference.kind}
-                    title={segment.type === 'skill'
-                      ? `技能 · ${segment.skill.name}${segment.skill.source === 'project' ? ' · 项目技能' : ' · 技能库'}`
-                      : segment.reference.subtitle}
-                  >
-                    {segment.text}
-                  </span>
-                ),
-              )}
-            </p> : null}
-            {/* 028 R-04：历史回看能分清本条消息实际携带的附件（点击进预览宿主）。 */}
-            {item.references?.length ? (
-              <div className="h24-msg-attachments" aria-label="本条消息的引用">
-                {item.references.map((reference) => (
-                  <span key={reference.key} className="h24-msg-attachment" title={`${reference.name} · ${reference.subtitle}`}>
-                    <Link2 className="size-3" aria-hidden="true" />
-                    <span>{reference.name}</span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="h24-user-actions">
-              {/* 037 细节：复制 / 编辑统一为 24px 图标钮（悬停出现，title 提示）；已复制换勾。 */}
-              <button
-                type="button"
-                className="h24-msg-copy"
-                aria-label={copied ? '已复制' : '复制这条消息'}
-                title={copied ? '已复制' : '复制'}
-                data-copied={copied ? 'true' : undefined}
-                onClick={() => void copyMessage()}
-              >
-                {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-              </button>
-              {item.queuedForSend ? <span className="h24-user-status is-pending">排队中</span> : null}
-              {item.editedAt ? <span className="h24-user-status">已编辑</span> : null}
-              {item.withdrawn ? <span className="h24-user-status">已撤回，未发送</span> : null}
-              {editable ? (
-                <button
-                  type="button"
-                  className="h24-edit-btn"
-                  aria-label="编辑这条消息"
-                  title="编辑"
-                  onClick={() => onStartEdit(item.id)}
-                >
-                  <Pencil aria-hidden="true" />
-                </button>
-              ) : null}
-            </div>
-          </>
-        )}
-      </article>
-      {copyToastNode}
-    </>
-    );
-  }
-
-  // —— Hemi 回复：开放式正文（026 R-02：无头像/名标行；连续回复天然连排）。
-  // 026 R-09：带 taskId 的阶段简报/终态交代挂轻量同任务标识，并发与回看不串台。
-  // 2026-10-07 会话审计：kind='error'＝回合失败留痕——正文是失败原因，弱化着色、
-  // 不带复制操作（不是 Hemi 说的话）。
-  if (item.kind === 'error') {
-    return (
-      <article
-        className="h24-hemi-message"
-        data-error="true"
-        data-continuation={continuation ? 'true' : undefined}
-        data-lead={lead ? 'true' : undefined}
-      >
-        <TurnErrorNotice message={item.text} onRetry={onRetry} busy={retryBusy} blocked={onRetry ? retryBlocked : undefined} />
-      </article>
-    );
-  }
-  return (
-    <>
-      <article
-        className="h24-hemi-message"
-        data-continuation={continuation ? 'true' : undefined}
-        data-lead={lead ? 'true' : undefined}
-      >
-      {item.taskId && showRelation ? <TaskRelation title={taskTitleOf?.(item.taskId)} /> : null}
-      {/* 029 R-02：被用户停止的未完成回复——增量原位保留，明确标注，不伪装成失败。 */}
-      {item.replyStatus === 'stopped' ? (
-        <span className="h24-reply-stopped" role="status">
-          未完成 · 已停止
-        </span>
-      ) : null}
-      {streaming && !item.parts?.length && !item.text ? <WaitingStatus /> : null}
-      {streaming && item.text && !item.parts?.some((part) => part.type !== 'text') ? <span className="h24-reply-status" role="status">回应中</span> : null}
-      {/* 056：有按序的段（思考／正文／工具组）就照接口返回的先后从上往下排；旧档走 048 形态。 */}
-      {item.parts?.length ? (
-        <TurnParts
-          parts={item.parts}
-          live={streaming}
-          renderText={renderText ?? ((text: string) => renderReplyText(text))}
-          renderTask={renderTask}
-          onOpenDeliverable={onOpenDeliverable}
-        />
-      ) : (
-        <>
-          {/* 048：思考折叠头（档案回看可展开；中断轮显示「思考已中断」）。 */}
-          {item.thinking ? (
-            <ThinkingBlock
-              state={item.thinking.interrupted ? 'interrupted' : 'done'}
-              text={item.thinking.text}
-              durationMs={item.thinking.durationMs}
-            />
-          ) : null}
-          {item.text.trim() ? (
-            <div className="chat-copy assistant-copy">{(renderText ?? renderReplyText)(item.text)}</div>
-          ) : null}
-        </>
-      )}
-      </article>
-      {copyToastNode}
-    </>
-  );
-}
-
-/**
- * 005 → 056：对话流里的任务条目。2026-10-15 用户裁决「遵守主流对话流样式」——任务一律
- * 显示成一行（Claude Code 的 Task 块，见 compact-delegation），不再出任务卡。
- * 055 及以前没有角色的旧任务：结果正文、成果与文件改动当年只在卡里交代（对话流的
- * task-result 气泡被 050 R-20 去重隐藏），回看时在这一行下方原样展示结果区。056 子 agent
- * 的报告由主 agent 验收转述，不在这里重复。活跃任务用实时快照，终态后用冻结快照。
- */
-function TaskTranscriptItem({
-  item,
-  taskSnaps,
-  nowTick,
-  onTaskAction,
-  onOpenProcess,
-  onOpenArtifact,
-  onOpenPreview,
-  onOpenReportPreview,
-}: {
-  item: TranscriptItem;
-  taskSnaps?: Record<string, TaskStateSnapshot>;
-  nowTick?: number;
-  onTaskAction: (action: TaskActionName, payload?: { choice?: TaskPermissionChoice; taskId?: string; taskKey?: string }) => void;
-  /** 025 v3：打开/收起该任务的过程抽屉。 */
-  onOpenProcess?: (snap: TaskStateSnapshot) => void;
-  onOpenArtifact?: (taskId: string, artifactId: string, intent: 'open' | 'reveal') => void;
-  /** 026 R-05：可预览文件的应用内阅读。 */
-  onOpenPreview?: (taskId: string, artifactId: string) => void;
-  /** 027 R-04：结果正文进右侧阅读区。 */
-  onOpenReportPreview?: (snap: TaskStateSnapshot) => void;
-}) {
-  // 卡身份：taskId 优先（2026-09-23 唯一标识收敛）。冻结项（taskFrozen）的
-  // 快照表里可能已被活卡覆盖——冻结项一律用自己内嵌的 taskSnap（并入瞬间状态）。
-  const snapKey =
-    item.taskId ?? item.taskSnap?.taskId ?? item.taskKey ?? item.taskSnap?.key ?? (item.taskSeq != null ? `s${item.taskSeq}` : null);
-  const snap = item.taskFrozen
-    ? item.taskSnap ?? undefined
-    : (snapKey ? taskSnaps?.[snapKey] : undefined) ?? item.taskSnap ?? undefined;
-  if (!snap) return null;
-  const legacyResult = !snap.agent && snap.phase === 'terminal' && !snap.verifying
-    && Boolean(snap.resultText?.trim() || snap.artifacts?.length || snap.fileChanges?.files?.length);
-  const taskId = snap.taskId ?? '';
-  return (
-    <>
-      <CompactDelegation
-        snap={snap}
-        nowTick={nowTick}
-        onAction={item.taskFrozen ? undefined : onTaskAction}
-        onOpenProcess={onOpenProcess ? () => onOpenProcess(snap) : undefined}
-      />
-      {legacyResult ? (
-        <div className="h56-delegation-result">
-          <TaskResultBlock
-            snap={snap}
-            frozen={Boolean(item.taskFrozen)}
-            onOpenBodyWide={onOpenReportPreview ? () => onOpenReportPreview(snap) : undefined}
-            onOpenArtifact={onOpenArtifact ? (artifactId, intent) => onOpenArtifact(taskId, artifactId, intent) : undefined}
-            onOpenPreview={onOpenPreview ? (artifactId) => onOpenPreview(taskId, artifactId) : undefined}
-          />
-        </div>
-      ) : null}
-    </>
-  );
 }

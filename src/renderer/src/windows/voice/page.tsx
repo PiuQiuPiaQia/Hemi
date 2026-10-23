@@ -75,6 +75,7 @@ import { VoiceScreen } from '@/windows/voice/voice-screen';
 import { useConversationFlow } from '@/windows/voice/lib/use-conversation-flow';
 import { deriveModelBusy } from '@/windows/voice/lib/turn-busy';
 import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
+import {createDraftPersistence, projectConversationQueue, queueStoppedIdle as isQueueStoppedIdle} from '@hemi/conversation-flow/core';
 import { createFlowTimelineProjector } from '@/windows/voice/lib/flow-timeline-view';
 import { RemotePasswordDialog } from '@/windows/voice/remote-password-dialog';
 import { MemoryNotices, memoryScopeLabel, useMemoryNotices } from '@/windows/voice/memory-notice';
@@ -361,64 +362,27 @@ export default function Home() {
   // 未发送内容不因重启丢。输入防抖落盘；切换和卸载从草稿模型同步取快照冲刷，
   // 不依赖 React effect 更新后的 ref，队列编辑层也遵循同一卸载生命周期。
   const DRAFT_NEW_KEY = 'draft-new';
-  const draftKeyRef = useRef(DRAFT_NEW_KEY);
-  const draftRevisionRef = useRef(0);
   const draftLoadRef = useRef<Promise<void>>(Promise.resolve());
+  const draftPersistenceRef = useRef<ReturnType<typeof createDraftPersistence> | null>(null);
   useEffect(() => {
-    draftRevisionRef.current += 1;
-    const key = draftKeyRef.current;
-    const revision = draftRevisionRef.current;
-    // 063：标签身份（技能＋行内引用）与正文同批落盘，重启共同恢复。
-    const snapshot = composerDraft.getPersistentSnapshot();
-    const timer = window.setTimeout(() => {
-      void window.hemiVoice?.saveDraft({
-        conversationId: key, revision, text: snapshot.text,
-        skills: snapshot.skills ?? [], references: snapshot.references ?? [],
-      });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [draftState]);
-  const flushDraft = useCallback(() => {
-    draftRevisionRef.current += 1;
-    const snapshot = composerDraft.getPersistentSnapshot();
-    void window.hemiVoice?.saveDraft({
-      conversationId: draftKeyRef.current,
-      revision: draftRevisionRef.current,
-      text: snapshot.text,
-      skills: snapshot.skills ?? [],
-      references: snapshot.references ?? [],
+    const persistence = createDraftPersistence({
+      draft: composerDraft, environmentId: 'desktop-local', persistAttachments: false,
+      storage: {
+        load: ({conversationId}) => window.hemiVoice.getDraft(conversationId),
+        save: ({conversationId}, value) => window.hemiVoice.saveDraft({conversationId, ...value}),
+      },
+      onError: message => flashAttachError(message),
     });
+    draftPersistenceRef.current = persistence;
+    return () => { void persistence.dispose(); draftPersistenceRef.current = null; };
   }, [composerDraft]);
+  const flushDraft = useCallback(() => { void draftPersistenceRef.current?.flush(); }, []);
   const loadDraftFor = useCallback((key: string) => {
-    draftKeyRef.current = key;
-    const version = composerDraft.getTextRevision();
-    draftLoadRef.current = window.hemiVoice
-      ?.getDraft(key)
-      .then((stored) => {
-        if (draftKeyRef.current !== key || composerDraft.getTextRevision() !== version) return;
-        draftRevisionRef.current = Math.max(draftRevisionRef.current, stored?.revision ?? 0) + 1;
-        setDraft(stored?.text ?? '');
-        setDraftReferences(stored?.references ?? []);
-        setDraftSkills(stored?.skills ?? []);
-      })
-      .catch(() => {}) ?? Promise.resolve();
-  }, [composerDraft, setDraft, setDraftReferences, setDraftSkills]);
-  /**
-   * 新建对话的槽丢弃（2026-10-06 用户裁决）：不再恢复旧稿，槽清空。清空前
-   * 先读存量、把全局 revision 顶过该槽已存版本——计数器随重启归零，低于存量
-   * 的空存会被主进程单调守卫当迟到写入拒掉，槽清不干净。
-   */
+    draftLoadRef.current = draftPersistenceRef.current?.activate(key) ?? Promise.resolve();
+  }, []);
   const clearDraftFor = useCallback((key: string) => {
-    draftKeyRef.current = key;
-    setDraft('');
-    setDraftReferences([]);
-    setDraftSkills([]);
-    void window.hemiVoice?.getDraft(key).then((stored) => {
-      if (draftKeyRef.current !== key) return;
-      draftRevisionRef.current = Math.max(draftRevisionRef.current, stored?.revision ?? 0) + 1;
-      void window.hemiVoice?.saveDraft({ conversationId: key, revision: draftRevisionRef.current, text: composerDraft.getSnapshot().text });
-    }).catch(() => {});
-  }, [composerDraft, setDraft, setDraftReferences, setDraftSkills]);
+    draftLoadRef.current = draftPersistenceRef.current?.activate(key, 'clear') ?? Promise.resolve();
+  }, []);
   const leaveQueueEdit = useCallback((cancel = true) => {
     const editing = queueEditRef.current;
     if (!editing) return;
@@ -1242,33 +1206,8 @@ export default function Home() {
   //（060 技术方案「必须退役或改写的规则」：未派发消息先写 transcripts／history、
   //  再由乐观 ID 隐藏队列）。
 
-  const queueState: TurnQueueState = useMemo(() => ({
-    paused: flowSnapshot?.queuePaused ?? false,
-    // 060 R-04：待发送区＝未派发普通输入的唯一展示位（pending 与待核对全量显示；
-    // 派发提交时按同一 inputId 转正进正式流，见投影分支）。
-    items: (flowSnapshot?.pending ?? [])
-      .filter((input) => input.state === 'pending' || input.state === 'needs-review' || input.state === 'editing')
-      .map((input) => ({
-        queueItemId: input.inputId,
-        readOnly:Boolean(input.workflow),
-        conversationId: conversationId ?? '',
-        text: input.text,
-        revision: (input.editRevision ?? 0) + 1,
-        dispatchState: input.state === 'editing' ? 'editing' as const : input.promoteAt != null ? 'promoting' as const : 'pending' as const,
-        error: input.state === 'needs-review' ? '投递结果不明，待核对' : '',
-        attachmentIds: input.attachmentIds ?? [],
-        references: (input as { references?: MessageReferenceView[] }).references ?? [],
-        skills: (input as { skills?: SkillSelectionView[] }).skills ?? [],
-        inputSource: input.inputSource ?? 'text',
-        createdAt: input.createdAt ?? 0,
-      })),
-  }), [flowSnapshot, conversationId]);
-
-  // 2026-10-18 用户裁决：手动停止后没有新任务（收口且队列为空）＝输入框上方
-  // 只放一个「继续任务」按钮，不出「待发送消息（0）」空托盘。
-  const queueStoppedIdle = (flowSnapshot?.phase ?? 'idle') === 'idle'
-    && (flowSnapshot?.queuePaused ?? false)
-    && (flowSnapshot?.pending ?? []).length === 0;
+  const queueState: TurnQueueState = useMemo(() => projectConversationQueue(flowSnapshot), [flowSnapshot]);
+  const queueStoppedIdle = isQueueStoppedIdle(flowSnapshot);
 
   const handleEditQueued = useCallback(async (inputId: string) => {
     const cid = conversationIdRef.current;
@@ -1907,7 +1846,7 @@ export default function Home() {
     if (!conversationIdRef.current) {
       conversationIdRef.current = createConversationId();
       setConversationId(conversationIdRef.current);
-      draftKeyRef.current = conversationIdRef.current;
+      draftLoadRef.current = draftPersistenceRef.current?.activate(conversationIdRef.current, 'preserve') ?? Promise.resolve();
       const title = cleanTitleSource(messages.at(-1)?.content ?? '').trim();
       if (title) setConversationTitle(title.slice(0, 24));
     }
@@ -2827,6 +2766,8 @@ export default function Home() {
     navigationTargetRef.current = null;
     setWorkflowStudioOpen(false); // 059：切回对话页
     flushDraft(); // 030：切走前冲刷已存会话自己的草稿（随会话保留）。
+    // Transfer draft ownership before UI cleanup so empty resets cannot overwrite the old conversation.
+    clearDraftFor(DRAFT_NEW_KEY);
     handleClearTranscripts();
     conversationIdRef.current = null;
     setConversationId(null);
@@ -2839,7 +2780,6 @@ export default function Home() {
     applyConversationProfile(lastUsedProfileForNewConversation());
     applyConversationWorkspace('default'); // 033 R-01：每次新建对话都从默认工作区开始
     void resetThinkingLevelForNewConversation(); // 2026-10-07：新会话思考档重置回「自动」
-    clearDraftFor(DRAFT_NEW_KEY); // 2026-10-06：新建＝丢弃新对话草稿槽
     setComposerFocusToken((token) => token + 1);
   }, [applyConversationProfile, applyConversationWorkspace, clearDraftFor, flushDraft, handleClearTranscripts, lastUsedProfileForNewConversation, resetThinkingLevelForNewConversation]);
 
@@ -2872,7 +2812,7 @@ export default function Home() {
         setTurnError('');
         applyConversationSession(session);
         navigationTargetRef.current = null;
-        if (switching) setDraft('');
+        // SDK activation clears before hydration; a later clear would invalidate the restored draft.
         logChain(`载入会话「${session.title}」（${session.turns.length} 条）`);
       } catch (error) {
         // 021 实录：失败只弹提示不留日志，排查时彻底失明——失败必须入日志。
@@ -2895,6 +2835,7 @@ export default function Home() {
    */
   const handleConversationRemoved = useCallback((id: string) => {
     if (conversationIdRef.current !== id) return;
+    draftLoadRef.current = draftPersistenceRef.current?.activate(DRAFT_NEW_KEY, 'clear', {discardPrevious: true}) ?? Promise.resolve();
     navigationSeqRef.current += 1;
     navigationTargetRef.current = null;
     invalidateTurn();

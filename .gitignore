@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -51,3 +52,11 @@ next-env.d.ts
 # 视觉回归 skill 的工作目录（快照、对比图、配置）
 /.visual/
 .verify-059/
+
+# Built conversation SDK and standalone example
+/packages/conversation-flow/dist/
+/examples/conversation-flow/dist/
+
+# Mobile build outputs and generated npm notices
+/apps/mobile/dist/
+/apps/mobile/public/licenses/

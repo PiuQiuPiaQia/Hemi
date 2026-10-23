@@ -48,6 +48,8 @@ A smoke test without model configuration checks startup and configuration errors
 
 ## Source layout
 
+- `apps/mobile/`: React + Capacitor mobile app; `npm run dev:mobile` starts its browser preview. See the [mobile setup](../apps/mobile/README.md) and [monorepo boundaries](technical/mobile-monorepo.md).
+- `packages/conversation-flow/`: shared conversation UI consumed by desktop and mobile.
 - `src/main/`: Electron services, IPC, agent runtime and workflows.
 - `src/preload/`: renderer bridge; `src/shared/`: shared channels and contracts.
 - `src/renderer/`: React UI and styles; `extensions/chrome-extension/`: browser extension.

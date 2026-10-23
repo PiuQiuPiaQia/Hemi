@@ -1,0 +1,37 @@
+{
+  "component": "Material Icon Theme",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2025 Material Extensions",
+  "sourceRepository": "https://github.com/zai-org/ZCode.git",
+  "sourceCommit": "aac4755666d09fdcd70272fcf063c077a639015f",
+  "originalIconRevision": "Not recorded by ZCode",
+  "licenseSource": "https://raw.githubusercontent.com/material-extensions/vscode-material-icon-theme/cb1dfb6d9cb73b15681a93939983d75dbba7bf5b/LICENSE",
+  "licensePath": "src/renderer/public/licenses/Material-Icon-Theme-MIT.txt",
+  "files": [
+    {
+      "source": "packages/desktop/src/renderer/public/material-icons/pdf.svg",
+      "path": "src/renderer/src/assets/file-types/pdf.svg",
+      "sha256": "c14c66a3914b894da40778a6dcd00f0daa134426521aaddbd8ccea86ba4f5ffc"
+    },
+    {
+      "source": "packages/desktop/src/renderer/public/material-icons/word.svg",
+      "path": "src/renderer/src/assets/file-types/word.svg",
+      "sha256": "9f12a8d98f292c34f73181c49ce79dd378decfb82f760cd9c4aa9900e2d7b2d6"
+    },
+    {
+      "source": "packages/desktop/src/renderer/public/material-icons/table.svg",
+      "path": "src/renderer/src/assets/file-types/table.svg",
+      "sha256": "1714898c0d538648edb0f8dd041d97435aa8cbac078c5897f9fa8103b36f029a"
+    },
+    {
+      "source": "packages/desktop/src/renderer/public/material-icons/powerpoint.svg",
+      "path": "src/renderer/src/assets/file-types/powerpoint.svg",
+      "sha256": "40468deea73e07067459c0c3b0bbef0697e93afbc4533e961d1b441f5294871e"
+    },
+    {
+      "source": "packages/desktop/src/renderer/public/material-icons/image.svg",
+      "path": "src/renderer/src/assets/file-types/image.svg",
+      "sha256": "838e1953a3a2ebf5c6a06b662892ba17e1c605c4379a77c61737639e51fb4f0a"
+    }
+  ]
+}

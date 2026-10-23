@@ -29,7 +29,7 @@ function collectTestFiles(dir, out = []) {
   return out;
 }
 
-const roots = ['src/main', 'src/renderer/src', 'src/shared'];
+const roots = ['src/main', 'src/renderer/src', 'src/shared', 'packages/conversation-flow/test'];
 const files = roots.flatMap((relative) => collectTestFiles(path.join(root, relative)));
 if (!files.length) {
   console.error('[test] 没有找到任何 *.test.mjs（检查 src/main 与 src/renderer/src）');

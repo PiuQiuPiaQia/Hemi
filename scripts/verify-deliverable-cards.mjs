@@ -127,7 +127,7 @@ async function start() {
   for (const key of ['HEMI_LLM_API_KEY', 'HEMI_LLM_BASE_URL', 'HEMI_LLM_MODEL', 'HEMI_LLM_THINKING_LEVEL']) delete env[key];
   app = await _electron.launch({ executablePath: electronPath, args: ['.'], env });
   await wait(() => { page = app.windows().find(p => /^(http|file):/.test(p.url()) && !new URL(p.url()).searchParams.has('mode')); return !!page; }, 'main window');
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(Number(process.env.HEMI_UI_TIMEOUT_MS ?? 15000));
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
   await app.evaluate(({ shell }) => {
@@ -194,7 +194,7 @@ try {
       apiKey: 'TEST_ONLY', models: [{ id: 'main', model: 'delivery-test', thinkingLevel: 'default' }] });
     await window.hemiVoice.saveRoleModel({ main: 'delivery/main' });
   }, baseUrl);
-  await page.reload(); await input().waitFor();
+  await page.reload({waitUntil:'domcontentloaded'}); await input().waitFor();
   await page.getByRole('button', { name: '新建对话', exact: true }).click();
   fs.rmSync(workspace, { recursive: true, force: true }); // First-use open must create its managed default directory.
   await page.getByRole('button', { name: '选择打开方式', exact: true }).click();

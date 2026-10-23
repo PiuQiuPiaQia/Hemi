@@ -1,0 +1,21 @@
+[data-hemi-conversation-flow].hcf-root { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; position:relative; --hcf-touch-target:44px; --hcf-input-size:16px; font-family:var(--font); color:var(--ink); font-size:var(--fs-15); -webkit-font-smoothing:antialiased; }
+[data-hemi-conversation-flow][data-hcf-part='true'] { display:contents; }
+[data-hemi-conversation-flow], [data-hemi-conversation-flow] *, [data-hemi-conversation-flow] *::before, [data-hemi-conversation-flow] *::after { box-sizing:border-box; }
+[data-hemi-conversation-flow] .hcf-portals { display:contents; }
+[data-hemi-conversation-flow] .hcf-resource-more { display:none; }
+@media (hover:none), (pointer:coarse) {
+  [data-hemi-conversation-flow] .h24-user-actions, [data-hemi-conversation-flow] .h24-reply-actions { opacity:1; visibility:visible; }
+  [data-hemi-conversation-flow] .h24-msg-copy, [data-hemi-conversation-flow] .h24-edit-btn, [data-hemi-conversation-flow] .h56-delegation-stop, [data-hemi-conversation-flow] .hcf-resource-more { min-width:var(--hcf-touch-target); min-height:var(--hcf-touch-target); }
+  [data-hemi-conversation-flow] .hcf-resource-more { display:inline-flex; align-items:center; justify-content:center; }
+  [data-hemi-conversation-flow] input, [data-hemi-conversation-flow] textarea, [data-hemi-conversation-flow] select { font-size:var(--hcf-input-size); }
+}
+@media (prefers-reduced-motion:reduce) { [data-hemi-conversation-flow] *, [data-hemi-conversation-flow] *::before, [data-hemi-conversation-flow] *::after { scroll-behavior:auto !important; animation-duration:0s !important; transition-duration:0s !important; } }
+
+[data-hemi-conversation-flow][data-hcf-active='false'] *, [data-hemi-conversation-flow][data-hcf-active='false'] *::before, [data-hemi-conversation-flow][data-hcf-active='false'] *::after { animation-play-state:paused !important; }
+
+@media (hover:none), (pointer:coarse) {
+  [data-hemi-conversation-flow] .h24-queue-item { grid-template-columns:var(--hcf-touch-target) minmax(0,1fr); }
+  [data-hemi-conversation-flow] .h24-queue-item-actions { grid-column:2; justify-content:flex-end; flex-wrap:wrap; }
+  [data-hemi-conversation-flow] .h24-queue-tool, [data-hemi-conversation-flow] .h24-queue-run, [data-hemi-conversation-flow] .h24-queue-head, [data-hemi-conversation-flow] .h24-queue-resume { min-width:var(--hcf-touch-target); min-height:var(--hcf-touch-target); }
+  [data-hemi-conversation-flow] .h24-queue-text { font-size:var(--fs-13); white-space:normal; overflow-wrap:anywhere; }
+}

@@ -2432,7 +2432,7 @@ export type HemiVoiceBridge = {
   workflowAbandon: (payload:{invocationId:string;conversationId?:string}) => Promise<unknown>;
   workflowContinue: (payload:{invocationId:string;requestId:string;confirmed?:boolean;verifiedOutputs?:Record<string,unknown>;resumeMessage?:string}) => Promise<Record<string,unknown>>;
   workflowSubmitInteraction: (payload:{invocationId:string;interactionId:string;requestId:string;actionId:string;values?:Record<string,unknown>;expectedRevision?:number}) => Promise<Record<string,unknown>>;
-  workflowSaveInteractionDraft: (payload:{invocationId:string;interactionId:string;values:Record<string,unknown>}) => Promise<{ok:boolean;revision:number}>;
+  workflowSaveInteractionDraft: (payload:{invocationId:string;interactionId:string;values:Record<string,unknown>;expectedRevision?:number}) => Promise<{ok:true;revision:number}|{ok:false;code:string;message:string}>;
   workflowStop: (workflowRunId: string) => Promise<{ stopped: boolean; reason?: string }>;
   workflowGetInvocation: (invocationId: string) => Promise<Record<string, unknown> | null>;
   /** 057 S3-2d：元数据轻保存（profile/workspace；不动宿主 turns）。 */
