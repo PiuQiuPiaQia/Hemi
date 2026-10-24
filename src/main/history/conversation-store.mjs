@@ -530,6 +530,10 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     const usageLedger = existing && !existing.corrupt && Array.isArray(existing.usageLedger)
       ? sanitizeUsageRecords(existing.usageLedger)
       : [];
+    // 上下文容量快照同款：主进程轮末落档，渲染层保存不携带、原样保留。
+    const contextUsage = existing && !existing.corrupt && existing.contextUsage
+      ? existing.contextUsage
+      : undefined;
     // 056：主 agent 的 Pi 会话条目（header＋entries）同样主进程专属——渲染层保存
     // 不携带，原样保留；读写走 saveAgentSession（专字段更新，不动 updatedAt）。
     // 055 的 brainSession 字段随脑手分层退役（未发布不留兼容，下次保存即丢弃）。
@@ -572,6 +576,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
       turns: clean,
       ...(cutKeys.length ? { cutKeys } : {}),
       ...(usageLedger.length ? { usageLedger } : {}),
+      ...(contextUsage ? { contextUsage } : {}),
       ...(agentSession ? { agentSession } : {}),
       ...(existing?.runtimeDiagnostics?.length ? { runtimeDiagnostics: existing.runtimeDiagnostics } : {}),
       // 未读由宿主收口产生；渲染层防抖保存不能抹除或伪造已读信息。
@@ -773,6 +778,40 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
       writeFile(next);
     } catch (error) {
       log?.warn(`[conversation] 用量记录写入失败（${sessionId}）：${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * 上下文容量快照落档（轮末随用量一起；不动 updatedAt）。打开旧会话时没有
+   * 在途 Pi 会话，读这份上次真实读数兜底——档案剪裁后数字会偏高，下一轮即刷新。
+   */
+  function saveContextUsage(id, snapshot) {
+    const sessionId = String(id ?? '');
+    const existing = readSessionFile(sessionId);
+    const contextWindow = Number(snapshot?.contextWindow);
+    if (!existing || existing.corrupt || !(contextWindow > 0)) return false;
+    const tokens = snapshot?.tokens == null ? null : Number(snapshot.tokens);
+    const clean = {
+      tokens: tokens != null && Number.isFinite(tokens) ? Math.max(0, Math.round(tokens)) : null,
+      contextWindow: Math.round(contextWindow),
+      percent: tokens == null ? null : Math.round((tokens / contextWindow) * 1000) / 10,
+      categories: Array.isArray(snapshot?.categories)
+        ? snapshot.categories.filter((category) => category && typeof category.key === 'string' && typeof category.label === 'string')
+            .map((category) => ({
+              key: category.key,
+              label: category.label,
+              tokens: Math.max(0, Math.round(Number(category.tokens) || 0)),
+              percent: Math.round((Number(category.percent) || 0) * 10) / 10,
+            }))
+        : [],
+      at: Date.now(),
+    };
+    try {
+      writeFile({ ...existing, contextUsage: clean });
+    } catch (error) {
+      log?.warn(`[conversation] 上下文容量落档失败（${sessionId}）：${error.message}`);
       return false;
     }
     return true;
@@ -984,5 +1023,6 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     autoTitleCandidate,
     setAutoTitle,
     appendUsageRecord,
+    saveContextUsage,
   };
 }

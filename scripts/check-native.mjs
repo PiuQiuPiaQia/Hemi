@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 原生桌面口径门：src/renderer/src/native.css 是焦点环门控、文字选中、拖拽、
+// 原生桌面口径门：packages/ui/src/styles/native.css 是焦点环门控、文字选中、拖拽、
 // 光标规则的唯一来源，组件样式不得另起炉灶——
 //   1. 焦点环：选择器项含 :focus-visible 且声明 outline / box-shadow 的，该项必须挂
 //      `html.kb-nav` 前缀（只在键盘巡航时画环）；文本输入（input/rename/textarea）
@@ -9,7 +9,7 @@
 //      写在 native.css（内容区可选用 .selectable 类）。
 // 用法：node scripts/check-native.mjs（有违规时退出码 1）；
 // src/renderer/src/native-gate.test.mjs 让 npm test 同样把关。
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,7 +55,7 @@ export function checkCss(file, source) {
 
     if (props.some((prop) => RING_PROPS.test(prop))) {
       const ungated = splitTopLevel(selector).filter(
-        (item) => item.includes(':focus-visible') && !item.includes('kb-nav') && !TEXT_TARGET.test(item),
+        (item) => item.includes(':focus-visible') && !item.includes('kb-nav') && !item.includes('data-hcf-keyboard') && !TEXT_TARGET.test(item),
       );
       if (ungated.length) violations.push(`焦点环未挂 html.kb-nav：${where}`);
     }
@@ -94,8 +94,11 @@ function walk(dir, out = []) {
 
 export function checkNative(rendererSrc) {
   const violations = [];
-  for (const full of walk(rendererSrc)) {
-    const file = path.relative(rendererSrc, full);
+  const project = path.resolve(rendererSrc, '../../..');
+  const shared = ['packages/ui/src', 'packages/conversation-flow/src'].map(root => path.join(project, root)).filter(existsSync);
+  for (const full of [rendererSrc, ...shared].flatMap(root => walk(root))) {
+    const file = full.startsWith(rendererSrc + path.sep) ? path.relative(rendererSrc, full) : path.relative(project, full);
+    if (full === path.join(project, 'packages/ui/src/styles/native.css')) continue;
     if (file === 'native.css' || file === 'fixtures-main.tsx') continue;
     if (file.endsWith('.css')) violations.push(...checkCss(file, readFileSync(full, 'utf8')));
     else if (file.endsWith('.tsx')) violations.push(...checkTsx(file, readFileSync(full, 'utf8')));

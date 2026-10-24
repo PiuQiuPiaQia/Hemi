@@ -14,7 +14,7 @@ export interface ConversationOperation {
 }
 export interface ConversationTransport {
   fetchSnapshot(scope: ConversationIdentity, context: { signal: AbortSignal }): Promise<FlowSnapshotView | null>;
-  subscribe?(scope: ConversationIdentity, receive: (change: FlowChangeView) => void, disconnected?: () => void): () => void;
+  subscribe?(scope: ConversationIdentity, receive: (change: FlowChangeView) => void, disconnected?: () => void, connected?: () => void): () => void;
   command(request: { scope: ConversationIdentity; requestId: string; generation: number | null; command: Record<string, unknown> }, context: { signal: AbortSignal }): Promise<FlowCommandResult>;
   /** Lookup is read-only. Missing/unknown receipts never authorize automatic replay. */
   lookupOperation?(scope: ConversationIdentity, requestId: string, context: { signal: AbortSignal }): Promise<FlowCommandResult | null>;
@@ -180,6 +180,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       } catch {
         setOperation(operation.id, { state: 'unknown', result: undefined });
         try { await persistOperations(); } catch { /* Journal already says sending. */ }
+        void replica.refresh().then(reconcileUnknown);
         return { ok: false, code: 'unknown', message: '操作结果待核对，恢复连接后会查询状态' };
       }
     })().finally(() => { inFlight.delete(operation.id); });
@@ -212,6 +213,11 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       update({ error: message }); return { ok: false, code: 'offline', message };
     }
     const frozen = structuredClone(command);
+    const current=state.snapshot;
+    if(frozen.type==='stop' && frozen.targetRunId===undefined)frozen.targetRunId=current?.activeRunId??null;
+    if(['beginEditInput','finishEditInput','updateInput'].includes(String(frozen.type)) && frozen.expectedEditRevision===undefined)
+      frozen.expectedEditRevision=current?.pending.find(item=>item.inputId===frozen.inputId)?.editRevision;
+    if(frozen.type==='reorderInput' && frozen.expectedInputIds===undefined)frozen.expectedInputIds=current?.pending.map(item=>item.inputId);
     if (['send', 'rewind'].includes(String(frozen.type))) {
       const input = frozen.input as Record<string, unknown> | undefined;
       frozen.input = { ...input, inputId: input?.inputId ?? makeId() };
@@ -229,9 +235,13 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (started || disposed) return;
     started = true;
     try {
-    if (transport.subscribe) subscriptions.push(transport.subscribe(identity, change => replica.receive(change), () => {
+    if (transport.subscribe) subscriptions.push(transport.subscribe(identity, change => {
+      if(suspended||disposed)return;
+      const before=state.snapshot;replica.receive(change);
+      if(state.snapshot!==before){update({connection:'online'});void reconcileUnknown().then(flushQueue);}
+    }, () => {
       update({ connection: 'offline' }); if (!suspended) void replica.refresh();
-    }));
+    }, () => { if(!suspended&&!disposed&&hydrated)void replica.refresh().then(reconcileUnknown); }));
     if (lifecycle) subscriptions.push(lifecycle.subscribe(event => {
       suspended = event === 'suspend' || event === 'offline';
       if (suspended) { replica.suspend(); update({ connection: 'offline' }); void persistence?.flush(); }

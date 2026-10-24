@@ -53,12 +53,6 @@ form:has([data-h37-model-view='provider'], [data-h37-model-view='add']) > .h37-p
   max-width: 100%;
 }
 
-html.kb-nav .h37m-pick:has(select:focus-visible) {
-  box-shadow:
-    inset 0 0 0 1px var(--g-500),
-    0 0 0 3px var(--g-100);
-}
-
 .h37m-pick[data-disabled='true'] {
   opacity: 0.55;
   cursor: default;
@@ -330,9 +324,6 @@ html.kb-nav .h37m-pick:has(select:focus-visible) {
 
 html.kb-nav .h37m-preset:focus-visible {
   outline: 0;
-  box-shadow:
-    var(--shadow-1),
-    var(--focus-ring);
 }
 
 .h37m-preset[aria-checked='true'] {
@@ -398,7 +389,6 @@ html.kb-nav .h37m-preset:focus-visible {
 
 html.kb-nav .h37m-chip-ghost:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h37m-other-input {

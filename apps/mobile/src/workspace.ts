@@ -4,8 +4,8 @@ import type {ConversationClient} from '@hemi/conversation-flow/core';
 import type {ConversationFlowHost, FlowActionHandler} from '@hemi/conversation-flow';
 
 export type MobileThinking = 'default' | 'off' | 'low' | 'medium' | 'high';
-export type MobileConversation = {id: string; title: string; pinned: boolean; model: string; thinking: MobileThinking; directory: string; running: boolean};
-export type MobileModel = {id: string; name: string; description?: string};
+export type MobileConversation = {id: string; title: string; pinned: boolean; model: string; thinking: MobileThinking; directory: string; running: boolean; status?: 'queued' | 'running' | 'waiting' | null; waitingResource?: boolean; blockedBy?: string[]};
+export type MobileModel = {source?: 'local' | 'cloud'; id: string; name: string; description?: string};
 export type MobileDirectory = {path: string; parent: string; home: string; folders: Array<{name: string; path: string}>; truncated?: boolean};
 export type MobileSessionPatch = Partial<Pick<MobileConversation, 'model' | 'thinking' | 'directory'>>;
 export type MobileWorkspaceSnapshot = {
@@ -34,6 +34,8 @@ export interface MobileWorkspace {
   getClient(conversationId: string): ConversationClient;
   select(conversationId: string): void;
   create(): Promise<string>;
+  rename?(id: string, title: string): Promise<void>;
+  remove?(id: string): Promise<void>;
   update(conversationId: string, patch: MobileSessionPatch): Promise<void>;
   listDirectories(path: string, signal?: AbortSignal): Promise<MobileDirectory>;
   attachmentsAvailable?: boolean;

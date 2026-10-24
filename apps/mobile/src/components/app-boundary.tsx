@@ -1,10 +1,6 @@
-import {Component, type ReactNode} from 'react';
+import type {ReactNode} from 'react';
+import {ErrorBoundary, ErrorState} from '@hemi/ui';
 
-export class AppBoundary extends Component<{children: ReactNode; onReturn(): void}, {failed: boolean}> {
-  state = {failed: false};
-  static getDerivedStateFromError() { return {failed: true}; }
-  render() {
-    if (!this.state.failed) return this.props.children;
-    return <section className="connect-scroll"><h1>暂时无法打开对话</h1><p className="body-copy">请返回连接页后重试。</p><button type="button" className="primary-button" onClick={() => {this.setState({failed: false}); this.props.onReturn();}}>返回连接页</button></section>;
-  }
+export function AppBoundary({children, onReturn}: {children: ReactNode; onReturn(): void}) {
+  return <ErrorBoundary fallback={(_error, reset) => <ErrorState as="section" className="connect-scroll" title="暂时无法打开对话" titleAs="h1" description="请返回连接页后重试。" descriptionClassName="body-copy" actions={[{label:'返回连接页',className:'primary-button',onAction:()=>{reset();onReturn();}}]}/>}>{children}</ErrorBoundary>;
 }

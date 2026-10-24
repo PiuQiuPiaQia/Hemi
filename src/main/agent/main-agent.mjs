@@ -16,6 +16,7 @@ import { createHemiSession, messageText } from './hemi-session.mjs';
 import { createAgentTools } from './agent-tools.mjs';
 import { projectMessages } from './gate/pi-memory-bridge-core.mjs';
 import { summarizeBudget } from '../agent-runtime/budget-summary.mjs';
+import { breakdownOfRequestParams, buildContextSnapshot } from './context-usage.mjs';
 
 /** 单次运行模型请求数安全上限（防死循环；正常回合用不到一成）。 */
 const MAX_RUN_REQUESTS = 60;
@@ -166,11 +167,17 @@ export function createMainAgent({
     };
   }
 
+  // 上下文容量的分类估算：每次请求暂存（总量另有 usage 锚点，见 context-usage.mjs）。
+  const requestBreakdown = { current: null };
+
   const agentExtension = {
     name: 'hemi-agent',
     factory: (pi) => {
       for (const tool of createAgentTools(toolDeps)) pi.registerTool(tool);
-      pi.on('before_provider_request', (event) => addHistoryBreakpoint(event.payload));
+      pi.on('before_provider_request', (event) => {
+        addHistoryBreakpoint(event.payload);
+        requestBreakdown.current = breakdownOfRequestParams(event.payload);
+      });
       pi.on('context_with_system', memoryProjectionHook);
     },
   };
@@ -245,6 +252,8 @@ export function createMainAgent({
     notify: (customType, content) => session.notify(customType, content),
     respondPermission: (id, outcome) => session.respondPermission(id, outcome),
     exportEntries: () => session.exportEntries(),
+    /** 上下文容量快照（轮末广播给渲染层；无会话/无模型返回 null）。 */
+    contextUsage: () => buildContextSnapshot({ usage: session.contextUsage?.(), breakdown: requestBreakdown.current }),
     recentUserTurns,
     isBusy: () => Boolean(summary) || session.isBusy(),
     dispose: () => { summary?.controller.abort(); session.dispose(); },

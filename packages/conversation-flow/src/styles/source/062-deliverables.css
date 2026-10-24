@@ -118,7 +118,6 @@
 .compact-shell .h62-deliverable-error > span { flex: 1; min-width: 0; }
 .compact-shell .h62-deliverable-error button { display: inline-flex; align-items: center; flex: none; gap: var(--sp-4); color: var(--g-700); }
 .compact-shell .h62-deliverable-error button svg { width: var(--sp-12); height: var(--sp-12); }
-html.kb-nav .compact-shell .h62-deliverable-open:focus-visible { outline: 2px solid var(--h24-composer-focus); outline-offset: -2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .compact-shell .h62-deliverable-card { transition: none; }

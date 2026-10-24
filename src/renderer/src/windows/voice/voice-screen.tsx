@@ -1,3 +1,4 @@
+import {EmptyState, Toast, useTransientMessage} from '@hemi/ui';
 import {useConversationBridge,useConversationEnvironment,useConversationEnvironmentId} from './lib/conversation-bridge';
 import { DesktopConversationFlow } from './conversation-flow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -80,6 +81,7 @@ import { SKILLS_TOPBAR_SLOT_ID, SkillMarket } from '@/windows/voice/skill-market
 import { WorkflowStudio } from '@/windows/voice/workflow-studio';
 import { TextComposer } from '@/windows/voice/text-composer';
 import { SessionUsage } from '@/windows/voice/session-usage-view';
+import { ContextCapacityChip, type ContextUsageSnapshot } from '@/windows/voice/context-capacity';
 import type { ConversationDeliverableView, UsageRecord } from '@shared/protocol';
 import { DeliverableContext } from './deliverable-card';
 import { ModelSelectorChip } from '@/windows/voice/model-selector';
@@ -134,6 +136,8 @@ type VoiceScreenProps = {
   /** 056：本回合按到达顺序的段（思考／正文／工具组），对话流从上往下照实展示。 */
   /** 048：会话用量账本（空数组＝还没完成过调用，入口隐藏）。 */
   usageRecords?: UsageRecord[];
+  /** 上下文容量快照（null＝无在途会话，环形指示器不出现）。 */
+  contextUsage?: ContextUsageSnapshot | null;
   /** 048：有对话或任务调用进行中（入口运行点）。 */
   usageRunning?: boolean;
   interimText: string;
@@ -299,6 +303,7 @@ type VoiceScreenProps = {
   workspaceCurrent?: WorkspaceBarValue | null;
   /** 033：目录失效 → 禁发（提示条在上下文栏，禁用在输入区）。 */
   workspaceSendBlocked?: boolean;
+  workspaceSendBlockedHint?: string;
   /** 033 fixtures 用：菜单初始展开（静态取证）。 */
   workspaceFixtureOpen?: boolean;
   /** 066 fixtures 用：顶栏打开方式菜单初始展开（静态取证）。 */
@@ -339,6 +344,7 @@ export function VoiceScreen({
   streamingThinking = null,
   usageRecords = [],
   usageRunning = false,
+  contextUsage = null,
   interimText,
   transcripts,
   conversationLoading = false,
@@ -435,6 +441,7 @@ export function VoiceScreen({
   workspaceState = null,
   workspaceCurrent = null,
   workspaceSendBlocked = false,
+  workspaceSendBlockedHint,
   workspaceFixtureOpen = false,
   topbarOpenFixtureOpen = false,
   onWorkspaceSelect,
@@ -646,12 +653,7 @@ export function VoiceScreen({
     [openPreviewTab, currentConversationId],
   );
   // Markdown 本地文件链接：宿主受控解析后进右侧；失败原位 toast 说明原因（R-02/AC-03）。
-  const [linkToast, setLinkToast] = useState<{ id: number; text: string } | null>(null);
-  useEffect(() => {
-    if (!linkToast) return;
-    const timer = window.setTimeout(() => setLinkToast(null), 3000);
-    return () => window.clearTimeout(timer);
-  }, [linkToast]);
+  const [linkToast, setLinkToast] = useTransientMessage<{id: number; text: string}>(3000);
   const openLocalFileLink = useCallback(
     (href: string) => {
       if (!currentConversationId) return;
@@ -974,7 +976,6 @@ export function VoiceScreen({
             />
 
             {/* 037：记忆提示（「记住了：…」/「已忘记：…」+ 查看 / 撤销），每条自带 role=status。 */}
-            {composerBanner}
             {typeof memoryNotice === 'string' && memoryNotice ? (
               <p className="h24-memory-notice" data-legacy="true" role="status">
                 {memoryNotice}
@@ -993,14 +994,11 @@ export function VoiceScreen({
                 P1：引导与输入框成组居中（上方滚动区与下方 spacer 平分余量），首条消息后
                 spacer 收起、输入框沉到底部。 */}
             {conversationEmpty ? (
-              <div className="h24-empty" aria-label="功能引导">
-                <span className="h37-orb" data-live="true" style={{ '--orb': '40px' } as CSSProperties} aria-hidden="true"><SkinWelcomeAvatar /></span>
-                <p className="h24-empty-greeting">今天想做什么？</p>
-                <p className="h24-empty-hint">{botEnvironment?'交给 Hemi 一件事，文件与命令在云服务器上运行。':'直接说，或交给 Hemi 一件事——语音、文字都行。'}</p>
-              </div>
+              <EmptyState className="h24-empty" aria-label="功能引导" illustration={<span className="h37-orb" data-live="true" style={{'--orb':'40px'} as CSSProperties} aria-hidden="true"><SkinWelcomeAvatar/></span>} title="今天想做什么？" titleAs="p" titleClassName="h24-empty-greeting" description={botEnvironment?'交给 Hemi 一件事，文件与命令在云服务器上运行。':'直接说，或交给 Hemi 一件事——语音、文字都行。'} descriptionClassName="h24-empty-hint"/>
             ) : null}
 
             <div className="h24-composer">
+              {composerBanner}
               {/* 033：工作区目录失效提示条的槽位（芯片本体在输入工具行，经 portal 渲染到这）。 */}
               <div className="h37-workspace-alert-slot" ref={setWorkspaceAlertSlot} />
               {/* 032：就近修复条（语音服务/麦克风）——问题在相关入口旁说明并直达设置。 */}
@@ -1076,9 +1074,9 @@ export function VoiceScreen({
                 focusToken={(composerFocusToken ?? 0) + suggestionFocus}
                 sendBlocked={workspaceSendBlocked}
                 sendBlockedHint={
-                  recoveryInProgress ? '停止重连后可发送' : workspaceCurrent?.kind === 'view' && workspaceCurrent.view.host
+                  workspaceSendBlockedHint ?? (recoveryInProgress ? '停止重连后可发送' : workspaceCurrent?.kind === 'view' && workspaceCurrent.view.host
                     ? '连不上服务器，恢复连接后才能发送'
-                    : undefined
+                    : undefined)
                 }
                 fresh={!transcripts.length}
                 attachments={draftAttachments}
@@ -1183,6 +1181,8 @@ export function VoiceScreen({
                       activeTaskIds={activeTaskIds}
                       onManage={onOpenAccessSettings ?? onOpenSettings}
                     />}
+                    {/* 上下文容量：主会话当前占用（usage 锚点），点开看分类与缓存命中。 */}
+                    <ContextCapacityChip snapshot={contextUsage} />
                   </>
                 }
               />
@@ -1249,10 +1249,7 @@ export function VoiceScreen({
           {/* 062：本地文件链接解析失败的反馈（无上下文弹窗，底部 toast 原位说明）。 */}
           {linkToast
             ? createPortal(
-              <div className="h37-toast h37-toast-card" role="status" key={linkToast.id} data-tone="err">
-                <CircleAlert aria-hidden="true" />
-                <span>{linkToast.text}</span>
-              </div>,
+              <Toast key={linkToast.id} tone="error" icon={<CircleAlert aria-hidden="true"/>}>{linkToast.text}</Toast>,
               document.body,
             )
             : null}

@@ -7,7 +7,38 @@ import {randomUUID} from 'node:crypto';
 import {createBotHost} from '../../../src/main/bot/host.mjs';
 import {moduleUnderTest} from '../../../packages/conversation-flow/test/compile.mjs';
 const {createBotWorkspace,BotCommandRejected}=await moduleUnderTest('../../../apps/mobile/test/workspace-test-api.ts');
-const wait=async(fn)=>{for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('workspace condition timed out');};
+const wait=async(fn)=>{for(let i=0;i<100;i++){if(await fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('workspace condition timed out');};
+test('mobile shows resource waits separately while conversations run independently and cancellation stays scoped',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-workspace-queue-')),live=new Map(),started=[],stopped=[];
+  let ask;
+  const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:path.join(root,'work'),validateModel:async()=>{},executorFactory:({onPermission})=>{ask=onPermission;return{
+    run(spec,apply){started.push(spec.conversationId);return new Promise(resolve=>live.set(spec.conversationId,{spec,apply,resolve}));},
+    async stop(id){stopped.push(id);live.get(id)?.resolve({stopped:true});},
+    async close(){for(const run of live.values())run.resolve({stopped:true});},
+  };}});
+  t.after(async()=>{await host.close();await fs.rm(root,{recursive:true,force:true});});
+  const {instanceId}=await host.request('handshake'),call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
+  await call('model.sync',{models:[{modelKey:'fixture/model',providerId:'fixture',name:'Fixture',model:'fixture',api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}]});
+  const first=(await call('session.create')).id,second=(await call('session.create')).id;
+  const send=id=>call('flow.command',{id,command:{type:'send',input:{inputId:randomUUID(),text:'queue fixture'}}});
+  await send(first);await wait(()=>live.has(first));await send(second);await wait(()=>live.has(second));
+  const waitOnResource=()=>{const {spec,apply}=live.get(second);apply({type:'run-activity',runId:spec.runId,generation:spec.generation,activity:{phase:'waiting-resource',jobs:[],resources:[{toolCallId:'resource-wait',tool:'bash',since:Date.now(),resource:{host:'local',scope:'file:/isolated/workspace',mode:'write'},blockers:[{owner:{conversationId:first}}]}]}});};
+  waitOnResource();
+  const values=new Map(),storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+  const workspace=createBotWorkspace({rpc:{request:(method,params)=>host.request(method,params)},target:{endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Queue Bot'},storage});
+  t.after(()=>workspace.dispose());
+  const item=id=>workspace.getSnapshot().items.find(item=>item.id===id);
+  await workspace.reconnect();assert.equal(item(first).status,'running');assert.equal(item(second).status,'queued');assert.equal(item(second).running,true);assert.equal(item(second).waitingResource,true);assert.deepEqual(item(second).blockedBy,[first]);
+  const runId=(await call('flow.snapshot',{id:second})).activeRunId;
+  await call('flow.command',{id:second,command:{type:'stop',targetRunId:runId}});await workspace.reconnect();
+  assert.equal(item(second).status,null);assert.deepEqual(stopped,[second],'cancelling a resource wait stops only its own execution');assert.deepEqual(started,[first,second]);
+  await send(second);await wait(()=>started.length===3);waitOnResource();ask(live.get(first).spec,{id:'queue-permission',title:'Approve fixture',options:['allow','deny']});
+  await workspace.reconnect();assert.equal(item(first).status,'waiting');assert.equal(item(second).status,'queued');
+  live.get(first).resolve({});await wait(async()=>!(await call('flow.snapshot',{id:first})).activeRunId);const running=live.get(second);running.apply({type:'run-activity',runId:running.spec.runId,generation:running.spec.generation,activity:{phase:'running',jobs:[],resources:[]}});await workspace.reconnect();
+  assert.equal(item(first).status,null);assert.equal(item(second).status,'running');assert.deepEqual(started,[first,second,second]);
+  live.get(second).resolve({});await wait(async()=>!(await call('flow.snapshot',{id:second})).activeRunId);
+  await workspace.reconnect();assert.equal(item(second).status,null);
+});
 test('real Bot workspace restores catalog, SDK draft and unknown send receipt across client disposal/reload',async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-workspace-'));
   const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:path.join(root,'work'),validateModel:async()=>{},executorFactory:()=>({run:async()=>({stopped:true}),stop:async()=>{},close:async()=>{}})});
@@ -16,8 +47,8 @@ test('real Bot workspace restores catalog, SDK draft and unknown send receipt ac
   const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
   await call('model.sync',{models:[{modelKey:'fixture/model',providerId:'fixture',name:'Actual model',model:'fixture',api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}]});
   const {id}=await call('session.create');
-  let drop=false,dropCreate=false,createdId;const calls=[];
-  const rpc={async request(method,params,{signal}){signal.throwIfAborted();calls.push(method);const result=await host.request(method,params);if(drop&&method==='flow.command'){drop=false;throw new Error('reply lost');}if(dropCreate&&method==='session.create'){dropCreate=false;createdId=result.id;throw Object.assign(new Error('create reply lost'),{code:'network'});}return result;}};
+  let drop=false,offline=false,dropCreate=false,createdId;const calls=[];
+  const rpc={async request(method,params,{signal}){signal.throwIfAborted();if(offline)throw new Error('Network offline');calls.push(method);const result=await host.request(method,params);if(drop&&method==='flow.command'){drop=false;offline=true;throw new Error('reply lost');}if(dropCreate&&method==='session.create'){dropCreate=false;createdId=result.id;throw Object.assign(new Error('create reply lost'),{code:'network'});}return result;}};
   const values=new Map(),storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
   const target={endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Own Bot'};
   let workspace=createBotWorkspace({rpc,target,storage});t.after(()=>workspace.dispose());
@@ -28,7 +59,7 @@ test('real Bot workspace restores catalog, SDK draft and unknown send receipt ac
   assert.equal(client.draft.getSnapshot().text,'切换时保留的草稿');
   drop=true;assert.equal((await client.sendDraft()).code,'unknown');
   client.draft.setText('后来写的内容');await client.flushDraft();release();await new Promise(r=>setTimeout(r,0));workspace.dispose();
-  workspace=createBotWorkspace({rpc,target,storage});await workspace.reconnect();client=workspace.getClient(id);release=client.retain();await wait(()=>client.getSnapshot().connection==='online');await client.refresh();
+  offline=false;workspace=createBotWorkspace({rpc,target,storage});await workspace.reconnect();client=workspace.getClient(id);release=client.retain();await wait(()=>client.getSnapshot().connection==='online');await client.refresh();
   assert.equal(client.draft.getSnapshot().text,'后来写的内容');
   assert.equal(calls.filter(method=>method==='flow.command').length,1);
   await wait(()=>client.getSnapshot().operations.some(item=>item.state==='accepted'));
@@ -75,4 +106,34 @@ test('mobile settings use real Host directories, survive reload and reach the ne
   const client=workspace.getClient(id),release=client.retain();t.after(release);await wait(()=>client.getSnapshot().connection==='online');
   client.draft.setText('用选择的模型、思考强度和目录执行');const sent=await client.sendDraft();assert.equal(sent.ok,true);await wait(()=>runs.length>0);
   assert.equal(runs[0].envelope.modelPolicySnapshot.modelKey,'fixture/two');assert.equal(runs[0].envelope.modelPolicySnapshot.thinkingLevel,'medium');assert.equal(runs[0].envelope.workspaceSnapshot.dir,project);
+});
+
+test('mobile uses Host automatic routing and source metadata without defining another model configuration',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-mobile-routing-')),runs=[];
+  const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:path.join(root,'work'),validateModel:async()=>{},executorFactory:()=>({run:async spec=>{runs.push(spec);return{};},stop:async()=>{},close:async()=>{}})});
+  t.after(async()=>{await host.close();await fs.rm(root,{recursive:true,force:true});});
+  const {instanceId}=await host.request('handshake');
+  const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
+  const models=['main','role','fallback'].map(name=>({modelKey:'local/'+name,providerId:'local',name:'本机',model:name,api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'FIXTURE_LOCAL_SECRET'}));
+  await call('model.sync',{models});
+  const roles={main:'local/main',explorer:'local/role',fallback:'local/fallback'};
+  await call('model.local-config',{keys:models.map(model=>model.modelKey),roleModels:roles});
+  await call('model.sync',{source:'manual',models:[{...models[0],modelKey:'cloud/model',providerId:'cloud',name:'云端',model:'cloud',apiKey:'FIXTURE_CLOUD_SECRET'}]});
+  const {id}=await call('session.create');
+  const values=new Map(),storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+  const methods=[];
+  const rpc={request(method,params){methods.push(method);return host.request(method,params);}};
+  const workspace=createBotWorkspace({rpc,target:{endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Routing Bot'},storage});
+  t.after(()=>workspace.dispose());await workspace.reconnect();
+  const snapshot=workspace.getSnapshot();
+  assert.equal(snapshot.models[0].id,'auto');assert.equal(snapshot.models[0].source,'local');
+  assert.equal(snapshot.models.find(model=>model.id==='cloud/model').source,'cloud');
+  assert.equal(snapshot.items.find(item=>item.id===id).model,'auto');
+  const client=workspace.getClient(id),release=client.retain();t.after(release);
+  await wait(()=>client.getSnapshot().connection==='online');
+  client.draft.setText('自动路由');await client.sendDraft();await wait(()=>runs.length===1);
+  assert.deepEqual(runs[0].envelope.modelPolicySnapshot.policy.main,['local/main','local/fallback']);
+  assert.deepEqual(runs[0].envelope.modelPolicySnapshot.policy.roles.explorer,['local/role','local/fallback']);
+  assert.ok(!JSON.stringify(snapshot).includes('_SECRET'));
+  assert.ok(!methods.some(method=>method.startsWith('model.')),'mobile never creates an independent routing configuration');
 });

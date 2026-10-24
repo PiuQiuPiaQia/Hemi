@@ -474,6 +474,9 @@ type Mutate = (
 type Controller = {
   directory: ModelProfilesDirectory;
   readOnly: boolean;
+  /** External hosts currently expose viewing and adding providers only. */
+  external?: boolean;
+  addDisabled?: boolean;
   saveState: SaveState;
   statuses: Record<string, ProviderStatus>;
   mutate: Mutate;
@@ -548,19 +551,26 @@ type ViewTransitionDocument = Document & {
 export function ModelProfilesSection({
   fixtureDirectory,
   onViewChange,
+  externalDirectory,
+  onAddProvider,
+  addDisabled,
 }: {
   fixtureDirectory?: ModelProfilesDirectory | null;
+  /** Cloud directory: never load, probe or mutate local model configuration. */
+  externalDirectory?: ModelProfilesDirectory;
+  onAddProvider?: () => void;
+  addDisabled?: boolean;
   /** 下钻/返回时通知外壳（详情、添加页需要隐藏外层「模型」页头与「其他」组）。 */
   onViewChange?: (kind: ModelView['kind']) => void;
 }) {
   const [initialFixture] = useState(() => fixtureState);
-  const [directory, setDirectory] = useState<ModelProfilesDirectory | null>(fixtureDirectory ?? null);
+  const [directory, setDirectory] = useState<ModelProfilesDirectory | null>(externalDirectory ?? fixtureDirectory ?? null);
   const directoryRef = useRef<ModelProfilesDirectory | null>(directory);
-  const [loading, setLoading] = useState(!fixtureDirectory);
+  const [loading, setLoading] = useState(!externalDirectory && !fixtureDirectory);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<ModelView>(initialFixture?.view ?? { kind: 'overview' });
   const [pane, setPane] = useState<{ key: number; anim: 'forward' | 'back' | null }>({ key: 0, anim: null });
-  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>(() => Object.fromEntries(statusCache));
+  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>(() => externalDirectory ? {} : Object.fromEntries(statusCache));
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -568,7 +578,8 @@ export function ModelProfilesSection({
   const savedTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const slowLoading = useDelayed(loading);
-  const readOnly = Boolean(directory?.corrupt);
+  const external = Boolean(externalDirectory);
+  const readOnly = external || Boolean(directory?.corrupt);
 
   const commit = useCallback((next: ModelProfilesDirectory | null) => {
     directoryRef.current = next;
@@ -577,13 +588,18 @@ export function ModelProfilesSection({
 
   const reload = useCallback(async () => {
     const bridge = window.hemiVoice;
-    if (fixtureDirectory || !bridge?.listModelProfiles) return directoryRef.current;
+    if (external || fixtureDirectory || !bridge?.listModelProfiles) return directoryRef.current;
     const next = await bridge.listModelProfiles();
     commit(next);
     return next;
-  }, [fixtureDirectory, commit]);
+  }, [external, fixtureDirectory, commit]);
 
   useEffect(() => {
+    if (externalDirectory) {
+      commit(externalDirectory);
+      setLoading(false);
+      return;
+    }
     if (fixtureDirectory) {
       commit(fixtureDirectory);
       setLoading(false);
@@ -613,7 +629,7 @@ export function ModelProfilesSection({
     return () => {
       cancelled = true;
     };
-  }, [fixtureDirectory, commit]);
+  }, [externalDirectory, fixtureDirectory, commit]);
 
   useEffect(
     () => () => {
@@ -629,6 +645,7 @@ export function ModelProfilesSection({
   /** 即时保存：串行队列（规避主进程并发保存竞态）＋乐观更新，失败回滚并提示。 */
   const mutate = useCallback<Mutate>(
     (optimistic, action) => {
+      if (external) return Promise.resolve('当前 Bot 尚不支持修改已有供应商。');
       const run = async (): Promise<string | null> => {
         const snapshot = directoryRef.current;
         if (!snapshot) return '模型配置还没读出来';
@@ -656,14 +673,15 @@ export function ModelProfilesSection({
       queue.current = result.catch(() => undefined);
       return result;
     },
-    [commit, reload],
+    [external, commit, reload],
   );
 
   const saveProvider = useCallback(async (input: SaveInput) => {
+    if (external) throw new Error('当前 Bot 尚不支持修改已有供应商。');
     const result = await window.hemiVoice.saveModelProfile(input);
     if (!result?.ok) throw new Error('主进程没有确认保存');
     return { providerId: result.providerId, modelKeys: result.modelKeys ?? [] };
-  }, []);
+  }, [external]);
 
   const setStatus = useCallback((providerId: string, status: ProviderStatus) => {
     statusCache.set(providerId, status);
@@ -674,7 +692,7 @@ export function ModelProfilesSection({
     async (provider: ModelProviderView) => {
       const first = provider.models[0];
       const bridge = window.hemiVoice;
-      if (!first || !bridge?.testModelProfile) return;
+      if (external || !first || !bridge?.testModelProfile) return;
       setStatus(provider.id, { state: 'testing' });
       try {
         const keyless = !provider.hasApiKey && isLocalEndpoint(provider.baseUrl);
@@ -687,18 +705,18 @@ export function ModelProfilesSection({
         setStatus(provider.id, { state: 'fail', error: errorText(error) });
       }
     },
-    [setStatus],
+    [external, setStatus],
   );
 
   // 进页面自动测一遍（每个供应商每个会话一次）：「连不上的会在这里直接标出来」。
   useEffect(() => {
-    if (!directory || fixtureDirectory || directory.corrupt) return;
+    if (external || !directory || fixtureDirectory || directory.corrupt) return;
     for (const provider of directory.providers) {
       if (provider.oauthProvider || statusCache.has(provider.id) || provider.models.length === 0) continue;
       if (!provider.hasApiKey && !isLocalEndpoint(provider.baseUrl)) continue;
       void testProvider(provider);
     }
-  }, [directory, fixtureDirectory, testProvider]);
+  }, [external, directory, fixtureDirectory, testProvider]);
 
   const navigate = useCallback((next: ModelView, direction: 'forward' | 'back') => {
     const doc = document as ViewTransitionDocument;
@@ -738,7 +756,7 @@ export function ModelProfilesSection({
   const activeView: ModelView['kind'] = view.kind === 'provider' && !provider ? 'overview' : view.kind;
 
   const controller: Controller | null = directory
-    ? { directory, readOnly, saveState, statuses, mutate, saveProvider, testProvider, setStatus, reload, back }
+    ? { directory, readOnly, external, addDisabled, saveState, statuses, mutate, saveProvider, testProvider, setStatus, reload, back }
     : null;
 
   let body: ReactNode;
@@ -778,7 +796,7 @@ export function ModelProfilesSection({
         ctl={controller}
         flashId={flashId}
         onOpen={(id) => navigate({ kind: 'provider', id }, 'forward')}
-        onAdd={() => navigate({ kind: 'add' }, 'forward')}
+        onAdd={external ? onAddProvider ?? (() => {}) : () => navigate({ kind: 'add' }, 'forward')}
       />
     );
   }
@@ -903,7 +921,7 @@ function OverviewView({
 
   return (
     <>
-      {directory.providers.length ? (
+      {!ctl.external && directory.providers.length ? (
         <section className="h37-section">
           <div className="h37-section-head">
             <h3>看图</h3>
@@ -944,14 +962,14 @@ function OverviewView({
       ) : null}
 
       {/* 056：模型路由摘要卡（看图之后、供应商之前；配置在弹窗里）。 */}
-      <RoleModelsSection ctl={ctl} />
+      {!ctl.external ? <RoleModelsSection ctl={ctl} /> : null}
 
       <section className="h37-section">
         <div className="h37-section-head">
           <h3>供应商</h3>
           <span className="h37-count">{directory.providers.length}</span>
           <span className="h37-aside">
-            <button type="button" className="h37-btn h37-btn-secondary" disabled={readOnly} onClick={onAdd}>
+            <button type="button" className="h37-btn h37-btn-secondary" disabled={ctl.external ? ctl.addDisabled : readOnly} onClick={onAdd}>
               <Plus aria-hidden />
               添加供应商
             </button>
@@ -964,7 +982,7 @@ function OverviewView({
                 <b>还没有供应商</b>
               </span>
               <span className="h37-row-end">
-                <button type="button" className="h37-btn h37-btn-primary" disabled={readOnly} onClick={onAdd}>
+                <button type="button" className="h37-btn h37-btn-primary" disabled={ctl.external ? ctl.addDisabled : readOnly} onClick={onAdd}>
                   添加供应商
                 </button>
               </span>
@@ -990,7 +1008,7 @@ function OverviewView({
                   </span>
                 </span>
                 <span className="h37-row-end">
-                  <StatusBadge status={statuses[provider.id]} provider={provider} />
+                  {!ctl.external ? <StatusBadge status={statuses[provider.id]} provider={provider} /> : null}
                   <ChevronRight className="h37-chev" aria-hidden />
                 </span>
               </button>
@@ -1238,10 +1256,10 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
         <div className="h37m-head-text">
           <h2>{provider.name}</h2>
           <p>
-            <SaveIndicator state={ctl.saveState} idleText="修改后自动保存并重新测试" />
+            {ctl.external ? '模型配置保存在云端' : <SaveIndicator state={ctl.saveState} idleText="修改后自动保存并重新测试" />}
           </p>
         </div>
-        <div className="h37-actions">
+        {!ctl.external ? <div className="h37-actions">
           <StatusBadge status={status} provider={provider} detail />
           <button
             type="button"
@@ -1251,7 +1269,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
           >
             重新测试
           </button>
-        </div>
+        </div> : null}
       </div>
       {status?.state === 'fail' ? (
         <div className="h37-note h37m-note" data-tone="warn" role="status">
@@ -1259,7 +1277,19 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
         </div>
       ) : null}
 
-      {provider.oauthProvider ? <OAuthAccountSection providers={directory.providers} onlyProvider={provider.oauthProvider} disabled={readOnly} onChanged={ctl.reload} onConnected={() => { ctl.setStatus(provider.id, { state: 'ok' }); }} /> : <section className="h37-section">
+      {ctl.external ? <section className="h37-section">
+        <div className="h37-section-head"><h3>连接</h3></div>
+        <div className="h37-group">
+          {[
+            ['名称', provider.name],
+            ['接口地址', provider.baseUrl],
+            ['接口协议', provider.api === 'anthropic-messages' ? 'Anthropic 原生（/v1/messages）' : 'OpenAI 兼容（chat/completions）'],
+          ].map(([label, value]) => <div className="h37-row h37m-form-row" key={label}>
+            <span className="h37m-lbl">{label}</span>
+            <span className="h37-row-text break-all"><span>{value}</span></span>
+          </div>)}
+        </div>
+      </section> : provider.oauthProvider ? <OAuthAccountSection providers={directory.providers} onlyProvider={provider.oauthProvider} disabled={readOnly} onChanged={ctl.reload} onConnected={() => { ctl.setStatus(provider.id, { state: 'ok' }); }} /> : <section className="h37-section">
         <div className="h37-section-head">
           <h3>连接</h3>
         </div>
@@ -1373,6 +1403,10 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
                   <ModelSub model={model} test={modelTests[model.model]} />
                 </span>
                 <span className="h37-row-end">
+                  {ctl.external ? <>
+                    {model.supportsVision ? <span className="h37-badge">能看图</span> : null}
+                    {directory.defaultModelId === model.modelKey ? <span className="h37-badge" data-tone="ok">默认</span> : null}
+                  </> : <>
                   {/* 041：模型本身的普通配置直接放行内——能看图即改即存（正在当看图模型用时锁住）。 */}
                   <span className="h37m-vision-toggle">
                     <span className="h37m-vision-lbl">能看图</span>
@@ -1397,11 +1431,12 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
                     </span>
                   ) : null}
                   <MoreMenu label={`${model.model} 的更多操作`} entries={menuFor(model, usage)} disabled={readOnly} />
+                  </>}
                 </span>
               </div>
             );
           })}
-          <div className="h37m-add-row">
+          {!ctl.external ? <><div className="h37m-add-row">
             <input
               className="h37-input h37m-mono"
               value={newModel}
@@ -1488,13 +1523,14 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
               ))}
             </div>
           ) : null}
+          </> : null}
         </div>
         <div className="h37-section-foot">
-          添加时自动测试这个型号能不能用；「能看图」在行内直接改，看图模型在页面顶部的「看图」里换。
+          {ctl.external ? '在 Bot 对话中切换要使用的模型。' : '添加时自动测试这个型号能不能用；「能看图」在行内直接改，看图模型在页面顶部的「看图」里换。'}
         </div>
       </section>
 
-      <section className="h37-section">
+      {!ctl.external ? <section className="h37-section">
         <div className="h37-group">
           <div className="h37-row">
             <span className="h37-row-text">
@@ -1519,7 +1555,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
             </span>
           </div>
         </div>
-      </section>
+      </section> : null}
 
       {deleteOpen ? (
         <DeleteProviderDialog

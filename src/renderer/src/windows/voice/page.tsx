@@ -69,6 +69,7 @@ import {
   type WorkspaceState,
   type WorkspaceView,
   type UsageRecord,
+  type ContextUsageSnapshotView,
   type TurnPart,
 } from '@/shared/types';
 import { SetupScreen } from '@/windows/voice/setup-screen';
@@ -188,6 +189,7 @@ export default function Home() {
   /** 设置页直达目标（修复条/引导完成后的入口按区块定位）。
    *  041 六分类键；旧五分类键（model/computer/browser）作为别名由 SettingsScreen 映射。 */
   const [settingsTarget, setSettingsTarget] = useState<{
+    environment?: 'local' | 'bot';
     page: 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory' | 'model' | 'computer' | 'browser';
     /** 旧目标「模型 → 语音」子 tab 的兼容键（解析为语音与通话页）。 */
     modelTab?: 'text' | 'voice';
@@ -201,6 +203,8 @@ export default function Home() {
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('idle');
   const [turnError, setTurnError] = useState('');
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
+  // 上下文容量快照（轮末广播刷新；null＝无在途会话或首回合前，指示器不出现）。
+  const [contextUsage, setContextUsage] = useState<ContextUsageSnapshotView | null>(null);
   const [voiceGateOpen, setVoiceGateOpen] = useState(false);
   const [silenceSkippedSeconds, setSilenceSkippedSeconds] = useState(0);
   const [interimText, setInterimText] = useState('');
@@ -1090,6 +1094,13 @@ export default function Home() {
         if (conversationIdRef.current === session.id) setUsageRecords(view?.records ?? []);
       })
       .catch(() => { /* 账本读取失败不阻断对话，入口保持旧值 */ });
+    // 上下文容量同批取（无在途会话/首回合前 snapshot 为 null，指示器不出现）。
+    setContextUsage(null);
+    void window.hemiVoice?.getContextSnapshot(session.id)
+      .then((view) => {
+        if (conversationIdRef.current === session.id) setContextUsage(view?.snapshot ?? null);
+      })
+      .catch(() => { /* 快照读取失败不阻断对话 */ });
     setConversationId(session.id);
     setConversationTitle(session.title || '已载入会话');
     // 031：会话重开仍显示自己的模型选择（旧档无选择＝默认组）。
@@ -3471,6 +3482,20 @@ export default function Home() {
     });
   }, []);
 
+  // 上下文容量：轮末（含取消/失败停靠）重取快照，环形指示器随之刷新。
+  useEffect(() => {
+    if (!window.hemiVoice) return;
+    return window.hemiVoice.onContextChanged((event) => {
+      const id = event?.conversationId ?? '';
+      if (!id || id !== conversationIdRef.current) return;
+      void window.hemiVoice?.getContextSnapshot(id)
+        .then((view) => {
+          if (conversationIdRef.current === id) setContextUsage(view?.snapshot ?? null);
+        })
+        .catch(() => { /* 静默：下次轮末会再拉 */ });
+    });
+  }, []);
+
   useEffect(() => {
     if (!window.hemiVoice) return;
 
@@ -3637,7 +3662,7 @@ export default function Home() {
 
   const applicationPage: ApplicationPage = botOpen ? 'bot' : settingsOpen ? 'settings'
     : skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : 'home';
-  const navigate = useCallback(async (next: ApplicationPage, settingsPage?: 'general' | 'models') => {
+  const navigate = useCallback(async (next: ApplicationPage, settingsPage?: 'general' | 'models', settingsEnvironment?: 'local' | 'bot') => {
     if (navigationPendingRef.current || next === applicationPage) return;
     navigationPendingRef.current = true;
     const wasBot = botOpenRef.current;
@@ -3657,7 +3682,10 @@ export default function Home() {
       setSkillMarketOpen(next === 'skills');
       setWorkflowStudioOpen(next === 'workflows');
       setSettingsOpen(next === 'settings');
-      setSettingsTarget(next === 'settings' && settingsPage ? {page: settingsPage} : null);
+      setSettingsTarget(next === 'settings' ? {
+        page: settingsPage ?? 'general',
+        environment: settingsEnvironment ?? (wasBot ? 'bot' : 'local'),
+      } : null);
     } catch (error) {
       botOpenRef.current = wasBot;
       setTurnError(messageFromError(error, '无法切换页面。'));
@@ -3665,8 +3693,8 @@ export default function Home() {
       navigationPendingRef.current = false;
     }
   }, [applicationPage, settingsOpen, stopSession, stopTtsPlayback]);
-  const navigation = {page: applicationPage, navigate: (next: ApplicationPage) => void navigate(next)};
-  if (botOpen) return <ApplicationNavigationContext.Provider value={navigation}><BotPage onOpenSettings={(models=false) => {void navigate('settings', models ? 'models' : 'general');}} /></ApplicationNavigationContext.Provider>;
+  const navigation = {page: applicationPage, navigate: (next: ApplicationPage, page?: 'general' | 'models', environment?: 'local' | 'bot') => void navigate(next, page, environment)};
+  if (botOpen) return <ApplicationNavigationContext.Provider value={navigation}><BotPage onOpenSettings={(models=false, environment) => {void navigate('settings', models ? 'models' : 'general', environment ?? (models ? 'local' : 'bot'));}} /></ApplicationNavigationContext.Provider>;
 
   if (bootstrapping) {
     return (
@@ -3711,11 +3739,11 @@ export default function Home() {
         ttsConfig={ttsForm}
         primarySpeakerEnabled={primarySpeakerEnabled}
         initialPage={settingsTarget?.page}
+        initialEnvironment={settingsTarget?.environment}
         initialModelTab={settingsTarget?.modelTab}
         initialSection={settingsTarget?.section}
         onClose={() => {
-          setSettingsTarget(null);
-          setSettingsOpen(false);
+          void navigate(settingsTarget?.environment === 'bot' ? 'bot' : 'home');
         }}
         onOpenSkills={() => {
           // 037：设置成为壳内页面——图标栏「技能」先关设置再打开技能中心。
@@ -3789,6 +3817,7 @@ export default function Home() {
         streamingReply={streamingReply}
         streamingThinking={streamingThinking}
         usageRecords={usageRecords}
+        contextUsage={contextUsage}
         usageRunning={
           (modelBusy && !flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.activity?.phase.startsWith('waiting-')) ||
           (taskState?.tasks ?? []).some((task) => task.conversationId === conversationId && task.phase !== 'terminal'

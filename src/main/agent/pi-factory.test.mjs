@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createRoutingExtension, resetRoutingForApplicationTurn, settledRoutingError } from './pi-factory.mjs';
+import { createRoutingExtension, resetRoutingForApplicationTurn, settledRoutingError, sessionSettingsOf } from './pi-factory.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
 
 /** 只取 route 闭包：假 pi 记下注册的虚拟模型，modelRegistry.find 回传「provider/model」字符串。 */
@@ -28,6 +28,13 @@ function routerOf({ withoutFallback = false, extraFallbacks = [] } = {}) {
 }
 
 const failure = { message: { stopReason: 'error', errorMessage: '503 service_unavailable', content: [] } };
+
+test('managed recovery keeps only the SDK candidate-switch budget for routed sessions', () => {
+  const fixed = sessionSettingsOf({managedRecovery: true});
+  assert.equal(fixed.retry.enabled, false);
+  const routed = sessionSettingsOf({managedRecovery: true, routing: {fallbacks: [{}, {}]}, settings: {retry: {provider: {maxRetries: 8}}}});
+  assert.equal(routed.retry.enabled, true);assert.equal(routed.retry.maxRetries, 2);assert.equal(routed.retry.provider.maxRetries, 0);
+});
 
 test('SDK 预算先耗尽时按实际候选说明失败，未走完候选／取消／已有明确原因不改写', () => {
   const raw = '503 service_unavailable', routing = { fallback: {} };

@@ -63,7 +63,7 @@ import {
 } from "./workflow-leave-guard";
 import "reflect-metadata";
 import "@flowgram.ai/free-layout-editor/index.css";
-import "@/styles/059-workflows.css";
+import "@hemi/conversation-flow/styles/059-workflows.css";
 
 /** 人工输入节点的出口锚点：每个动作一个端口，超时模式追加独立 timeout 端口。 */
 function humanInputPortAnchors(record: WorkflowNode) {

@@ -57,6 +57,7 @@ next-env.d.ts
 /build/hemi-bot-runtime.tgz
 # Built conversation SDK and standalone example
 /packages/conversation-flow/dist/
+/packages/ui/dist/
 /examples/conversation-flow/dist/
 
 # Mobile build outputs and generated npm notices

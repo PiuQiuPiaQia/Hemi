@@ -1,12 +1,8 @@
+import {DirectoryPicker} from '@hemi/conversation-flow/navigation';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ArrowUp,
-  ChevronRight,
-  ChevronDown,
-  Folder,
-  RefreshCw,
   Server,
-  Search,
+  Monitor,
   X,
 } from 'lucide-react';
 import type {
@@ -86,303 +82,13 @@ export function BotButton({
     />
   );
 }
-export function BotFolderPicker({
-  host,
-  initial,
-  defaultDir,
-  recent = [],
-  load,
-  onPick,
-  onClose,
-  online = true,
-}: {
-  host: string;
-  initial: string;
-  defaultDir?: string;
-  recent?: string[];
-  online?: boolean;
-  load: (path: string) => Promise<BotDirectory>;
-  onPick: (path: string) => Promise<void>;
-  onClose: () => void;
+export function BotFolderPicker({host, initial, defaultDir, recent=[], load, onPick, onClose, online=true}: {
+  host:string;initial:string;defaultDir?:string;recent?:string[];online?:boolean;load(path:string):Promise<BotDirectory>;onPick(path:string):Promise<void>;onClose():void;
 }) {
-  const [address, setAddress] = useState(initial),
-    [result, setResult] = useState<BotDirectory | null>(null),
-    [busy, setBusy] = useState(true),
-    [saving, setSaving] = useState(false),
-    [error, setError] = useState('');
-  const epoch = useRef(0),
-    alive = useRef(true),
-    addressRevision = useRef(0),
-    input = useRef<HTMLInputElement>(null);
-  const parentPath = result?.parent ?? (() => {
-    const value = address.trim().replace(/\/+$/, '');
-    return value.slice(0, value.lastIndexOf('/')) || (value.startsWith('~') ? '~' : '/');
-  })();
-  async function browse(path: string) {
-    if (saving || !online) return;
-    const addressAtStart = ++addressRevision.current;
-    const seq = ++epoch.current;
-    setAddress(path);
-    setBusy(true);
-    setError('');
-    setResult(null);
-    try {
-      const next = await load(path);
-      if (alive.current && seq === epoch.current) {
-        setResult(next);
-        if (addressRevision.current === addressAtStart) setAddress(next.path);
-        requestAnimationFrame(() => {
-          if (
-            document.activeElement === document.body ||
-            document.activeElement === input.current?.closest('dialog')
-          )
-            input.current?.focus();
-        });
-      }
-    } catch (e) {
-      if (alive.current && seq === epoch.current)
-        setError(e instanceof Error ? e.message : '服务器目录读取失败');
-    } finally {
-      if (alive.current && seq === epoch.current) setBusy(false);
-    }
-  }
-  useEffect(() => {
-    alive.current = true;
-    void browse(initial);
-    return () => {
-      alive.current = false;
-      epoch.current++;
-    };
-  }, []);
-  useEffect(() => {
-    if (!online) {
-      epoch.current++;
-      setResult(null);
-      setBusy(false);
-      setError('连接已断开，恢复连接后重新读取目录。');
-    }
-  }, [online]);
-  async function commit() {
-    if (!result || address !== result.path) return;
-    setSaving(true);
-    try {
-      await onPick(result.path);
-      if (alive.current) onClose();
-    } catch (e) {
-      if (alive.current) {
-        setError(e instanceof Error ? e.message : '设置目录失败');
-        setSaving(false);
-      }
-    }
-  }
-  return (
-    <BotDialog
-      title="选择云端文件夹"
-      busy={saving}
-      onClose={onClose}
-      footer={
-        <>
-          <BotButton disabled={saving} onClick={onClose}>
-            取消
-          </BotButton>
-          <BotButton
-            primary
-            disabled={
-              busy ||
-              saving ||
-              !!error ||
-              !result ||
-              address !== result.path ||
-              !online
-            }
-            onClick={() => void commit()}
-          >
-            {saving ? '正在设置…' : '使用此文件夹'}
-          </BotButton>
-        </>
-      }
-    >
-      <p className="h-bot-host">
-        <Server size={14} />
-        {host}
-      </p>
-      <form
-        className="h-bot-address"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void browse(address);
-        }}
-      >
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="上级目录"
-          disabled={saving || busy || !online || result?.path === '/'}
-          onClick={() => void browse(parentPath)}
-        >
-          <ArrowUp size={16} />
-        </button>
-        <input
-          ref={input}
-          aria-label="云端文件夹路径"
-          value={address}
-          disabled={saving}
-          onChange={(e) => {
-            addressRevision.current++;
-            setAddress(e.target.value);
-          }}
-        />
-        <BotButton disabled={saving || !online} onClick={() => void browse(address)}>
-          前往
-        </BotButton>
-      </form>
-      <div className="h-bot-shortcuts">
-        {defaultDir ? <BotButton disabled={saving || !online} onClick={() => void browse(defaultDir)}>
-          默认空间
-        </BotButton> : null}
-        <BotButton
-          disabled={saving || !online}
-          onClick={() => void browse(result?.home ?? '~')}
-        >
-          主目录
-        </BotButton>
-        {recent.slice(0, 3).map((dir) => (
-          <BotButton
-            key={dir}
-            disabled={saving || !online}
-            title={dir}
-            onClick={() => void browse(dir)}
-          >
-            {dir.split('/').at(-1)}
-          </BotButton>
-        ))}
-      </div>
-      <div className="h-bot-folders" aria-label="云端目录列表" aria-busy={busy}>
-        {busy ? (
-          <p role="status">
-            <RefreshCw size={16} className="h-bot-spin" />
-            正在读取服务器文件夹…
-          </p>
-        ) : error ? (
-          <div role="alert">
-            <p>{error}</p>
-            <BotButton disabled={!online} onClick={() => void browse(address)}>重试</BotButton>
-          </div>
-        ) : result?.folders.length ? (
-          result.folders.map((folder) => (
-            <button key={folder.path} onClick={() => void browse(folder.path)}>
-              <Folder size={16} />
-              <span>{folder.name}</span>
-              <ChevronRight size={14} />
-            </button>
-          ))
-        ) : (
-          <p>此文件夹没有子文件夹</p>
-        )}
-      </div>
-    </BotDialog>
-  );
-}
-export function BotModelPicker({
-  models,
-  selected,
-  onChange,
-  disabled = false,
-}: {
-  models: BotModelCandidate[];
-  selected: string[];
-  onChange: (keys: string[]) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false), [query, setQuery] = useState('');
-  const panelId = useId(), root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
-  const search = useRef<HTMLInputElement>(null);
-  const outsidePress = useRef(false);
-  const chosen = models.filter(m => selected.includes(m.key));
-  const filtered = models.filter(m => `${m.name} ${m.provider} ${m.key}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const expanded = open && !disabled;
-  useEffect(() => {
-    if (!expanded) return;
-    search.current?.focus();
-    const press = (event: PointerEvent) => {
-      outsidePress.current = event.target instanceof Node && !root.current?.contains(event.target);
-    };
-    const outside = (event: MouseEvent) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
-      outsidePress.current = false;
-    };
-    // Close after the clicked action runs; collapsing this in-flow panel on
-    // pointerdown would move the import button before it receives its click.
-    document.addEventListener('pointerdown', press, true);
-    document.addEventListener('click', outside);
-    return () => {
-      document.removeEventListener('pointerdown', press, true);
-      document.removeEventListener('click', outside);
-      outsidePress.current = false;
-    };
-  }, [expanded]);
-  return (
-    <div className="h-bot-model-picker" ref={root} onBlurCapture={event => {
-      const next = event.relatedTarget;
-      if (outsidePress.current) return;
-      // On macOS, pressing a label first blurs its search input to the native
-      // dialog, before the label forwards a click to its checkbox. Keep it mounted.
-      if (next === event.currentTarget.closest('dialog') || next === document.body) return;
-      if (next instanceof Node && !event.currentTarget.contains(next)) setOpen(false);
-    }} onKeyDown={event => {
-      if (event.key !== 'Escape' || !expanded) return;
-      event.preventDefault(); event.stopPropagation();
-      setOpen(false); trigger.current?.focus();
-    }}>
-      <span className="h-bot-model-label">本机模型</span>
-      <button type="button" ref={trigger} className="h-bot-model-trigger" aria-label="选择导入模型"
-        aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
-        disabled={disabled || !models.length} onClick={() => {setQuery(''); setOpen(value => !value);}}>
-        <span>{chosen.length ? chosen[0].name : '选择本机模型'}</span>
-        {chosen.length > 1 ? <small>+{chosen.length - 1}</small> : null}
-        <ChevronDown size={16} aria-hidden="true" />
-      </button>
-      {expanded ? <div id={panelId} className="h-bot-model-panel" role="group" aria-label="本机模型">
-        <div className="h-bot-model-search"><Search size={14} aria-hidden="true" /><input ref={search}
-          aria-label="搜索本机模型" placeholder="搜索模型或供应商" value={query} onChange={e => setQuery(e.target.value)} /></div>
-        <div className="h-bot-models">
-      {filtered.map((m, index) => (
-        <label key={m.key}>
-          <input
-            type="checkbox"
-            aria-label={m.name}
-            aria-describedby={`${panelId}-model-${index} ${panelId}-status-${index}`}
-            checked={selected.includes(m.key)}
-            disabled={disabled || !m.canSync}
-            onChange={(e) =>
-              onChange(
-                e.target.checked
-                  ? [...selected, m.key]
-                  : selected.filter((k) => k !== m.key),
-              )
-            }
-          />
-          <span>
-            <strong>{m.name}</strong>
-            <small id={`${panelId}-model-${index}`}>
-              {m.provider} · {m.auth}
-            </small>
-          </span>
-          <em id={`${panelId}-status-${index}`}>
-            {m.reason ||
-              (m.status === 'synced'
-                ? '已同步'
-                : m.status === 'update'
-                  ? '有更新'
-                  : '未同步')}
-          </em>
-        </label>
-      ))}
-        {!filtered.length ? <p className="h-bot-small">没有找到匹配的模型</p> : null}
-        </div>
-      </div> : null}
-    </div>
-  );
+  const [saving,setSaving]=useState(false),[error,setError]=useState('');
+  const alive=useRef(true);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+  return <DirectoryPicker path={initial} defaultPath={defaultDir} recent={recent} load={load} saving={saving} offline={!online} error={error} hostLabel={host} presentation="dialog" onClose={onClose} onSelect={path=>{setSaving(true);setError('');void onPick(path).then(()=>{if(alive.current)onClose();}).catch(reason=>{if(alive.current){setSaving(false);setError(reason instanceof Error?reason.message:'设置目录失败');}});}} renderSurface={({title,children,footer})=><BotDialog title={title} busy={saving} onClose={onClose} footer={footer}>{children}</BotDialog>}/>;
 }
 export function BotModelSetup({
   api,
@@ -401,9 +107,9 @@ export function BotModelSetup({
   onCancel: () => void;
   onBusyChange: (busy: boolean) => void;
 }) {
-  const [tab, setTab] = useState<'manual' | 'import'>('manual');
+  const [tab, setTab] = useState<'manual' | 'local'>(candidateId ? 'local' : 'manual');
   const [models, setModels] = useState<BotModelCandidate[]>([]),
-    [selected, setSelected] = useState<string[]>([]),
+
     [saving, setSaving] = useState(false),
     [loaded, setLoaded] = useState(false),
     [error, setError] = useState('');
@@ -412,7 +118,7 @@ export function BotModelSetup({
   const operation = useRef('models-' + crypto.randomUUID());
   const reportBusy = useCallback((value: boolean) => { setSaving(value); onBusyChange(value); }, [onBusyChange]);
   useEffect(() => {
-    if (tab !== 'import' || loaded) return;
+    if (tab !== 'local' || loaded) return;
     let alive = true;
     setError('');
     void api
@@ -437,14 +143,15 @@ export function BotModelSetup({
   async function save(provider?: ModelProviderSaveInput) {
     try {
       if (candidateId) {
-        const result = await api.initialize({ candidateId, ...(provider ? { provider } : { modelKeys: selected }), requestId: operation.current });
+        const result = await api.initialize({ candidateId, ...(provider ? { provider } : {}), requestId: operation.current });
         return { providerId: result.cache?.models.at(-1)?.providerId ?? 'bot', modelKeys: result.cache?.models.map(model => model.key) ?? [] };
       }
+      if (!provider) throw new Error('请在对话输入区直接选择本机模型。');
       const result = await api.command<{
         results: Array<{ key: string; ok: boolean; message?: string }>;
         providerId?: string;
         modelKeys?: string[];
-      }>(provider ? 'models.add' : 'models.sync', { ...(provider ? { provider } : { keys: selected }), requestId: operation.current });
+      }>('models.add', { provider, requestId: operation.current });
       const failed = result.results.filter((r) => !r.ok);
       if (failed.length) throw new Error(failed.map(result => result.message).join('；'));
       return { providerId: result.providerId ?? 'bot', modelKeys: result.modelKeys ?? result.results.map(model => model.key) };
@@ -453,11 +160,11 @@ export function BotModelSetup({
       throw e;
     }
   }
-  async function importModels() {
+  async function useLocalModel() {
     reportBusy(true);
     setError('');
     try { await save(); onDone(); } catch (error) {
-      setError(error instanceof Error ? error.message : '导入结果待核对，请重新连接。');
+      setError(error instanceof Error ? error.message : '模型配置未完成，请重试。');
     } finally {
       reportBusy(false);
     }
@@ -473,38 +180,28 @@ export function BotModelSetup({
   };
   return (
     <div className="h-bot-model-setup">
-      <div className="h37-seg" role="tablist" aria-label="添加模型方式">
-        {(['manual', 'import'] as const).map((value, index, values) => <button type="button" role="tab" key={value}
+      {candidateId ? <div className="h37-seg" role="tablist" aria-label="选择模型来源">
+        {(['local', 'manual'] as const).map((value, index, values) => <button type="button" role="tab" key={value}
           id={`${tabsId}-${value}-tab`} aria-controls={`${tabsId}-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1}
           disabled={locked} onClick={() => { setTab(value); setError(''); }} onKeyDown={event => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
-            const next = event.key === 'Home' ? 'manual' : event.key === 'End' ? 'import' : values[(index + 1) % values.length];
+            const next = event.key === 'Home' ? 'local' : event.key === 'End' ? 'manual' : values[(index + 1) % values.length];
             setTab(next); document.getElementById(`${tabsId}-${next}-tab`)?.focus();
-          }}>{value === 'manual' ? '手动添加' : '从本机导入'}</button>)}
-      </div>
-      <p className="h-bot-small">模型配置与 API Key 保存到 Bot，保存时由服务器验证连接。</p>
-      <div role="tabpanel" id={`${tabsId}-manual`} aria-labelledby={`${tabsId}-manual-tab`} hidden={tab !== 'manual'}>
+          }}>{value === 'manual' ? '云端专用配置' : '本机模型'}</button>)}
+      </div> : null}
+      <p className="h-bot-small">{tab === 'local' ? '初始化时自动配置本机可用模型、主模型、角色模型与备用模型；后续本机变更自动更新。' : '此配置独立保存在 Bot，由服务器验证连接。'}</p>
+      <div role={candidateId ? 'tabpanel' : undefined} id={`${tabsId}-manual`} aria-labelledby={candidateId ? `${tabsId}-manual-tab` : undefined} hidden={tab !== 'manual'}>
         <fieldset className="h-bot-model-form" disabled={locked}>
           <AddProviderView ctl={ctl} initial={null} embedded services={services} onAdded={onDone} onBusyChange={reportBusy}
             submitLabel={candidateId ? () => '初始化并开始使用' : undefined} />
         </fieldset>
       </div>
-      <div role="tabpanel" id={`${tabsId}-import`} aria-labelledby={`${tabsId}-import-tab`} hidden={tab !== 'import'}>
+      <div role="tabpanel" id={`${tabsId}-local`} aria-labelledby={`${tabsId}-local-tab`} hidden={tab !== 'local'}>
       {!loaded && !error ? <p role="status">正在读取本机模型…</p> : null}
-      {loaded && !models.length ? <p>暂无本机模型，可切换到“手动添加”直接配置。</p> : null}
-      <BotModelPicker
-        models={models}
-        selected={selected}
-        onChange={(keys) => {
-          operation.current = 'sync-' + crypto.randomUUID();
-          setSelected(keys);
-        }}
-        disabled={locked}
-      />
-      <p className="h-bot-small">
-        选择本机已有的 API Key 模型导入，验证可能产生少量调用费用。
-      </p>
+      {loaded && !models.length ? <p>暂无本机模型，请先在本机设置中添加，或使用云端专用配置。</p> : null}
+      <div className="h-bot-models" role="list" aria-label="自动配置的本机模型">{models.map(model => <div role="listitem" className="h-bot-auto-model" key={model.key}><Monitor size={15} aria-hidden="true" /><span><strong>{model.name}</strong><small>{model.provider} · 本机</small></span><em>{model.reason || '自动配置'}</em></div>)}</div>
+      <p className="h-bot-small">可用的 API Key 模型会保存到 Bot 并验证连接。云端验证可能产生少量调用费用。</p>
       {error && (
         <p role="alert" className="h-bot-error">
           {error}
@@ -512,8 +209,8 @@ export function BotModelSetup({
       )}
       <div className="h37m-add-foot">
         <BotButton disabled={locked} onClick={onCancel}>取消</BotButton>
-        <BotButton primary disabled={locked || !selected.length} onClick={() => void importModels()}>
-          {saving ? '正在导入…' : candidateId ? '初始化并开始使用' : '导入到 Bot'}
+        <BotButton primary disabled={locked || !models.some(model => model.canSync)} onClick={() => void useLocalModel()}>
+          {saving ? '正在配置…' : '初始化并开始使用'}
         </BotButton>
       </div>
       </div>
@@ -521,12 +218,6 @@ export function BotModelSetup({
   );
 }
 
-export function BotAddModels({ api, state, onClose }: { api: BotBridge; state: BotState; onClose: () => void }) {
-  const [busy, setBusy] = useState(false);
-  return <BotDialog title="添加模型" className="h-bot-model-dialog" busy={busy} onClose={onClose}>
-    <BotModelSetup api={api} state={state} onDone={onClose} onCancel={onClose} onBusyChange={setBusy} />
-  </BotDialog>;
-}
 export function BotSetup({
   api,
   state,

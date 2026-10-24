@@ -16,6 +16,7 @@ test('门禁本身：抓得到各类违规，放得过合规写法', () => {
   assert.equal(checkCss('a.css', '.x:hover, .x:focus-visible { outline: 2px solid; }').length, 1);
   assert.equal(checkCss('a.css', 'html.kb-nav .x:focus-visible { box-shadow: 0 0 0 2px red; }').length, 0);
   assert.equal(checkCss('a.css', '.x:hover, html.kb-nav .x:focus-visible { outline: 2px solid; }').length, 0);
+  assert.equal(checkCss('a.css', '[data-hemi-conversation-flow][data-hcf-keyboard="true"] .x:focus-visible { outline: 2px solid; }').length, 0);
   assert.equal(checkCss('a.css', '.x-rename:focus-visible { box-shadow: 0 0 0 2px red; }').length, 0);
   assert.equal(checkCss('a.css', '.x:focus-within { box-shadow: 0 0 0 2px red; }').length, 0);
   assert.equal(checkCss('a.css', '.x:focus-visible { background: red; }').length, 0);

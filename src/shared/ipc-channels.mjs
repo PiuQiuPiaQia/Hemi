@@ -193,6 +193,12 @@ export const IPC = {
     /** main → renderer：账本有新记录（对话轮结束、任务每次模型调用完成）。 */
     changed: 'usage:changed',
   },
+  contextUsage: {
+    /** 上下文容量快照（主 agent 会话当前占用＋分类估算）。 */
+    getSnapshot: 'context-usage:get-snapshot',
+    /** main → renderer：轮末上下文占用可能变化（重取快照）。 */
+    changed: 'context-usage:changed',
+  },
   tts: {
     getConfig: 'tts:get-config',
     saveConfig: 'tts:save-config',

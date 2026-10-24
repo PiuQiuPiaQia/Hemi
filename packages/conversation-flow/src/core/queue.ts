@@ -12,11 +12,11 @@ export function projectConversationQueue(snapshot: FlowSnapshotView | null, oper
       attachmentIds: input.attachmentIds ?? [], references: input.references ?? [], skills: input.skills ?? [],
       inputSource: input.inputSource ?? 'text', createdAt: input.createdAt ?? 0,
     })), ...operations.flatMap(operation => {
-      if (operation.command.type !== 'send' || !['waiting', 'unknown'].includes(operation.state)) return [];
+      if (operation.command.type !== 'send' || !['waiting', 'sending', 'unknown'].includes(operation.state)) return [];
       const input = operation.command.input as { inputId?: string; text?: string } | undefined;
       if (snapshot?.pending.some(item => item.inputId === input?.inputId) || snapshot?.timeline.some(item => item.kind === 'user' && item.id === input?.inputId)) return [];
       return [{ operationId: operation.id, queueItemId: `operation:${operation.id}`, conversationId: snapshot?.conversationId ?? '',
-        text: input?.text ?? '', revision: 1, dispatchState: 'pending' as const, error: operation.state === 'unknown' ? '投递结果不明，待核对' : '',
+        text: input?.text ?? '', revision: 1, dispatchState: operation.state === 'sending' ? 'sending' as const : 'pending' as const, error: operation.state === 'unknown' ? '投递结果不明，待核对' : '',
         attachmentIds: [], references: [], createdAt: 0, inputSource: 'text' as const }];
     })],
   };

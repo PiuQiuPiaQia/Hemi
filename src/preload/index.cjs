@@ -445,6 +445,13 @@ contextBridge.exposeInMainWorld('hemiVoice', {
     ipcRenderer.on('usage:changed', listener);
     return () => ipcRenderer.removeListener('usage:changed', listener);
   },
+  // 上下文容量：主会话当前占用快照（环形指示器/容量面板）；轮末可能变化时广播。
+  getContextSnapshot: (conversationId) => ipcRenderer.invoke('context-usage:get-snapshot', { conversationId }),
+  onContextChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('context-usage:changed', listener);
+    return () => ipcRenderer.removeListener('context-usage:changed', listener);
+  },
   // 033 工作区：状态（默认 + 项目列表）/ 目录选择器添加项目 / 移除列表项。
   getWorkspaceState: () => ipcRenderer.invoke('workspace:get-state'),
   addWorkspaceFolder: () => ipcRenderer.invoke('workspace:add-folder'),

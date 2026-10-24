@@ -549,3 +549,25 @@ test('060 不响应取消的工具触发释放，主 agent 明确暴露不可复
     assert.equal((await running).aborted, true);
   }, { sessionOptions: { abortGraceMs: 30 } });
 });
+test('上下文容量：轮后有快照（usage 锚点总量＋before_provider_request 分类暂存）', async () => {
+  await withAgent(() => ({ text: 'ANSWER' }), baseDeps(), async ({ agent }) => {
+    // 首回合前：会话已建但从未发请求——无分类；usage 锚点也还没有，快照为 null。
+    const before = agent.contextUsage();
+    assert.equal(before, null);
+    await agent.runTurn({ userText: '第一问', contextText: 'CTX_1' });
+    const snapshot = agent.contextUsage();
+    assert.ok(snapshot, '轮后应有快照');
+    assert.ok(snapshot.tokens > 0, '总量按 usage 锚点为正');
+    assert.ok(snapshot.contextWindow > 0);
+    assert.equal(typeof snapshot.percent, 'number');
+    assert.ok(snapshot.percent >= 0 && snapshot.percent <= 100, 'tiny mock usage 允许 0.0%');
+    // 分类来自真实 before_provider_request 请求体（系统提示词/工具/对话消息/工具结果）。
+    assert.deepEqual(snapshot.categories.map((category) => category.key), ['tools', 'conversation', 'toolResults', 'system']);
+    for (const category of snapshot.categories) {
+      assert.ok(category.tokens >= 0);
+      assert.ok(category.percent >= 0 && category.percent <= 100);
+    }
+    const percentSum = snapshot.categories.reduce((acc, category) => acc + category.percent, 0);
+    assert.ok(Math.abs(percentSum - 100) < 1, `分类比例应凑满 100（实际 ${percentSum}）`);
+  });
+});

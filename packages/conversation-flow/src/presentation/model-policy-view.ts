@@ -8,7 +8,7 @@ export function modelPolicyView(
     (directory?.providers ?? [])
       .filter((provider) => provider.hasApiKey)
       .flatMap((provider) =>
-        provider.models.map((model) => [model.modelKey, model.model]),
+        provider.models.filter(model => !model.unavailableReason).map((model) => [model.modelKey, model.model]),
       ),
   );
   const keys = (

@@ -1,7 +1,9 @@
+import {DirectoryControlButton} from '@hemi/conversation-flow/controls';
 import { retainedDeliverables } from '../voice/lib/retained-deliverables';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Folder, Plus, QrCode, Server, Settings, ShieldCheck } from 'lucide-react';
+import { useConnectionWarning } from '@hemi/conversation-flow/react';
+import { Check, Clock3, Folder, QrCode, Server, ShieldCheck } from 'lucide-react';
 import type {
   BotBridge,
   BotDetail,
@@ -15,7 +17,6 @@ import type {
   MessageAttachmentView,
   MessageReferenceView,
   SkillSelectionView,
-  TaskStateSnapshot,
   ThinkingLevel,
   TurnQueueState,
   UsageRecord,
@@ -23,7 +24,8 @@ import type {
 import { VoiceScreen } from '../voice/voice-screen';
 import { NavRail } from '../voice/nav-rail';
 import { AppTopBar } from '../voice/app-top-bar';
-import { PermissionCard } from '../voice/task-panel';
+import {PermissionRequestCard} from '@hemi/conversation-flow/parts';
+import {LoadingState, StateView, StatusNotice, TimedToast} from '@hemi/ui';
 import {
   ConversationBridgeContext,
   ConversationEnvironmentContext,
@@ -37,9 +39,8 @@ import {
   BotDialog,
   BotFolderPicker,
   BotSetup,
-  BotAddModels,
 } from './dialogs';
-import { BotSettings } from './settings';
+import { BotPairing } from './pairing';
 import './styles.css';
 const EMPTY_STATE: BotState = {
   binding: null,
@@ -60,27 +61,16 @@ const emptyDraft = (): BotDraft => ({
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function ModelSavedToast({ api, instanceId, requestId }: { api: BotBridge; instanceId: string; requestId: string }) {
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setVisible(false);
-      // A late acknowledgement must not clear a newer model operation.
-      void api.command('models.dismiss', { expectedInstanceId: instanceId, requestId }).catch(() => {});
-    }, 2600);
-    return () => window.clearTimeout(timer);
-  }, [api, instanceId, requestId]);
-  return visible ? createPortal(
-    <div className="h37-toast h37-toast-card" role="status">
-      <Check aria-hidden="true" />
-      <span>模型已保存</span>
-    </div>, document.body,
-  ) : null;
+  return createPortal(<TimedToast icon={<Check aria-hidden="true"/>} onExpire={() => {
+    // A late acknowledgement must not clear a newer model operation.
+    void api.command('models.dismiss', {expectedInstanceId: instanceId, requestId}).catch(() => {});
+  }}>模型已保存</TimedToast>, document.body);
 }
 
 export function BotPage({
   onOpenSettings,
 }: {
-  onOpenSettings: (models?: boolean) => void;
+  onOpenSettings: (models?: boolean, environment?: 'local' | 'bot') => void;
 }) {
   const api = window.hemiVoice.bot;
   const [state, setState] = useState<BotState>(EMPTY_STATE),
@@ -90,6 +80,7 @@ export function BotPage({
     [error, setError] = useState(''),
     [panel, setPanel] = useState<string | null>(null),
     [sending, setSending] = useState(false),
+    [submittingDraft, setSubmittingDraft] = useState<{id: string; revision: number} | null>(null),
     [editing, setEditing] = useState<string | null>(null),
     [uploadJobs, setUploadJobs] = useState<
       Record<
@@ -109,6 +100,7 @@ export function BotPage({
       inputId: string;
       revision: number;
     } | null>(null);
+  const showConnectionWarning = useConnectionWarning(!state.online, state.binding?.instanceId ?? '');
   const stateRef = useRef(state),
     idRef = useRef(id),
     alive = useRef(true),
@@ -131,9 +123,10 @@ export function BotPage({
   const currentDetail = state.cache?.details[id ?? ''] ?? detail;
   const current = currentDetail?.id === id ? currentDetail : null;
   const flow = current?.flow ?? null;
+  const queued = state.cache?.sessions.find(session => session.id === id)?.status === 'queued';
   const transcripts = useMemo(
-    () => (flow ? project(flow).transcripts : []),
-    [flow, project],
+    () => (flow ? project(flow).transcripts.filter(item => !(queued && item.author === 'hemi' && item.flow?.runId === flow.activeRunId && !item.text && !item.parts?.length)) : []),
+    [flow, project, queued],
   );
   const draft = id
     ? (drafts.current.get(id) ?? current?.draft ?? emptyDraft())
@@ -369,6 +362,7 @@ export function BotPage({
     const target = id,
       version = draft.revision,
       inputId = 'input-' + crypto.randomUUID();
+    if (!queueEditing) setSubmittingDraft({id: target, revision: version});
     try {
       if (queueEditing) {
         await command(
@@ -420,7 +414,7 @@ export function BotPage({
         setUnknownSend({ id: target, inputId, revision: version });
     } finally {
       sendLock.current = false;
-      if (alive.current) setSending(false);
+      if (alive.current) { setSending(false); setSubmittingDraft(null); }
     }
   }
   async function reconcile() {
@@ -656,10 +650,13 @@ export function BotPage({
     genMs: c.usageDetail?.genMs ?? 0,
   }));
   const running = !!flow?.activeRunId && flow.phase !== 'idle';
+  const currentSession = state.cache?.sessions.find(session => session.id === id);
+  const waitingResource = currentSession?.waitingResource;
+  const activeTask = state.cache?.sessions.find(session => waitingResource ? currentSession.blockedBy?.includes(session.id) : session.status === 'running');
   const permissions = Object.values(current?.permissions ?? {}).filter(
     (p) => p.status === 'pending',
   );
-  const modelsSaved = state.syncStatus?.phase === 'confirmed' &&
+  const modelsSaved = !state.syncStatus?.automatic && state.syncStatus?.phase === 'confirmed' &&
     !!state.syncStatus.results?.length && state.syncStatus.results.every(result => result.ok);
   const actions = (
     <div className="h-bot-top-actions">
@@ -667,25 +664,15 @@ export function BotPage({
         className={'h-bot-connection' + (state.online ? ' online' : '')}
         title={state.binding?.host}
         aria-label={
-          (state.online ? '已连接 ' : '连接已断开 ') +
+          (state.online ? '已连接 ' : showConnectionWarning ? '连接已断开 ' : '正在连接 ') +
           (state.binding?.host ?? '')
         }
       >
         <i />
         <span>
-          {state.online ? '已连接' : '未连接'} · {state.binding?.host}
+          {state.online ? '已连接' : showConnectionWarning ? '未连接' : '连接中'} · {state.binding?.host}
         </span>
       </span>
-      <button
-        className="h-bot-sync"
-        aria-label="添加模型"
-        title="添加模型"
-        disabled={!state.online}
-        onClick={() => setPanel('sync')}
-      >
-        <Plus size={14} />
-        <span>添加模型</span>
-      </button>
       <button
         className="h-bot-sync"
         aria-label="连接新设备"
@@ -695,29 +682,27 @@ export function BotPage({
         <QrCode size={14} aria-hidden="true" />
         <span aria-live="polite">{state.cache?.deviceAccess?.pendingCount ? `新设备请求 (${state.cache.deviceAccess.pendingCount})` : '连接新设备'}</span>
       </button>
-      <button
-        className="icon-btn"
-        aria-label="Bot 设置"
-        onClick={() => setPanel('settings')}
-      >
-        <Settings size={16} />
-      </button>
     </div>
   );
   const banner = (
     <>
-      {state.syncStatus && state.syncStatus.phase !== 'sending' && !modelsSaved && (
-        <div className="h-bot-banner" role="status">
+      {queued && state.online ? <StatusNotice icon={<Clock3 size={18} aria-hidden="true"/>} title={waitingResource ? '等待资源' : '排队中'} detail={waitingResource ? activeTask ? `「${activeTask.title}」正在使用同一资源，相关操作结束后会自动继续。` : '同一资源正在使用中，相关操作结束后会自动继续。' : activeTask ? `「${activeTask.title}」${activeTask.waitingPermission ? '正在等待确认' : '正在执行'}，结束后会自动开始。` : '消息已受理，轮到后会自动开始。'} actions={activeTask ? <BotButton onClick={() => void open(activeTask.id)}>查看当前任务</BotButton> : null}/> : null}
+      {state.syncStatus?.automatic && state.syncStatus.phase === 'sending' ? <StatusNotice>正在配置云端模型…</StatusNotice> : null}
+      {state.modelConfigError ? <StatusNotice>{state.modelConfigError}</StatusNotice> : null}
+      {state.syncStatus && state.syncStatus.phase !== 'sending' && !modelsSaved &&
+        (!state.modelConfigError || state.syncStatus.phase === 'unknown') &&
+        (state.syncStatus.phase !== 'confirmed' || state.syncStatus.results?.some(result => !result.ok)) && (
+        <StatusNotice>
           <span>
             {state.syncStatus.phase === 'unknown'
-              ? '模型同步结果待核对。'
+              ? '模型配置结果待确认。'
               : state.syncStatus.phase === 'interrupted'
-                ? '云端同步曾被中断，请核对模型列表后重新选择同步。'
+                ? '云端模型配置曾被中断，重新选用时会自动重试。'
                 : state.syncStatus.phase === 'not-received'
-                  ? '云端未受理上次模型同步，可以重新选择同步。'
+                  ? '云端尚未完成模型配置，重新选用时会自动重试。'
                   : state.syncStatus.results?.some((r) => !r.ok)
                     ? '部分模型未通过云端验证，原配置保留。'
-                    : '模型同步结果待核对。'}
+                    : '模型配置结果待确认。'}
           </span>
           {state.syncStatus.phase === 'unknown' ? (
             <BotButton
@@ -726,7 +711,7 @@ export function BotPage({
                 void call('models.reconcile').catch((e) => setError(message(e)))
               }
             >
-              核对同步结果
+              检查配置状态
             </BotButton>
           ) : (
             <BotButton
@@ -737,10 +722,10 @@ export function BotPage({
               知道了
             </BotButton>
           )}
-        </div>
+        </StatusNotice>
       )}
-      {!state.online && (
-        <div className="h-bot-banner" role="status">
+      {!state.online && (showConnectionWarning || state.cache?.enabled === false) && (
+        <StatusNotice>
           <div>
             <strong>
               {state.cache?.enabled === false
@@ -766,10 +751,10 @@ export function BotPage({
           >
             {state.cache?.enabled === false ? '启动 Bot' : '重新连接'}
           </BotButton>
-        </div>
+        </StatusNotice>
       )}
       {state.online && !state.cache?.enabled && (
-        <div className="h-bot-banner">
+        <StatusNotice>
           <strong>任务执行已停用</strong>
           <BotButton
             onClick={() =>
@@ -778,13 +763,13 @@ export function BotPage({
           >
             启动 Bot
           </BotButton>
-        </div>
+        </StatusNotice>
       )}
       {unknownSend && (
-        <div className="h-bot-banner">
+        <StatusNotice>
           <span>提交结果待核对，草稿已保留。</span>
           <BotButton onClick={() => void reconcile()}>核对提交结果</BotButton>
-        </div>
+        </StatusNotice>
       )}
       {uploadJob && (
         <div className="h-bot-upload" role="status">
@@ -819,32 +804,11 @@ export function BotPage({
         </div>
       )}
       {permissions.map((p) => (
-        <fieldset
-          key={p.id}
-          disabled={!state.online}
-          className="h-bot-permission"
-        >
-          <PermissionCard
-            persistentWait
-            snap={
-              {
-                taskId: p.runId,
-                key: p.runId,
-                phase: 'waiting',
-                taskText: current?.title,
-                permission: {
-                  id: p.id,
-                  kind: p.kind ?? 'action',
-                  summary: p.title,
-                  tool: p.tool ?? '',
-                  args: p.args ?? {},
-                  note: p.note,
-                  options: p.options,
-                  remainingMs: 0,
-                },
-              } as TaskStateSnapshot
-            }
-            onDecide={() => {}}
+          <PermissionRequestCard
+            key={p.id}
+            request={{...p, kind: p.kind ?? 'action'}}
+            taskText={current?.title}
+            disabled={!state.online}
             onChooseOption={(value) =>
               void call('permission.decide', {
                 id,
@@ -856,7 +820,6 @@ export function BotPage({
               void command({ type: 'stop' }).catch((e) => setError(message(e)))
             }
           />
-        </fieldset>
       ))}
     </>
   );
@@ -875,19 +838,11 @@ export function BotPage({
               topBarActions={actions}
               composerBanner={banner}
               workspaceControl={
-                <button
-                  className="h33-workspace-chip"
+                <DirectoryControlButton className="h33-workspace-chip" chevron={false} icon={<Server size={14} aria-hidden="true"/>}
                   title={`${state.binding.host}:${current?.dir ?? state.cache?.defaultDir}`}
-                  disabled={!state.online}
-                  onClick={() => setPanel('folder')}
-                >
-                  <Server size={14} />
-                  <span>
-                    {current?.dir === state.cache?.defaultDir
-                      ? '默认空间'
-                      : current?.dir.split('/').at(-1) || '默认空间'}
-                  </span>
-                </button>
+                  disabled={!state.online} onClick={() => setPanel('folder')}
+                  text={current?.dir === state.cache?.defaultDir ? '默认空间' : current?.dir.split('/').at(-1) || '默认空间'}
+                />
               }
               scopeControl={
                 <button
@@ -934,7 +889,7 @@ export function BotPage({
               retryTurnBlocked={
                 blocked ? '恢复连接并启动 Bot 后重试' : undefined
               }
-              textDraft={draft.text}
+              textDraft={submittingDraft?.id === id && submittingDraft.revision === draft.revision ? '' : draft.text}
               onTextDraftChange={(text) => changeDraft({ text })}
               onTextSend={() => void send()}
               onStopModelTurn={() =>
@@ -955,7 +910,7 @@ export function BotPage({
               textModelReady={!!current?.modelKey}
               voiceModelReady={false}
               onOpenSettings={() => onOpenSettings()}
-              onOpenModelSettings={() => setPanel('sync')}
+              onOpenModelSettings={() => onOpenSettings(true, state.cache?.models.find(model => model.key === current?.modelKey)?.source === 'cloud' ? 'bot' : 'local')}
               onNewConversation={() => void create()}
               onOpenConversation={(next) => void open(next)}
               onConversationRemoved={(removed) => {
@@ -1050,6 +1005,7 @@ export function BotPage({
               usageRecords={usage}
               usageRunning={running}
               workspaceSendBlocked={blocked || uploading || sending}
+              workspaceSendBlockedHint={sending ? '正在发送…' : uploading ? '附件上传完成后即可发送' : unknownSend ? '正在确认上一条消息的提交结果' : !state.online ? showConnectionWarning ? '正在恢复 Bot 连接，草稿会保留' : '' : 'Bot 暂时无法接收消息，请检查运行状态'}
               onOpenAccessSettings={() => setPanel('scope')}
               flowDeliverables={
                 flow
@@ -1071,16 +1027,7 @@ export function BotPage({
                 <NavRail page="bot" />
                 <section className="h-bot-onboarding">
                   {state.binding ? (
-                    <div className="h-bot-welcome" role="status">
-                      <Server size={26} aria-hidden="true" />
-                      <h1>
-                        {state.stoppedConfirmed || state.cache?.enabled === false
-                          ? 'Bot 已停止'
-                          : state.online
-                            ? '正在读取云端会话…'
-                            : 'Bot 连接已断开'}
-                      </h1>
-                      <p className="h-bot-welcome-host">{state.binding.host}</p>
+                    <StateView kind={state.stoppedConfirmed||state.cache?.enabled===false?'empty':state.online||!showConnectionWarning?'loading':'error'} className="h-bot-welcome" role="status" illustration={<Server size={26} aria-hidden="true"/>} titleAs="h1" title={state.stoppedConfirmed||state.cache?.enabled===false?'Bot 已停止':state.online?'正在读取云端会话…':showConnectionWarning?'Bot 连接已断开':'正在连接 Bot…'} description={state.binding.host} descriptionClassName="h-bot-welcome-host">
                       <div className="h-bot-welcome-actions">
                         <BotButton
                           primary={state.stoppedConfirmed || state.cache?.enabled === false}
@@ -1093,10 +1040,10 @@ export function BotPage({
                         >
                           启动 Bot
                         </BotButton>
-                        <BotButton disabled={!!state.busy} onClick={() => setPanel('settings')}>
+                        <BotButton disabled={!!state.busy} onClick={() => onOpenSettings()}>
                           Bot 设置
                         </BotButton>
-                        {!state.online && (
+                        {!state.online && (showConnectionWarning || state.cache?.enabled === false) && (
                           <BotButton
                             primary={!state.stoppedConfirmed && state.cache?.enabled !== false}
                             disabled={!!state.busy}
@@ -1110,7 +1057,7 @@ export function BotPage({
                           </BotButton>
                         )}
                       </div>
-                    </div>
+                    </StateView>
                   ) : loaded ? (
                     <BotSetup
                       api={api}
@@ -1118,7 +1065,7 @@ export function BotPage({
                       onDone={() => setId(null)}
                     />
                   ) : (
-                    <p role="status">正在读取 Bot 连接…</p>
+                    <LoadingState description="正在读取 Bot 连接…"/>
                   )}
                   {error && (
                     <p className="h-bot-error" role="alert">
@@ -1128,9 +1075,6 @@ export function BotPage({
                 </section>
               </div>
             </main>
-          )}
-          {panel === 'sync' && (
-            <BotAddModels api={api} state={state} onClose={() => setPanel(null)} />
           )}
           {panel === 'folder' && id && (
             <BotFolderPicker
@@ -1164,14 +1108,13 @@ export function BotPage({
               <code>{current?.dir}</code>
             </BotDialog>
           )}
-          {(panel === 'settings' || panel === 'pairing') && (
-            <BotSettings
-              key={`${panel}:${state.binding?.instanceId}`}
-              initialScreen={panel === 'pairing' ? 'pairing' : 'settings'}
+          {panel === 'pairing' && (
+            <BotPairing
+              key={state.binding?.instanceId}
               state={state}
               call={call}
               onClose={() => setPanel(null)}
-              onSync={() => setPanel('sync')}
+              onBack={() => setPanel(null)}
             />
           )}
           {panel === 'capabilities' && (

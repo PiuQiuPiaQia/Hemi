@@ -7,28 +7,33 @@ import type {
 
 export function botModelDirectory(state: BotState): ModelProfilesDirectory {
   const providers = new Map<string, ModelProviderView>();
-  for (const model of state.cache?.models ?? []) {
+  const localKeys = new Set(state.localModels?.map(model => model.key));
+  const models = [
+    ...(state.localModels ?? []).map(model => ({
+      key: model.key, providerId: model.providerId ?? model.key.split('/')[0],
+      name: model.provider, model: model.name, baseUrl: model.baseUrl ?? '',
+      api: model.api ?? 'openai-completions', supportsVision: model.supportsVision ?? false,
+      source: 'local' as const,
+      thinkingLevel: model.thinkingLevel ?? 'default', unavailableReason: model.reason || undefined,
+    })),
+    ...(state.cache?.models ?? []).filter(model => !localKeys.has(model.key)),
+  ];
+  for (const model of models) {
     let p = providers.get(model.providerId);
     if (!p) {
       p = {
-        id: model.providerId,
-        name: model.name,
-        baseUrl: model.baseUrl,
-        api: model.api as ModelProviderView['api'],
-        hasApiKey: true,
-        keyStoredSecurely: true,
-        updatedAt: 0,
-        models: [],
+        source: model.source ?? 'local',
+        id: model.providerId, name: model.name, baseUrl: model.baseUrl,
+        api: model.api as ModelProviderView['api'], hasApiKey: true,
+        keyStoredSecurely: true, updatedAt: 0, models: [],
       };
       providers.set(p.id, p);
     }
     p.models.push({
-      id: model.key.slice(model.key.indexOf('/') + 1),
-      modelKey: model.key,
-      model: model.model,
-      thinkingLevel: 'default',
-      supportsVision: model.supportsVision,
-      visionModel: '',
+      id: model.key.slice(model.key.indexOf('/') + 1), modelKey: model.key,
+      model: model.model, thinkingLevel: model.thinkingLevel ?? 'default',
+      supportsVision: model.supportsVision, visionModel: '',
+      unavailableReason: 'unavailableReason' in model ? model.unavailableReason : undefined,
     });
   }
   return {
@@ -36,7 +41,7 @@ export function botModelDirectory(state: BotState): ModelProfilesDirectory {
     defaultModelId: state.cache?.defaultModel ?? null,
     lastConversationModelKey: state.cache?.lastConversationModelKey ?? null,
     providers: [...providers.values()],
-    roleModels: {},
+    roleModels: state.localRoleModels ?? state.cache?.roleModels ?? {},
     envOverride: false,
     corrupt: false,
   };
@@ -64,7 +69,7 @@ export function createBotConversationBridge(
         getState().cache?.sessions.map((s) => ({
           ...s,
           status:
-            s.waitingPermission || s.status === 'queued' ? 'waiting' : s.status,
+            s.waitingPermission ? 'waiting' : s.status,
           unreadAt: null,
         })) ?? [],
       storageError: null,
@@ -77,8 +82,18 @@ export function createBotConversationBridge(
     reorderConversations: (ids: string[]) => command('session.order', { ids }),
     markConversationRead: async () => ({ ok: true, unreadAt: null }),
     flowGetSnapshot: (id: string) => command('flow.snapshot', { id }),
-    flowCommand: (id: string, flowCommand: Record<string, unknown>) =>
-      command('flow.command', { id, command: flowCommand }),
+    flowCommand: (id: string, flowCommand: Record<string, unknown>, operation?: {requestId: string; generation: number | null}) => {
+      const snapshot=getState().cache?.details[id]?.flow;
+      const next={...flowCommand};
+      if(['beginEditInput','finishEditInput','updateInput'].includes(String(next.type)) && next.expectedEditRevision===undefined)next.expectedEditRevision=snapshot?.pending.find(item=>item.inputId===next.inputId)?.editRevision;
+      if(next.type==='stop' && next.targetRunId===undefined)next.targetRunId=snapshot?.activeRunId;
+      return command('flow.command', { id, command: next, generation: operation?.generation ?? snapshot?.generation, ...(operation?{requestId:operation.requestId}:{}) });
+    },
+    flowLookupOperation: async (_id: string, requestId: string) => {
+      const receipt=await command('operation.get',{operationId:requestId}) as {status:string;result?:{ok:boolean}};
+      return receipt.status==='done'?receipt.result??null:null;
+    },
+    onFlowDisconnected: (receive: () => void) => api.onChanged(state=>{if(!state.online)receive();}),
     onFlowChanged: (callback: (value: unknown) => void) => {
       const seen = new Map<string, number>();
       return api.onChanged((state) => {

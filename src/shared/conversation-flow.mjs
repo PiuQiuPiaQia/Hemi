@@ -144,7 +144,7 @@ export function applyFlowFact(snapshot, fact) {
         ...(fact.patch.attachmentIds !== undefined ? { attachmentIds: fact.patch.attachmentIds } : {}),
         ...(fact.patch.references !== undefined ? { references: fact.patch.references } : {}),
         ...(fact.patch.skills !== undefined ? { skills: fact.patch.skills } : {}),
-        ...(fact.patch.text !== undefined && fact.patch.text !== current.text ? { editRevision: current.editRevision + 1 } : {}),
+        editRevision: current.editRevision + 1,
       };
       const pending = snapshot.pending.map((entry, i) => (i === index ? updated : entry));
       const next = { ...snapshot, revision: snapshot.revision + 1, pending };

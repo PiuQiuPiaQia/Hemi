@@ -1,3 +1,4 @@
+import { freezeModelPolicy } from '../agent-runtime/model-policy.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -36,6 +37,7 @@ import { listRemoteModels } from '../services/text-model.mjs';
 import { createDeviceGateway } from './device-gateway.mjs';
 import { createResourceFiles } from './resource-files.mjs';
 import { createAttachmentUploads } from './attachment-uploads.mjs';
+import { createBotEventStream } from './event-stream.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
@@ -71,6 +73,8 @@ export async function createBotHost({
   executorFactory = createBotExecutor,
   validateModel = validateCloudModel,
   allowLoopbackModels = false,
+  editLeaseMs = 60000,
+  now = Date.now,
 } = {}) {
   privateDirectory(dataDir);
   dataDir = await fsp.realpath(dataDir);
@@ -89,6 +93,8 @@ export async function createBotHost({
     defaultModel: null,
     lastConversationModelKey: null,
     models: {},
+    modelSources: {},
+    roleModels: {},
     versions: {},
     sessions: {},
     order: [],
@@ -100,29 +106,39 @@ export async function createBotHost({
       'Bot 数据版本不兼容，请使用对应版本维护，原数据已保留。',
       'unsupported',
     );
+  state.roleModels ??= {};
+  state.modelSources ??= Object.fromEntries(Object.keys(state.models).map(key => [key, /^bot-[a-f0-9]{24}\//.test(key) ? 'cloud' : 'local']));
   await fsp.mkdir(state.defaultDir, { recursive: true });
   state.defaultDir = await fsp.realpath(state.defaultDir);
   const controllers = new Map(),
     jobs = new Map(),
     listeners = new Set();
-  let activeJob = null,
-    closed = false,
+  let closed = false,
     flushTimer = null,
     maintenanceUntil = 0;
   let modelSyncActive = false;
   const maintenanceActive = () => maintenanceUntil > Date.now();
   for (const operation of Object.values(state.operations))
     if (operation.status === 'pending') operation.status = 'interrupted';
-  const save = () => {
+  const commandTails = new Map(), editLeases = new Map(), liveClients = new Map();
+  const events = createBotEventStream({ instanceId: state.instanceId, bootId, snapshot: id => catalog(id) });
+  const serialize = (id, work) => {
+    const next = (commandTails.get(id) ?? Promise.resolve()).catch(() => {}).then(work);
+    commandTails.set(id, next);
+    void next.finally(() => { if (commandTails.get(id) === next) commandTails.delete(id); }).catch(() => {});
+    return next;
+  };
+  const save = (catalogChanged = true) => {
     state.revision++;
     atomicJson(stateFile, state);
     for (const fn of listeners) fn(state.revision);
+    if (catalogChanged) events.publish({ type: 'catalog' });
   };
   const laterSave = () => {
     if (!flushTimer)
       flushTimer = setTimeout(() => {
         flushTimer = null;
-        save();
+        save(false);
       }, 120);
   };
   const requireSession = (id) => {
@@ -131,13 +147,19 @@ export async function createBotHost({
     return state.sessions[id];
   };
   const requireOnlineModel = (key) => {
+    if (key === 'auto') {
+      if (!state.roleModels.main) fail('请先在本机配置自动路由主模型。', 'missing');
+      for (const candidate of new Set(Object.values(state.roleModels).filter(Boolean))) requireOnlineModel(candidate);
+      return;
+    }
     const revision = Object.hasOwn(state.models, key)
       ? state.models[key]
       : null;
     if (!revision)
-      fail('当前模型不可用，请手动同步或选择可用模型。', 'missing');
+      fail('当前模型不可用，请在本机检查配置或选择可用模型。', 'missing');
     return state.versions[revision];
   };
+  const resourceWait = session => session.flow?.runs?.[session.flow.activeRunId]?.activity;
   const view = (session) => ({
     id: session.id,
     title: session.title,
@@ -147,7 +169,7 @@ export async function createBotHost({
     modelKey: session.modelKey,
     thinking: session.thinking,
     status:
-      jobs.has(session.id) && activeJob?.id !== session.id
+      (jobs.has(session.id) && !jobs.get(session.id).running) || resourceWait(session)?.phase === 'waiting-resource'
         ? 'queued'
         : session.flow?.activeRunId && session.flow.phase !== 'idle'
           ? 'running'
@@ -155,6 +177,9 @@ export async function createBotHost({
     waitingPermission: Object.values(session.permissions ?? {}).some(
       (p) => p.status === 'pending',
     ),
+    waitingResource: resourceWait(session)?.phase === 'waiting-resource',
+    blockedBy: [...new Set((resourceWait(session)?.resources ?? []).flatMap(resource => resource.blockers ?? [])
+      .map(blocker => blocker.owner?.conversationId).filter(id => id && id !== session.id))],
     turnCount: session.flow?.timeline?.length ?? 0,
   });
   const privatePath = (target) =>
@@ -221,11 +246,13 @@ export async function createBotHost({
     save();
     return Promise.resolve();
   }
-  async function drain() {
-    if (activeJob || !state.enabled || closed) return;
-    const job = [...jobs.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
-    if (!job) return;
-    activeJob = job;
+  function drain() {
+    if (!state.enabled || closed) return;
+    // Controllers order inputs within each conversation. The shared execution
+    // runtime coordinates conflicting tools; another conversation never owns this slot.
+    for (const job of jobs.values()) if (!job.running) void runJob(job);
+  }
+  async function runJob(job) {
     job.running = true;
     laterSave();
     try {
@@ -274,7 +301,6 @@ export async function createBotHost({
         await persistSession(job.id);
       }
       if (jobs.get(job.id) === job) jobs.delete(job.id);
-      activeJob = null;
       job.settled.resolve();
       pruneVersions();
       save();
@@ -309,12 +335,20 @@ export async function createBotHost({
         token: selection.token ?? resolved.name,
       });
     }
+    const frozenRoles = clone(state.roleModels), revisions = clone(state.models);
+    const configs = Object.fromEntries(Object.entries(revisions).map(([modelKey, revision]) => [modelKey, clone(state.versions[revision])]));
+    const policy = await freezeModelPolicy({
+      modelKey: key,
+      store: {
+        list: async () => ({ roleModels: frozenRoles }),
+        resolveStrict: async modelKey => configs[modelKey] ? { ok: true, config: configs[modelKey] } : { ok: false, message: '模型版本已不可用。' },
+      },
+    });
     return {
       skills,
       modelPolicySnapshot: {
-        modelKey: key,
-        revision: state.models[key],
-        thinkingLevel: s.thinking,
+        ...policy, modelKey: key, revision: revisions[key], thinkingLevel: s.thinking,
+        revisions: Object.fromEntries(Object.keys(policy.candidates).map(modelKey => [modelKey, revisions[modelKey]])),
       },
       workspaceSnapshot: { dir },
       thinkingLevel: s.thinking,
@@ -375,20 +409,22 @@ export async function createBotHost({
     });
     if (s.flow) {
       const recovered = recoverConversationFlow(restoreFlowSnapshot(s.flow));
-      c.restore(recovered.snapshot);
+      c.restore({ ...recovered.snapshot, pending: recovered.snapshot.pending.map(input => input.state === 'editing' ? { ...input, state: 'pending' } : input) });
       for (const p of Object.values(s.permissions ?? {}))
         if (p.status === 'pending') p.status = 'expired';
     }
     controllers.set(id, c);
-    c.subscribe(() => {
+    c.subscribe(change => {
       s.flow = c.getSnapshot();
       s.updatedAt = Date.now();
+      events.flow(id, change);
       laterSave();
     });
     return c;
   }
   const executor = executorFactory({
     dataDir,
+    flowService: {has: id => controllers.has(id), controllerFor: controller},
     readEntries: (id, generation, inputId) => {
       const s = requireSession(id),
         saved = s.agent;
@@ -491,7 +527,7 @@ export async function createBotHost({
         }
       }
     },
-    attachmentPrompt: async (envelope) => {
+    attachmentPrompt: async (envelope, selectedModel) => {
       const s = requireSession(envelope.conversationId),
         blocks = [],
         images = [];
@@ -500,7 +536,7 @@ export async function createBotHost({
         if (!a) fail('附件记录不存在。', 'missing');
         const buffer = await fsp.readFile(a.path);
         if (a.kind === 'image') {
-          const config = state.versions[envelope.modelPolicySnapshot.revision];
+          const config = selectedModel ?? state.versions[envelope.modelPolicySnapshot.revision];
           if (!config.supportsVision)
             fail('当前模型不支持图片，请选择支持图片的模型。');
           images.push({
@@ -551,11 +587,14 @@ export async function createBotHost({
   });
   function pruneVersions() {
     const keep = new Set(Object.values(state.models));
-    for (const job of jobs.values())
-      keep.add(job.spec.envelope?.modelPolicySnapshot?.revision);
+    const retain = snapshot => {
+      keep.add(snapshot?.revision);
+      for (const revision of Object.values(snapshot?.revisions ?? {})) keep.add(revision);
+    };
+    for (const job of jobs.values()) retain(job.spec.envelope?.modelPolicySnapshot);
     for (const session of Object.values(state.sessions))
       for (const input of session.flow?.pending ?? [])
-        keep.add(input.modelPolicySnapshot?.revision);
+        retain(input.modelPolicySnapshot);
     for (const revision of Object.keys(state.versions))
       if (!keep.has(revision)) delete state.versions[revision];
   }
@@ -573,8 +612,33 @@ export async function createBotHost({
       ...(a.thumbnailUrl ? { thumbnailUrl: a.thumbnailUrl } : {}),
     };
   }
-  async function mutate(method, p) {
+  async function mutate(method, p, clientId) {
     switch (method) {
+      case 'model.local-config': {
+        if (modelSyncActive) fail('云端仍在验证模型。', 'busy');
+        if (!Array.isArray(p.keys) || p.keys.length > 1000) fail('本机模型配置无效。');
+        const keys = new Set(p.keys);
+        const roles = {};
+        for (const role of ['main', 'explorer', 'oracle', 'fixer', 'designer', 'fallback']) {
+          const key = p.roleModels?.[role];
+          if (!key) continue;
+          if (!keys.has(key)) fail('本机路由模型尚未通过云端验证，原路由保留。', 'missing');
+          roles[role] = key;
+        }
+        for (const key of keys) {
+          requireOnlineModel(key);
+          if (state.modelSources[key] !== 'local') fail('本机配置不能覆盖云端模型。', 'permission');
+        }
+        for (const key of Object.keys(state.models)) if (state.modelSources[key] === 'local' && !keys.has(key)) {
+          delete state.models[key]; delete state.modelSources[key];
+        }
+        const firstRouting = !state.roleModels.main && roles.main;
+        state.roleModels = roles;
+        if (firstRouting) state.defaultModel = 'auto';
+        if (state.defaultModel === 'auto' ? !roles.main : !state.models[state.defaultModel])
+          state.defaultModel = roles.main ? 'auto' : Object.keys(state.models)[0] ?? null;
+        pruneVersions(); save(); return { ok: true };
+      }
       case 'model.sync': {
         if (maintenanceActive())
           fail('云端组件正在维护，请稍后再同步模型。', 'busy');
@@ -598,8 +662,15 @@ export async function createBotHost({
               if (index >= rawModels.length) return;
               const raw = rawModels[index],
                 config = syncModelConfig(raw);
+              const source = p.source === 'manual' ? 'cloud' : 'local';
+              const previousRevision = state.models[config.modelKey];
+              const previous = state.versions[previousRevision] ?? (source === 'cloud' ? Object.values(state.models).map(revision => state.versions[revision]).find(config => config.providerId === raw.providerId && state.modelSources[config.modelKey] === 'cloud') : null);
+              if (source === 'cloud' && !config.apiKey && previous && state.modelSources[previous.modelKey] === 'cloud') config.apiKey = previous.apiKey;
               const rejected = (message) =>
                 (results[index] = { key: config.modelKey, ok: false, message });
+              if ((previousRevision && state.modelSources[config.modelKey] !== source) || Object.entries(state.models).some(([key, revision]) => state.versions[revision].providerId === config.providerId && state.modelSources[key] !== source)) {
+                rejected('本机来源模型请前往本机设置修改。'); continue;
+              }
               if (
                 !config.modelKey ||
                 !config.model ||
@@ -652,14 +723,24 @@ export async function createBotHost({
             if (!item) continue;
             state.versions[item.revision] = item.config;
             state.models[item.config.modelKey] = item.revision;
+            state.modelSources[item.config.modelKey] = p.source === 'manual' ? 'cloud' : 'local';
             state.defaultModel ??= item.config.modelKey;
           }
+          if (p.source === 'manual') {
+            const providers = new Set(validated.filter(Boolean).map(item => item.config.providerId));
+            const keys = new Set(validated.filter(Boolean).map(item => item.config.modelKey));
+            for (const key of Object.keys(state.models)) if (state.modelSources[key] === 'cloud' && providers.has(state.versions[state.models[key]].providerId) && !keys.has(key)) {
+              delete state.models[key]; delete state.modelSources[key];
+            }
+          }
+          if (state.defaultModel !== 'auto' && !state.models[state.defaultModel]) state.defaultModel = Object.keys(state.models)[0] ?? null;
           pruneVersions();
           save();
           return {
             results,
+            roleModels: clone(state.roleModels),
             models: Object.entries(state.models).map(([key, revision]) =>
-              publicModel(state.versions[revision], revision),
+              publicModel(state.versions[revision], revision, state.modelSources[key]),
             ),
           };
         } finally {
@@ -731,8 +812,8 @@ export async function createBotHost({
       }
       case 'session.create': {
         const modelKey = [state.lastConversationModelKey, state.defaultModel, ...Object.keys(state.models)]
-          .find(key => key && state.models[key]);
-        if (!modelKey) fail('请先同步一个可用的模型。', 'missing');
+          .find(key => key && (key === 'auto' ? state.roleModels.main : state.models[key]));
+        if (!modelKey) fail('请先选择一个可用的模型。', 'missing');
         const id = 'bot-' + randomUUID(),
           now = Date.now();
         state.sessions[id] = {
@@ -796,6 +877,7 @@ export async function createBotHost({
         if (job) await job.settled.promise;
         await c.close();
         controllers.delete(p.id);
+        editLeases.delete(p.id);
         state.order = state.order.filter((id) => id !== p.id);
         delete state.sessions[p.id];
         await fsp.rm(path.join(dataDir, 'attachments', p.id), {
@@ -843,6 +925,18 @@ export async function createBotHost({
           c = controller(p.id),
           cmd = clone(p.command ?? {});
         if (!COMMANDS.has(cmd.type)) fail('不支持的对话操作。', 'unsupported');
+        if (p.generation != null && p.generation !== c.getSnapshot().generation)
+          return { ok: false, code: 'conflict', message: '会话已回卷，请刷新后核对操作。' };
+        const item = c.getSnapshot().pending.find(input => input.inputId === cmd.inputId);
+        if (cmd.expectedEditRevision != null && item && item.editRevision !== cmd.expectedEditRevision)
+          return {ok:false,code:'stale-input',message:'消息已在其他设备更新，本机修改已保留，请核对后重试。'};
+        const lease = editLeases.get(s.id);
+        if (['beginEditInput','finishEditInput','saveInputEditDraft','updateInput','withdrawInput','promoteInput'].includes(cmd.type)
+          && lease?.inputId === cmd.inputId && lease.owner !== clientId)
+          return { ok: false, code: 'locked', message: '这条消息正在另一台设备上编辑，请稍后重试。' };
+        if (['finishEditInput','saveInputEditDraft'].includes(cmd.type) && (!lease || lease.inputId !== cmd.inputId || lease.owner !== clientId))
+          return { ok: false, code: 'stale-input', message: '编辑占用已释放，本机修改已保留，请重新打开消息核对。' };
+
         if (cmd.input) {
           delete cmd.input.modelPolicySnapshot;
           delete cmd.input.workspaceSnapshot;
@@ -872,6 +966,9 @@ export async function createBotHost({
             };
         }
         const result = await c.command(cmd);
+        if (result.ok && cmd.type === 'beginEditInput') editLeases.set(s.id, { inputId: cmd.inputId, owner: clientId, expiresAt: now() + editLeaseMs });
+        if (result.ok && cmd.type === 'saveInputEditDraft' && lease) lease.expiresAt = now() + editLeaseMs;
+        if (result.ok && ['finishEditInput','withdrawInput','rewind'].includes(cmd.type)) editLeases.delete(s.id);
         await persistSession(s.id);
         if (result.ok && cmd.type === 'send') {
           if (s.title === '新对话')
@@ -955,7 +1052,8 @@ export async function createBotHost({
         fail('不支持的操作。', 'unsupported');
     }
   }
-  async function request(method, p = {}) {
+  async function request(method, p = {}, context = {}) {
+    const clientId = context.clientId ?? 'legacy';
     if (method !== 'handshake' && p.instanceId !== state.instanceId)
       fail('云端 Bot 身份不同，请重新核对连接。', 'conflict');
     if (method.startsWith('pairing.') || method.startsWith('devices.'))
@@ -977,7 +1075,7 @@ export async function createBotHost({
         defaultDir: state.defaultDir,
         enabled: state.enabled,
         configured: state.initialized === true,
-        capabilities: { devicePairing: 1 },
+        capabilities: { devicePairing: 1, realtime: 1, modelRouting: 1, modelSources: 1 },
       };
     if (method === 'snapshot' && p.revision === state.revision)
       return {
@@ -1002,31 +1100,12 @@ export async function createBotHost({
         return { ok: false, error: method === 'model.list' ? '服务器无法拉取模型列表，请检查接口地址和 API Key，或手动填写型号。' : '服务器未能验证模型连接，请检查接口地址、API Key 和型号。' };
       }
     }
-    if (method === 'snapshot')
-      return {
-        instanceId: state.instanceId,
-        revision: state.revision,
-        enabled: state.enabled,
-        defaultDir: state.defaultDir,
-        defaultModel: state.defaultModel,
-        lastConversationModelKey: state.lastConversationModelKey ?? null,
-        recentDirs: state.recentDirs,
-        deviceAccess: gateway.summary(),
-        models: Object.entries(state.models).map(([key, rev]) =>
-          publicModel(state.versions[rev], rev),
-        ),
-        sessions: state.order
-          .filter((id) => state.sessions[id])
-          .map((id) => view(state.sessions[id])),
-        ...(p.id && Object.hasOwn(state.sessions, p.id)
-          ? { detail: detail(p.id) }
-          : {}),
-      };
+    if (method === 'snapshot') return catalog(p.id);
     if (method === 'session.open') {
       const session = requireSession(p.id);
       // Opening a conversation counts as the last model choice, just like local
       // chat. Background reads must not replace that preference.
-      if (p.activate !== false && state.models[session.modelKey] && state.lastConversationModelKey !== session.modelKey) {
+      if (p.activate !== false && (session.modelKey === 'auto' ? state.roleModels.main : state.models[session.modelKey]) && state.lastConversationModelKey !== session.modelKey) {
         state.lastConversationModelKey = session.modelKey;
         save();
       }
@@ -1244,7 +1323,9 @@ export async function createBotHost({
     state.operations[key] = { hash: digest, status: 'pending' };
     save();
     try {
-      const result = await mutate(method, p);
+      const work = () => mutate(method, p, clientId);
+      const result = p.id && (method.startsWith('session.') || method === 'flow.command' || method === 'permission.decide')
+        ? await serialize(p.id, work) : await work();
       state.operations[key] = { hash: digest, status: 'done', result };
       const keys = Object.keys(state.operations);
       for (const old of keys.slice(0, Math.max(0, keys.length - 1000)))
@@ -1256,6 +1337,29 @@ export async function createBotHost({
       save();
       throw error;
     }
+  }
+  function catalog(id) {
+    return {
+        instanceId: state.instanceId,
+        bootId,
+        revision: state.revision,
+        enabled: state.enabled,
+        defaultDir: state.defaultDir,
+        defaultModel: state.defaultModel,
+        lastConversationModelKey: state.lastConversationModelKey ?? null,
+        recentDirs: state.recentDirs,
+        deviceAccess: gateway.summary(),
+        roleModels: clone(state.roleModels),
+        models: Object.entries(state.models).map(([key, rev]) =>
+          publicModel(state.versions[rev], rev, state.modelSources[key]),
+        ),
+        sessions: state.order
+          .filter((id) => state.sessions[id])
+          .map((id) => view(state.sessions[id])),
+        ...(id && Object.hasOwn(state.sessions, id)
+          ? { detail: detail(id) }
+          : {}),
+      };
   }
   function detail(id) {
     const s = requireSession(id);
@@ -1292,9 +1396,42 @@ export async function createBotHost({
     const value={id,conversationId:s.id,name:item.name,kind:item.kind,path:file,size:bytes.length,source:'picker',at:Date.now(),sha256:item.sha256};
     s.attachments[id]=value;save();return attachmentView(value);
   }});
-  const gateway = await createDeviceGateway({ dataDir, instanceId: state.instanceId, request });
+  function watch(options, send, disconnected, context = {}) {
+    const owner = context.clientId ?? 'legacy';
+    const unsubscribe = events.subscribe(options, send, disconnected);
+    const subscriptions = liveClients.get(owner) ?? new Set();
+    const ids = new Set(options.ids ?? (options.id ? [options.id] : []));
+    subscriptions.add(ids); liveClients.set(owner, subscriptions);
+    let released = false;
+    return () => {
+      if (released) return; released = true; unsubscribe();
+      subscriptions.delete(ids); if (!subscriptions.size) liveClients.delete(owner);
+    };
+  }
+  const hasLiveEditor = (owner, id) => [...(liveClients.get(owner) ?? [])].some(ids => ids.has(id));
+  const leaseTimer = setInterval(() => { void expireEditLeases().catch(() => {}); }, Math.min(5000, editLeaseMs));
+  leaseTimer.unref?.();
+  async function expireEditLeases() {
+    for (const [id, lease] of editLeases) {
+      if (hasLiveEditor(lease.owner, id)) { lease.expiresAt = now() + editLeaseMs; continue; }
+      if (lease.expiresAt > now()) continue;
+      await serialize(id, async () => {
+        if (editLeases.get(id) !== lease || hasLiveEditor(lease.owner, id) || lease.expiresAt > now()) return;
+        const c = controllers.get(id);
+        if (c) {
+          // Leave the original text and saved edit draft available for recovery; don't auto-run it.
+          c.applyFact({ type: 'queue-paused' });
+          const input = c.getSnapshot().pending.find(item => item.inputId === lease.inputId);
+          if (input?.state === 'editing') c.applyFact({ type: 'input-edit-restored', inputId: input.inputId, input: { ...input, state: 'pending' } });
+          await persistSession(id);
+        }
+        editLeases.delete(id);
+      });
+    }
+  }
+  const gateway = await createDeviceGateway({ dataDir, instanceId: state.instanceId, request, watch });
   return {
-    request,
+    request, watch, expireEditLeases,
     subscribe: (fn) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -1302,9 +1439,13 @@ export async function createBotHost({
     async close() {
       closed = true;
       clearTimeout(flushTimer);
+      clearInterval(leaseTimer);
+      events.close();
       await gateway.close();
+      const running = [...jobs.values()].map(job => job.settled.promise);
       await executor.close();
       for (const c of controllers.values()) await c.close();
+      await Promise.all(running);
       save();
     },
   };

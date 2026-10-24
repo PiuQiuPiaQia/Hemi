@@ -1,12 +1,7 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@import './vendor/shadcn-tailwind.css';
 
 /* 原生桌面口径（焦点环门控、文字选中、拖拽、光标）的唯一来源 */
-@import './native.css';
 
 /* 037 视觉系统：设计 token 唯一来源 */
-@import './tokens.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -302,10 +297,6 @@ html[data-platform='darwin'] .compact-titlebar {
 
 .onboarding-input::placeholder {
   color: var(--n-400);
-}
-
-.onboarding-input:focus-visible {
-  border-color: var(--g-500);
 }
 
 .onboarding-input[data-error='true'] {
@@ -3315,12 +3306,6 @@ html[data-window='task-popover'] #root {
   transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 
-/* 聚焦态：描边转柔绿（设计稿 var(--g-500)），不加布局高度。 */
-.compact-shell .text-composer:focus-within {
-  border-color: var(--h24-composer-focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--g-600) 9%, transparent), 0 8px 32px color-mix(in srgb, var(--n-800) 6%, transparent);
-}
-
 /* —— 028 本条消息附件：composer 内的准备区托盘 ——
    发送前确认范围：名称/来源/体积一行一个卡片，点击进 027 预览宿主；
    未就绪态只展示说明（不可发送）；拖入文件时整卡描边提示。 */
@@ -3788,11 +3773,6 @@ html[data-window='task-popover'] #root {
   cursor: default;
 }
 
-html.kb-nav .compact-shell .text-composer-send:focus-visible {
-  outline: 2px solid var(--hemi-green);
-  outline-offset: 1px;
-}
-
 /* 条件提示（待提交语音／模型未配置／通话中）：面板内顶部，只在需要时占行。 */
 .compact-shell .text-composer-hint {
   display: flex;
@@ -3813,11 +3793,6 @@ html.kb-nav .compact-shell .text-composer-send:focus-visible {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-html.kb-nav .compact-shell .text-composer-hint-link:focus-visible {
-  outline: 2px solid var(--hemi-green);
-  outline-offset: 1px;
 }
 
 /* 004 设置导航（对齐交互稿 settings-nav）。 */
@@ -5381,11 +5356,6 @@ html.kb-nav .reader-content:focus-visible {
   color: var(--h24-green-deep);
 }
 
-html.kb-nav .compact-shell .h24-call-nav:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 /* —— 工作区：侧栏 + 主列 —— */
 .compact-shell .h24-workspace {
   display: grid;
@@ -5440,11 +5410,6 @@ html.kb-nav .compact-shell .h24-call-nav:focus-visible {
 .compact-shell .h24-navrail-item[data-current='true'] {
   background: var(--h24-green-soft);
   color: var(--h24-green-deep);
-}
-
-html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 .compact-shell .h24-navrail-spacer {
@@ -5535,11 +5500,6 @@ html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
   text-align: left;
 }
 
-html.kb-nav .compact-shell .h24-sidebar-open:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: -2px;
-}
-
 .compact-shell .h24-sidebar-open:disabled {
   cursor: default;
 }
@@ -5548,11 +5508,6 @@ html.kb-nav .compact-shell .h24-sidebar-open:focus-visible {
    拖动；行容器承担 dnd 监听，指针起动距离在 DndContext sensors 配置。 */
 .compact-shell .h24-sidebar-item:not([data-corrupt='true']):not([data-editing='true']) {
   cursor: grab;
-}
-
-html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: -2px;
 }
 
 .compact-shell .h24-sidebar-item-text {
@@ -5569,17 +5524,13 @@ html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
   min-width: 0;
   margin: 2px 4px;
   padding: 4px 6px;
-  border: 1px solid var(--h24-green);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--h24-canvas);
   font-size: var(--fs-12);
   line-height: 1.4;
   color: var(--h24-ink);
   outline: none;
-}
-
-.compact-shell .h24-sidebar-rename:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--g-600) 18%, transparent);
 }
 
 /* 拖拽排序：被拖行浮起，光标示意可拖。 */
@@ -5760,11 +5711,6 @@ html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
   background: var(--h24-danger-hover-bg);
 }
 
-html.kb-nav .compact-shell .btn-retry:focus-visible {
-  outline: 2px solid var(--h24-danger);
-  outline-offset: 1px;
-}
-
 /* —— 016 记忆轻提示（可见不播报）—— */
 .compact-shell .h24-memory-notice {
   flex-shrink: 0;
@@ -5941,13 +5887,6 @@ html.kb-nav .compact-shell .btn-retry:focus-visible {
 .compact-shell .h24-call-dock-icon:last-child:hover {
   background: var(--h24-danger-soft-bg);
   color: var(--h24-danger-strong);
-}
-
-html.kb-nav .compact-shell .h24-call-dock-icon:focus-visible,
-html.kb-nav .compact-shell .h24-call-dock-mute:focus-visible,
-html.kb-nav .compact-shell .h24-call-chip-btn:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 .compact-shell .h24-call-dock-body {
@@ -6140,11 +6079,6 @@ html.kb-nav .compact-shell .h24-call-chip-btn:focus-visible {
   cursor: default;
 }
 
-html.kb-nav .compact-shell .h24-resend-btn:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 /* 轻量「编辑」入口与原位编辑框。 */
 .compact-shell .h24-edit-btn {
   border: none;
@@ -6162,8 +6096,6 @@ html.kb-nav .compact-shell .h24-resend-btn:focus-visible {
 }
 
 html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
   border-radius: 4px;
 }
 
@@ -6199,11 +6131,6 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 
 .compact-shell .h24-edit-cancel:hover {
   background: var(--h24-surface);
-}
-
-html.kb-nav .compact-shell .h24-edit-cancel:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 /* —— 用户消息：右对齐气泡（设计稿 .user-message）—— */
@@ -6261,8 +6188,6 @@ html.kb-nav .compact-shell .h24-edit-cancel:focus-visible {
 }
 
 html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 2px;
   border-radius: 4px;
 }
 
@@ -6285,11 +6210,6 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
   font-size: var(--fs-14);
   line-height: 1.65;
   outline: none;
-}
-
-.compact-shell .h24-edit-form .h24-edit-input:focus-visible {
-  outline: 2px solid var(--g-300);
-  outline-offset: 0;
 }
 
 .compact-shell .h24-edit-footer {
@@ -6422,8 +6342,6 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 
 html.kb-nav .compact-shell .h24-msg-copy:focus-visible {
   opacity: 1;
-  outline: 2px solid var(--h24-green);
-  outline-offset: 2px;
   border-radius: 4px;
 }
 
@@ -6544,11 +6462,6 @@ html.kb-nav .compact-shell .h24-msg-copy:focus-visible {
   background: var(--h24-green);
 }
 
-html.kb-nav .compact-shell .h24-preview-resizer:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: -2px;
-}
-
 /* 窄窗覆盖模式不显示手柄 */
 @media (max-width: 1179px) {
   .compact-shell .h24-preview-resizer {
@@ -6630,8 +6543,6 @@ html.kb-nav .compact-shell .h24-preview-resizer:focus-visible {
 }
 
 html.kb-nav .compact-shell .h24-preview-tab-select:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: -2px;
   border-radius: var(--r-md);
 }
 
@@ -6653,11 +6564,6 @@ html.kb-nav .compact-shell .h24-preview-tab-select:focus-visible {
   background: var(--h24-line);
 }
 
-html.kb-nav .compact-shell .h24-preview-tab-close:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 .compact-shell .h24-preview-add {
   display: grid;
   place-items: center;
@@ -6676,11 +6582,6 @@ html.kb-nav .compact-shell .h24-preview-tab-close:focus-visible {
 .compact-shell .h24-preview-add[aria-expanded='true'] {
   background: var(--h24-rail);
   color: var(--h24-ink);
-}
-
-html.kb-nav .compact-shell .h24-preview-add:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 .compact-shell .h24-preview-scroll-controls {
@@ -6713,11 +6614,6 @@ html.kb-nav .compact-shell .h24-preview-add:focus-visible {
   cursor: default;
 }
 
-html.kb-nav .compact-shell .h24-preview-scroll-controls button:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 .compact-shell .h24-preview-collapse {
   display: grid;
   place-items: center;
@@ -6735,11 +6631,6 @@ html.kb-nav .compact-shell .h24-preview-scroll-controls button:focus-visible {
 .compact-shell .h24-preview-collapse:hover {
   background: var(--n-50);
   color: var(--h24-ink);
-}
-
-html.kb-nav .compact-shell .h24-preview-collapse:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 .compact-shell .h24-preview-add-menu {
@@ -6830,11 +6721,6 @@ html.kb-nav .compact-shell .h24-preview-collapse:focus-visible {
   cursor: default;
 }
 
-html.kb-nav .compact-shell .h24-preview-tool:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 .compact-shell .h24-preview-tool-spacer {
   flex: 1 1 auto;
   min-width: 0;
@@ -6874,21 +6760,11 @@ html.kb-nav .compact-shell .h24-preview-tool:focus-visible {
   cursor: default;
 }
 
-html.kb-nav .compact-shell .h24-preview-path:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
-}
-
 .compact-shell .h24-preview-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 28px 27px 48px;
-}
-
-html.kb-nav .compact-shell .h24-preview-body:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: -2px;
 }
 
 .compact-shell .h24-preview-status {
@@ -7097,11 +6973,6 @@ html.kb-nav .compact-shell .h24-preview-body:focus-visible {
 
 .compact-shell .h24-sidebar-more:hover {
   color: var(--h24-green);
-}
-
-html.kb-nav .compact-shell .h24-sidebar-more:focus-visible {
-  outline: 2px solid var(--h24-green);
-  outline-offset: 1px;
 }
 
 /* —— 顶栏改为设计稿的三列 grid：品牌占侧栏宽、标题对齐主列左缘 ——
@@ -7380,4 +7251,19 @@ html.kb-nav .compact-shell .h24-sidebar-more:focus-visible {
   .h33-workspace-chip {
     max-width: 180px;
   }
+}
+
+html.kb-nav .compact-shell .text-composer-hint-link:focus-visible {
+  outline: 2px solid var(--hemi-green);
+  outline-offset: 1px;
+}
+
+html.kb-nav .compact-shell .h24-preview-resizer:focus-visible {
+  outline: 2px solid var(--h24-green);
+  outline-offset: -2px;
+}
+
+html.kb-nav .compact-shell .h24-preview-body:focus-visible {
+  outline: 2px solid var(--h24-green);
+  outline-offset: -2px;
 }

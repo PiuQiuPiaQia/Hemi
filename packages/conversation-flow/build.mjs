@@ -26,6 +26,10 @@ const entries = [
   "core",
   "react",
   "parts",
+  "composer",
+  "controls",
+  "navigation",
+  "resources",
   "types",
   "adapters/web-host",
   "adapters/native-host",
@@ -58,6 +62,16 @@ const currentJS = new Set(
 for (const file of previousJS)
   if (!currentJS.has(file)) fs.rmSync(path.join("dist", file));
 const source = path.resolve("src/styles/source");
+const uiStyles = path.resolve("../ui/src/styles");
+const styleFile = (file) => {
+  if (file === "tokens.css") return path.resolve("../ui/src/tokens.css");
+  if (file === "native.css") return path.join(uiStyles, "native.css");
+  if (file === "037-controls.css") return path.join(uiStyles, "controls.css");
+  if (file === "040-popovers.css") return path.join(uiStyles, "popovers.css");
+  if (file === "status.css") return path.join(uiStyles, "status.css");
+  if (file === "dialog.css") return path.join(uiStyles, "dialog.css");
+  return path.join(source, file);
+};
 const order = [
   "tokens.css",
   "native.css",
@@ -72,6 +86,8 @@ const order = [
   "050-result.css",
   "056-tools.css",
   "064-runtime.css",
+  "dialog.css",
+  "status.css",
   "037-overlays.css",
   "062-deliverables.css",
   "attachment-cards.css",
@@ -92,6 +108,7 @@ function readWords(folder) {
   }
 }
 readWords("src");
+readWords("../ui/src");
 function presentationCSS(file) {
   const ast = postcss.parse(
     fs.readFileSync(file, "utf8").replace(/^@import[^;]+;/gm, ""),
@@ -122,10 +139,10 @@ function presentationCSS(file) {
   return ast.toString();
 }
 const input =
-  '@import "tailwindcss" source(none);\n@source "./src";\n' +
+  '@import "tailwindcss" source(none);\n@source "./src";\n@source "../ui/src";\n' +
   order
-    .filter((file) => fs.existsSync(path.join(source, file)))
-    .map((file) => presentationCSS(path.join(source, file)))
+    .filter((file) => fs.existsSync(styleFile(file)))
+    .map((file) => presentationCSS(styleFile(file)))
     .join("\n");
 const compiled = await postcss([tailwind({ optimize: false })]).process(input, {
   from: path.resolve("sdk-styles.css"),
@@ -176,6 +193,9 @@ css.walkDecls((decl) => {
 });
 const extra = fs.readFileSync("src/styles/sdk.css", "utf8");
 fs.writeFileSync("dist/styles.css", css.toString() + "\n" + extra);
+fs.mkdirSync("dist/styles", {recursive: true});
+for (const name of fs.readdirSync(source).filter(name => !name.startsWith('.') && name.endsWith('.css')))
+  fs.copyFileSync(path.join(source, name), path.join("dist/styles", name));
 const names = new Set();
 css.walkDecls((decl) => {
   if (/^--(?!tw-|hcf-)/.test(decl.prop)) names.add(decl.prop);

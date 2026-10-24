@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
 import net from 'node:net';
+import { WebSocketServer } from 'ws';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash, randomBytes, randomInt, randomUUID, timingSafeEqual, X509Certificate} from 'node:crypto';
@@ -25,13 +26,13 @@ export function deviceEndpoint(value) {
 }
 
 /** Trusted SSH management and the public TLS boundary are deliberately separate. */
-export async function createDeviceGateway({dataDir, instanceId, request, now = Date.now, listenHost}) {
+export async function createDeviceGateway({dataDir, instanceId, request, watch, now = Date.now, listenHost}) {
   const dir = path.join(dataDir, 'device-access');
   privateDirectory(dir);
   const file = path.join(dir, 'state.json');
   let state = readJson(file, {schema:1, instanceId, config:null, invitations:{}, devices:{}, operations:{}});
   if (state.schema !== 1 || state.instanceId !== instanceId) fail('设备访问数据与 Bot 身份不匹配。', 'conflict');
-  let server = null, fault = '', configuring = false;
+  let webSockets = null, server = null, fault = '', configuring = false;
   const nonces = new Map(), rates = new Map(), sockets = new Map();
   const commit = next => {atomicJson(file, next); state = next;};
   const expires = invite => invite.expiresAt <= now() && invite.status === 'waiting';
@@ -197,7 +198,7 @@ export async function createDeviceGateway({dataDir, instanceId, request, now = D
     if (body.params.instanceId && body.params.instanceId!==instanceId) fail('Bot 身份不匹配。','conflict');
     const owned = sockets.get(deviceId) ?? new Set();
     if (!owned.has(socket)) {owned.add(socket); sockets.set(deviceId,owned); socket.once('close',()=>owned.delete(socket));}
-    const result = await request(body.method,{...body.params,instanceId});
+    const result = await request(body.method,{...body.params,instanceId},{clientId:deviceId});
     if (state.devices[deviceId]?.revokedAt) fail('设备访问已被撤销。','permission');
     if (!device.lastConnectedAt || now()-device.lastConnectedAt>30000) {const next=structuredClone(state); next.devices[deviceId].lastConnectedAt=now();commit(next);}
     return result;
@@ -219,6 +220,40 @@ export async function createDeviceGateway({dataDir, instanceId, request, now = D
         res.end(JSON.stringify({ok:true,result}));
       } catch(error) {res.statusCode=error?.code==='busy'?429:error?.code==='permission'?403:400;res.end(JSON.stringify(errorView(error)));}
     });
+    const wss = new WebSocketServer({noServer:true, maxPayload:16384, perMessageDeflate:false});
+    candidate.on('upgrade',(req,socket,head)=>{
+      try {
+        rate(socket.remoteAddress ?? 'unknown');
+        if (!watch || req.url!=='/v1/events' || req.headers.origin || wss.clients.size >= 64) {socket.destroy();return;}
+        wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req));
+      } catch {socket.destroy();}
+    });
+    wss.on('connection',(ws,req)=>{
+      let unsubscribe, alive=true, stopped=false;
+      const close=()=>{if(stopped)return;stopped=true;clearTimeout(deadline);clearInterval(heartbeat);unsubscribe?.();};
+      const deadline=setTimeout(()=>ws.terminate(),5000);deadline.unref?.();
+      const heartbeat=setInterval(()=>{if(!alive){ws.terminate();return;}alive=false;ws.ping();},20000);heartbeat.unref?.();
+      ws.on('pong',()=>{alive=true;});ws.on('close',close);ws.on('error',close);
+      ws.once('message',async(raw,binary)=>{
+        try {
+          if(binary)fail('事件认证格式无效。');
+          const {body,deviceId}=await proof(JSON.parse(raw.toString()),'/v1/events');
+          if(stopped)return;
+          const device=state.devices[deviceId];
+          if(!device || device.revokedAt)fail('设备访问已被撤销。','permission');
+          const owned=sockets.get(deviceId)??new Set();
+          if(owned.size>=8)fail('设备连接过多。','busy');
+          owned.add(req.socket);sockets.set(deviceId,owned);req.socket.once('close',()=>owned.delete(req.socket));
+          clearTimeout(deadline);
+          unsubscribe=watch({...body,instanceId},frame=>{
+            if(ws.readyState!==1 || ws.bufferedAmount>2*1024*1024)throw new Error('Slow event consumer');
+            ws.send(JSON.stringify(frame));
+          },()=>ws.terminate(),{clientId:deviceId});
+        } catch(error) {if(ws.readyState===1)ws.send(JSON.stringify(errorView(error)));ws.close(1008);}
+      });
+      // Subscriptions are immutable for this connection; a changed scope reconnects with a new cursor.
+    });
+    webSockets=wss;
     candidate.requestTimeout=15000; candidate.headersTimeout=10000; candidate.keepAliveTimeout=5000; candidate.maxConnections=128;
     candidate.on('tlsClientError',()=>{});
     const address=new URL(config.endpoint);
@@ -227,7 +262,7 @@ export async function createDeviceGateway({dataDir, instanceId, request, now = D
     server=candidate;
     candidate.on('error',()=>{fault='设备连接入口异常，请检查端口并重新启用。';});
   }
-  async function stop() {if(server){const old=server;server=null;old.closeAllConnections();await new Promise(resolve=>old.close(resolve));}nonces.clear();}
+  async function stop() {if(webSockets){for(const ws of webSockets.clients)ws.terminate();webSockets.close();webSockets=null;}if(server){const old=server;server=null;old.closeAllConnections();await new Promise(resolve=>old.close(resolve));}nonces.clear();}
   if(state.config && !state.config.disabled) {try {await start(state.config);} catch {fault='设备连接入口未启动，请检查证书、端口和权限。';}}
   return {management,summary,close:stop};
 }

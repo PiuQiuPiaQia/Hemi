@@ -29,7 +29,7 @@
     "prebuild:renderer": "node scripts/generate-appearance.mjs",
     "predev": "node scripts/generate-appearance.mjs && npm run build:sdk",
     "predev:renderer": "node scripts/generate-appearance.mjs && npm run build:sdk",
-    "build:sdk": "npm run build --workspace @hemi/conversation-flow",
+    "build:sdk": "npm run build --workspace @hemi/ui && npm run build --workspace @hemi/conversation-flow",
     "test:sdk": "npm test --workspace @hemi/conversation-flow",
     "pretest": "npm run build:sdk",
     "dev:mobile": "npm run build:sdk && npm run dev --workspace @hemi/mobile",
@@ -53,7 +53,8 @@
     "playwright-core": "1.64.1",
     "uiohook-napi": "^1.5.5",
     "unpdf": "1.9.1",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "@hemi/ui": "file:packages/ui"
   },
   "devDependencies": {
     "@aiden0z/pptx-renderer": "1.2.4",

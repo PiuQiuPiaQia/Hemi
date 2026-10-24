@@ -106,7 +106,6 @@
 html.kb-nav .compact-shell .h24-call-nav:focus-visible,
 html.kb-nav .compact-shell .h24-nav-toggle:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* 066 · 顶栏「打开工作区目录」split 按钮：主钮用默认方式立即打开，窄箭头
@@ -138,7 +137,6 @@ html.kb-nav .compact-shell .h24-nav-toggle:focus-visible {
 html.kb-nav .compact-shell .h65-open-main:focus-visible,
 html.kb-nav .compact-shell .h65-open-more:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* —— 图标栏 —— */
@@ -214,7 +212,6 @@ html.kb-nav .compact-shell .h65-open-more:focus-visible {
 
 html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* —— 会话栏 —— */
@@ -266,7 +263,6 @@ html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
 
 html.kb-nav .compact-shell .h24-sidebar-new:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring-inset);
 }
 
 .compact-shell .h24-sidebar-new kbd {
@@ -347,7 +343,6 @@ html.kb-nav .compact-shell .h24-sidebar-new:focus-visible {
 html.kb-nav .compact-shell .h24-sidebar-open:focus-visible,
 html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring-inset);
 }
 
 .compact-shell .h24-sidebar-rename {
@@ -357,16 +352,8 @@ html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
   border: 0;
   border-radius: var(--r-sm);
   background: var(--bg-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--g-500),
-    0 0 0 3px var(--g-100);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   font-size: var(--fs-13);
-}
-
-.compact-shell .h24-sidebar-rename:focus-visible {
-  box-shadow:
-    inset 0 0 0 1px var(--g-500),
-    0 0 0 3px var(--g-100);
 }
 
 .compact-shell .h24-sidebar-item[data-dragging='true'] {
@@ -486,6 +473,17 @@ html.kb-nav .compact-shell .h24-sidebar-new:focus-visible kbd {
   .compact-shell.h24-shell[data-market-open='false'] .h24-workspace[data-preview-open='true'] .h24-preview {
     border-top: 1px solid var(--line);
   }
+}
+
+/* 输入区提示沿用输入框的居中列宽与窄窗边距。 */
+.compact-shell .h24-composer > .h-status-notice {
+  width: 100%;
+}
+.compact-shell .h24-composer > .h-status-notice > .h-status-content {
+  flex: 1;
+}
+.compact-shell .h24-composer > .h-status-notice > svg {
+  flex: none;
 }
 
 /* 会话行状态：标题优先截断，图标保持可见；同一组件用于「查看全部」。 */

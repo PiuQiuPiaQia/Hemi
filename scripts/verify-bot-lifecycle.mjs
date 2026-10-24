@@ -135,9 +135,10 @@ try {
   );
   assert.equal((await state()).cache.selectedId, selected);
   note('只读切换已缓存会话后完全重启，仍恢复最后会话和原草稿');
-  await page.getByRole('button', { name: 'Bot 设置', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '停止 Bot', exact: true }).click();
-  await page.getByRole('button', { name: '停止 Bot', exact: true }).click();
+  await page.getByRole('dialog', { name: '停止云端 Bot？', exact: true })
+    .getByRole('button', { name: '停止 Bot', exact: true }).click();
   await wait(
     async () => (await state()).stoppedConfirmed === true,
     'OS stop confirmed',
@@ -147,14 +148,14 @@ try {
     path: path.join(evidence, 'lifecycle-service-stopped.png'),
   });
   await page
-    .getByRole('dialog', { name: 'Bot 设置', exact: true })
+    .locator('.h37-settings-shell')
     .getByRole('button', { name: '启动 Bot', exact: true })
     .click();
   await wait(async () => {
     const s = await state();
     return s.online && s.cache.enabled && !s.stoppedConfirmed;
   }, 'OS restarted');
-  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: 'Bot', exact: true }).click();
   note('收到 systemd 停止回执后才显示已确认停止，重新启动恢复服务');
   await page
     .locator('.h24-sidebar-item[data-current="true"]')

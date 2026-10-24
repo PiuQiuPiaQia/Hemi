@@ -190,7 +190,7 @@ test('draft conflicts pause automatic writes until an explicit keep-local choice
 
 test('online submissions serialize acceptance so slow ports cannot reorder inputs', async () => {
   const first=deferred();let count=0;const sent=[];
-  const f=fixture({transport:{async command(request){sent.push(request.command.input.text);return ++count===1?first.promise:{ok:true};}}});
+  const f=fixture({client:{requestTimeoutMs:1000},transport:{async command(request){sent.push(request.command.input.text);return ++count===1?first.promise:{ok:true};}}});
   await f.client.start();f.client.draft.setText('one');const a=f.client.sendDraft();await tick();
   f.client.draft.setText('two');const b=f.client.sendDraft();await tick();assert.deepEqual(sent,['one']);
   first.resolve({ok:true});await Promise.all([a,b]);assert.deepEqual(sent,['one','two']);f.client.dispose();
@@ -248,4 +248,19 @@ test('offline stop/edit operations are rejected rather than silently scheduled f
   assert.equal((await f.client.sendCommand({type:'stop'})).code,'offline');
   assert.equal((await f.client.sendCommand({type:'rewind'})).code,'offline');
   assert.equal(f.client.getSnapshot().operations.length,0);assert.equal(f.commands.length,0);f.client.dispose();
+});
+
+
+test('an in-flight message stays visible until the Host snapshot includes its stable input identity', async () => {
+  const receipt = deferred();
+  const f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
+  await f.client.start(); f.client.draft.setText('visible immediately');
+  const pending = f.client.sendDraft(); await tick();
+  const state = f.client.getSnapshot(), queue = projectConversationQueue(state.snapshot, state.operations);
+  assert.equal(queue.items[0].text, 'visible immediately');
+  assert.equal(queue.items[0].dispatchState, 'sending');
+  const inputId = state.operations[0].command.input.inputId;
+  f.set(snapshot({revision: 1, timeline: [{kind: 'user', id: inputId}]}));
+  assert.equal(projectConversationQueue(f.client.getSnapshot().snapshot, state.operations).items.length, 0);
+  receipt.resolve({ok: true}); await pending; f.client.dispose();
 });

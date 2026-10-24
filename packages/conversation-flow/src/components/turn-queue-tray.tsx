@@ -90,7 +90,7 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
     setActing(true);
     try { await action(item.queueItemId); } finally { setActing(false); }
   };
-  const waiting = item.dispatchState === 'promoting';
+  const waiting = item.dispatchState === 'promoting' || item.dispatchState === 'sending';
   return <div ref={setNodeRef} className="h24-queue-item" data-queue-item-id={item.queueItemId} data-state={item.dispatchState}
     data-source={item.inputSource ?? 'text'} data-dragging={isDragging ? 'true' : undefined}
     style={{ transform: CSS.Transform.toString(transform), transition }}>
@@ -118,7 +118,7 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
     <div className="h24-queue-item-actions">
       <button type="button" className="h24-queue-run" aria-label="直接运行" title="直接运行：当前阶段结束后交接，旧任务不再继续" disabled={locked || Boolean(item.operationId) || !onPromote}
         data-waiting={waiting ? 'true' : undefined} onClick={() => onPromote && void act(onPromote)}>
-        {waiting ? <Clock3 className="size-3" /> : <Play className="size-3" />}<span>{waiting ? '等待交接' : '直接运行'}</span>
+        {waiting ? <Clock3 className="size-3" /> : <Play className="size-3" />}<span>{item.dispatchState === 'sending' ? '正在发送' : waiting ? '等待交接' : '直接运行'}</span>
       </button>
       <button type="button" className="h24-queue-tool" aria-label="编辑这条" title={item.readOnly?"本次参数已冻结，撤回后可从工作流重新准备":"回到输入框编辑"} disabled={!onEdit || item.readOnly || Boolean(item.operationId) || acting || sorting || waiting || Boolean(item.error)} onClick={() => { if (!onEdit) return; if (item.dispatchState === 'editing') onEdit(item.queueItemId); else void act(onEdit); }}><Pencil className="size-3.5" /></button>
       <button type="button" className="h24-queue-tool" aria-label="撤回这条" title="撤回这条" disabled={locked} onClick={() => void act(onWithdraw)}><X className="size-3.5" /></button>

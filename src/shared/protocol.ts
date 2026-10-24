@@ -1380,6 +1380,29 @@ export type UsageLedgerView = {
   records: UsageRecord[];
 };
 
+/** 上下文容量：分类明细（字符估算比例，按总量等比缩放）。 */
+export type ContextUsageCategoryView = {
+  key: 'tools' | 'conversation' | 'toolResults' | 'system';
+  label: string;
+  tokens: number;
+  percent: number;
+};
+
+/** 上下文容量快照（tokens/percent 为 null＝压缩后未确认，等待下一轮回复）。 */
+export type ContextUsageSnapshotView = {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+  categories: ContextUsageCategoryView[];
+  unknownReason?: 'compaction';
+};
+
+/** 上下文容量查询结果（无在途主会话时 snapshot 为 null）。 */
+export type ContextSnapshotView = {
+  conversationId: string;
+  snapshot: ContextUsageSnapshotView | null;
+};
+
 /** 015 完整会话（启动种子化 / 历史列表点开载入）。 */
 export type ConversationSession = {
   id: string;
@@ -1401,7 +1424,7 @@ export type ConversationSession = {
 };
 
 /** 015 会话列表行（不带全文）。 */
-export type ConversationStatus = 'running' | 'waiting';
+export type ConversationStatus = 'running' | 'waiting' | 'queued';
 
 export type ConversationSummary = {
   id: string;
@@ -1466,6 +1489,8 @@ export type TaskWorkspaceSnapshot = {
 
 /** 031 v2：模型条目视图（属于供应商；modelKey＝providerId/modelId）。 */
 export type ModelEntryView = {
+  /** A host-specific reason this model cannot be selected. */
+  unavailableReason?: string;
   id: string;
   modelKey: string;
   model: string;
@@ -1493,6 +1518,7 @@ export type OAuthLoginState = {
 
 /** 031 v2：供应商视图（端点＋Key＋协议＋模型列表；无 Key 材料）。 */
 export type ModelProviderView = {
+  source?: 'local' | 'cloud';
   oauthProvider?: OAuthProvider;
   id: string;
   name: string;
@@ -1596,7 +1622,7 @@ export type TurnQueueItemView = {
   text: string;
   revision: number;
   /** 托盘只收 pending（submitting＝已转正上屏，行即刻消失——2026-10-16 用户裁决）。 */
-  dispatchState: 'pending' | 'editing' | 'promoting';
+  dispatchState: 'pending' | 'editing' | 'promoting' | 'sending';
   error: string;
   attachmentIds: string[];
   references: Array<{ kind: string; [key: string]: unknown }>;
@@ -2381,7 +2407,10 @@ export type HemiVoiceBridge = {
   flowCommand: (
     conversationId: string,
     command: Record<string, unknown>,
+    operation?: {requestId: string; generation: number | null},
   ) => Promise<FlowCommandResult>;
+  flowLookupOperation?: (conversationId: string, requestId: string) => Promise<FlowCommandResult | null>;
+  onFlowDisconnected?: (receive: () => void) => () => void;
   flowGetSnapshot: (conversationId: string) => Promise<FlowSnapshotView | null>;
   /** 059 工作流：列表／定义只读＋两入口受理（渲染层零 store 访问）。 */
   workflowApplications: () => Promise<Array<{name:string;applicationRef:string}>>;
@@ -2660,6 +2689,14 @@ export type HemiVoiceBridge = {
   ) => Promise<UsageLedgerView>;
   /** 048：账本有新记录（对话轮结束、任务每次模型调用完成）——重取聚合。 */
   onUsageChanged: (
+    callback: (event: { conversationId: string }) => void,
+  ) => () => void;
+  /** 上下文容量：主会话当前占用＋分类估算。 */
+  getContextSnapshot: (
+    conversationId: string,
+  ) => Promise<ContextSnapshotView>;
+  /** 上下文占用轮末可能变化（含取消/失败停靠）——重取快照。 */
+  onContextChanged: (
     callback: (event: { conversationId: string }) => void,
   ) => () => void;
   /** 033：工作区状态（默认工作区 + 项目列表，含实时可用性）。 */

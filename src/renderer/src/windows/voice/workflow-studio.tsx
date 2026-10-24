@@ -56,7 +56,7 @@ import {
 } from "lucide-react";
 import { workflowPresentation } from "./lib/workflow-presentation";
 import { confirmWorkflowLeave } from "./workflow-leave-guard";
-import "@/styles/059-workflows.css";
+import "@hemi/conversation-flow/styles/059-workflows.css";
 
 type EditorTarget = {
   workflowId: string;

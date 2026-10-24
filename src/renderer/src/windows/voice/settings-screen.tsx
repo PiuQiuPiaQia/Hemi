@@ -24,6 +24,7 @@ import { AccessSection } from '@/windows/voice/access-section';
 import { PushToTalkSection } from '@/windows/voice/push-to-talk-section';
 import { VisionSection } from '@/windows/voice/vision-section';
 import { WebSection } from '@/windows/voice/web-section';
+import { BotSettings } from '@/windows/bot/settings';
 
 /**
  * 设置整页视图。
@@ -40,6 +41,7 @@ import { WebSection } from '@/windows/voice/web-section';
  */
 
 export type SettingsPage = 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory';
+export type SettingsEnvironment = 'local' | 'bot';
 
 /** 旧直达目标别名（038/032 时代的五分类键）。 */
 type LegacySettingsPage = 'model' | 'computer' | 'browser';
@@ -66,12 +68,13 @@ const PAGES: Array<{ key: SettingsPage; label: string; icon: ReactNode }> = [
  */
 
 type SettingsScreenProps = {
+  initialEnvironment?: SettingsEnvironment;
   /** 031 fixtures 用：注入确定性配置目录（不查桥）。 */
   modelProfilesFixture?: ModelProfilesDirectory | null;
   /** 旧目标兼容：model+voice 子 tab 解析为「语音与通话」页；新目标直接用六分类键。 */
   initialModelTab?: 'text' | 'voice';
   saving: boolean;
-  /** 六分类键或旧五分类别名；缺省回到运行期最近分类（无则「通用」）。 */
+  /** 六分类键或旧五分类别名；缺省回到「通用」。 */
   initialPage?: SettingsPage | LegacySettingsPage;
   /** 深层定位锚点：recognition / browser-decision / browser / invoke。 */
   initialSection?: string;
@@ -107,6 +110,7 @@ function resolveInitialPage(
 }
 
 export function SettingsScreen({
+  initialEnvironment = 'local',
   saving,
   initialPage,
   initialSection,
@@ -126,7 +130,11 @@ export function SettingsScreen({
   onCallExpand,
   onCallEnd,
 }: SettingsScreenProps) {
-  const [page, setPage] = useState<SettingsPage>(() => resolveInitialPage(initialPage, initialModelTab));
+  const [environment, setEnvironment] = useState(initialEnvironment);
+  const [page, setPage] = useState<SettingsPage>(() => {
+    const next = resolveInitialPage(initialPage, initialModelTab);
+    return initialEnvironment === 'bot' && next !== 'models' ? 'general' : next;
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 深层定位：切页后滚动到锚点并短暂强调（browser-decision 同时展开 Jev 组）。
   const [pendingSection, setPendingSection] = useState<string | null>(initialSection ?? null);
@@ -179,9 +187,22 @@ export function SettingsScreen({
   const openLog = () => {
     void window.hemiVoice?.revealLogFile();
   };
+  const changeEnvironment = (next: SettingsEnvironment) => {
+    if (next === environment) return;
+    leaveThen(() => {
+      setEnvironment(next);
+      if (page !== 'general' && page !== 'models') setPage('general');
+      setModelView('overview');
+      setPendingSection(null);
+      setDrawerOpen(false);
+    });
+  };
+  const pages = environment === 'bot'
+    ? PAGES.filter((item) => item.key === 'general' || item.key === 'models')
+    : PAGES;
 
   const navItems = (onPick: (key: SettingsPage) => void) =>
-    PAGES.map((item) => (
+    pages.map((item) => (
       <button
         key={item.key}
         type="button"
@@ -193,12 +214,13 @@ export function SettingsScreen({
         {item.label}
       </button>
     ));
-  const currentLabel = PAGES.find((item) => item.key === page)?.label ?? '';
+  const currentLabel = pages.find((item) => item.key === page)?.label ?? '';
 
   return (
     <main
       className="settings-shell compact-shell h24-shell h37-settings-shell min-h-dvh overflow-hidden"
       data-page="settings"
+      data-settings-environment={environment}
     >
       <AppTopBar
         showBrand={false}
@@ -250,15 +272,33 @@ export function SettingsScreen({
             <p className="h37-settings-side-title">设置</p>
             {navItems(goTo)}
             {/* 041：日志降为导航底部辅助入口，不再是内容分组的成员。 */}
-            <div className="h37-settings-navfoot">
+            {environment === 'local' ? <div className="h37-settings-navfoot">
               <button type="button" className="h37-settings-navitem" onClick={openLog}>
                 日志文件
               </button>
-            </div>
+            </div> : null}
           </nav>
 
           <div className="h37-scroll h37-settings-scroll">
             <div className="h37-column h37-settings-column">
+              <label className="h37-settings-environment">
+                <span>设置对象</span>
+                <span className="h37-settings-select">
+                  <select
+                    className="h37-select"
+                    aria-label="设置对象"
+                    value={environment}
+                    onChange={(event) => changeEnvironment(event.target.value as SettingsEnvironment)}
+                  >
+                    <option value="local">本地</option>
+                    <option value="bot">Bot</option>
+                  </select>
+                  <ChevronDown aria-hidden="true" />
+                </span>
+              </label>
+              {environment === 'bot' ? (
+                <BotSettings page={page === 'models' ? 'models' : 'general'} onOpenLocalModels={() => {setEnvironment('local'); setPage('models');}} />
+              ) : <>
               {/* 记忆 tab 常驻挂载：切走再切回，未保存草稿不丢（交互说明 v3）。
                   037：标题文案对齐分域语义；区块内不重复渲染页标题。
                   display:none → 可见会重放 h37-enter 动画，与其余分页的换 key 进场一致。 */}
@@ -400,6 +440,7 @@ export function SettingsScreen({
                   ) : null}
                 </div>
               ) : null}
+              </>}
             </div>
           </div>
         </section>
@@ -419,7 +460,7 @@ export function SettingsScreen({
               setDrawerOpen(false);
               goTo(key);
             })}
-            <div className="h37-settings-navfoot">
+            {environment === 'local' ? <div className="h37-settings-navfoot">
               <button
                 type="button"
                 className="h37-settings-navitem"
@@ -430,7 +471,7 @@ export function SettingsScreen({
               >
                 日志文件
               </button>
-            </div>
+            </div> : null}
           </aside>
         </div>
       ) : null}

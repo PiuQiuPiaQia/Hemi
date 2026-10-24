@@ -242,6 +242,7 @@ export function createProfileStore({
 } = {}) {
   let directory = null;
   let corrupt = false;
+  const listeners = new Set();
 
   const canEncrypt = () => Boolean(safeStorage?.isEncryptionAvailable?.());
 
@@ -286,6 +287,7 @@ export function createProfileStore({
     await writeFileImpl(temp, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await renameImpl(temp, filePath);
     directory = next;
+    for (const listener of listeners) { try { listener(); } catch {} }
   }
 
   // 038：同一 store 的串行写入队列。角色保存、供应商编辑与拨盘修改都是
@@ -327,6 +329,10 @@ export function createProfileStore({
   }
 
   return {
+    onChanged(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     /** 渲染层目录视图。空目录（未迁移/未建组）返回空列表，损坏仍给只读占位。 */
     async list() {
       await ensureLoaded();

@@ -7,6 +7,8 @@ import net from 'node:net';
 import https from 'node:https';
 import {createHash,randomUUID} from 'node:crypto';
 import {SignJWT,generateKeyPair,exportJWK,calculateJwkThumbprint} from 'jose';
+import WebSocket from 'ws';
+import {once} from 'node:events';
 import {createBotHost} from './host.mjs';
 import {createDeviceGateway} from './device-gateway.mjs';
 
@@ -161,4 +163,29 @@ test('resource stat/chunks use actual signed device TLS, exact attachment bytes 
  assert.deepEqual(Buffer.concat(parts),bytes);assert.equal(stat.result.sha256,createHash('sha256').update(bytes).digest('hex'));
  assert.equal((await rpc('resource.chunk',{version:'stale',offset:0,length:1})).code,'conflict');
  await f.manage('devices.revoke',{deviceId:f.deviceId,operationId:randomUUID()});assert.equal((await rpc('resource.stat')).code,'permission');
+});
+
+
+test('actual WSS authenticates device proofs, replays cursors, isolates subscriptions and closes revoked connections',async t=>{
+  const f=await fixture(t), invite=await f.invite();await f.apply(invite);await f.approve(invite);
+  await f.manage('model.sync',{requestId:randomUUID(),models:[{modelKey:'f/m',providerId:'f',name:'Fixture',model:'fake',api:'openai-completions',baseUrl:'https://fixture.invalid',apiKey:'TEST_ONLY'}]});
+  const {id}=await f.manage('session.create',{requestId:randomUUID()});
+  const workspace=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-wss-work-')));t.after(()=>fs.rm(workspace,{recursive:true,force:true}));
+  await f.manage('session.update',{id,dir:workspace,requestId:randomUUID()});
+  const wait=async predicate=>{const end=Date.now()+3000;while(!predicate()){assert.ok(Date.now()<end,'WSS event timed out');await new Promise(r=>setTimeout(r,10));}};
+  async function connect(options={}) {
+    const envelope=await f.envelope('/v1/events',options), ws=new WebSocket(f.endpoint.replace('https:','wss:')+'/v1/events',{ca:f.cert}),frames=[];
+    ws.on('message',data=>frames.push(JSON.parse(data.toString())));ws.on('error',()=>{});t.after(()=>ws.terminate());
+    await once(ws,'open');ws.send(JSON.stringify(envelope));await wait(()=>frames.some(f=>f.type==='ready'||f.ok===false));
+    return{ws,frames};
+  }
+  const first=await connect({id});assert.equal(first.frames[0].type,'reset');assert.equal(first.frames[0].snapshot.detail.id,id);assert.equal(JSON.stringify(first.frames).includes('TEST_ONLY'),false);
+  const cursor={bootId:first.frames.at(-1).bootId,sequence:first.frames.at(-1).sequence,id};
+  first.ws.terminate();await once(first.ws,'close');
+  await f.manage('session.rename',{id,title:'断线期间更新',requestId:randomUUID()});
+  const second=await connect({id,cursor});assert.ok(second.frames.some(f=>f.type==='catalog'));assert.ok(!second.frames.some(f=>f.type==='reset'));
+  const sent=await f.signed('/v1/rpc',{method:'flow.command',params:{id,requestId:randomUUID(),command:{type:'send',input:{inputId:'wss-input',text:'真实推送'}}}});assert.equal(sent.result?.ok,true,JSON.stringify(sent));
+  await wait(()=>second.frames.some(f=>f.type==='flow'));assert.ok(second.frames.filter(f=>f.type==='flow').every(f=>f.id===id));
+  const closed=once(second.ws,'close');await f.manage('devices.revoke',{deviceId:f.deviceId,operationId:randomUUID()});await closed;
+  const rejected=await connect({id});assert.equal(rejected.frames[0].code,'permission');
 });

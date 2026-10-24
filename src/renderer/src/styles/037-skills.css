@@ -151,7 +151,6 @@
 
 html.kb-nav .h34-market .h34-card:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h34-market .h34-card-top {
@@ -619,7 +618,6 @@ html.kb-nav .h34-market .h34-card:focus-visible {
 
 html.kb-nav .h34-market .h34-fold > summary:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* 吸底确认条：证据再长，确认动作始终同屏 */

@@ -1,9 +1,11 @@
+import {DirectoryControlButton} from '@hemi/conversation-flow/controls';
+import {SelectionSurface, useControlDisclosure} from '@hemi/ui';
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Check, ChevronDown, FolderOpen, FolderPlus, House, Server, X } from 'lucide-react'
+import { AlertTriangle, Check, FolderOpen, FolderPlus, House, Server, X } from 'lucide-react'
 
 import type { WorkspaceState, WorkspaceView } from '@/shared/types'
-import { Menu, MenuSearch, MenuSeparator } from '@/components/menu'
+import { MenuSearch, MenuSeparator } from '@/components/menu'
 import { displayPath } from '@/windows/voice/lib/path-format'
 import { RemoteFolderDialog } from './remote-folder-dialog'
 
@@ -72,7 +74,7 @@ export function WorkspaceBar({
   onRetryRemote?: (id: string) => void
   onRemove: (id: string) => void
 }) {
-  const [open, setOpen] = useState(Boolean(fixtureOpen))
+  const {open, setOpen} = useControlDisclosure({defaultOpen: fixtureOpen})
   const [filter, setFilter] = useState('')
   const [remoteDialog, setRemoteDialog] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -127,29 +129,12 @@ export function WorkspaceBar({
     <div className="h33-workspace">
       {alert ? (alertSlot ? createPortal(alert, alertSlot) : alert) : null}
       <div className="h33-workspace-bar" data-missing={missing ? 'true' : undefined}>
-        <button
-          ref={triggerRef}
-          type="button"
-          className="h33-workspace-chip h37-tool"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title={triggerTitle}
-          onClick={() => {
-            setFilter('')
-            setOpen((value) => !value)
-          }}
-        >
-          {currentHost ? (
-            <Server aria-hidden="true" />
-          ) : isProject ? (
-            <FolderOpen aria-hidden="true" />
-          ) : (
-            <House aria-hidden="true" />
-          )}
-          <span className="h33-workspace-chip-label h37-tool-label">{label}</span>
-          {missing ? <AlertTriangle className="size-3 h33-workspace-warn" aria-hidden="true" /> : null}
-          <ChevronDown className="h37-tool-chev" aria-hidden="true" />
-        </button>
+        <DirectoryControlButton
+          ref={triggerRef} text={label} title={triggerTitle} aria-haspopup="menu" aria-expanded={open}
+          icon={currentHost ? <Server aria-hidden="true"/> : isProject ? <FolderOpen aria-hidden="true"/> : <House aria-hidden="true"/>}
+          indicator={missing ? <AlertTriangle className="size-3 h33-workspace-warn" aria-hidden="true"/> : null}
+          onClick={() => {setFilter(''); setOpen(!open)}}
+        />
         {isProject ? (
           <button
             type="button"
@@ -168,14 +153,12 @@ export function WorkspaceBar({
         ) : null}
       </div>
       {open && (
-        <Menu
+        <SelectionSurface
+          title="选择工作目录"
           open={open}
           onClose={() => setOpen(false)}
           anchorRef={triggerRef}
-          placement="anchor-up"
-          autoFocusFirst={false}
-          className="h37-workspace-menu"
-          maxHeight="min(420px, 60vh)"
+          menuProps={{placement:"anchor-up",autoFocusFirst:false,className:"h37-workspace-menu",maxHeight:"min(420px, 60vh)"}}
         >
           {(state?.projects ?? []).length ? (
             <MenuSearch
@@ -289,7 +272,7 @@ export function WorkspaceBar({
             <Server className="h37-workspace-icon" aria-hidden="true" />
             <span className="h37-workspace-name">服务器上的文件夹…</span>
           </button>
-        </Menu>
+        </SelectionSurface>
       )}
       {remoteDialog
         ? createPortal(

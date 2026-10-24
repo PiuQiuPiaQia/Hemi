@@ -1,3 +1,5 @@
+import {EmptyState, ErrorState} from '@hemi/ui';
+import {ConversationList, ConversationRow} from '@hemi/conversation-flow/navigation';
 import {useConversationBridge} from './lib/conversation-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
@@ -22,14 +24,12 @@ import { CSS } from '@dnd-kit/utilities';
 import { Plus } from 'lucide-react';
 
 import type { ConversationSummary } from '@/shared/types';
-import { ConversationStatusIcon } from './conversation-status-icon';
 import { useConversationList } from './lib/use-conversation-list';
 import { ConversationContextMenu } from '@/windows/voice/conversation-context-menu';
 import { ConversationHistoryDialog } from '@/windows/voice/conversation-history-dialog';
 import { newConversationShortcut } from '@/windows/voice/lib/platform-format';
 import {
   displayTitle,
-  formatRelative,
   groupByRecency,
   pickRecent,
   reorderWithinGroup,
@@ -212,54 +212,19 @@ export function ConversationSidebar({
       {notice || !groups.length ? (
         <>
           <SidebarHeading label="最近对话" history={historyTrigger} />
-          <p className="h24-sidebar-note" role="status">
-            {notice || '还没有存下的会话。聊过几句后自动保存。'}
-          </p>
+          {notice ? <ErrorState className="h24-sidebar-note" role="status" description={notice}/> : <EmptyState className="h24-sidebar-note" description="还没有存下的会话。聊过几句后自动保存。"/>}
         </>
       ) : (
-        <nav className="h24-sidebar-nav" aria-label="最近会话">
-          {groups.map((group, index) => {
-            const groupIds = group.sessions.filter((session) => !session.corrupt).map((session) => session.id);
-            return (
-              <section key={group.key} className="h24-sidebar-group" aria-label={group.label}>
-                <SidebarHeading label={group.label} history={index === 0 ? historyTrigger : null} />
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  modifiers={[restrictToVerticalAxis]}
-                  onDragEnd={(event) => handleDragEnd(groupIds, event)}
-                >
-                  <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
-                    {group.sessions.map((session) => (
-                      <SidebarRow
-                        key={session.id}
-                        session={session}
-                        current={session.id === currentConversationId}
-                        fresh={freshIds.has(session.id)}
-                        editing={editingId === session.id}
-                        draft={draft}
-                        onDraftChange={setDraft}
-                        onStartEdit={() => {
-                          setEditingId(session.id);
-                          // 所见即所编：编辑预填与行内显示同用 displayTitle——否则
-                          // 行里是「下载 链接…」、编辑框却是原始 URL，观感割裂；
-                          // 回车保存时顺带把清理后的标题固化进存储。
-                          setDraft(displayTitle(session.title));
-                        }}
-                        onCancelEdit={() => setEditingId(null)}
-                        onCommitEdit={(title) => void commitRename(session.id, title)}
-                        onRemove={() => void commitDelete(session.id)}
-                        onOpen={() => {
-                          if (!session.corrupt) onOpenConversation(session.id);
-                        }}
-                      />
-                    ))}
-                  </SortableContext>
-                </DndContext>
-              </section>
-            );
-          })}
-        </nav>
+        <ConversationList as="nav" className="h24-sidebar-nav" label="最近会话" groupClassName="h24-sidebar-group" groups={groups.map(group=>({key:group.key,label:group.label,items:group.sessions}))}
+          renderHeading={(group,index)=><SidebarHeading label={group.label} history={index===0?historyTrigger:null}/>}
+          wrapGroupItems={(group,rows)=>{
+            const groupIds=group.items.filter(session=>!session.corrupt).map(session=>session.id);
+            return <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} onDragEnd={event=>handleDragEnd(groupIds,event)}><SortableContext items={groupIds} strategy={verticalListSortingStrategy}>{rows}</SortableContext></DndContext>;
+          }}
+          renderItem={session=><SidebarRow session={session} current={session.id===currentConversationId} fresh={freshIds.has(session.id)} editing={editingId===session.id} draft={draft} onDraftChange={setDraft}
+            onStartEdit={()=>{setEditingId(session.id);setDraft(displayTitle(session.title));}}
+            onCancelEdit={()=>setEditingId(null)} onCommitEdit={title=>void commitRename(session.id,title)} onRemove={()=>void commitDelete(session.id)} onOpen={()=>{if(!session.corrupt)onOpenConversation(session.id);}}/>}
+        />
       )}
     </aside>
   );
@@ -306,14 +271,6 @@ function SidebarRow({
   /** 右键菜单落点（null＝收起）；dnd PointerSensor 只认主键，右键不会误触拖拽。 */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
-  const commit = () => {
-    const next = draft.trim();
-    if (!next || next === session.title) {
-      onCancelEdit();
-      return;
-    }
-    onCommitEdit(next);
-  };
 
   const corrupt = Boolean(session.corrupt);
 
@@ -339,42 +296,8 @@ function SidebarRow({
       {...(corrupt || editing ? {} : attributes)}
       {...(corrupt || editing ? {} : listeners)}
     >
-      {editing ? (
-        <input
-          className="h24-sidebar-rename"
-          value={draft}
-          autoFocus
-          spellCheck={false}
-          aria-label="重命名会话"
-          onChange={(event) => onDraftChange(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              commit();
-            } else if (event.key === 'Escape') {
-              event.preventDefault();
-              onCancelEdit();
-            }
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className="h24-sidebar-open"
-          onClick={onOpen}
-          disabled={corrupt}
-          aria-current={current ? 'page' : undefined}
-          title={corrupt ? '这条会话档案损坏，无法打开' : `${session.title}（${formatRelative(session.updatedAt)} · 双击或右键重命名）`}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            onStartEdit();
-          }}
-        >
-          <span className="h24-sidebar-item-text">{displayTitle(session.title)}</span>
-          {!corrupt && <ConversationStatusIcon status={session.status} unreadAt={session.unreadAt} />}
-        </button>
-      )}
+      <ConversationRow item={session} current={current} onOpen={onOpen} editing={editing} draft={draft} onDraftChange={onDraftChange} onCancelEdit={onCancelEdit} onCommitEdit={onCommitEdit} onStartEdit={onStartEdit}/>
+
       <ConversationContextMenu
         session={session}
         point={menuAt}

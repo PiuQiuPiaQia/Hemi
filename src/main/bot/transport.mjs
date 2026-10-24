@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { createHash, randomUUID } from 'node:crypto';
 import { shq, sshFailureCopy } from '../remote/ssh-runner.mjs';
 import { BOT_PROTOCOL, fail, botRpcTimeout } from './storage.mjs';
@@ -116,7 +117,7 @@ export function createBotTransport({ runner, archivePath }) {
     const r = await runner.exec({
       host,
       command,
-      stdin: JSON.stringify({ method, params }),
+      stdin: JSON.stringify({ method, params, clientId: options.clientId }),
       timeoutMs: botRpcTimeout(method, params),
       signal: options.signal,
     });
@@ -142,6 +143,22 @@ export function createBotTransport({ runner, archivePath }) {
   }
   return {
     rpc,
+    async watch(host, params, {signal, onEvent, clientId}) {
+      const controller=new AbortController(), decoder=new StringDecoder('utf8');
+      const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
+      if(signal?.aborted)controller.abort();
+      let pending='', lastFrame=Date.now();
+      const heartbeat=setInterval(()=>{if(Date.now()-lastFrame>45000)controller.abort();},5000);heartbeat.unref?.();
+      try {
+        const command=`r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" watch`;
+        const result=await runner.exec({host,command,stdin:JSON.stringify({params,clientId}),timeoutMs:0,signal:controller.signal,onStdout(chunk){
+          pending+=decoder.write(chunk);
+          if(Buffer.byteLength(pending)>40*1024*1024)throw new Error('Bot event too large');
+          let end;while((end=pending.indexOf('\n'))>=0){const raw=pending.slice(0,end);pending=pending.slice(end+1);if(!raw)continue;const frame=JSON.parse(raw);lastFrame=Date.now();onEvent(frame);}
+        }});
+        if(!signal?.aborted && (result.code!==0 || !result.aborted))fail('实时连接已断开，正在恢复。','offline');
+      } finally {clearInterval(heartbeat);signal?.removeEventListener('abort',abort);}
+    },
     disconnect: () => runner.close(),
     async directory(host, raw = '~') {
       const requested = String(raw).trim();

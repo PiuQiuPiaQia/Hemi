@@ -299,8 +299,8 @@ export function createConversationController({
 
   async function commandStop(command) {
     const reason = command.reason ?? 'stop';
-    const targetRunId = command.targetRunId ?? snapshot.activeRunId;
-    if (targetRunId && targetRunId !== snapshot.activeRunId) return { ok: false, code: 'run-changed' };
+    const targetRunId = Object.hasOwn(command, 'targetRunId') ? command.targetRunId : snapshot.activeRunId;
+    if (targetRunId !== snapshot.activeRunId) return { ok: false, code: 'run-changed' };
     if (reason === 'stop') {
       for (const item of snapshot.pending.filter((entry) => entry.promoteAt != null)) {
         commit({ type: 'input-promoted', inputId: item.inputId, targetRunId: null, at: null, generation: snapshot.generation });

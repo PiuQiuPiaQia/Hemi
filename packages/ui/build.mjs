@@ -1,0 +1,10 @@
+import {copyFileSync, cpSync, writeFileSync} from 'node:fs';
+import {build} from 'esbuild';
+import {execFileSync} from 'node:child_process';
+import path from 'node:path';
+process.chdir(import.meta.dirname);
+execFileSync(process.execPath,[path.resolve('../../node_modules/typescript/bin/tsc'),'-p','tsconfig.json'],{stdio:'inherit'});
+await build({entryPoints:['src/index.ts'],outdir:'dist',bundle:true,format:'esm',packages:'external',target:'es2022',jsx:'automatic'});
+copyFileSync('src/tokens.css','dist/tokens.css');
+cpSync('src/styles','dist/styles',{recursive:true});
+writeFileSync('dist/styles.css',`@import './styles/controls.css';\n@import './styles/popovers.css';\n@import './styles/dialog.css';\n@import './styles/status.css';\n`);

@@ -52,7 +52,6 @@
 
 html.kb-nav .h37-mem-ws-pick:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h37-mem-ws-pick > span {
@@ -291,7 +290,6 @@ html.kb-nav .h37-mem-ws-pick:focus-visible {
 
 html.kb-nav .h37-mem-entry-head:focus-visible {
   outline: 0;
-  box-shadow: inset var(--focus-ring);
 }
 
 .h37-mem-chev {
@@ -815,7 +813,6 @@ html.kb-nav .h37-mem-entry-head:focus-visible {
 
 html.kb-nav .h37-mem-opt:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h37-mem-opt:disabled {
@@ -963,7 +960,6 @@ html.kb-nav .h37-mem-opt:focus-visible {
 
 html.kb-nav .h37-mn-acts button:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h37-mn-acts button:disabled {

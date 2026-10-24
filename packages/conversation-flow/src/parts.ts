@@ -12,3 +12,4 @@ export { DeliverableCards } from "./components/deliverable-card.js";
 export { renderReplyText } from "./components/message-row.js";
 export { Markdown } from "./shared/markdown.js";
 export { TurnQueueTray } from './components/turn-queue-tray.js';
+export {PermissionCard, PermissionRequestCard, type PermissionRequest, type PermissionRequestCardProps} from './components/permission-card.js';

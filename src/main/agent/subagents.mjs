@@ -153,6 +153,8 @@ export function createSubagentManager({
   restoreSession = null,
   history = null,
   onTerminal = null,
+  onPermissionRequest = null,
+  permissionTimeoutMs = PERMISSION_MS,
   onSettled = null,
   onModelUsage = null,
   cleanupAccessTask = null,
@@ -310,7 +312,7 @@ export function createSubagentManager({
   }
 
   function ensurePermissionTicker() {
-    if (permissionTicker) return;
+    if (permissionTicker || permissionTimeoutMs === 0) return;
     permissionTicker = setIntervalFn(() => {
       const now = nowFn();
       let waiting = false;
@@ -358,10 +360,14 @@ export function createSubagentManager({
       id: request.id, summary, tool, args, note, kind, options,
       category: typeof parsed?.category === 'string' && parsed.category ? parsed.category : null,
       askedAt: nowFn(),
-      remainingMs: PERMISSION_MS,
+      remainingMs: permissionTimeoutMs,
     };
-    task.permissionDeadline = nowFn() + PERMISSION_MS;
+    task.permissionDeadline = nowFn() + permissionTimeoutMs;
     ensurePermissionTicker();
+    onPermissionRequest?.({ conversationId: task.conversationId, rootRunId: task.rootRunId ?? null, taskKey: task.key, request, decide: value => {
+      const choice = value === TASK_VALUE ? 'task' : value === PERSISTENT_VALUE ? 'persistent' : value === ONCE_VALUE ? 'once' : value === DENY_VALUE ? 'deny' : null;
+      return choice ? decide(choice, { taskKey: task.key }).ok : false;
+    } });
     broadcast();
   }
 

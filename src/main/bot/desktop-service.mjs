@@ -11,6 +11,7 @@ import {
 import { createBotTransport } from './transport.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
 import { manualProviderModels } from './models.mjs';
+import { applyFlowChange } from '../../shared/conversation-flow.mjs';
 
 const METHODS = new Set([
   'snapshot',
@@ -76,6 +77,9 @@ export function createBotDesktopService({
     cacheFile = path.join(dir, 'cache.json');
   const draftsFile = path.join(dir, 'drafts.json'),
     syncFile = path.join(dir, 'model-sync.json');
+  const clientFile=path.join(dir,'client.json');
+  const clientId=localJson(clientFile,null)?.id ?? randomUUID();
+  atomicJson(clientFile,{id:clientId});
   const diagnosticsFile = path.join(dir, 'diagnostics.json');
   const diagnosticEvents = localJson(diagnosticsFile, []);
   const record = (stage, outcome, code = null) => {
@@ -83,6 +87,9 @@ export function createBotDesktopService({
     diagnosticEvents.splice(0, Math.max(0, diagnosticEvents.length - 40));
     atomicJson(diagnosticsFile, diagnosticEvents);
   };
+  let localModels = [], localRoleModels = {}, localCatalogError = '', modelCatalogRevision = '';
+  let modelWork = Promise.resolve(), updatingModels = null;
+  const modelFailures = new Map();
   let syncStatus = localJson(syncFile, null),
     syncInFlight = false;
   if (syncStatus?.phase === 'sending')
@@ -110,6 +117,7 @@ export function createBotDesktopService({
   if (localDrafts.instanceId !== binding?.instanceId)
     localDrafts = { instanceId: binding?.instanceId ?? null, items: {} };
   const publish = () => {
+    ensureRealtime();
     const value = getState();
     onChanged(value);
     return value;
@@ -123,6 +131,9 @@ export function createBotDesktopService({
       lastConnectedAt,
       stoppedConfirmed,
       syncStatus: syncStatus ? structuredClone(syncStatus) : null,
+      localModels: structuredClone(localModels),
+      localRoleModels: structuredClone(localRoleModels),
+      modelConfigError: [...modelFailures.values()].map(value => value.message).join('；'),
       cache: cache ? structuredClone(cache) : null,
       candidate: candidate
         ? { id: candidate.id, host: candidate.host, info: candidate.info }
@@ -135,6 +146,58 @@ export function createBotDesktopService({
       ...params,
       instanceId: binding.instanceId,
       requestId: params.requestId ?? 'op-' + randomUUID(),
+    }, {clientId});
+  }
+  let stream=null, streamCursor=null, streamScope='', streamRetryAt=0, streamFailures=0, refreshAgain=false, eventRefresh=null, streamReconnect=null;
+  function changedCatalog() {
+    if(polling){refreshAgain=true;return;}
+    if(!eventRefresh)eventRefresh=setTimeout(()=>{eventRefresh=null;void refresh();},60);
+  }
+  function ensureRealtime() {
+    const id=activeId ?? cache?.sessions[0]?.id ?? null;
+    const scope=binding ? `${binding.host}:${binding.instanceId}:${id}` : '';
+    if(stream && (scope!==streamScope || closed || disconnected || stoppedConfirmed || !online)){stream.abort();stream=null;}
+    if(scope!==streamScope){streamCursor=null;streamScope=scope;streamFailures=0;streamRetryAt=0;}
+    if(!transport.watch || stream || !binding || !online || closed || disconnected || stoppedConfirmed || Date.now()<streamRetryAt)return;
+    const controller=new AbortController(), identity=binding.instanceId;stream=controller;
+    void transport.watch(binding.host,{instanceId:identity,id,cursor:streamCursor},{signal:controller.signal,clientId,onEvent(frame){
+      if(controller.signal.aborted || binding?.instanceId!==identity)return;
+      if(frame.type==='heartbeat')return;
+      if(frame.version!==1 || frame.instanceId!==identity || !Number.isSafeInteger(frame.sequence))throw new Error('Invalid Bot event');
+      if(frame.type==='reset'){
+        const value=frame.snapshot;
+        if(value?.instanceId!==identity)throw new Error('Invalid Bot reset');
+        const details={...cache?.details};
+        for(const key of Object.keys(details))if(!value.sessions.some(s=>s.id===key))delete details[key];
+        if(value.detail){
+          const previous=details[value.detail.id];
+          if(cache?.bootId===frame.bootId && previous?.flow?.revision>value.detail.flow.revision)value.detail.flow=previous.flow;
+          details[value.detail.id]=value.detail;
+        }
+        for(const [key,draft] of Object.entries(localDrafts.items))if(details[key])details[key].draft=draft;
+        cache={...value,details,detailRevisions:{},selectedId:activeId,syncedAt:Date.now()};delete cache.detail;
+      } else if(frame.type==='flow'){
+        const detail=cache?.details?.[frame.id];
+        if(!detail){changedCatalog();}
+        else if(frame.change.revision>detail.flow.revision){
+          const next=applyFlowChange(detail.flow,frame.change);
+          if(!next.ok)changedCatalog();else{
+            detail.flow=next.snapshot;
+            cache.sessions=cache.sessions.map(s=>s.id===frame.id?{...s,status:detail.flow.phase==='idle'?null:'running',turnCount:detail.flow.timeline.length}:s);
+          }
+        }
+      } else if(frame.type==='catalog')changedCatalog();
+      streamCursor={bootId:frame.bootId,sequence:frame.sequence,id};
+      streamFailures=0;lastConnectedAt=Date.now();
+      if(frame.type==='reset' || frame.type==='flow')onChanged(getState());
+    }}).catch(()=>{}).finally(()=>{
+      if(stream!==controller)return;
+      stream=null;
+      if(!controller.signal.aborted){
+        const delay=Math.min(30000,500*2**Math.min(streamFailures++,6));streamRetryAt=Date.now()+delay;
+        clearTimeout(streamReconnect);streamReconnect=setTimeout(()=>{streamReconnect=null;ensureRealtime();void refresh();},delay);
+        changedCatalog();
+      }
     });
   }
   async function refresh() {
@@ -142,11 +205,14 @@ export function createBotDesktopService({
     if (polling) return polling;
     const identity = binding.instanceId,
       host = binding.host,
-      target = activeId ?? cache?.sessions[0]?.id;
+      target = activeId ?? cache?.sessions[0]?.id,
+      initialBoot = cache?.bootId;
     const stale = () => closed || disconnected || stoppedConfirmed ||
       binding?.instanceId !== identity || binding?.host !== host;
     polling = (async () => {
       try {
+        await modelCandidates();
+        if (stale()) return getState();
         if (!online) {
           const hello = await direct('handshake');
           if (stale()) return getState();
@@ -165,6 +231,7 @@ export function createBotDesktopService({
             : -1,
         });
         if (stale()) return getState();
+        if(cache?.bootId!==initialBoot && snapshot.bootId && snapshot.bootId!==cache?.bootId)return getState();
         if (
           snapshot.notModified &&
           binding?.instanceId === identity &&
@@ -181,6 +248,7 @@ export function createBotDesktopService({
             cache.syncedAt = lastConnectedAt;
             atomicJson(cacheFile, cache);
           }
+          ensureRealtime();
           return changed || devicesChanged ? publish() : getState();
         }
         if (binding?.instanceId !== identity || binding?.host !== host)
@@ -193,7 +261,11 @@ export function createBotDesktopService({
             snapshot.sessions.some((s) => s.id === id),
           ),
         );
-        if (snapshot.detail) details[snapshot.detail.id] = snapshot.detail;
+        if (snapshot.detail) {
+          const previous=details[snapshot.detail.id];
+          if((!snapshot.bootId||snapshot.bootId===cache?.bootId)&&previous?.flow?.revision>snapshot.detail.flow.revision)snapshot.detail.flow=previous.flow;
+          details[snapshot.detail.id] = snapshot.detail;
+        }
         for (const [id, draft] of Object.entries(localDrafts.items)) {
           if (!snapshot.sessions.some((s) => s.id === id)) {
             delete localDrafts.items[id];
@@ -287,12 +359,18 @@ export function createBotDesktopService({
         return getState();
       } finally {
         polling = null;
+        scheduleModelUpdates();
+        if(refreshAgain){refreshAgain=false;changedCatalog();}
       }
     })();
     return polling;
   }
   async function modelCandidates() {
     const list = await profiles.list();
+    localCatalogError = list.corrupt ? '本机模型配置无法读取，云端原配置已保留。' : '';
+    if (localCatalogError) { modelFailures.set('$catalog', { message: localCatalogError }); return localModels; }
+    modelFailures.delete('$catalog');
+    localRoleModels = list.envOverride ? {} : list.roleModels ?? {};
     const out = [];
     for (const provider of list.providers) {
       for (const model of provider.models) {
@@ -320,6 +398,11 @@ export function createBotDesktopService({
         }
         out.push({
           key: model.modelKey,
+          providerId: provider.id,
+          baseUrl: provider.baseUrl,
+          api: config?.api ?? provider.api ?? 'openai-completions',
+          supportsVision: model.supportsVision ?? false,
+          thinkingLevel: model.thinkingLevel ?? 'default',
           name: model.model,
           provider: provider.name,
           auth: provider.oauthProvider ? '账号登录' : 'API Key',
@@ -334,9 +417,125 @@ export function createBotDesktopService({
         });
       }
     }
+    localModels = out;
+    modelCatalogRevision = fingerprint({ models: out.map(model => [model.key, model.revision, model.reason]), roles: localRoleModels });
     return out;
   }
-  async function sync(host, instanceId, keys, requestId, signal) {
+
+  // Serialize first use and background updates. Only models already configured
+  // on this Host are updated automatically; listing never uploads credentials.
+  async function ensureModel(key) {
+    if (key === 'auto') return ensureRouting();
+    const identity = binding?.instanceId, host = binding?.host;
+    // An unrelated model may be validating for tens of seconds. Ready models
+    // must not wait behind it just to send an ordinary message.
+    const candidate = (await modelCandidates()).find(model => model.key === key);
+    if (localCatalogError) fail(localCatalogError, 'invalid');
+    if (binding?.instanceId !== identity || binding?.host !== host || !online || closed)
+      fail('恢复连接后才能配置模型。', 'offline');
+    if (candidate?.canSync && cache?.models.some(model => model.key === key && model.revision === candidate.revision)) return;
+    const run = modelWork.then(async () => {
+      const current = () => !closed && online && !disconnected &&
+        binding?.instanceId === identity && binding?.host === host;
+      if (!current()) fail('恢复连接后才能配置模型。', 'offline');
+      const model = (await modelCandidates()).find(item => item.key === key);
+      if (!current()) fail('Bot 连接已更换。', 'conflict');
+      if (!model) {
+        if (cache?.models.some(item => item.key === key)) return;
+        fail('模型已不在本机配置中，请重新选择。', 'missing');
+      }
+      if (!model.canSync) fail(model.reason, 'invalid');
+      if (syncStatus?.phase === 'unknown') await refresh();
+      if (!current()) fail('Bot 连接已更换。', 'conflict');
+      if (cache?.models.some(item => item.key === key && item.revision === model.revision)) {
+        if (modelFailures.delete(key)) publish();
+        return;
+      }
+      const result = await performCommand('models.sync', { keys: [key], automatic: true, expectedInstanceId: identity });
+      if (!current()) fail('Bot 连接已更换。', 'conflict');
+      const confirmed = result.results?.find(item => item.key === key);
+      if (!confirmed?.ok) fail(confirmed?.message ?? '模型未通过云端验证，原配置保留。', 'invalid');
+      if (modelFailures.delete(key)) publish();
+    });
+    modelWork = run.catch(() => {});
+    return run;
+  }
+  async function ensureRouting(prepare = true) {
+    await modelCandidates();
+    if (localCatalogError) fail(localCatalogError, 'invalid');
+    const identity = binding?.instanceId;
+    const roles = Object.fromEntries(Object.entries(localRoleModels).filter(([, key]) => key));
+    if (prepare && !roles.main) fail('请先在本机配置自动路由主模型。', 'missing');
+    for (const key of new Set(Object.values(roles))) {
+      if (prepare) await ensureModel(key);
+      else if (!localModels.some(model => model.key === key && model.canSync && model.status === 'synced'))
+        fail('本机路由模型尚未通过云端验证。', 'missing');
+    }
+    if (binding?.instanceId !== identity || !online || closed) fail('恢复连接后才能更新自动路由。', 'offline');
+    const keys = localModels.filter(model => model.canSync && cache?.models.some(remote => remote.key === model.key)).map(model => model.key).sort();
+    const remoteKeys = (cache?.models ?? []).filter(model => model.source !== 'cloud').map(model => model.key).sort();
+    if (JSON.stringify(keys) === JSON.stringify(remoteKeys) && fingerprint(roles) === fingerprint(cache?.roleModels ?? {})) return;
+    await direct('model.local-config', { keys, roleModels: roles });
+    await refresh();
+  }
+  function scheduleModelUpdates() {
+    if (closed || localCatalogError) return;
+    let cleared = false;
+    // Clear stale failures as soon as a corrected local configuration matches
+    // the verified Host, even while another verification is still settling.
+    if (syncStatus?.automatic && !['sending', 'unknown'].includes(syncStatus.phase) &&
+      (syncStatus.phase !== 'confirmed' || syncStatus.results?.some(result => !result.ok)) &&
+      syncStatus.keys.every(key => localModels.some(model => model.key === key && model.status === 'synced'))) {
+      syncStatus = null;
+      atomicJson(syncFile, null);
+      cleared = true;
+    }
+    for (const key of modelFailures.keys()) {
+      if (key.startsWith('$')) continue;
+      const model = localModels.find(model => model.key === key);
+      if (!model || model.status === 'synced') cleared = modelFailures.delete(key) || cleared;
+    }
+    const roles = Object.fromEntries(Object.entries(localRoleModels).filter(([, key]) => key));
+    const localKeys = localModels.filter(model => model.canSync).map(model => model.key).sort();
+    const remoteKeys = (cache?.models ?? []).filter(model => model.source !== 'cloud').map(model => model.key).sort();
+    if (fingerprint(roles) === fingerprint(cache?.roleModels ?? {}) && JSON.stringify(localKeys) === JSON.stringify(remoteKeys) &&
+      Object.values(roles).every(key => localModels.some(model => model.key === key && model.status === 'synced')))
+      cleared = modelFailures.delete('$routing') || cleared;
+    if (cleared) publish();
+    if (!online || disconnected || stoppedConfirmed || updatingModels || syncInFlight || syncStatus?.phase === 'unknown') return;
+    const identity = binding?.instanceId, catalogRevision = modelCatalogRevision;
+    updatingModels = (async () => {
+      for (const model of localModels) {
+        if (!model.canSync) continue;
+        if (model.status === 'synced') { modelFailures.delete(model.key); continue; }
+        const previous = modelFailures.get(model.key);
+        if (previous?.revision === model.revision && Date.now() < previous.retryAt) continue;
+        try { await ensureModel(model.key); } catch (error) {
+          if (binding?.instanceId !== identity || closed) return;
+          modelFailures.set(model.key, { revision: model.revision, retryAt: Date.now() + 30000,
+            message: `${model.name}：${['invalid', 'offline', 'needs-review', 'busy'].includes(error.code) ? error.message : '自动配置未完成，恢复连接后重试。'}` });
+        }
+      }
+      const previous = modelFailures.get('$routing');
+      const revision = fingerprint({ roles: localRoleModels, dependencies: localModels.filter(model => Object.values(localRoleModels).includes(model.key)).map(model => [model.key, model.revision, model.status]) });
+      if (previous?.revision === revision && Date.now() < previous.retryAt) return;
+      try { await ensureRouting(false); modelFailures.delete('$routing'); }
+      catch (error) {
+        if (binding?.instanceId !== identity || closed) return;
+        modelFailures.set('$routing', { revision, retryAt: Date.now() + 30000, message: error.code === 'unsupported' ? '请在 Bot 通用设置中更新云端组件以启用自动路由。' : '本机自动路由尚未更新到云端，请检查各角色模型是否可用。' });
+      }
+    })().finally(() => {
+      updatingModels = null;
+      if (!closed && binding?.instanceId === identity) {
+        publish();
+        if (catalogRevision !== modelCatalogRevision) scheduleModelUpdates();
+      }
+    });
+  }
+  const offProfiles = profiles.onChanged?.(() => {
+    if (!closed) changedCatalog();
+  });
+  async function sync(host, instanceId, keys, requestId, signal, isCurrent = () => true) {
     if (!Array.isArray(keys) || !keys.length || new Set(keys).size > 50)
       fail('请选择要同步的模型。');
     const models = [];
@@ -346,12 +545,25 @@ export function createBotDesktopService({
         fail('所选模型缺少独立 API Key，或使用暂不支持的账号授权。');
       models.push(resolved.config);
     }
+    if (!isCurrent()) fail('Bot 连接已更换。', 'conflict');
     return transport.rpc(
       host,
       'model.sync',
       { instanceId, requestId: requestId ?? 'sync-' + randomUUID(), models },
       { signal },
     );
+  }
+  async function syncInitialModels(host, instanceId, operationId, signal) {
+    const keys = (await modelCandidates()).filter(model => model.canSync).map(model => model.key);
+    if (localCatalogError) fail(localCatalogError, 'invalid');
+    if (!keys.length) fail('请先在本机添加云端可用的 API Key 模型，或填写云端专用配置。');
+    const results = [];
+    for (let offset = 0; offset < keys.length; offset += 50) {
+      const requestId = offset === 0 ? operationId : 'models-' + fingerprint([operationId, offset]).slice(0, 32);
+      const result = await sync(host, instanceId, keys.slice(offset, offset + 50), requestId, signal);
+      results.push(...result.results);
+    }
+    return { results };
   }
   async function uploadRecord(item) {
     if (item.instanceId !== binding?.instanceId)
@@ -451,8 +663,8 @@ export function createBotDesktopService({
     if (method === 'models.sync' || method === 'models.add') {
       if (!online) fail('恢复连接后才能添加模型。', 'offline');
       if (syncInFlight || syncStatus?.phase === 'unknown')
-        fail('请先核对上次模型同步结果。', 'needs-review');
-      const identity = binding.instanceId;
+        fail('正在确认模型配置，请稍后重试。', 'needs-review');
+      const identity = binding.instanceId, host = binding.host;
       const requestId = params.requestId ?? 'sync-' + randomUUID();
       const manual = method === 'models.add' ? manualProviderModels(params.provider, requestId) : null;
       syncStatus = {
@@ -460,19 +672,22 @@ export function createBotDesktopService({
         requestId,
         keys: manual ? manual.map(model => model.modelKey) : params.keys,
         phase: 'sending',
+        automatic: params.automatic === true,
         at: Date.now(),
       };
       syncInFlight = true;
       atomicJson(syncFile, syncStatus);
       publish();
       try {
-        const result = manual ? await transport.rpc(binding.host, 'model.sync', {
+        const result = manual ? await transport.rpc(host, 'model.sync', {
           instanceId: identity, requestId, models: manual, source: 'manual',
         }) : await sync(
-          binding.host,
+          host,
           identity,
           params.keys,
           syncStatus.requestId,
+          undefined,
+          () => binding?.instanceId === identity && binding?.host === host && online && !closed,
         );
         if (binding?.instanceId === identity) {
           syncStatus = {
@@ -542,7 +757,9 @@ export function createBotDesktopService({
       return publish();
     }
     if (method === 'connection.reconnect') {
+      streamRetryAt=0;
       disconnected = false;
+      for (const failure of modelFailures.values()) failure.retryAt = 0;
       retryCount = 0;
       retryAt = 0;
       const result = await refresh();
@@ -578,6 +795,7 @@ export function createBotDesktopService({
     if (method === 'connection.forget') {
       await transport.disconnect?.();
       binding = null;
+      modelFailures.clear();
       cache = null;
       activeId = null;
       syncStatus = null;
@@ -612,6 +830,7 @@ export function createBotDesktopService({
         await transport.control(binding.host, 'stop');
       }
       binding = null;
+      modelFailures.clear();
       cache = null;
       activeId = null;
       syncStatus = null;
@@ -653,6 +872,15 @@ export function createBotDesktopService({
 
     if (!online) fail('连接已断开，草稿保留；请重新连接后操作。', 'offline');
     const identity = binding.instanceId;
+    if (method === 'session.update' && params.modelKey) {
+      if (!cache?.sessions.some(session => session.id === params.id)) fail('会话不属于当前 Bot。', 'missing');
+      await ensureModel(params.modelKey);
+    }
+    if (method === 'flow.command' && ['send', 'rewind', 'resendInput'].includes(params.command?.type)) {
+      const session = cache?.sessions.find(item => item.id === params.id);
+      if (session) await ensureModel(session.modelKey);
+    }
+    if (binding?.instanceId !== identity) fail('Bot 连接已更换。', 'conflict');
     if (method === 'session.remove' && activeId === params.id) activeId = null;
     if (method === 'session.open' && params.activate !== false)
       activeId = params.id;
@@ -667,6 +895,12 @@ export function createBotDesktopService({
       if (localDrafts.items[params.id]?.revision === params.revision)
         delete localDrafts.items[params.id];
       atomicJson(draftsFile, localDrafts);
+    }
+    if (method === 'flow.command') {
+      // The command receipt already confirms durable acceptance. Let streaming
+      // or a background refresh update presentation without another SSH wait.
+      changedCatalog();
+      return result;
     }
     if (!method.startsWith('pairing.') && !method.startsWith('devices.') &&
       ![
@@ -698,7 +932,8 @@ export function createBotDesktopService({
     ) {
       nextPollAt =
         Date.now() +
-        (online && !cache?.sessions.some((s) => s.status) ? 4000 : 1200);
+        (stream ? 30000 : online && !cache?.sessions.some((s) => s.status) ? 4000 : 1200);
+      ensureRealtime();
       void refresh();
     }
   }, 1200);
@@ -777,15 +1012,15 @@ export function createBotDesktopService({
           publish();
           const result = manual ? await transport.rpc(selected.host, 'model.sync', {
             instanceId: info.instanceId, requestId: operationId, models: manual, source: 'manual',
-          }, { signal: cancellation.signal }) : await sync(
-            selected.host,
-            info.instanceId,
-            modelKeys,
-            requestId,
-            cancellation.signal,
-          );
+          }, { signal: cancellation.signal }) : await syncInitialModels(selected.host, info.instanceId, operationId, cancellation.signal);
           if (!result.results?.some((item) => item.ok))
             fail('没有模型通过云端验证，请检查模型配置后重试。');
+          if (!manual) {
+            const keys = result.results.filter(item => item.ok).map(item => item.key);
+            if (Object.values(localRoleModels).filter(Boolean).every(key => keys.includes(key))) await transport.rpc(selected.host, 'model.local-config', {
+              instanceId: info.instanceId, requestId: 'routing-' + fingerprint(operationId).slice(0, 32), keys, roleModels: localRoleModels,
+            }, { signal: cancellation.signal });
+          }
         }
         if (!existing)
           await transport.rpc(selected.host, 'initialize.verify', {
@@ -817,6 +1052,9 @@ export function createBotDesktopService({
           dataDir: verify.dataDir,
           boundAt: Date.now(),
         };
+        modelFailures.clear();
+        syncStatus = null;
+        atomicJson(syncFile, null);
         cache = null;
         activeId = null;
         atomicJson(connectionFile, binding);
@@ -894,6 +1132,8 @@ export function createBotDesktopService({
     },
     async close() {
       closed = true;
+      offProfiles?.();
+      stream?.abort();clearTimeout(eventRefresh);clearTimeout(streamReconnect);
       clearInterval(timer);
       initializationAbort?.abort();
       for (const item of uploads.values()) item.controller?.abort();

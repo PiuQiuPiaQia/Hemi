@@ -10,7 +10,7 @@ export type TurnQueueItemView = {
   text: string;
   revision: number;
   /** 托盘只收 pending（submitting＝已转正上屏，行即刻消失——2026-10-16 用户裁决）。 */
-  dispatchState: 'pending' | 'editing' | 'promoting';
+  dispatchState: 'pending' | 'editing' | 'promoting' | 'sending';
   error: string;
   attachmentIds: string[];
   references: Array<{ kind: string; [key: string]: unknown }>;

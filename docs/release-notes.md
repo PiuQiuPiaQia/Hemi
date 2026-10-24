@@ -1,17 +1,19 @@
-本次更新可以直接用 ChatGPT、Claude 或 GitHub Copilot 账号登录，凭据改为应用本地加密。
+本次更新完善云端 Bot、手机接入与模型自动配置，并统一本地和 Bot 的执行机制。
 
-- 账号登录：在「设置 → 模型与路由 → 添加供应商 → 账号登录」连接账号，浏览器授权后模型直接进入对话和角色路由的选择列表。每家服务商保留一个账号，可随时重新登录或退出。
-- 凭据存储：API Key、账号 token 和记住的密码改由应用在本机用 AES-256-GCM 加密，不再使用系统钥匙串。加密钥匙在应用数据目录的 `secrets/` 中，备份时需保留整个应用数据目录。旧的系统密文不再兼容，需要重新填写或登录；模型名称和接口地址会保留。
-- 修复：Windows 上的无头浏览器发现按目标平台拼接路径；生成的皮肤文件固定为 LF，避免 Windows 检出后换行比对失败。
+- 会话独立运行：Bot 复用本地执行核心，不同会话可以同时执行；只有冲突资源的操作需要等待。同一会话保持消息顺序，停止只影响所属会话。
+- 模型自动配置：初始化和后续变更自动更新本机 API Key 模型、主模型、角色模型与备用模型。来源图标区分本机与云端配置，本机配置在本机修改，云端配置仍可独立新增和编辑。
+- 手机接入：支持安全配对、实时回复、模型切换、会话管理、附件上传与资源预览；修复模型选项可见却无法点击的问题。
+- 界面一致：桌面与手机共用输入、选择、授权和会话列表组件，精简 Bot 模型设置与自动路由展示，并补充资源等待状态和上下文容量指示。
 
 下载：macOS（Apple 芯片）用 `.dmg`，Windows（64 位）用 `-setup.exe`。macOS 安装包未签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中允许。
 
 ---
 
-This update adds sign-in with a ChatGPT, Claude or GitHub Copilot account, and moves credentials to app-owned local encryption.
+This update improves the cloud Bot, mobile access and automatic model configuration, and shares the desktop execution core with the Bot.
 
-- Account sign-in: connect an account under Settings → Models and routing → Add provider → Account sign-in. After browser authorization, its models join the conversation and role-routing pickers. One account is kept per provider, and you can reconnect or sign out at any time.
-- Credential storage: API keys, account tokens and remembered passwords are now encrypted locally with AES-256-GCM instead of the system credential store. The key lives in `secrets/` inside the application-data directory, so back up the whole directory. Credentials saved in the old format need to be entered again; model names and endpoints are kept.
-- Fixes: headless browser discovery joins paths for the target platform, and generated skin files stay LF so the byte comparison no longer fails on a Windows checkout.
+- Independent conversations: Bot conversations run concurrently, with conflicting operations waiting for their resources. Inputs within a conversation stay ordered, and stopping a run affects only its conversation.
+- Automatic model configuration: local API-key models and primary, role and fallback selections update automatically. Source icons distinguish local settings from editable cloud settings.
+- Mobile access: secure pairing, live replies, model switching, conversation management, uploads and resource previews. Model-picker options are clickable again.
+- Consistent interface: desktop and mobile share composer, selection, permission and conversation-list components. Bot model settings and routing details are more compact, with resource-wait status and a context-capacity indicator.
 
 Downloads: `.dmg` for macOS (Apple silicon), `-setup.exe` for Windows (64-bit). The macOS build is unsigned and unnotarized; allow it on first launch under System Settings → Privacy & Security.

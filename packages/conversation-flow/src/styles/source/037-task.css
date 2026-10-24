@@ -535,7 +535,6 @@ html.kb-nav .compact-shell .h25-process-body:focus-visible {
 
 html.kb-nav .compact-shell .permission-actions .tbtn:focus-visible {
   outline: 0;
-  box-shadow: var(--shadow-1), var(--focus-ring);
 }
 
 .compact-shell .permission-foot {

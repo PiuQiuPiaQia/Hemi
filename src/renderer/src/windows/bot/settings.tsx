@@ -1,273 +1,339 @@
-import { useState } from 'react';
-import { QrCode } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { BotMethod, BotState } from '@shared/bot';
 import { BotButton, BotDialog } from './dialogs';
+import { BotModelsSettings } from './models-settings';
 import { BotPairing } from './pairing';
+import { useApplicationNavigation } from '../voice/lib/conversation-bridge';
+import './styles.css';
 
-export function BotSettings({
-  state,
-  call,
-  onClose,
-  onSync,
-  initialScreen = 'settings',
+type Dialog = 'pairing' | 'address' | 'stop' | 'remove' | 'forget' | 'update';
+
+/** Settings use the desktop Bot bridge directly; local configuration APIs are never substituted. */
+export function BotSettings({page = 'general', onOpenLocalModels}: {page?: 'general' | 'models'; onOpenLocalModels?: () => void}) {
+  const api = window.hemiVoice?.bot;
+  const [state, setState] = useState<BotState | null>(null);
+  const [error, setError] = useState('');
+  const navigation = useApplicationNavigation();
+  useEffect(() => {
+    if (!api) return;
+    let active = true;
+    let events = 0;
+    const off = api.onChanged((next) => {
+      events++;
+      if (active) {
+        setState(next);
+        setError('');
+      }
+    });
+    void api
+      .getState()
+      .then((next) => {
+        if (active && !events) setState(next);
+      })
+      .catch((e: unknown) => {
+        if (active && !events) setError(e instanceof Error ? e.message : '无法读取 Bot 设置。');
+      });
+    return () => {
+      active = false;
+      off();
+    };
+  }, [api]);
+
+  if (error || !api)
+    return (
+      <p className="h-bot-error" role="alert">
+        {error || 'Bot 连接不可用。'}
+      </p>
+    );
+  if (!state)
+    return (
+      <p className="h37-section-foot" role="status">
+        正在读取 Bot 设置…
+      </p>
+    );
+  if (!state.binding)
+    return (
+      <div className="h37-enter">
+        <div className="h37-page-head">
+          <div>
+            <h2>通用</h2>
+            <p>连接云服务器后，在这里管理 Bot。</p>
+          </div>
+        </div>
+        <section className="h37-section">
+          <div className="h37-group">
+            <SettingsRow title="尚未连接 Bot" description="让 Hemi 在云端持续工作。">
+              <button
+                type="button"
+                className="h37-btn h37-btn-secondary"
+                onClick={() => navigation?.navigate('bot')}
+              >
+                连接 Bot
+              </button>
+            </SettingsRow>
+          </div>
+        </section>
+      </div>
+    );
+  if (page === 'models') return <BotModelsSettings key={state.binding.instanceId} state={state} onOpenLocalModels={onOpenLocalModels ?? (() => {})} />;
+  return <ConnectedBotSettings key={state.binding.instanceId} state={state} />;
+}
+
+function SettingsRow({
+  title,
+  description,
+  children,
 }: {
-  state: BotState;
-  call: <T = unknown>(
-    method: BotMethod,
-    params?: Record<string, unknown>,
-  ) => Promise<T>;
-  onClose: () => void;
-  onSync: () => void;
-  initialScreen?: 'settings' | 'pairing';
+  title: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
 }) {
-  const [screen, setScreen] = useState<
-    | 'settings'
-    | 'pairing'
-    | 'address'
-    | 'stop'
-    | 'remove'
-    | 'forget'
-    | 'update'
-  >(initialScreen);
+  return (
+    <div className="h37-row h37-bot-settings-row">
+      <span className="h37-row-text">
+        <b>{title}</b>
+        {description ? <span>{description}</span> : null}
+      </span>
+      {children ? <span className="h37-row-end">{children}</span> : null}
+    </div>
+  );
+}
+
+function ConnectedBotSettings({ state }: { state: BotState }) {
+  const api = window.hemiVoice.bot;
+  const [screen, setScreen] = useState<Dialog | null>(null);
   const [host, setHost] = useState(state.binding?.host ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const busy = pending || !!state.busy;
-  async function perform(
-    method: BotMethod,
-    params?: Record<string, unknown>,
-    close = false,
-  ) {
+  const instanceId = state.binding!.instanceId;
+  const call = async <T = unknown,>(method: BotMethod, params?: Record<string, unknown>) => {
+    const request = { ...params, expectedInstanceId: instanceId };
+    if (!api.commandResult) return api.command<T>(method, request);
+    // Preserve error codes across Electron's context bridge for pairing recovery.
+    const reply = await api.commandResult<T>(method, request);
+    if (!reply.ok) throw Object.assign(new Error(reply.message), { code: reply.code });
+    return reply.result;
+  };
+  async function perform(method: BotMethod, params?: Record<string, unknown>) {
     setPending(true);
     setError('');
     setNotice('');
     try {
       const result = await call<{ cancelled?: boolean }>(method, params);
-      if (close) onClose();
-      else {
-        setScreen('settings');
-        if (!result?.cancelled)
-          setNotice(
-            method === 'diagnostics.export'
-              ? '诊断已导出'
-              : '已完成',
-          );
-      }
+      setScreen(null);
+      if (!result?.cancelled) setNotice(method === 'diagnostics.export' ? '诊断已导出' : '已完成');
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : '操作未能确认，请重新连接核对。',
-      );
+      setError(e instanceof Error ? e.message : '操作未能确认，请重新连接核对。');
     } finally {
       setPending(false);
     }
   }
-  const title = {
-    settings: 'Bot 设置',
-    pairing: '连接新设备',
-    address: '修改连接地址',
-    stop: '停止云端 Bot？',
-    remove: '停止并移除连接？',
-    forget: '仅移除本机绑定？',
-    update: '重新部署云端组件？',
-  }[screen];
+  const action = (label: string, onClick: () => void, offline = false) => (
+    <button
+      type="button"
+      className="h37-btn h37-btn-secondary"
+      disabled={busy || offline}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+  const openAddress = () => {
+    setHost(state.binding?.host ?? '');
+    setError('');
+    setScreen('address');
+  };
+  const status = state.stoppedConfirmed ? '已确认停止' : state.online ? '运行中' : '状态待核对';
+  const title = screen
+    ? {
+        pairing: '连接新设备',
+        address: '修改连接地址',
+        stop: '停止云端 Bot？',
+        remove: '停止并移除连接？',
+        forget: '仅移除本机绑定？',
+        update: '重新部署云端组件？',
+      }[screen]
+    : '';
   const operation = {
     stop: 'service.stop',
     remove: 'connection.remove',
     forget: 'connection.forget',
     update: 'component.update',
   } as const;
-  if (screen === 'pairing') return <BotPairing state={state} call={call} onClose={onClose} onBack={() => setScreen('settings')}/>;
+
   return (
-    <BotDialog
-      title={title}
-      busy={busy}
-      onClose={onClose}
-      footer={
-        screen === 'settings' ? (
-          <BotButton onClick={onClose} disabled={busy}>
-            完成
-          </BotButton>
-        ) : (
-          <>
-            <BotButton
-              disabled={busy}
-              onClick={() => {
-                setScreen('settings');
-                setError('');
-              }}
-            >
-              返回
-            </BotButton>
-            <BotButton
-              primary
-              disabled={
-                busy ||
-                (screen === 'address' && !host.trim())
-              }
-              onClick={() =>
-                void (screen === 'address'
-                    ? perform('connection.address', { host })
-                    : perform(
-                        operation[screen as keyof typeof operation],
-                        undefined,
-                        screen === 'remove' || screen === 'forget',
-                      ))
-              }
-            >
-              {busy
-                ? '正在处理…'
-                : screen === 'address'
-                  ? '保存'
-                  : screen === 'update'
-                    ? '空闲时重新部署'
-                    : screen === 'forget'
-                      ? '仅移除本机绑定'
-                      : screen === 'remove'
-                        ? '停止并移除'
-                        : '停止 Bot'}
-            </BotButton>
-          </>
-        )
-      }
-    >
-      {screen === 'settings' && (
-        <>
-          <p className="h-bot-host">{state.binding?.host}</p>
-          <dl className="h-bot-dl">
-            <dt>连接</dt>
-            <dd>{state.online ? '已连接' : '连接已断开'}</dd>
-            <dt>常驻服务</dt>
-            <dd>
-              {state.stoppedConfirmed?'已确认停止':state.online?'运行中':'状态待核对'}
-            </dd>
-            <dt>默认空间</dt>
-            <dd>
-              <code>{state.cache?.defaultDir}</code>
-            </dd>
-            <dt>可用模型</dt>
-            <dd>{state.cache?.models.length ?? 0} 个</dd>
-            <dt>组件版本</dt>
-            <dd>{state.binding?.version}</dd>
-            <dt>最后连接</dt>
-            <dd>
-              {state.lastConnectedAt
+    <div className="h37-enter">
+      <div className="h37-page-head">
+        <div>
+          <h2>通用</h2>
+          <p>
+            管理云端连接、设备与常驻服务。
+          </p>
+        </div>
+      </div>
+      <section className="h37-section">
+        <div className="h37-section-head">
+          <h3>连接与设备</h3>
+        </div>
+        <div className="h37-group">
+          <SettingsRow title="服务器地址" description={state.binding?.host}>
+            {action('修改地址', openAddress)}
+          </SettingsRow>
+          <SettingsRow
+            title={state.online ? '已连接' : '连接已断开'}
+            description={
+              !state.online
+                ? state.error || '云端 Bot 可能仍在运行。'
+                : '文件与任务在云服务器上运行。'
+            }
+          >
+            {state.online
+              ? action('断开连接', () => void perform('connection.disconnect'))
+              : action('重新连接', () => void perform('connection.reconnect'))}
+          </SettingsRow>
+          <SettingsRow
+            title="默认空间"
+            description={<code>{state.cache?.defaultDir ?? '暂无记录'}</code>}
+          />
+          <SettingsRow
+            title="最后连接"
+            description={
+              state.lastConnectedAt
                 ? new Date(state.lastConnectedAt).toLocaleString()
-                : '暂无记录'}
-            </dd>
-          </dl>
-          <div className="h-bot-setting-actions">
-            <BotButton disabled={busy} onClick={() => setScreen('pairing')}>
-              <QrCode size={14} aria-hidden="true" />
-              连接新设备
-            </BotButton>
-            <BotButton disabled={busy || !state.online} onClick={onSync}>
-              添加模型
-            </BotButton>
-            <BotButton disabled={busy} onClick={() => setScreen('address')}>
-              修改连接地址
-            </BotButton>
-            <BotButton
-              disabled={busy}
-              onClick={() => void perform('diagnostics.export')}
-            >
-              导出诊断
-            </BotButton>
-            <BotButton
-              disabled={busy || !state.online}
-              onClick={() => setScreen('update')}
-            >
-              维护云端组件
-            </BotButton>
-            {state.cache?.enabled ? (
-              <BotButton
-                disabled={busy || !state.online}
-                onClick={() => setScreen('stop')}
-              >
-                停止 Bot
-              </BotButton>
-            ) : (
-              <BotButton
-                disabled={busy}
-                onClick={() => void perform('service.start')}
-              >
-                启动 Bot
-              </BotButton>
-            )}
-            <BotButton
-              disabled={busy || !state.online}
-              onClick={() =>
-                void perform('connection.disconnect', undefined, true)
-              }
-            >
-              断开连接
-            </BotButton>
-            <BotButton
-              disabled={busy || !state.online}
-              onClick={() => setScreen('remove')}
-            >
-              停止并移除连接
-            </BotButton>
-            <BotButton disabled={busy} onClick={() => setScreen('forget')}>
-              仅移除本机绑定
-            </BotButton>
-          </div>
-        </>
-      )}
-      {screen === 'address' && (
-        <>
-          <label className="h-bot-field">
-            SSH 地址
-            <input
-              value={host}
-              disabled={busy}
-              onChange={(e) => setHost(e.target.value)}
-            />
-          </label>
-        </>
-      )}
-      {(screen === 'stop' || screen === 'remove') && (
-        <>
-          <p>
-            将停止当前任务并关闭自动启动，云端会话、模型配置与文件保留。
-          </p>
-        </>
-      )}
-      {screen === 'forget' && (
-        <>
-          <p>
-            只移除本机连接和缓存。云端 Bot 可能仍在运行，会话、文件与模型配置保留。
-          </p>
-        </>
-      )}
-      {(screen === 'forget' || screen === 'remove') && (
-        <details className="h-bot-small">
-          <summary>云端清理说明</summary>
-          <p>
-            通过 SSH 执行 <code>systemctl --user disable --now hemi-bot</code>{' '}
-            停止服务。
-          </p>
-          <p>
-            需要彻底清理时，删除{' '}
-            <code>~/.config/systemd/user/hemi-bot.service</code> 和{' '}
-            <code>~/.local/share/hemi-bot</code>，再执行{' '}
-            <code>systemctl --user daemon-reload</code>
-            。这会永久删除云端会话、附件和模型凭据。默认空间及其他工作目录文件保留。
-          </p>
-          <p>如需撤销模型密钥，请到相应供应商后台撤销。</p>
-        </details>
-      )}
-      {screen === 'update' && (
-        <p>
-          重新部署会短暂重启 Bot，现有会话和文件保留。
+                : '暂无记录'
+            }
+          />
+          <SettingsRow title="连接新设备" description="通过二维码将手机等设备连接到 Bot。">
+            {action('管理设备', () => setScreen('pairing'))}
+          </SettingsRow>
+        </div>
+      </section>
+      <section className="h37-section">
+        <div className="h37-section-head">
+          <h3>常驻服务</h3>
+        </div>
+        <div className="h37-group">
+          <SettingsRow title="运行状态" description={status}>
+            {state.cache?.enabled && !state.stoppedConfirmed
+              ? action('停止 Bot', () => setScreen('stop'), !state.online)
+              : action('启动 Bot', () => void perform('service.start'))}
+          </SettingsRow>
+          <SettingsRow title="组件版本" description={state.binding?.version ?? '暂无记录'}>
+            {action('维护云端组件', () => setScreen('update'), !state.online)}
+          </SettingsRow>
+          <SettingsRow title="诊断信息" description="导出连接与运行信息，帮助排查问题。">
+            {action('导出诊断', () => void perform('diagnostics.export'))}
+          </SettingsRow>
+        </div>
+      </section>
+      <section className="h37-section">
+        <div className="h37-section-head">
+          <h3>移除连接</h3>
+        </div>
+        <div className="h37-group">
+          <SettingsRow title="停止并移除连接" description="停止云端服务，再移除本机绑定。">
+            {action('停止并移除', () => setScreen('remove'), !state.online)}
+          </SettingsRow>
+          <SettingsRow title="仅移除本机绑定" description="移除本机连接与缓存，云端数据保留。">
+            {action('移除绑定', () => setScreen('forget'))}
+          </SettingsRow>
+        </div>
+      </section>
+      {notice ? (
+        <p className="h37-section-foot" role="status">
+          {notice}
         </p>
-      )}
-      {notice && <p role="status">{notice}</p>}
-      {error && (
+      ) : null}
+      {error && !screen ? (
         <p role="alert" className="h-bot-error">
           {error}
         </p>
-      )}
-    </BotDialog>
+      ) : null}
+      {screen === 'pairing' ? (
+        <BotPairing
+          state={state}
+          call={call}
+          onClose={() => setScreen(null)}
+          onBack={() => setScreen(null)}
+        />
+      ) : null}
+      {screen && screen !== 'pairing' ? (
+        <BotDialog
+          title={title}
+          busy={busy}
+          onClose={() => setScreen(null)}
+          footer={
+            <>
+              <BotButton
+                disabled={busy}
+                onClick={() => {
+                  setScreen(null);
+                  setError('');
+                }}
+              >
+                取消
+              </BotButton>
+              <BotButton
+                primary
+                disabled={busy || (screen === 'address' && !host.trim())}
+                onClick={() =>
+                  void (screen === 'address'
+                    ? perform('connection.address', { host })
+                    : perform(operation[screen]))
+                }
+              >
+                {busy
+                  ? '正在处理…'
+                  : screen === 'address'
+                    ? '保存'
+                    : screen === 'update'
+                      ? '空闲时重新部署'
+                      : screen === 'forget'
+                        ? '仅移除本机绑定'
+                        : screen === 'remove'
+                          ? '停止并移除'
+                          : '停止 Bot'}
+              </BotButton>
+            </>
+          }
+        >
+          {screen === 'address' ? (
+            <label className="h-bot-field">
+              SSH 地址
+              <input value={host} disabled={busy} onChange={(e) => setHost(e.target.value)} />
+            </label>
+          ) : null}
+          {screen === 'stop' || screen === 'remove' ? (
+            <p>将停止当前任务并关闭自动启动，云端会话、模型配置与文件保留。</p>
+          ) : null}
+          {screen === 'forget' ? (
+            <p>只移除本机连接和缓存。云端 Bot 可能仍在运行，会话、文件与模型配置保留。</p>
+          ) : null}
+          {screen === 'forget' || screen === 'remove' ? (
+            <details className="h-bot-small">
+              <summary>云端清理说明</summary>
+              <p>
+                通过 SSH 执行 <code>systemctl --user disable --now hemi-bot</code> 停止服务。
+              </p>
+              <p>
+                需要彻底清理时，删除 <code>~/.config/systemd/user/hemi-bot.service</code> 和{' '}
+                <code>~/.local/share/hemi-bot</code>，再执行{' '}
+                <code>systemctl --user daemon-reload</code>
+                。这会永久删除云端会话、附件和模型凭据。默认空间及其他工作目录文件保留。
+              </p>
+              <p>如需撤销模型密钥，请到相应供应商后台撤销。</p>
+            </details>
+          ) : null}
+          {screen === 'update' ? <p>重新部署会短暂重启 Bot，现有会话和文件保留。</p> : null}
+          {error ? (
+            <p role="alert" className="h-bot-error">
+              {error}
+            </p>
+          ) : null}
+        </BotDialog>
+      ) : null}
+    </div>
   );
 }

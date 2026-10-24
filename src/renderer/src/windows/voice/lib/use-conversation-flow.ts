@@ -16,10 +16,13 @@ export function useConversationFlow(conversationId: string | null): Conversation
     scope: {environmentId, conversationId: conversationId ?? 'new'},
     transport: {
       fetchSnapshot: () => conversationId ? bridge.flowGetSnapshot(conversationId) : Promise.resolve(null),
-      subscribe: (_scope, receive) => conversationId ? bridge.onFlowChanged(({conversationId: source, change}) => {
-        if (source === conversationId) receive(change);
-      }) : () => {},
-      command: ({command}) => conversationId ? bridge.flowCommand(conversationId, command)
+      subscribe: (_scope, receive, disconnected) => {
+        const release=conversationId ? bridge.onFlowChanged(({conversationId: source, change}) => {if(source===conversationId)receive(change);}) : () => {};
+        const offline=disconnected ? bridge.onFlowDisconnected?.(disconnected) : undefined;
+        return () => {release();offline?.();};
+      },
+      lookupOperation: (_scope,requestId) => conversationId ? bridge.flowLookupOperation?.(conversationId,requestId) ?? Promise.resolve(null) : Promise.resolve(null),
+      command: ({command,requestId,generation}) => conversationId ? bridge.flowCommand(conversationId, command, {requestId,generation})
         : Promise.resolve({ok: false, code: 'invalid', message: '无会话'}),
     },
   }), [bridge, environmentId, conversationId]);

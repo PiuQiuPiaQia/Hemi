@@ -65,8 +65,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-html.kb-nav .compact-shell .turn-error-retry:focus-visible,
-html.kb-nav .compact-shell .turn-error-details summary:focus-visible { outline: 2px solid var(--g-500); outline-offset: 2px; }
 .compact-shell .h24-turn-error { display: block; padding: 0; border: 0; background: none; }
 @media (prefers-reduced-motion: reduce) {
   .compact-shell .turn-error-retry { transition: none; }
@@ -165,7 +163,6 @@ html.kb-nav .compact-shell .turn-error-details summary:focus-visible { outline: 
 
 html.kb-nav .compact-shell .h24-suggestion:focus-visible {
   outline: 0;
-  box-shadow: inset 0 0 0 1px var(--line), var(--focus-ring);
 }
 
 /* —— 用户消息 —— */
@@ -475,7 +472,6 @@ html.kb-nav .compact-shell .h24-suggestion:focus-visible {
 html.kb-nav .compact-shell .h24-msg-copy:focus-visible,
 html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .compact-shell .h24-user-status {
@@ -537,8 +533,6 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 @keyframes model-recovery-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .compact-shell .model-recovery-notice .model-recovery-icon { animation: none; } }
 @media (pointer: coarse) { .compact-shell .model-recovery-action, .compact-shell .model-recovery-toggle { min-height: 44px; } }
-
-html.kb-nav .compact-shell .model-recovery-action:focus-visible, html.kb-nav .compact-shell .model-recovery-toggle:focus-visible { outline: 2px solid var(--g-700); outline-offset: 2px; }
 @media (pointer: coarse) { .compact-shell .model-recovery-toggle { width: 44px; } }
 @media (max-width: 360px) { .compact-shell .model-recovery-row { gap: var(--sp-4); } }
 

@@ -1,6 +1,6 @@
 /** Bounded, expiring in-memory resources. Completed data only; no raw bytes in localStorage. */
-export type ResourceProgress={phase:'idle'|'queued'|'checking'|'downloading'|'verifying'|'ready'|'cached'|'preparing'|'failed';received:number;total?:number;expiresAt?:number};
-export const IDLE_PROGRESS:ResourceProgress=Object.freeze({phase:'idle',received:0});
+import {IDLE_PROGRESS, type ResourceProgress} from '@hemi/conversation-flow/core';
+export {IDLE_PROGRESS, type ResourceProgress};
 export type ResourceTransfers={subscribe(listener:()=>void):()=>void;getProgress(key:string):ResourceProgress;invalidate(key:string):void};
 const aborted=()=>new DOMException('文件读取已取消','AbortError');
 export function createResourceCache<T>({now=Date.now,ttlMs=10*60*1000,maxBytes=48*1024*1024,maxEntries=8,sizeOf,onEvict}:{now?:()=>number;ttlMs?:number;maxBytes?:number;maxEntries?:number;sizeOf(value:T):number;onEvict?(value:T):void}) {

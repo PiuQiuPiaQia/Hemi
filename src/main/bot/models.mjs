@@ -10,10 +10,11 @@ export function manualProviderModels(input, requestId) {
   if (!Array.isArray(input.models) || !input.models.length || input.models.length > 50)
     fail('每次请添加 1 至 50 个模型。');
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-  if (!apiKey) fail('请填写 API Key。');
+  const editing = typeof input.id === 'string' && /^bot-[a-f0-9]{24}$/.test(input.id);
+  if (!apiKey && !editing) fail('请填写 API Key。');
   if (input.models.some(model => typeof model?.model !== 'string' || !model.model.trim())) fail('请填写模型型号。');
-  const id = 'bot-' + createHash('sha256').update(requestId).digest('hex').slice(0, 24);
-  const provider = normalizeProvider({ ...input, id, models: input.models.map((model, index) => ({ ...model, id: 'm-' + index })) });
+  const id = editing ? input.id : 'bot-' + createHash('sha256').update(requestId).digest('hex').slice(0, 24);
+  const provider = normalizeProvider({ ...input, id, models: input.models.map((model, index) => ({ ...model, id: editing && validId(model.id) ? model.id : 'm-' + index })) });
   // The Host validates reachability and its loopback policy from the server.
   modelEndpoint(provider, { allowLoopback: true });
   return provider.models.map(model => ({

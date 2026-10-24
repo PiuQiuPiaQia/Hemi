@@ -145,8 +145,9 @@ export function settledRoutingError(message, { routing, state, aborted = false, 
  * 自动压缩管理；子 agent 维持 SDK 默认）。
  */
 export function sessionSettingsOf({ routing = false, settings = {}, managedRecovery = false } = {}) {
-  // Host recovery owns the absolute deadline; SDK/fallback retries cannot start a fresh window.
-  if (managedRecovery) return { ...settings, retry: { ...settings.retry, enabled: false, provider: { ...settings.retry?.provider, maxRetries: 0 } } };
+  // Host recovery owns same-candidate retries. A routing session still needs the
+  // SDK retry boundary to select the next frozen candidate once.
+  if (managedRecovery && !routing) return { ...settings, retry: { ...settings.retry, enabled: false, provider: { ...settings.retry?.provider, maxRetries: 0 } } };
   if (!routing) return settings;
   return {
     ...settings,

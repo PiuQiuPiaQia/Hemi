@@ -23,11 +23,6 @@
   color: var(--ink);
 }
 
-html.kb-nav .compact-shell .turn-activity-head:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-
 .compact-shell .turn-activity-label {
   min-width: 0;
   overflow: hidden;

@@ -156,10 +156,6 @@ html.kb-nav .floating-orb-button:focus-visible {
   outline: 0;
 }
 
-html.kb-nav .floating-orb-button:focus-visible .floating-orb-core {
-  box-shadow: var(--focus-ring);
-}
-
 /* —— 任务角标：贴球右下的 10px 圆点；进行中 1.2s 呼吸，待确认琥珀 —— */
 .floating-orb-shell .task-indicator {
   right: 18px;
@@ -548,7 +544,6 @@ html.kb-nav .compact-shell .h24-preview-path:focus-visible,
 html.kb-nav .compact-shell .h24-preview-retry:focus-visible,
 html.kb-nav .compact-shell .h24-preview-scroll-controls button:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
   border-radius: var(--r-sm);
 }
 
@@ -688,112 +683,6 @@ html.kb-nav .compact-shell .h24-preview-add-item:focus-visible {
   animation: h37-toast-in var(--dur-3) var(--ease-out);
 }
 
-/* ============================================================
-   Dialog 基件（components/ui/dialog.tsx）+ 历史会话对话框
-   base-ui 用 data-starting-style / data-ending-style 驱动进出场：
-   入 200ms ease-out（+4px），出 140ms ease-in；≤600 底部弹层 280ms。
-   ============================================================ */
-.h37-dialog-overlay {
-  background: var(--bg-scrim);
-  transition: opacity var(--dur-3) linear;
-}
-
-.h37-dialog-overlay[data-starting-style],
-.h37-dialog-overlay[data-ending-style] {
-  opacity: 0;
-}
-
-.h37-dialog-overlay[data-ending-style] {
-  transition: opacity var(--dur-2) var(--ease-in);
-}
-
-.h37-dialog-popup {
-  max-height: calc(100dvh - 48px);
-  border-radius: var(--r-lg);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-2);
-  font-family: var(--font);
-  font-size: var(--fs-13);
-  color: var(--body);
-  transition:
-    opacity var(--dur-3) var(--ease-out),
-    transform var(--dur-3) var(--ease-out);
-}
-
-.h37-dialog-popup[data-starting-style],
-.h37-dialog-popup[data-ending-style] {
-  opacity: 0;
-  transform: translateY(4px);
-}
-
-.h37-dialog-popup[data-ending-style] {
-  transition:
-    opacity var(--dur-2) var(--ease-in),
-    transform var(--dur-2) var(--ease-in);
-}
-
-.h37-dialog-popup .h37-dialog-title {
-  margin: 0;
-  padding-right: var(--sp-32);
-  font-size: var(--fs-16);
-  font-weight: var(--fw-semibold);
-  line-height: 1.35;
-  color: var(--ink);
-}
-
-.h37-dialog-popup .h37-dialog-desc {
-  margin: 0;
-  font-size: var(--fs-13);
-  line-height: 1.55;
-  color: var(--muted);
-}
-
-.h37-dialog-popup [data-slot='dialog-header'] {
-  gap: var(--sp-4);
-}
-
-.h37-dialog-popup > [data-slot='dialog-close'] {
-  top: 14px;
-  right: 14px;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-sm);
-  color: var(--muted);
-}
-
-.h37-dialog-popup > [data-slot='dialog-close']:hover {
-  background: var(--bg-hover);
-  color: var(--ink);
-}
-
-.h37-dialog-popup .h37-dialog-foot {
-  margin-top: var(--sp-4);
-}
-
-@media (max-width: 600px) {
-  .h37-dialog-popup[data-slot='dialog-content'] {
-    top: auto;
-    bottom: 0;
-    left: 0;
-    max-width: 100%;
-    max-height: 90dvh;
-    translate: none;
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    padding-bottom: calc(var(--sp-20) + env(safe-area-inset-bottom));
-    transition: transform var(--dur-4) var(--ease-out);
-  }
-
-  .h37-dialog-popup[data-slot='dialog-content'][data-starting-style],
-  .h37-dialog-popup[data-slot='dialog-content'][data-ending-style] {
-    opacity: 1;
-    transform: translateY(100%);
-  }
-
-  .h37-dialog-popup[data-slot='dialog-content'][data-ending-style] {
-    transition: transform var(--dur-2) var(--ease-in);
-  }
-}
-
 /* —— 历史会话：行式列表（无边框卡），40px 行，悬停 bg-hover —— */
 .h37-dialog-popup.history-dialog {
   gap: var(--sp-12);
@@ -850,7 +739,6 @@ html.kb-nav .compact-shell .h24-preview-add-item:focus-visible {
 html.kb-nav .history-dialog .history-item-main:focus-visible,
 html.kb-nav .history-dialog .history-chip-btn:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* 行内重命名输入框（2026-10-05）：与侧栏 h24-sidebar-rename 同一观感——

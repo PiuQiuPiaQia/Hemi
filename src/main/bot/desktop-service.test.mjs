@@ -395,7 +395,7 @@ test('selecting already cached conversations persists the last selection even wh
   assert.equal(f.client.getState().cache.selectedId, a.id);
 });
 
-test('initialization only syncs chosen models and lets Host own its built-in workspace', async t => {
+test('initialization automatically configures available local models and lets Host own its built-in workspace', async t => {
   const f = await fixture(t);
   const candidate = await f.client.connect({ host: 'fixture-cloud' });
   const ignoredPath = path.join(f.root, 'not-a-setup-setting');
@@ -409,4 +409,19 @@ test('initialization only syncs chosen models and lets Host own its built-in wor
   assert.equal(f.client.getState().cache.defaultDir, path.join(f.root, 'cloud/workspace'));
   assert.equal(await fs.stat(ignoredPath).then(() => true, () => false), false);
   await assert.rejects(f.client.command('bot.configure', { defaultDir: ignoredPath }), /不支持|无效|操作/);
+});
+
+
+test('a send receipt returns without waiting for a second catalog SSH round trip', async t => {
+  const f = await fixture(t), session = await f.client.command('session.create');
+  await f.client.command('session.open', { id: session.id });
+  const gate = f.holdNextSnapshot();
+  try {
+    const result = await Promise.race([
+      f.client.command('flow.command', { id: session.id, command: { type: 'send', input: { inputId: 'fast-ack', text: 'accepted' } } }),
+      new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('receipt waited for catalog refresh')), 1500); timer.unref(); }),
+    ]);
+    assert.equal(result.ok, true);
+    await gate.started;
+  } finally { gate.release(); }
 });

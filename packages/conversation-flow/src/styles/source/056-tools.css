@@ -185,7 +185,6 @@
 
 html.kb-nav .h56-route-gear:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .h56-route-gear:hover {
@@ -278,7 +277,7 @@ html.kb-nav .h56-route-gear:focus-visible {
 .compact-shell .h56-run-activity-head { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; padding: var(--sp-6) var(--sp-8); border-radius: var(--r-sm); line-height: var(--sp-20); list-style: none; cursor: var(--cursor-arrow); }
 .compact-shell .h56-run-activity-head::-webkit-details-marker { display: none; }
 .compact-shell .h56-run-activity-head:hover { background: var(--bg-hover); }
-html.kb-nav .compact-shell .h56-run-activity-head:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+html.kb-nav .compact-shell .h56-run-activity-head:focus-visible { outline: none; }
 .compact-shell .h56-run-activity-head > svg { width: var(--sp-12); height: var(--sp-12); flex: none; }
 .compact-shell .h56-run-activity-title { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
 .compact-shell .h56-run-activity-time { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }

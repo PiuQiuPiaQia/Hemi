@@ -36,6 +36,7 @@ import {
   getConversationTurnsRaw,
   getConversationSession,
   setArchiveCutListener,
+  recordContextUsage,
 } from './conversation.ipc.mjs';
 import { buildRuntimeDiagnostic, buildRuntimeDiagnosticBlock } from '../services/runtime-diagnostics.mjs';
 import { getSkillService } from './skills.ipc.mjs';
@@ -300,6 +301,7 @@ function handleEventTurn(conversationId, result, meta) {
     conversationTurns.settle(runToken, { result: { ...payload, responseId, createdAt, text, announce: true, inputSource } });
     // 事件回合占流槽：关闭后续排队发（暂停时不派，控制器自持口径）。
     closeEventRun('completed');
+    try { recordContextUsage(conversationId); } catch { /* 收口失败不影响回合 */ }
   };
   if (inputSource !== 'voice') {
     finish({ speechText: null });
@@ -557,14 +559,9 @@ function createLlmFlowRuntime(conversationId) {
         if (reason === 'promote') await runtime?.requestHandoff(conversationId);
         const turnId = activeTurnId(runId);
         if (turnId != null) conversationTurns.cancel({ conversationId, turnId });
-        await Promise.all([
-          runtime?.abort(conversationId),
-          runtime?.subagents?.cancelByRootRun?.(runId, { reason }),
-        ]);
         const snapshot = controllerOf().getSnapshot();
         const inputs = snapshot.timeline.filter((item) => item.kind === 'user' && item.runId === runId).map((item) => item.text);
-        await runtime?.get(conversationId)?.recordGoalStop?.({ runId, reason: snapshot.runs[runId]?.stopReason ?? reason, inputs });
-        await runtime?.persist(conversationId);
+        await runtime?.stopRoot(conversationId, runId, {reason: snapshot.runs[runId]?.stopReason ?? reason, inputs});
         return { ok: true };
       });
       stoppingRuns.set(runId, stopping);
@@ -1027,6 +1024,8 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     throw failure;
   } finally {
     void runtime?.persist(conversationId).catch(() => {});
+    // 上下文容量轮末收口（成功/取消/失败都到停靠点）：落档＋广播，指示器重取。
+    try { recordContextUsage(conversationId); } catch { /* 收口失败不影响回合 */ }
   }
 }
 

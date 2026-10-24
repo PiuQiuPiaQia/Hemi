@@ -127,8 +127,9 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
    * @returns {Promise<{code:number, stdout:Buffer, stderr:string, timedOut?:boolean,
    *            aborted?:boolean, connError?:string|null}>}
    */
-  function exec({ host, command, stdin = null, timeoutMs = 120_000, signal = null, onKill = null, password = null }) {
+  function exec({ host, command, stdin = null, timeoutMs = 120_000, signal = null, onKill = null, password = null, onStdout = null }) {
     const target = String(host ?? '').trim();
+    if (signal?.aborted) return Promise.resolve({code:-1,stdout:Buffer.alloc(0),stderr:'',aborted:true});
     if (!isValidSshTarget(target)) {
       return Promise.resolve({ code: -1, stdout: Buffer.alloc(0), stderr: '', connError: 'invalid-host' });
     }
@@ -167,6 +168,8 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
         if (settled) return;
         settled = true;
         clearTimeout(killGraceTimer);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
         const result = {
           code,
           stdout: Buffer.concat(outChunks),
@@ -181,8 +184,8 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
         resolve(result);
       };
 
-      child.stdout.on('data', (chunk) => outChunks.push(chunk));
-      child.stderr.on('data', (chunk) => { errText += chunk.toString('utf8'); });
+      child.stdout.on('data', (chunk) => { if (onStdout) { try { onStdout(chunk); } catch { child.kill('SIGKILL'); } } else outChunks.push(chunk); });
+      child.stderr.on('data', (chunk) => { errText = (errText + chunk.toString('utf8')).slice(-65536); });
       child.on('error', (error) => {
         if (error?.code === 'ENOENT') { finish(255); errText += '\nssh: command not found'; return; }
         finish(-1);
@@ -216,7 +219,9 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
 
       const timer = timeoutMs > 0 ? setTimeout(() => { void terminate('timeout'); }, timeoutMs) : null;
       if (timer && typeof timer.unref === 'function') timer.unref();
-      signal?.addEventListener('abort', () => { clearTimeout(timer); void terminate('abort'); }, { once: true });
+      const abort = () => { clearTimeout(timer); void terminate('abort'); };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
     });
   }
 

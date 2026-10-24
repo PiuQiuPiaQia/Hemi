@@ -1,0 +1,77 @@
+/**
+ * 原生桌面口径——Chromium 的网页默认行为在这里统一收成桌面应用的样子。
+ * 焦点、文字选中、拖拽、光标四类规则的唯一来源；scripts/check-native.mjs
+ * 门禁强制各组件样式不另起炉灶。键盘事件侧在 lib/native-input.ts，
+ * 主进程侧（菜单、页内导航、系统键盘导航开关）在 main/windows/native-shell.mjs。
+ *
+ * 按用户要求，按钮、输入控件与对话框聚焦时沿用普通边框和阴影，不额外画环；
+ * 共享 controls.css / touch.css 收掉浏览器默认 outline。键盘仍可定位和操作控件。
+ * 内容阅读区、链接等保留的键盘定位提示须挂 `html.kb-nav` 前缀（门禁检查，
+ * outline 与 box-shadow 环都算）。html.kb-nav 由 native-input.ts 维护：Tab / 方向键
+ * 进入，任何指针按下退出。
+ * 鼠标点过的控件拿着焦点 → Enter/空格不激活它（native-input.ts 在事件层
+ *    截默认动作）。CSS 分不清 Tab 和点击两种来源的焦点，必须在事件层做。
+ *
+ * 文字选中：界面文字（标签、按钮、标题、列表项）不可选，拖动不刷蓝、悬停
+ * 不出 I 形光标；只有内容区可选可复制——文本输入、Markdown 渲染块（助手回复、
+ * 文件预览）、用户气泡、交付报告阅读器、文件预览正文、任务过程日志、代码。
+ * 新的内容区加 `.selectable` 类，不要在组件样式里写 user-select。
+ *
+ * 光标：按钮、条目、卡片等控件一律箭头（mac 原生惯例），只有文字链接用手型
+ * （.h37-link 等，门禁白名单）。
+ *
+ * 不依赖第三方焦点 polyfill。
+ */
+
+@layer base {
+  /* 兜底：原生 :focus（非 :focus-visible）一律不画环。 */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* 输入模态门控：最近一次交互是指针时，非文本元素的 :focus-visible 环不画。
+     原生启发式的「键盘模态粘滞」会让点击与程序化 focus() 亮环（键盘输入
+     常态化的语音应用必踩）；带 !important 以压过各组件的焦点环规则。 */
+  html:not(.kb-nav)
+    :focus-visible:not(input):not(textarea):not([contenteditable='true']) {
+    outline: none !important;
+  }
+
+  /* 文字选中：默认不可选，内容区放开。 */
+  html {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'],
+  pre,
+  code,
+  .selectable,
+  .md,
+  .h24-user-bubble,
+  .reader-content,
+  .h24-preview-body,
+  .h25-process-body {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* 内容区里的按钮仍是控件。 */
+  :is(.selectable, .md, .reader-content, .h24-preview-body, .h25-process-body)
+    :is(button, [role='button']) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* 拖拽：界面图片与链接不可拖出窗口；内容区的图片可拖（拖到访达存图）。 */
+  img,
+  a {
+    -webkit-user-drag: none;
+  }
+
+  :is(.md, .h24-preview-body) img {
+    -webkit-user-drag: auto;
+  }
+}

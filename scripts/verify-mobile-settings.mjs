@@ -1,3 +1,4 @@
+import {installMobileBotEvents} from './lib/mobile-bot-events-fixture.mjs';
 // Mobile renderer -> native bridge boundary fixture -> actual Bot Host/controller/filesystem.
 // No real user data or external model is used. Native TLS is covered separately.
 import assert from 'node:assert/strict';
@@ -13,26 +14,29 @@ import {createBotHost} from '../src/main/bot/host.mjs';
 const repo=path.resolve(import.meta.dirname,'..'),app=path.join(repo,'apps/mobile');
 const output=path.join(repo,'.visual/workflow/mobile-settings');await fs.mkdir(output,{recursive:true});
 const report={date:new Date().toISOString(),commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),workingTree:true,node:process.version,platform:process.platform+'/'+process.arch,sources:{},results:[]};
-for(const name of ['apps/mobile/src/app.tsx','apps/mobile/src/workspace.ts','apps/mobile/src/composer.tsx','apps/mobile/src/style.css','apps/mobile/src/host/app-viewport.ts','apps/mobile/src/bot/workspace-client.ts','apps/mobile/src/components/directory-panel.tsx','apps/mobile/src/components/dialog.tsx','apps/mobile/src/components/conversation-drawer.tsx','apps/mobile/src/components/chat-panels.tsx','packages/conversation-flow/src/components/virtual-transcript.tsx','apps/mobile/capacitor.config.ts','apps/mobile/package.json','package-lock.json','scripts/verify-mobile-settings.mjs'])report.sources[name]=createHash('sha256').update(await fs.readFile(path.join(repo,name))).digest('hex');
+for(const name of ['apps/mobile/src/app.tsx','apps/mobile/src/workspace.ts','apps/mobile/src/composer.tsx','apps/mobile/src/style.css','apps/mobile/src/host/app-viewport.ts','apps/mobile/src/bot/workspace-client.ts','apps/mobile/src/components/directory-panel.tsx','apps/mobile/src/components/dialog.tsx','apps/mobile/src/components/conversation-drawer.tsx','apps/mobile/src/components/chat-panels.tsx','packages/ui/src/sheet.tsx','packages/ui/src/environment.tsx','packages/conversation-flow/src/controls/model-control.tsx','packages/conversation-flow/src/components/virtual-transcript.tsx','apps/mobile/capacitor.config.ts','apps/mobile/package.json','package-lock.json','scripts/verify-mobile-settings.mjs'])report.sources[name]=createHash('sha256').update(await fs.readFile(path.join(repo,name))).digest('hex');
 const browser=await chromium.launch({executablePath:process.env.HEMI_CHROME_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
 try {
  for(const mode of ['dev','built']) {
-  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-settings-ui-'))),work=path.join(root,'workspace'),project=path.join(work,'项目'),slow=path.join(work,'迟到的目录');
-  const runs=[],requests=[];let dropUpdate=false,networkDown=false,releaseDirectory,heldDirectory;
-  const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:work,validateModel:async()=>{},executorFactory:()=>({run:async spec=>{runs.push(spec);return{stopped:false};},stop:async()=>{},close:async()=>{}})});
-  await fs.mkdir(project,{recursive:true});await fs.mkdir(slow);await fs.mkdir(path.join(work,'用于检查较长名称换行和点击区域的项目文件夹'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-settings-ui-'))),work=path.join(root,'workspace'),project=path.join(work,'项目'),slow=path.join(work,'迟到的目录'),longProject=path.join(work,'用于检查较长名称换行和点击区域的项目文件夹');
+  const runs=[],requests=[];let dropUpdate=false,networkDown=false,releaseDirectory,heldDirectory,holdRun=false,releaseRun;
+  const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:work,validateModel:async()=>{},executorFactory:()=>({run:async spec=>{runs.push(spec);if(holdRun)await new Promise(resolve=>{releaseRun=resolve;});return{stopped:false};},stop:async()=>{releaseRun?.();},close:async()=>{releaseRun?.();}})});
+  await fs.mkdir(project,{recursive:true});await fs.mkdir(slow);await fs.mkdir(longProject);
   const {instanceId}=await host.request('handshake'),target={endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Isolated settings Bot'};
   const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
-  await call('model.sync',{models:[['one','模型一'],['two','模型二']].map(([key,name])=>({modelKey:`fixture/${key}`,providerId:'fixture',name,model:key,api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}))});
+  await call('model.sync',{models:[['one','模型一'],['two','模型二']].map(([key,name])=>({modelKey:`fixture/${key}`,providerId:'fixture',name,model:key==='two'?'very-long-model-name-two':key,api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}))});
+  await call('model.sync',{source:'manual',models:[{modelKey:'cloud/one',providerId:'cloud',name:'云端独立配置',model:'cloud-only',api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}]});
+  await call('model.local-config',{keys:['fixture/one','fixture/two'],roleModels:{main:'fixture/one',explorer:'fixture/two',fallback:'fixture/two'}});
   const other=await call('session.create');await call('session.rename',{id:other.id,title:'另一个对话'});
   const session=await call('session.create');await call('session.rename',{id:session.id,title:'移动端设置验证'});
-  const options={configFile:path.join(app,'vite.config.ts'),root:app,logLevel:'error'};
+  const options={configFile:path.join(app,'vite.config.ts'),root:app,cacheDir:path.join(root,'vite-cache'),logLevel:'error'};
   const server=mode==='dev'?await createServer({...options,server:{host:'127.0.0.1',port:0}}):await preview({...options,preview:{host:'127.0.0.1',port:0}});
   const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,reducedMotion:'reduce'});
   const result={mode,checks:[],errors:[],screenshots:[]};report.results.push(result);
   const check=name=>{result.checks.push(name);console.log('PASS',mode,name);};
   try {
    if(mode==='dev')await server.listen();const url=server.resolvedUrls.local[0];
+  await installMobileBotEvents(context,host,{offline:()=>networkDown});
    await context.exposeBinding('__hemiSettingsRpc',async(_source,{method,params})=>{
     requests.push({method,params});
     if(networkDown)return{ok:false,code:'network',message:'Isolated connection unavailable'};
@@ -61,14 +65,28 @@ try {
    await input.fill('保留草稿，使用新的设置');
    const thinking=page.getByRole('button',{name:'思考强度：自动',exact:true});await thinking.click();
    const thinkingDialog=page.getByRole('dialog',{name:'思考强度',exact:true});await thinkingDialog.waitFor();
+   assert.equal(await thinkingDialog.evaluate(node=>!!node.closest('[inert]')),false,'thinking sheet must stay outside the inert conversation surface');
    assert.equal(await thinkingDialog.getByRole('button',{name:/^自动/}).getAttribute('aria-pressed'),'true');
    await shot('thinking-390');await thinkingDialog.getByRole('button',{name:/^高/}).click();await thinkingDialog.waitFor({state:'hidden'});
    await page.getByRole('button',{name:'思考强度：高',exact:true}).waitFor();
-   await page.getByRole('button',{name:/^切换模型：/}).click();const models=page.getByRole('dialog',{name:'选择模型',exact:true});await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
+   await page.getByRole('button',{name:/^切换模型：/}).click();const models=page.getByRole('dialog',{name:'选择模型',exact:true});
+   assert.equal(await models.evaluate(node=>!!node.closest('[inert]')),false,'model sheet must stay outside the inert conversation surface');
+   await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
+   await page.getByRole('button',{name:/^切换模型：/}).click();
+   assert.ok(await models.getByLabel('本机配置',{exact:true}).count());
+   assert.ok(await models.getByLabel('云端配置',{exact:true}).count());
+   await shot('model-routing-sources-390');
+   await models.getByRole('button',{name:/自动路由/}).click();await models.waitFor({state:'hidden'});
+   assert.equal((await call('session.open',{id:session.id})).modelKey,'auto');
+   await page.getByRole('button',{name:/^切换模型：/}).click();await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
+   check('automatic routing uses the Host local role/fallback policy and both source icons remain visible on mobile');
    assert.equal(await input.inputValue(),'保留草稿，使用新的设置');
    check('composer model and thinking selectors persist through actual Host updates without clearing the SDK draft');
 
-   const folderTrigger=page.getByRole('button',{name:/^工作目录：/});heldDirectory=work;await folderTrigger.click();
+   const folderTrigger=page.getByRole('button',{name:/^工作目录：/});
+   assert.equal(await folderTrigger.count(),1);assert.equal(await folderTrigger.evaluate(node=>!!node.closest('.composer-toolbar')),true);
+   assert.equal(await page.locator('.composer-context').count(),0);assert.equal(await page.locator('.app-topbar').getByRole('button',{name:/工作目录/}).count(),0);
+   heldDirectory=work;await folderTrigger.click();
    const folders=page.getByRole('dialog',{name:'选择工作目录',exact:true}),pathInput=folders.getByRole('textbox',{name:'服务器目录路径',exact:true}),choose=folders.getByRole('button',{name:'使用此目录',exact:true});
    await expect(()=>!!releaseDirectory);await pathInput.fill(path.join(root,'missing'));releaseDirectory();heldDirectory=null;
    await folders.getByRole('button',{name:'项目',exact:true}).waitFor();assert.equal(await pathInput.inputValue(),path.join(root,'missing'));
@@ -94,13 +112,22 @@ try {
    check('lost settings reply uses its original receipt without mutation replay; accepted input captures selected model/thinking/directory');
 
    await page.reload();await page.getByRole('button',{name:'思考强度：中',exact:true}).waitFor();await page.getByRole('button',{name:`工作目录：${project}`,exact:true}).waitFor();
-   for(const width of [320,375,390,768,1440]) {
-    await page.setViewportSize({width,height:844});await shot(`composer-${width}`);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+   await call('session.update',{id:session.id,dir:longProject});await page.getByRole('button',{name:`工作目录：${longProject}`,exact:true}).waitFor();
+   const checkToolbar=async()=>{
+    const boxes=await page.locator('.composer-toolbar button').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return{label:node.getAttribute('aria-label'),x:box.x,right:box.right,y:box.y,width:box.width,height:box.height};}));
+    for(let i=0;i<boxes.length;i++){const box=boxes[i];assert.ok(box.width>=44&&box.height>=44,`${box.label} has a small touch target: ${JSON.stringify(box)}`);if(i)assert.ok(boxes[i-1].right<=box.x+1,'composer controls overlap');}
+    assert.equal(await page.locator('.composer-toolbar').evaluate(node=>node.scrollWidth>node.clientWidth),false);
+   };
+   for(const width of [320,375,376,390,768,1440]) {
+    await page.setViewportSize({width,height:844});await checkToolbar();await shot(`composer-${width}`);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.getByRole('button',{name:'思考强度：中',exact:true}).click();assert.equal(await thinkingDialog.evaluate(node=>node.scrollWidth>node.clientWidth),false);await shot(`thinking-${width}`);await thinkingDialog.getByRole('button',{name:'关闭',exact:true}).click();
    }
+   holdRun=true;await input.fill('验证运行时目录和停止按钮的位置');await page.getByRole('button',{name:'发送消息',exact:true}).click();await page.getByRole('button',{name:'停止任务',exact:true}).waitFor();
+   try {for(const width of [320,375,376,390]) {await page.setViewportSize({width,height:844});await checkToolbar();await shot(`composer-busy-${width}`);}} finally {holdRun=false;releaseRun?.();}
+   await page.getByRole('button',{name:'停止任务',exact:true}).waitFor({state:'hidden'});
    await page.setViewportSize({width:375,height:480});await folderTrigger.click();await expect(async()=>await choose.isEnabled());assert.equal(await folders.evaluate(node=>node.scrollWidth>node.clientWidth),false);await choose.scrollIntoViewIfNeeded();await shot('directory-short');await folders.getByRole('button',{name:'关闭',exact:true}).click();
    await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'dark'});await folderTrigger.click();await expect(async()=>await choose.isEnabled());await shot('directory-system-dark');await folders.getByRole('button',{name:'关闭',exact:true}).click();
-   await page.getByRole('button',{name:'打开对话列表',exact:true}).click();await page.getByRole('button',{name:/另一个对话/}).click();await page.getByRole('button',{name:'思考强度：自动',exact:true}).waitFor();await page.getByRole('button',{name:`工作目录：${work}`,exact:true}).waitFor();
+   await page.getByRole('button',{name:'打开对话列表',exact:true}).click();await page.getByRole('button',{name:'另一个对话',exact:true}).click();await page.getByRole('button',{name:'思考强度：自动',exact:true}).waitFor();await page.getByRole('button',{name:`工作目录：${work}`,exact:true}).waitFor();
    check('reload restores server settings; other conversation retains its own settings; 320/375/390/768/1440, short and system dark layouts fit');
 
    await call('flow.command',{id:other.id,command:{type:'send',input:{inputId:randomUUID(),text:Array.from({length:40},(_,i)=>`历史段落 ${i}：用于验证键盘打开后仍保持最后一段可见。`).join('\n\n'),inputSource:'text',attachmentIds:[]}}});
@@ -114,10 +141,10 @@ try {
    const transcript=page.locator('.conversation-frame [data-slot="scroll-area-viewport"]');await transcript.waitFor();
    const atBottom=()=>transcript.evaluate(node=>Math.abs(node.scrollHeight-node.scrollTop-node.clientHeight)<3);
    await expect(atBottom);
-   const geometry=()=>page.evaluate(()=>({top:document.querySelector('.app-topbar').getBoundingClientRect().top,shell:document.querySelector('.mobile-shell').getBoundingClientRect().height,rootY:window.scrollY,rootScroll:document.scrollingElement.scrollTop,bottom:document.querySelector('.composer-context').getBoundingClientRect().bottom,flowHeight:document.querySelector('.conversation-frame').getBoundingClientRect().height}));
+   const geometry=()=>page.evaluate(()=>({top:document.querySelector('.app-topbar').getBoundingClientRect().top,shell:document.querySelector('.mobile-shell').getBoundingClientRect().height,rootY:window.scrollY,rootScroll:document.scrollingElement.scrollTop,bottom:document.querySelector('.input-dock').getBoundingClientRect().bottom,flowHeight:document.querySelector('.conversation-frame').getBoundingClientRect().height}));
    const initial=await geometry();
    await page.evaluate(()=>{const original=HTMLElement.prototype.focus;window.__hemiFocusCalls=[];HTMLElement.prototype.focus=function(options){window.__hemiFocusCalls.push(options?.preventScroll===true);return original.call(this,options);};});
-   for(const label of ['选择模型','选择工作目录']) {
+   for(const label of ['选择模型',/^工作目录：/]) {
     await page.getByRole('button',{name:label,exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();
     assert.equal((await geometry()).top,initial.top);
    }
@@ -132,7 +159,7 @@ try {
    await input.fill(Array.from({length:30},(_,i)=>`多行输入 ${i}`).join('\n'));await input.evaluate(node=>{node.scrollTop=node.scrollHeight;});
    compact=await geometry();assert.equal(compact.top,initial.top);assert.ok(compact.bottom<=500);
    await shot('keyboard-native-390');
-   await page.getByRole('button',{name:'选择工作目录',exact:true}).click();await pathInput.waitFor();await pathInput.click();assert.equal((await geometry()).top,initial.top);await shot('keyboard-directory-390');await folders.getByRole('button',{name:'关闭',exact:true}).click();
+   await folderTrigger.click();await pathInput.waitFor();await pathInput.click();assert.equal((await geometry()).top,initial.top);await shot('keyboard-directory-390');await folders.getByRole('button',{name:'关闭',exact:true}).click();
    await input.fill('');await page.evaluate(()=>{window.__hemiKeyboard.emit('keyboardWillHide');window.__hemiKeyboard.emit('keyboardDidHide');delete visualViewport.height;visualViewport.dispatchEvent(new Event('resize'));});
    assert.equal(await page.locator('html').evaluate(node=>node.style.getPropertyValue('--sa-bottom')),'1');assert.deepEqual(await geometry(),initial);await expect(atBottom);
    await page.emulateMedia({reducedMotion:'no-preference'});
@@ -168,7 +195,7 @@ try {
    const failed=context.pages()[0];
    if(failed){await failed.screenshot({path:path.join(output,`${mode}-failure.png`)});result.failure=await failed.evaluate(()=>({dialogs:[...document.querySelectorAll('[role="dialog"]')].map(node=>({label:node.getAttribute('aria-label'),text:node.textContent})),buttons:[...document.querySelectorAll('button')].map(node=>({label:node.getAttribute('aria-label'),text:node.textContent,inert:!!node.closest('[inert]')})),rootY:scrollY}));}
    throw error;
-  } finally {releaseDirectory?.();await context.close();await server.close();await host.close();await fs.rm(root,{recursive:true,force:true});}
+  } finally {releaseDirectory?.();releaseRun?.();await context.close();await server.close();await host.close();await fs.rm(root,{recursive:true,force:true});}
  }
 } finally {await browser.close();await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2)+'\n');}
 

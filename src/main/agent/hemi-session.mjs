@@ -621,6 +621,7 @@ export function createHemiSession({
           run.usages.push(detail);
           const messageAt = Number(event.message?.timestamp) || 0;
           emitter.emit('model-call', {
+            modelKey: runtimeExecution?.actualCandidate?.modelKey ?? null,
             model: event.message.model ?? event.message.providerId ?? null,
             stopReason: event.message.stopReason ?? null,
             isError: Boolean(event.message.errorMessage),
@@ -1041,6 +1042,8 @@ export function createHemiSession({
     respondPermission,
     exportEntries,
     appendContextFact,
+    // 上下文容量：Pi 会话的占用读数（{tokens, contextWindow, percent}；压缩后 tokens 为 null）。
+    contextUsage: () => { try { return session?.getContextUsage?.() ?? undefined; } catch { return undefined; } },
     recordBudgetSummary,
     getEntries,
     callAnchor: toolCallId => sessionManager?.getEntries().findLast(entry => entry.type === 'message' && entry.message?.role === 'assistant' && entry.message.content?.some(block => block.type === 'toolCall' && block.id === toolCallId))?.id ?? null,

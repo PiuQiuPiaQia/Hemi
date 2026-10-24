@@ -33,7 +33,7 @@ export function atomicJson(file, data) {
   }
   fs.renameSync(tmp, file);
 }
-export function publicModel(config, revision) {
+export function publicModel(config, revision, source = 'local') {
   const endpoint = new URL(config.baseUrl);
   endpoint.username = '';
   endpoint.password = '';
@@ -48,6 +48,9 @@ export function publicModel(config, revision) {
     api: config.api,
     supportsVision: config.supportsVision === true,
     revision,
+    source,
+    thinkingLevel: config.thinkingLevel ?? 'default',
+    thinkingFormat: config.thinkingFormat ?? null,
   };
 }
 export function errorView(error) {
@@ -94,6 +97,8 @@ export const syncModelConfig = (raw) =>
       'supportsVision',
       'thinkingLevel',
       'thinkingFormat',
+      'supportsTools',
+      'contextWindow',
     ]
       .filter((k) => raw[k] !== undefined)
       .map((k) => [k, raw[k]]),

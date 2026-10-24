@@ -113,8 +113,6 @@
 .compact-shell .h-attachment-card:hover .h24-attach-remove,
 .compact-shell .h-attachment-card:focus-within .h24-attach-remove { opacity: 1; }
 .compact-shell .h-attachment-card .h24-attach-remove:hover { background: var(--danger); color: var(--bg-surface); }
-html.kb-nav .compact-shell .h-attachment-card .h24-attach-open:focus-visible,
-html.kb-nav .compact-shell .h-attachment-card .h24-attach-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .compact-shell .h-attachment-tray .h24-attach-error { flex-basis: 100%; }
 

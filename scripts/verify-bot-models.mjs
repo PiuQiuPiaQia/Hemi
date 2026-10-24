@@ -50,7 +50,7 @@ async function stopHost() {
   host = null;
 }
 try {
-  for (const mode of ['dev', 'built']) {
+  for (const mode of process.argv.includes('--built-only') ? ['built'] : ['dev', 'built']) {
     const work = path.join(root, mode), home = path.join(work, 'home'), profile = path.join(work, 'profile');
     const data = path.join(home, '.local/share/hemi-bot/data');
     await fs.mkdir(home, { recursive: true });
@@ -90,7 +90,8 @@ try {
     }
     async function shot(label) {
       const file = `${mode}-${label}.png`;
-      await page.screenshot({ path: path.join(evidence, file), scale: 'css' }); screenshots.push(file);
+      await page.waitForFunction(() => !document.documentElement.hasAttribute('data-h37m-vt'));
+      await page.screenshot({ path: path.join(evidence, file), scale: 'css', animations: 'disabled' }); screenshots.push(file);
     }
     async function fill(dialog, model, name = 'Bot 专用网关') {
       await dialog.getByRole('radio').filter({ hasText: '自定义' }).click();
@@ -101,7 +102,24 @@ try {
       const other = dialog.getByRole('textbox', { name: '其他型号 ID', exact: true });
       await other.fill(model); await other.press('Enter');
     }
-    await page.getByRole('button', { name: 'Bot', exact: true }).click();
+    async function openAddModels() {
+      await page.getByRole('button', { name: '设置', exact: true }).click();
+      await page.locator('.h37-settings-shell').waitFor();
+      if (await page.locator('.h37-settings-side').isVisible()) {
+        await page.locator('.h37-settings-side').getByRole('button', { name: '模型与路由', exact: true }).click();
+      } else {
+        await page.locator('.h37-settings-drawer-trigger').click();
+        await page.getByRole('dialog', { name: '设置分类', exact: true }).getByRole('button', { name: '模型与路由', exact: true }).click();
+      }
+      await page.getByRole('button', { name: '添加供应商', exact: true }).click();
+      return page.getByRole('dialog', { name: '添加供应商', exact: true });
+    }
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    const targetSelect = page.getByRole('combobox', { name: '设置对象', exact: true });
+    assert.equal(await targetSelect.inputValue(), 'local');
+    await targetSelect.selectOption('bot');
+    await page.getByText('尚未连接 Bot', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '连接 Bot', exact: true }).click();
     await resize(1440);
     const before = await local();
     await page.getByRole('button', { name: '创建连接', exact: true }).click();
@@ -120,8 +138,11 @@ try {
     await dialog.waitFor({ state: 'hidden' });
     assert.deepEqual(await local(), before);
     note(mode + ': manual initialization without changing local model profiles; tabs retain draft and support arrow keys');
-    await page.getByRole('button', { name: '添加模型', exact: true }).click();
-    dialog = page.getByRole('dialog', { name: '添加模型', exact: true });
+    assert.equal(await page.locator('.h-bot-top-actions').getByRole('button', { name: '添加模型', exact: true }).count(), 0);
+    assert.equal(await page.locator('.h-bot-top-actions').getByRole('button', { name: 'Bot 设置', exact: true }).count(), 0);
+    assert.equal(await page.locator('.h-bot-top-actions').getByRole('button', { name: '连接新设备', exact: true }).count(), 1);
+    await shot('bot-top-actions');
+    dialog = await openAddModels();
     await fill(dialog, 'manual-' + mode);
     await dialog.getByText('连接成功', { exact: true }).waitFor();
     await dialog.getByRole('button', { name: '从服务拉取', exact: true }).click();
@@ -141,6 +162,7 @@ try {
     await resize(1440);
     await dialog.getByRole('button', { name: '添加 1 个模型', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Bot', exact: true }).click();
     assert.ok((await state()).cache.models.some(model => model.model === 'manual-' + mode));
     assert.deepEqual(await local(), before);
     const toast = page.locator('.h37-toast-card').filter({ hasText: '模型已保存' });
@@ -152,19 +174,18 @@ try {
     await wait(async () => (await state()).syncStatus === null, 'success receipt dismissed');
     note(mode + ': shared compact toast replaces the success banner, expires automatically and clears its receipt');
     note(mode + ': real cloud SDK probe, remote list, manual save, responsive 375/768/1440 and reduced motion');
-    await page.getByRole('button', { name: '添加模型', exact: true }).click();
-    dialog = page.getByRole('dialog', { name: '添加模型', exact: true });
+    dialog = await openAddModels();
     await fill(dialog, 'unavailable');
     await dialog.getByRole('button', { name: '添加 1 个模型', exact: true }).click();
     await dialog.getByText('服务器未能验证模型连接，原配置保留。', { exact: true }).waitFor();
     assert.ok(!(await dialog.innerText()).includes(secret));
     assert.ok(!(await state()).cache.models.some(model => model.model === 'unavailable'));
     await dialog.getByRole('button', { name: '关闭弹窗', exact: true }).click();
-    await page.locator('.h-bot-banner').filter({ hasText: '部分模型未通过云端验证' }).waitFor();
+    await page.getByRole('button', { name: 'Bot', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '部分模型未通过云端验证' }).waitFor();
     await page.evaluate(baseUrl => window.hemiVoice.saveModelProfile({ name: '本机导入夹具', baseUrl, apiKey: 'LOCAL-IMPORT-FIXTURE-KEY', models: Array.from({ length: 20 }, (_, index) => ({ model: index === 0 ? 'imported-model' : 'import-fixture-' + index, thinkingLevel: 'off' })) }), baseUrl);
     const localAfter = await local();
-    await page.getByRole('button', { name: '添加模型', exact: true }).click();
-    dialog = page.getByRole('dialog', { name: '添加模型', exact: true });
+    dialog = await openAddModels();
     await dialog.getByRole('tab', { name: '从本机导入', exact: true }).click();
     await dialog.getByRole('button', { name: '选择导入模型', exact: true }).click();
     const search = dialog.getByRole('textbox', { name: '搜索本机模型', exact: true });
@@ -198,6 +219,7 @@ try {
       error.message += '\n' + await dialog.innerText();
       throw error;
     });
+    await page.getByRole('button', { name: 'Bot', exact: true }).click();
     assert.ok((await state()).cache.models.some(model => model.model === 'imported-model'));
     assert.deepEqual(await local(), localAfter);
     await toast.waitFor();
@@ -210,6 +232,123 @@ try {
       assert.ok(!content.includes(secret) && !content.includes('LOCAL-IMPORT-FIXTURE-KEY'), name);
     }
     note(mode + ': rejected credentials stay safe; existing local models import successfully without changing local profiles');
+    // Unified settings use the same shell and navigation in both environments.
+    const settings = page.locator('.h37-settings-shell');
+    const environment = page.getByRole('combobox', { name: '设置对象', exact: true });
+    const categories = () => page.locator('.h37-settings-side > .h37-settings-navitem').allTextContents();
+    const pickCategory = async label => {
+      if (await page.locator('.h37-settings-side').isVisible()) {
+        await page.locator('.h37-settings-side').getByRole('button', { name: label, exact: true }).click();
+      } else {
+        await page.locator('.h37-settings-drawer-trigger').click();
+        await page.getByRole('dialog', { name: '设置分类', exact: true }).getByRole('button', { name: label, exact: true }).click();
+      }
+    };
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await settings.waitFor();
+    assert.equal(await environment.inputValue(), 'bot');
+    assert.deepEqual(await categories(), ['通用', '模型与路由']);
+    assert.equal(await page.getByRole('button', { name: '日志文件', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '修改地址', exact: true }).click();
+    const addressDialog = page.getByRole('dialog', { name: '修改连接地址', exact: true });
+    assert.equal(await addressDialog.getByRole('textbox', { name: 'SSH 地址', exact: true }).inputValue(), 'fixture-bot');
+    await addressDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await page.getByRole('button', { name: '停止 Bot', exact: true }).click();
+    await page.getByRole('dialog', { name: '停止云端 Bot？', exact: true }).getByRole('button', { name: '取消', exact: true }).click();
+    assert.equal((await state()).online, true);
+    await page.getByRole('button', { name: '断开连接', exact: true }).click();
+    await page.getByRole('button', { name: '重新连接', exact: true }).waitFor();
+    assert.equal((await state()).online, false);
+    assert.equal(await page.getByRole('button', { name: '维护云端组件', exact: true }).isDisabled(), true);
+    await shot('settings-offline');
+    await page.getByRole('button', { name: '重新连接', exact: true }).click();
+    await page.getByRole('button', { name: '断开连接', exact: true }).waitFor();
+    assert.equal((await state()).online, true);
+    note(mode + ': shared Bot settings, guarded operations, real IPC disconnect/reconnect and offline controls');
+
+    for (const width of [1440, 768, 375]) {
+      await resize(width);
+      await pickCategory('通用');
+      await page.locator('.h37-settings-scroll').evaluate(node => { node.scrollTop = 0; });
+      assert.ok(await settings.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await shot('settings-general-' + width);
+      await pickCategory('模型与路由');
+      const importedProvider = page.locator('.h37m-provider-row').filter({ hasText: 'imported-model' });
+      await importedProvider.waitFor();
+      assert.equal(await page.locator('[data-role-models]').count(), 0);
+      assert.equal(await page.getByRole('combobox', { name: '看图模型', exact: true }).count(), 0);
+      assert.ok(await settings.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await shot('settings-models-' + width);
+      await importedProvider.click();
+      await page.getByRole('heading', { name: '本机导入夹具', exact: true }).waitFor();
+      await page.getByText('imported-model', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '重新测试', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('textbox', { name: '新型号 ID', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('switch').count(), 0);
+      assert.equal(await page.getByText('删除这个供应商', { exact: true }).count(), 0);
+      assert.ok(await settings.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await shot('settings-provider-' + width);
+      await page.getByRole('button', { name: '模型', exact: true }).click();
+      await page.locator('[data-h37-model-view="overview"]').waitFor();
+    }
+    await resize(1440);
+    // The appearance runtime currently declares light mode only.
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.colorMode), 'light');
+    await shot('settings-models-dark-preference');
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+
+    await environment.selectOption('local');
+    await page.getByRole('heading', { name: '模型与路由', exact: true }).waitFor();
+    assert.equal((await categories()).length, 6);
+    assert.equal(await page.locator('[data-role-models]').count(), 1);
+    await page.locator('.h37m-provider-row').filter({ hasText: '本机导入夹具' }).click();
+    await page.getByRole('heading', { name: '本机导入夹具', exact: true }).waitFor();
+    assert.equal(await page.getByRole('textbox', { name: '名称', exact: true }).isEditable(), true);
+    assert.equal(await page.getByRole('button', { name: '重新测试', exact: true }).count(), 1);
+    await page.getByRole('button', { name: '模型', exact: true }).click();
+    await page.locator('[data-h37-model-view="overview"]').waitFor();
+    await pickCategory('记忆');
+    await page.getByRole('button', { name: '添加记忆', exact: true }).first().click();
+    await page.getByRole('textbox', { name: '记忆标题', exact: true }).fill('设置切换草稿');
+    await page.getByRole('textbox', { name: '记忆正文', exact: true }).fill('切换设置对象前应确认未保存的修改。');
+    await page.getByText('未保存', { exact: true }).waitFor();
+    await environment.selectOption('bot');
+    const leaveDialog = page.getByRole('dialog', { name: '还有修改没保存', exact: true });
+    await leaveDialog.getByRole('button', { name: '继续编辑', exact: true }).click();
+    assert.equal(await environment.inputValue(), 'local');
+    assert.equal(await page.getByRole('textbox', { name: '记忆标题', exact: true }).inputValue(), '设置切换草稿');
+    await environment.selectOption('bot');
+    await leaveDialog.getByRole('button', { name: '放弃修改', exact: true }).click();
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    await environment.selectOption('local');
+    await pickCategory('语音与通话');
+    await environment.selectOption('bot');
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    assert.deepEqual(await categories(), ['通用', '模型与路由']);
+    await pickCategory('模型与路由');
+    await page.getByRole('button', { name: '添加供应商', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: '添加供应商', exact: true });
+    await fill(dialog, 'settings-' + mode, '设置页网关');
+    await dialog.getByRole('button', { name: '添加 1 个模型', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.locator('.h37m-provider-row').filter({ hasText: 'settings-' + mode }).waitFor();
+    assert.deepEqual(await local(), localAfter);
+    await page.getByRole('button', { name: '知道了', exact: true }).click();
+    await shot('settings-model-saved');
+    await resize(768);
+    await page.getByRole('button', { name: '返回主窗口', exact: true }).click();
+    await page.locator('.h-bot-top-actions').waitFor();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    assert.equal(await environment.inputValue(), 'bot');
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    await resize(1440);
+    await page.getByRole('button', { name: '对话', exact: true }).click();
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    assert.equal(await environment.inputValue(), 'local');
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    await shot('settings-local');
+    note(mode + ': settings target switching, unsupported category fallback, cloud model save, return navigation and 375/768/1440/dark rendering');
     await app.close(); app = null; await stopHost();
     if (hostErrors) errors.push(mode + ' Host: ' + hostErrors);
   }

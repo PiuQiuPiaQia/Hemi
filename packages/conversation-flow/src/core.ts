@@ -15,3 +15,10 @@ export * from './core/retained-deliverables.js';
 export * from './core/reply-file-references.js';
 export * from './core/presenter.js';
 export type { TranscriptItem, MessageAttachmentView, MessageReferenceView, SkillSelectionView } from './types/presentation.js';
+
+export {IDLE_PROGRESS, type ResourceProgress, type ResourceTransfers} from './resources/progress.js';
+export * from './presentation/composer-tokens.js';
+export * from './composer/tag-undo.js';
+export * from './navigation/conversation-format.js';
+export * from './controls/session-usage.js';
+export type {UsageRecord} from './controls/usage-types.js';

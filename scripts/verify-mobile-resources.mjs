@@ -1,3 +1,4 @@
+import {installMobileBotEvents} from './lib/mobile-bot-events-fixture.mjs';
 // Native bridge/OS panel boundary fixture; actual Host, resource protocol, file bytes, SDK and renderer.
 import fs from 'node:fs/promises';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';import {createServer,preview} from 'vite';import{chromium}from'playwright-core';
 import{resourceFixture,wait}from'../apps/mobile/test/resource-fixture.mjs';
@@ -11,6 +12,7 @@ try{for(const mode of ['dev','built']){
  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,reducedMotion:'reduce'}),result={mode,checks:[],errors:[],screenshots:[]};report.results.push(result);const check=name=>{result.checks.push(name);console.log('PASS',mode,name);};
  try{
   if(mode==='dev')await server.listen();
+  await installMobileBotEvents(context,f.host,{});
   await context.exposeBinding('__resourcesNative',async(_source,{method,params})=>{
    if(method==='request'){if(['resource.stat','resource.chunk'].includes(params.method))readRequests.push(params);if(params.method==='resource.chunk'&&params.params.artifactId===f.byName['大文件.zip']&&params.params.offset>0&&hold)await new Promise(resolve=>{releaseChunk=resolve;});try{return{ok:true,result:await f.host.request(params.method,params.params)};}catch(error){return{ok:false,code:error.code??'failed',message:error.message};}}
    if(method==='beginResource'){const id=crypto.randomUUID();stages.set(id,{meta:params,parts:[]});return{id};}

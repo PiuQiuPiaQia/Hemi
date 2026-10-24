@@ -57,7 +57,9 @@ export async function serve(options = {}) {
   }
   const { createBotHost } = await import('./host.mjs');
   const host = await createBotHost({ dataDir, ...options });
+  const clients = new Set();
   const server = net.createServer({ allowHalfOpen: true }, (client) => {
+    clients.add(client);client.once('close',()=>clients.delete(client));
     let body = '';
     client.setTimeout(180000, () => client.destroy());
     client.on('error', () => {});
@@ -70,7 +72,14 @@ export async function serve(options = {}) {
         try {
           const value = JSON.parse(body);
           client.setTimeout(botRpcTimeout(value.method, value.params));
-          const result = await host.request(value.method, value.params);
+          if (value.method === 'events.watch') {
+            client.setTimeout(0);
+            const unsubscribe=host.watch(value.params,frame=>{if(client.destroyed || client.writableLength>2*1024*1024)throw new Error('Slow subscriber');client.write(JSON.stringify(frame)+'\n');},()=>client.destroy(),{clientId:value.clientId});
+            const heartbeat=setInterval(()=>{if(!client.destroyed)client.write(JSON.stringify({type:'heartbeat'})+'\n');},20000);heartbeat.unref?.();
+            client.once('close',()=>{clearInterval(heartbeat);unsubscribe();});
+            return;
+          }
+          const result = await host.request(value.method, value.params, {clientId:value.clientId});
           client.end(JSON.stringify({ ok: true, result }));
         } catch (error) {
           client.end(JSON.stringify(errorView(error)));
@@ -85,6 +94,7 @@ export async function serve(options = {}) {
   const close = async () => {
     if (closing) return;
     closing = true;
+    for(const client of clients)client.destroy();
     await host.close();
     await new Promise((resolve) => server.close(resolve));
     try {
@@ -108,6 +118,15 @@ if (
       process.once(signal, () => {
         void instance.close().then(() => process.exit(0));
       });
+  } else if (process.argv[2] === 'watch') {
+    let body='';for await(const chunk of process.stdin){body+=chunk;if(body.length>16384)throw new Error('订阅请求过大');}
+    const value=JSON.parse(body), client=net.createConnection(socketPath);
+    client.on('connect',()=>client.end(JSON.stringify({method:'events.watch',params:value.params,clientId:value.clientId})));
+    client.on('data',chunk=>{if(!process.stdout.write(chunk))client.pause();});
+    process.stdout.on('drain',()=>client.resume());
+    process.stdout.on('error',()=>client.destroy());
+    client.on('error',()=>{process.exitCode=1;});
+    client.on('end',()=>{process.exitCode=1;});
   } else if (process.argv[2] === 'rpc') {
     let body = '';
     for await (const chunk of process.stdin) {

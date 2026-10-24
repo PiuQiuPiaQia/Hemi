@@ -1,0 +1,99 @@
+/**
+ * 上下文容量：输入框工具行里的环形指示器 + 悬浮容量面板（InfoPopover openOnHover）。
+ * 数据口径见 src/main/agent/context-usage.mjs（总量 usage 锚点、分类字符估算）。
+ * 类目圆点只借现有 token 充当图表色（--conversation-unread 的 sky 不带未读语义、
+ * --warn 不带告警语义），不新增色板。
+ */
+.ctx-cap-trigger {
+  padding: 0 var(--sp-8);
+}
+
+.ctx-cap-ring {
+  display: block;
+}
+
+.ctx-cap-ring .ctx-cap-track {
+  stroke: var(--line-strong);
+}
+
+.ctx-cap-ring .ctx-cap-arc {
+  stroke: var(--g-600);
+  transform: rotate(-90deg);
+  transform-origin: 8px 8px;
+  transition: stroke var(--dur-2) linear;
+}
+
+.ctx-cap-ring[data-level='warn'] .ctx-cap-arc {
+  stroke: var(--warn);
+}
+
+.ctx-cap-ring[data-level='full'] .ctx-cap-arc {
+  stroke: var(--danger);
+}
+
+/* 空态（还没聊过）与压缩未知态：弧线在组件里已拉满 dashoffset，只留轨道。 */
+
+/* 面板＝InfoPopover（h37-info-*）：头部标题行收窄并让总量右对齐同一基线。 */
+.ctx-cap-pop .h37-info-head {
+  align-items: center;
+  padding: var(--sp-12) var(--sp-16) var(--sp-8);
+}
+
+.ctx-cap-total {
+  color: var(--muted);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-cap-list {
+  display: grid;
+  gap: var(--sp-10);
+}
+
+.ctx-cap-cats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.ctx-cap-cat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-12);
+  color: var(--body);
+}
+
+.ctx-cap-cat-label {
+  flex: 1;
+}
+
+.ctx-cap-cat-pct {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-cap-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  flex: none;
+}
+
+.ctx-cap-dot-tools {
+  background: var(--g-500);
+}
+
+.ctx-cap-dot-conversation {
+  background: var(--n-400);
+}
+
+.ctx-cap-dot-toolResults {
+  background: var(--conversation-unread);
+}
+
+.ctx-cap-dot-system {
+  background: var(--warn);
+}

@@ -26,17 +26,17 @@ async function fixture(t) {
   const request = (method, params = {}) => host.request(method, {instanceId, requestId: 'setup-' + randomUUID(), ...params});
   await request('model.sync', {models: [{modelKey: 'fixture/model', providerId: 'fixture', name: 'Synthetic', model: 'fake', api: 'openai-completions', baseUrl: 'https://fixture.invalid/v1', apiKey: 'SYNTHETIC_ONLY'}]});
   const {id} = await request('session.create');
-  let drop = false;
+  let drop = false, offline = false;
   const rpc = {async request(method, params, {signal}) {
-    signal.throwIfAborted(); calls.push({method, params});
+    signal.throwIfAborted(); if(offline)throw new Error('Network offline'); calls.push({method, params});
     let result;
     try {result = await host.request(method, params);}
     catch (error) {throw new BotCommandRejected(error.code ?? 'failed', error.message);}
-    if (drop && method === 'flow.command') {drop = false; throw new Error('Lost SSH reply');}
+    if (drop && method === 'flow.command') {drop = false; offline = true; throw new Error('Lost SSH reply');}
     return result;
   }};
   const scope = {environmentId: `bot:${instanceId}`, conversationId: id};
-  return {host, request, scope, calls, executions, transport: createBotConversationTransport(rpc, instanceId, id), dropReply() {drop = true;}};
+  return {host, request, scope, calls, executions, transport: createBotConversationTransport(rpc, instanceId, id), dropReply() {drop = true;}, reconnect() {offline = false;}};
 }
 
 test('mobile transport speaks the actual Host protocol; stable operation ID creates one input and run', async t => {
@@ -61,7 +61,7 @@ test('SDK reconciles an actual accepted-but-lost Host reply without replaying or
   client.draft.setText('已受理但丢失回执'); f.dropReply();
   assert.equal((await client.sendDraft()).code, 'unknown');
   assert.equal(client.getSnapshot().operations.at(-1).state, 'unknown');
-  client.draft.setText('后来写下的草稿'); await client.refresh();
+  client.draft.setText('后来写下的草稿'); f.reconnect(); await client.refresh();
   assert.equal(client.getSnapshot().operations.at(-1).state, 'accepted');
   assert.equal(client.draft.getSnapshot().text, '后来写下的草稿');
   assert.equal(f.calls.filter(call => call.method === 'flow.command').length, 1);

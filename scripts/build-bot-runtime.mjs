@@ -21,7 +21,7 @@ export async function buildBotRuntime({
           target = path.join(stage, relative, entry.name);
         if (entry.isDirectory())
           await copy(source, path.join(relative, entry.name));
-        else if (/\.(mjs|json)$/.test(entry.name)) {
+        else if ((/\.(mjs|json)$/.test(entry.name) || (relative === 'src/main/agent/roles' && entry.name.endsWith('.md')))) {
           await fs.mkdir(path.dirname(target), { recursive: true });
           await fs.copyFile(source, target);
         }
@@ -40,6 +40,7 @@ export async function buildBotRuntime({
       '@xmldom/xmldom',
       'playwright-core',
       'jose',
+      'ws',
     ];
     const dependencies = Object.fromEntries(
       names.map((name) => [name, app.dependencies[name]]),

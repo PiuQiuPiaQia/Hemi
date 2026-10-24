@@ -49,7 +49,6 @@
 
 html.kb-nav .compact-shell.h37-settings-shell .bar-actions .h37-settings-close:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 /* —— 二级栏：设置分页导航（224，--bg-rail）—— */
@@ -100,7 +99,6 @@ html.kb-nav .compact-shell.h37-settings-shell .bar-actions .h37-settings-close:f
 
 html.kb-nav .h37-settings-shell .h37-settings-navfoot > .h37-settings-navitem:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring-inset);
 }
 
 .h37-settings-shell .h37-settings-side-title {
@@ -145,7 +143,6 @@ html.kb-nav .h37-settings-shell .h37-settings-navfoot > .h37-settings-navitem:fo
 
 html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-settings-navitem:focus-visible {
   outline: 0;
-  box-shadow: var(--focus-ring-inset);
 }
 
 .h37-settings-shell .h37-settings-navitem svg {
@@ -166,6 +163,37 @@ html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-
   min-width: 0;
   min-height: 0;
   height: 100%;
+}
+
+/* Local and Bot settings share the same page; the selector stays visible in narrow windows. */
+.h37-settings-environment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  margin: var(--sp-8) 0 var(--sp-24);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h37-settings-environment .h37-settings-select {
+  width: auto;
+  min-width: calc(var(--sp-48) * 2);
+}
+
+.h37-bot-settings-row .h37-row-text {
+  overflow-wrap: anywhere;
+}
+
+.h37-bot-settings-row .h37-row-end {
+  flex: none;
+}
+
+@media (max-width: 480px) {
+  .h37-bot-settings-row {
+    flex-wrap: wrap;
+    gap: var(--sp-8);
+  }
 }
 
 /* 窄窗分页入口（041 抽屉）：宽窗隐藏「分类 · 当前页」触发钮。 */
@@ -326,7 +354,6 @@ html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-
 
   html.kb-nav .h37-settings-shell .h37-settings-drawer-trigger:focus-visible {
     outline: 0;
-    box-shadow: var(--focus-ring);
   }
 
   .h37-settings-shell .h37-settings-drawer-trigger svg {
@@ -415,14 +442,13 @@ html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-
 .h37-access-dialog-head > div { flex: 1; min-width: 0; }
 .h37-access-dialog-close { display: grid; place-items: center; flex: none; width: var(--sp-32); height: var(--sp-32); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); }
 .h37-access-dialog-close:hover { background: var(--bg-hover); color: var(--ink); }
-html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; }
 .h37-access-dialog-close svg { width: 16px; height: 16px; }
 .h37-access-dialog-body { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-16) var(--sp-20); min-height: 0; overflow-y: auto; }
 .h37-access-dialog .h37-dialog-foot { margin-top: 0; padding: var(--sp-12) var(--sp-20); border-top: 1px solid var(--line); }
 .h37-access-dialog-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--muted); }
 
 .h37-access-search { display: flex; align-items: center; gap: var(--sp-6); padding: 0 var(--sp-10); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-surface); }
-.h37-access-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .h37-access-search svg { width: 14px; height: 14px; flex: none; color: var(--faint); }
 .h37-access-search input { flex: 1; min-width: 0; padding: var(--sp-6) 0; border: 0; background: transparent; font: inherit; font-size: var(--fs-13); color: var(--ink); outline: none; }
 

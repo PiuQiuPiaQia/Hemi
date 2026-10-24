@@ -7,7 +7,7 @@ import { useThinkingElapsed } from './lib/use-thinking-elapsed';
 import { describeToolCall } from './tool-activity';
 import { ThinkingBlock } from './thinking-block';
 import { TranscriptPartState, useTranscriptRowState } from './transcript-row-state';
-import '@/styles/turn-activity.css';
+import '@hemi/conversation-flow/styles/turn-activity.css';
 
 function ToolIcon({ tool }: { tool: string }) {
   const Icon = tool === 'read' ? BookOpen : tool === 'write' || tool === 'edit' ? FilePenLine

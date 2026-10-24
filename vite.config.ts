@@ -20,7 +20,12 @@ export default defineConfig(({command}) => ({
     alias: {
       // Workspace development reads SDK source for reliable HMR; production consumes its public build.
       ...(command === 'serve' ? {
+        '@hemi/conversation-flow/composer': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/composer.ts'),
+        '@hemi/conversation-flow/controls': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/controls.ts'),
+        '@hemi/conversation-flow/navigation': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/navigation.ts'),
+        '@hemi/conversation-flow/resources': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/resources.ts'),
         '@hemi/conversation-flow/styles.css': path.resolve(import.meta.dirname, 'packages/conversation-flow/dist/styles.css'),
+        '@hemi/conversation-flow/styles': path.resolve(import.meta.dirname, 'packages/conversation-flow/dist/styles'),
         '@hemi/conversation-flow/core': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/core.ts'),
         '@hemi/conversation-flow/react': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/react.ts'),
         '@hemi/conversation-flow/parts': path.resolve(import.meta.dirname, 'packages/conversation-flow/src/parts.ts'),

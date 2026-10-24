@@ -16,14 +16,16 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/renderer/src/styles');
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const roots = ['src/renderer/src/styles', 'packages/conversation-flow/src/styles/source', 'packages/ui/src/styles'];
 const PROP = /^\s*(gap|row-gap|column-gap|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?)\s*:\s*([^;]+);/;
 const PX = /(?<![\w.])(\d+(?:\.\d+)?)px/g;
 const ALLOWED = new Set([0, 1, 3]);
 
 const violations = [];
-for (const file of readdirSync(dir).filter((name) => /^\d{3}-.*\.css$/.test(name)).sort()) {
-  const lines = readFileSync(path.join(dir, file), 'utf8').split('\n');
+for (const root of roots) for (const name of readdirSync(path.join(repo, root)).filter(name => /^\d{3}-.*\.css$/.test(name) || (root.includes('packages/ui') && /^(controls|popovers|dialog|status)\.css$/.test(name))).sort()) {
+  const file = path.join(root, name);
+  const lines = readFileSync(path.join(repo, file), 'utf8').split('\n');
   lines.forEach((line, index) => {
     const match = PROP.exec(line);
     // sp-ok 可写在本行行尾，也可写在上一行的注释里。

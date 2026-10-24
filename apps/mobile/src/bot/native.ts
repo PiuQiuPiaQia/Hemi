@@ -1,11 +1,15 @@
 import type {MobileResourceFiles} from './resource-host';
 import type {MobileFileSource, PickedFile} from './attachment-uploads';
+import type {BotEvent} from './realtime';
 import {Capacitor, registerPlugin} from '@capacitor/core';
 import {BotCommandRejected, type BotRpc} from './conversation-transport';
 
 export type BotTarget = {endpoint: string; botInstanceId: string; name: string; expiresAt?: number};
 export type PairResult = {status: 'preview' | 'not-received' | 'pending' | 'approved' | 'expired' | 'cancelled' | 'rejected' | 'revoked'; code?: string; expiresAt?: number; target?: BotTarget};
 export interface NativeBotApi {
+  openEvents?(input: {streamId:string;options:Record<string,unknown>}):Promise<void>;
+  closeEvents?(input:{streamId:string}):Promise<void>;
+  addListener?(event:string,receive:(value:{streamId:string;frame?:BotEvent;disconnected?:boolean})=>void):Promise<{remove():Promise<void>}>;
   beginResource(input: {name: string; size: number; sha256: string}): Promise<{id: string}>;
   appendResource(input: {id: string; offset: number; base64: string}): Promise<void>;
   finishResource(input: {id: string}): Promise<void>;
@@ -26,8 +30,17 @@ export interface NativeBotApi {
 }
 export const NativeBot = registerPlugin<NativeBotApi>('HemiBot');
 export const nativeBotAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('HemiBot');
-export function createNativeBotRpc(api: Pick<NativeBotApi, 'request'> = NativeBot): BotRpc {
-  return {async request<T>(method: string, params: Record<string, unknown>, {signal}: {signal: AbortSignal}) {
+export function createNativeBotRpc(api: Pick<NativeBotApi, 'request'|'openEvents'|'closeEvents'|'addListener'> = NativeBot): BotRpc {
+  return {
+    ...(api.openEvents&&api.closeEvents&&api.addListener ? {watch(options:Record<string,unknown>,receive:(frame:BotEvent)=>void,disconnected:()=>void){
+      const streamId=crypto.randomUUID();let closed=false,listener:{remove():Promise<void>}|undefined;
+      void api.addListener!('botEvent',value=>{if(closed||value.streamId!==streamId)return;if(value.disconnected)disconnected();else if(value.frame)receive(value.frame);}).then(async value=>{
+        listener=value;if(closed){await value.remove();return;}
+        await api.openEvents!({streamId,options});if(closed)await api.closeEvents!({streamId});
+      }).catch(()=>{if(!closed)disconnected();});
+      return()=>{closed=true;void listener?.remove();void api.closeEvents!({streamId}).catch(()=>{});};
+    }} : {}),
+    async request<T>(method: string, params: Record<string, unknown>, {signal}: {signal: AbortSignal}) {
     signal.throwIfAborted();
     try {
       const envelope = await api.request({method, params});

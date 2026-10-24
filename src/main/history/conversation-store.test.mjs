@@ -948,3 +948,44 @@ test('048 用量角色身份持久保留，旧账本不补造归属', () => {
   const records = sanitizeUsageRecords([{ ...base, role: 'explorer' }, { ...base, role: 'oracle' }, base]);
   assert.deepEqual(records.map(row => row.role), ['explorer', 'oracle', undefined]);
 });
+
+test('上下文容量落档：快照可读回、渲染层整表保存不冲掉、空/未知态与坏入参拒写', () => {
+  const dir = makeDir();
+  try {
+    const store = createConversationStore({ dir });
+    const id = newSessionId();
+    store.saveSession({ id, turns: [turn('user', '你好'), turn('hemi', '在的')] });
+    assert.equal(store.saveContextUsage(id, {
+      tokens: 51000, contextWindow: 1000000, percent: 5.1,
+      categories: [
+        { key: 'tools', label: '系统工具', tokens: 22000, percent: 43.1 },
+        { key: 'conversation', label: '对话消息', tokens: 9000, percent: 17.6 },
+        { key: 'toolResults', label: '工具结果', tokens: -5, percent: -1 },
+        { key: 'system', label: '系统提示词', tokens: 11000, percent: 21.6 },
+        { label: '缺 key 的脏行' },
+      ],
+    }), true, '已落盘会话可落档');
+
+    // 渲染层防抖整表保存（不带 contextUsage 字段）——快照必须保留。
+    store.saveSession({ id, turns: [turn('user', '你好'), turn('hemi', '在的'), turn('user', '再来')] });
+    const loaded = store.getSession(id);
+    assert.equal(loaded.contextUsage.tokens, 51000);
+    assert.equal(loaded.contextUsage.contextWindow, 1000000);
+    assert.equal(loaded.contextUsage.percent, 5.1);
+    assert.equal(loaded.contextUsage.categories.length, 4, '缺 key 的脏行剔除');
+    assert.equal(loaded.contextUsage.categories[2].tokens, 0, '负值钳到 0');
+    assert.ok(Number.isFinite(loaded.contextUsage.at));
+
+    // 压缩后未知态照落（tokens/percent 为 null，不编数）。
+    assert.equal(store.saveContextUsage(id, { tokens: null, contextWindow: 200000, percent: null, categories: [] }), true);
+    const unknown = store.getSession(id).contextUsage;
+    assert.equal(unknown.tokens, null);
+    assert.equal(unknown.percent, null);
+
+    // 无窗口/不存在会话拒写。
+    assert.equal(store.saveContextUsage(id, { tokens: 1, contextWindow: 0 }), false);
+    assert.equal(store.saveContextUsage('conv-nope', { tokens: 1, contextWindow: 100 }), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

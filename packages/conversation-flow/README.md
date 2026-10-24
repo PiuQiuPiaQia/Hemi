@@ -116,3 +116,58 @@ client 导入和构造不发请求。手动使用时调用 `start()`、订阅 `g
 ## 开发与验证
 
 仓库根目录：`npm ci`、`npm run build:sdk`、`npm run test:sdk`。独立示例见 `examples/conversation-flow`，其离线 HTML 可直接打开，不启动应用服务。完整桌面和视觉验证记录见 `docs/technical/conversation-flow-sdk-implementation.md`。
+
+## Shared conversation controls and surfaces
+
+Desktop and mobile applications consume these additional public entries:
+
+| Entry | Exports and responsibility |
+| --- | --- |
+| `@hemi/conversation-flow/composer` | `ConversationComposer`, `ComposerAdapter`, attachment views, editor tokens and tag undo |
+| `@hemi/conversation-flow/controls` | model options/selector, thinking options/selector, usage aggregation and `SessionUsage` |
+| `@hemi/conversation-flow/navigation` | conversation row/status/grouping/formatting and the directory picker |
+| `@hemi/conversation-flow/resources` | preview content/sheet, download progress and resource transfer view types |
+| `@hemi/conversation-flow/core` | existing pure session API and the pure resource progress contract; no React runtime dependency |
+
+`ConversationComposer` is controlled. Its `desktop` and `touch` layouts share the editor, draft identity, submission gating and keyboard implementation. Desktop Enter submits and Shift+Enter inserts a line; touch Enter inserts a line and Cmd/Ctrl+Enter submits. The touch layout retains independent send and stop controls. Header/tool/trailing slots carry voice and application controls without teaching the editor about native services.
+
+`ComposerAdapter` supplies optional slash candidates, references and dropped-file path resolution, plus automatic-routing availability and the keyboard hint. Unsupported candidate queries do not open an unusable panel. Keep adapter callbacks stable for the environment; stale reference replies are discarded on query, conversation or adapter changes.
+
+`ModelOptions` and `ThinkingOptions` support menu and sheet presentations. The desktop model selector takes a routing-configuration callback. Saving, selected values, connectivity and model availability come from the application. Menu and sheet choices share selection/disabled behavior, including `unavailableReason` from a model directory.
+
+`DirectoryPicker` accepts a cancellable `load(path, signal)` callback and a selection callback. It owns navigation, retries and stale-response guards. The sheet presentation uses `@hemi/ui`; desktop can inject `renderSurface` for its existing dialog. It does not perform filesystem or RPC access itself.
+
+`ConversationRow` owns common row content, status and rename editing. Sidebars/drawers, drag sensors, history loading and context actions remain application adapters. Optional actions preserve the capabilities offered by each host.
+
+`ConversationRow.actions` renders sibling controls outside the conversation-open button. Touch hosts can open `ConversationActionsSheet` with the selected item, optional async `onRename(title)` / `onRemove()` adapters, connectivity and a focus-return target. The shared sheet provides rename editing, explicit deletion confirmation, pending guards and recoverable errors. The host owns authorization, operation receipts, persistence, cache cleanup and selection after deletion. Desktop context menus can continue to supply their existing actions.
+
+`ResourcePreview` uses `ConversationFlowHost.resources` and optional transfer progress. The host owns verified bytes, resource leases and system operations. `ResourceContent` can render text, images and Markdown inside either preview surface. Markdown uses `ConversationFlowProvider`; callers with an existing Markdown host may supply `renderMarkdown`. Desktop retains its tab cache, document/video renderers and process panels. Mobile retains its keyboard-safe sheet and native QuickLook/save/share adapters.
+
+The package depends on `@hemi/ui` by version; its published manifest contains no sibling `file:` dependency. The repository verifier packs both packages and installs them in a fresh directory outside the monorepo before checking TypeScript, Vite and Node/SSR imports.
+
+## Shared style ownership and input controls
+
+`src/styles/source/` is the single source of conversation styles. Desktop uses the public `@hemi/conversation-flow/styles/*.css` entries in its existing cascade order; `styles.css` compiles the same sources into the scoped SDK stylesheet. Base controls, popovers, dialogs and native interaction styles live in `@hemi/ui`. The desktop no longer carries copies of those sources.
+
+Touch hosts also import these before their local shell/theme styles:
+
+```tsx
+import '@hemi/ui/styles/touch.css';
+import '@hemi/conversation-flow/styles/touch.css';
+```
+
+`ModelSelectorControl` and `ThinkingLevelStrip` accept `layout="desktop"` or `layout="touch"`. Both use the same trigger, disclosure and surface code; touch uses a Sheet, desktop uses a Menu. `open`/`onOpenChange` allow a host to coordinate panels or open the model selector from its page header. `saving`, `offline`, `disabled`, `error` and `returnFocus` preserve host operation state and accessibility. A selection callback may return a Promise; `false` keeps the surface open after a rejected update, while success closes it. Thrown errors are shown without discarding the selection surface.
+
+`ModelSelectorChip` supplies the desktop directory grouping, search, automatic-routing row, source/availability details and routing-settings callback to `ModelSelectorControl`. A touch host may supply its flat model catalog directly. `DirectoryControlButton` shares the same input-control trigger markup while local/SSH selection, native picking and RPC remain host adapters; touch defaults to a folder icon without directory text. The directory browser itself remains `DirectoryPicker`.
+
+## Permission requests
+
+`@hemi/conversation-flow/parts` exports `PermissionRequestCard`, `PermissionRequest` and the local-task adapter `PermissionCard`. Both desktop and touch hosts use the same request view and button submission path. A raw Bot request supplies `id`, `title`, `options` and optional command/path/reason metadata; `onChooseOption` receives the original server option string without translation. Omit `remainingMs` for persistent Bot confirmation. An explicit countdown of zero disables decisions; `disabled` also blocks the stop action. Touch retains its compact layout and server option order. Desktop retains task context, command disclosure, sorted decision buttons and queued-request hints.
+
+`PermissionCard` adapts a local `TaskStateSnapshot`, legacy labels and enum decisions. Modern grant/action requests ignore Escape. Historical requests without `kind` retain Escape-to-deny while yielding to menus/modal dialogs; disabled or expired requests cannot be decided by keyboard. The host owns the clock, pending requests, conversation/generation filtering, RPC/IPC, busy state, stop and uncertain receipt recovery. `PermissionStack` continues to supply runtime revision/action guards.
+
+## Controlled conversation lists and history
+
+`@hemi/conversation-flow/navigation` exports `ConversationList`, `ConversationGroup` and `ConversationRow`. A list takes flat `items` or named `groups`, a `renderItem` callback and an empty view. `renderHeading` and `wrapGroupItems` preserve host headings and desktop drag providers. Item keys use conversation identity; grouping policy, data subscriptions, search, persistence and context actions stay with the host.
+
+`ConversationRow` supports `sidebar`, `drawer` and `history` presentations. History reuses the same title/status and rename editor while showing time and turn count; `disabled` preserves in-flight operation guards and corrupt rows cannot open. Rename is controlled, ignores composing Enter, commits only once for Enter/blur, and Escape cancels without closing a containing dialog or committing on blur. Touch retains its existing title, pinned/running marks and tap layout. This does not add desktop mutations to touch hosts that do not provide them.

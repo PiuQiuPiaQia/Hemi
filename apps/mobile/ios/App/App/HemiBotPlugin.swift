@@ -14,7 +14,7 @@ class HemiBridgeViewController: CAPBridgeViewController {
 public class HemiBotPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDelegate, PHPickerViewControllerDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
     public let identifier = "HemiBotPlugin"
     public let jsName = "HemiBot"
-    public let pluginMethods: [CAPPluginMethod] = ["scan", "prepare", "pairRequest", "pairStatus", "cancelPairing", "forgetPairing", "restore", "request", "forget", "pickFiles", "readPickedFile", "removePickedFile", "beginResource", "appendResource", "finishResource", "removeResource", "presentResource"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
+    public let pluginMethods: [CAPPluginMethod] = ["scan", "prepare", "pairRequest", "pairStatus", "cancelPairing", "forgetPairing", "restore", "request", "openEvents", "closeEvents", "forget", "pickFiles", "readPickedFile", "removePickedFile", "beginResource", "appendResource", "finishResource", "removeResource", "presentResource"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
     private let resources = HemiResourceStore()
     private var resourcePresentation: (id: String, url: URL)?
     private var resourceExport: UIDocumentPickerViewController?
@@ -201,6 +201,21 @@ public class HemiBotPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDelegat
     @objc func request(_ call: CAPPluginCall) {
         guard let method = call.getString("method"), let params = call.getObject("params") else { call.reject("设备请求无效。", "invalid"); return }
         run(call) { try await self.client.request(method: method, params: params) }
+    }
+    @objc func openEvents(_ call: CAPPluginCall) {
+        guard let streamId=call.getString("streamId"), let options=call.getObject("options") else {call.reject("订阅参数无效。","invalid");return}
+        run(call) {
+            try await self.client.openEvents(streamId:streamId,options:options,receive:{ [weak self] frame in
+                DispatchQueue.main.async {self?.notifyListeners("botEvent",data:["streamId":streamId,"frame":frame])}
+            },disconnected:{ [weak self] in
+                DispatchQueue.main.async {self?.notifyListeners("botEvent",data:["streamId":streamId,"disconnected":true])}
+            })
+            return [:]
+        }
+    }
+    @objc func closeEvents(_ call: CAPPluginCall) {
+        guard let streamId=call.getString("streamId") else {call.reject("订阅参数无效。","invalid");return}
+        run(call) {await self.client.closeEvents(streamId:streamId);return [:]}
     }
     @objc func scan(_ call: CAPPluginCall) {
         DispatchQueue.main.async {

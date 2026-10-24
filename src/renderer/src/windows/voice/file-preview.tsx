@@ -1,3 +1,5 @@
+import {ErrorState, LoadingState} from '@hemi/ui';
+import {ResourceContent} from '@hemi/conversation-flow/resources';
 import {useConversationBridge,useConversationEnvironment,useConversationOnline} from './lib/conversation-bridge';
 import {Dialog as PreviewDialog} from '@base-ui/react/dialog';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -864,16 +866,10 @@ export function FilePreviewPanel({
             </article>
           )
         ) : !activeResult ? (
-          <p className="h24-preview-status">{bot&&!runtimeOnline?'连接已断开，恢复连接后可读取文件。':'正在读取…'}</p>
+          <LoadingState className="h24-preview-status" description={bot&&!runtimeOnline?'连接已断开，恢复连接后可读取文件。':'正在读取…'}/>
         ) : !activeResult.ok ? (
           // R-06：失败原位说明 + 重试；交付记录保留，不弹系统错误。
-          <div className="h37-note h24-preview-error" data-tone="warn" role="note">
-            <p>{activeResult.message ?? '文件现在读不了'}</p>
-            <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm h24-preview-retry" onClick={reloadCurrent}>
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              重试读取
-            </button>
-          </div>
+          <ErrorState className="h37-note h24-preview-error" data-tone="warn" role="note" description={activeResult.message??'文件现在读不了'} actions={[{label:<><RotateCcw className="size-3.5" aria-hidden="true"/>重试读取</>,className:'h37-btn h37-btn-secondary h37-btn-sm h24-preview-retry',onAction:reloadCurrent}]}/>
         ) : isUnsupported ? (
           // 062 R-03：范围外格式——文件信息＋可用动作（系统应用打开），不冒充预览成功。
           <div className="h62-unsupported">
@@ -898,23 +894,13 @@ export function FilePreviewPanel({
             ) : null}
           </div>
         ) : activeResult.kind === 'document' && activeResult.document && (activeTab.kind === 'attachment'||activeTab.kind==='deliverable') ? (
-          <Suspense fallback={<p className="h24-preview-status" role="status">正在打开文档…</p>}>
+          <Suspense fallback={<LoadingState className="h24-preview-status" description="正在打开文档…"/>}>
             <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? '文档'} readText={() => activeTab.kind==='attachment'?bridge.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId):bridge.readConversationDeliverableText?.(activeTab.conversationId,activeTab.artifactId,activeTab.linkPath)??Promise.resolve({ok:false,message:'暂无法读取文档文字'})} />
           </Suspense>
         ) : activeResult.kind === 'video' && activeResult.mediaUrl ? (
           <VideoPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? '预览视频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />
-        ) : isImage ? (
-          <img
-            className="h24-preview-image"
-            src={activeResult.dataUrl}
-            alt={currentAttachment?.name ?? currentDeliverable?.name ?? currentArtifact?.name ?? '预览图片'}
-          />
-        ) : activeResult.markdown ? (
-          <article className="h24-preview-doc">
-            <Markdown text={activeResult.text ?? ''} />
-          </article>
         ) : (
-          <pre className="h24-preview-plain">{activeResult.text}</pre>
+          <ResourceContent renderMarkdown={text=><Markdown text={text}/>} presentation="panel" name={currentAttachment?.name ?? currentDeliverable?.name ?? currentArtifact?.name ?? '预览图片'} content={isImage ? {kind:'image',url:activeResult.dataUrl??''} : {kind:activeResult.markdown?'markdown':'text',text:activeResult.text??''}}/>
         )}
       </div>
       )}

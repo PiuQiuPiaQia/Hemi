@@ -1,0 +1,23 @@
+.h-status-notice[data-layout="desktop"][data-variant="banner"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--n-50);
+  margin-bottom: var(--sp-12);
+  font-size: var(--fs-12);
+  width: fit-content;
+  max-width: 100%;
+}
+.h-status-notice[data-layout="desktop"][data-variant="banner"] p {
+  color: var(--muted);
+  margin-top: var(--sp-4);
+}
+.h-status-notice[data-layout="desktop"][data-variant="banner"] > button {
+  flex: none;
+}
+.h-status-content{min-width:0;overflow-wrap:anywhere}
+.h-status-notice[data-layout="desktop"][data-variant="inline"]{color:var(--muted);font-size:var(--fs-12)}

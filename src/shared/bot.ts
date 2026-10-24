@@ -4,6 +4,7 @@ import type {
   MessageReferenceView,
   SkillSelectionView,
   ModelProviderSaveInput,
+  RoleModelSlot,
 } from './protocol';
 import type {BotDeviceAccess} from './bot-pairing';
 export type BotModel = {
@@ -15,6 +16,9 @@ export type BotModel = {
   api: string;
   supportsVision: boolean;
   revision: string;
+  source?: 'local' | 'cloud';
+  thinkingLevel?: 'default' | 'off' | 'low' | 'medium' | 'high';
+  thinkingFormat?: string | null;
 };
 export type BotDraft = {
   text: string;
@@ -34,6 +38,8 @@ export type BotSession = {
   turnCount: number;
   status: 'queued' | 'running' | null;
   waitingPermission: boolean;
+  waitingResource?: boolean;
+  blockedBy?: string[];
 };
 export type BotPermission = {
   kind?: 'grant' | 'action';
@@ -85,6 +91,7 @@ export type BotCache = {
   lastConversationModelKey?: string | null;
   recentDirs: string[];
   models: BotModel[];
+  roleModels?: Partial<Record<RoleModelSlot, string | null>>;
   sessions: BotSession[];
   details: Record<string, BotDetail>;
 };
@@ -111,6 +118,7 @@ export type BotSyncStatus = {
   keys: string[];
   phase: 'sending' | 'unknown' | 'confirmed' | 'not-received' | 'interrupted';
   at: number;
+  automatic?: boolean;
   results?: Array<{ key: string; ok: boolean; message?: string }>;
 };
 export type BotState = {
@@ -121,11 +129,19 @@ export type BotState = {
   lastConnectedAt: number | null;
   stoppedConfirmed?: boolean;
   syncStatus?: BotSyncStatus | null;
+  localModels?: BotModelCandidate[];
+  localRoleModels?: Partial<Record<RoleModelSlot, string | null>>;
+  modelConfigError?: string;
   cache: BotCache | null;
   candidate: { id: string; host: string; info: BotProbe } | null;
 };
 export type BotModelCandidate = {
   key: string;
+  providerId?: string;
+  baseUrl?: string;
+  api?: string;
+  supportsVision?: boolean;
+  thinkingLevel?: 'default' | 'off' | 'low' | 'medium' | 'high';
   name: string;
   provider: string;
   auth: string;

@@ -123,7 +123,10 @@ export function controlledStream(stream, getExecution) {
             finalMessage = { ...finalMessage, errorMessage: `${summary}。请减少本轮附件或输入内容；原始会话记录已保留。` };
             break;
           }
-          const enabled = ['main', 'subagent'].includes(execution.purpose);
+          // Let the shared router try the remaining configured candidates before
+          // recovering the last candidate. Recovery must not hide a usable fallback.
+          const enabled = ['main', 'subagent'].includes(execution.purpose)
+            && candidateIndex(model.provider) >= plan.allowedFallbacks.length;
           if (!enabled || !await recovery.failed({ ...failure, message: finalMessage.errorMessage,
             aborted: Boolean(options.signal?.aborted || execution.cancelled?.()) || (finalMessage.stopReason === 'aborted' && !timedOut) })) break;
           retrying = true;

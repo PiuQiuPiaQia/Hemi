@@ -673,6 +673,7 @@ export type RoleModelSlot =
   | "fallback";
 
 export type ModelProviderView = {
+  source?: 'local' | 'cloud';
   oauthProvider?: OAuthProvider;
   id: string;
   name: string;
@@ -693,6 +694,7 @@ export type ModelProviderApi =
   | "openai-responses";
 
 export type ModelEntryView = {
+  unavailableReason?: string;
   id: string;
   modelKey: string;
   model: string;
@@ -847,4 +849,10 @@ export type ArtifactPreviewResult = {
   dataUrl?: string;
   message?: string;
   code?: string;
+};
+
+export type SlashCandidatesResult = {
+  commands: Array<{id: 'model'; name: string; description: string}>;
+  skills: Array<{skillId: string; name: string; description: string; source: 'library' | 'project'}>;
+  skillsError?: string;
 };

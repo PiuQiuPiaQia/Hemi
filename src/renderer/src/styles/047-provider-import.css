@@ -36,9 +36,6 @@
 
 html.kb-nav .h47n-method:focus-visible {
   outline: 0;
-  box-shadow:
-    var(--shadow-1),
-    var(--focus-ring);
 }
 
 .h47n-method[data-on='true'] {

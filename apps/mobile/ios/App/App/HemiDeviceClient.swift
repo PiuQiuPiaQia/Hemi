@@ -55,6 +55,25 @@ struct HemiDeviceCredential: Codable {
 // Content-Length; chunked framing, redirects, cookies and connection reuse are rejected.
 private final class HemiTLSVerification { var error: String? }
 
+private func hemiPinnedTLS(endpoint: URL, pin: String, queue: DispatchQueue, verification: HemiTLSVerification) -> NWProtocolTLS.Options {
+    let options = NWProtocolTLS.Options(), host = endpoint.host!.trimmingCharacters(in:CharacterSet(charactersIn:"[]"))
+    sec_protocol_options_set_min_tls_protocol_version(options.securityProtocolOptions,.TLSv12)
+    sec_protocol_options_add_tls_application_protocol(options.securityProtocolOptions,"http/1.1")
+    sec_protocol_options_set_tls_server_name(options.securityProtocolOptions,host)
+    sec_protocol_options_set_verify_block(options.securityProtocolOptions,{ _, value, complete in
+        let trust = sec_trust_copy_ref(value).takeRetainedValue()
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let certificate = chain.first else {verification.error="Bot 未提供可核对的 TLS 证书。";complete(false);return}
+        guard digest(SecCertificateCopyData(certificate) as Data)==pin else {verification.error="Bot 证书指纹与配对码不一致，请核对服务器。";complete(false);return}
+        SecTrustSetPolicies(trust,SecPolicyCreateSSL(true,host as CFString))
+        SecTrustSetAnchorCertificates(trust,[certificate] as CFArray)
+        SecTrustSetAnchorCertificatesOnly(trust,true)
+        SecTrustSetNetworkFetchAllowed(trust,false)
+        guard SecTrustEvaluateWithError(trust,nil) else {verification.error="Bot 证书无效、已过期或与地址不匹配，请在 PC 检查设备连接设置。";complete(false);return}
+        complete(true)
+    },queue)
+    return options
+}
+
 private final class HemiTLSExchange: @unchecked Sendable {
     let connection: NWConnection
     let queue = DispatchQueue(label:"ai.hemi.mobile.device-tls")
@@ -66,22 +85,9 @@ private final class HemiTLSExchange: @unchecked Sendable {
     private let verification: HemiTLSVerification
     private var sent = false
     init(endpoint: URL, pin: String) {
-        let options = NWProtocolTLS.Options(), host = endpoint.host!.trimmingCharacters(in:CharacterSet(charactersIn:"[]"))
         let verification=HemiTLSVerification();self.verification=verification
-        sec_protocol_options_set_min_tls_protocol_version(options.securityProtocolOptions,.TLSv12)
-        sec_protocol_options_add_tls_application_protocol(options.securityProtocolOptions,"http/1.1")
-        sec_protocol_options_set_tls_server_name(options.securityProtocolOptions,host)
-        sec_protocol_options_set_verify_block(options.securityProtocolOptions,{ _, value, complete in
-            let trust = sec_trust_copy_ref(value).takeRetainedValue()
-            guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let certificate = chain.first else {verification.error="Bot 未提供可核对的 TLS 证书。";complete(false);return}
-            guard digest(SecCertificateCopyData(certificate) as Data)==pin else {verification.error="Bot 证书指纹与配对码不一致，请核对服务器。";complete(false);return}
-            SecTrustSetPolicies(trust,SecPolicyCreateSSL(true,host as CFString))
-            SecTrustSetAnchorCertificates(trust,[certificate] as CFArray)
-            SecTrustSetAnchorCertificatesOnly(trust,true)
-            SecTrustSetNetworkFetchAllowed(trust,false)
-            guard SecTrustEvaluateWithError(trust,nil) else {verification.error="Bot 证书无效、已过期或与地址不匹配，请在 PC 检查设备连接设置。";complete(false);return}
-            complete(true)
-        },queue)
+        let options=hemiPinnedTLS(endpoint:endpoint,pin:pin,queue:queue,verification:verification)
+        let host=endpoint.host!.trimmingCharacters(in:CharacterSet(charactersIn:"[]"))
         connection = NWConnection(host:NWEndpoint.Host(host),port:NWEndpoint.Port(rawValue:UInt16(endpoint.port ?? 443))!,using:NWParameters(tls:options,tcp:NWProtocolTCP.Options()))
     }
     func start(request: Data, completion: @escaping (Result<Data,Error>)->Void) {
@@ -177,8 +183,102 @@ final class HemiPinnedSession: @unchecked Sendable {
     }
 }
 
+// Use the same explicit paired-certificate TLS policy as RPC on iOS and macOS.
+// Network.framework owns WebSocket framing, masking, fragmentation and ping/pong.
+final class HemiEventSession: @unchecked Sendable {
+    private let endpoint: URL
+    private let pin: String
+    private let queue=DispatchQueue(label:"ai.hemi.mobile.events")
+    private let verification=HemiTLSVerification()
+    private let receive: @Sendable ([String:Any]) -> Void
+    private let disconnected: @Sendable () -> Void
+    private var connection: NWConnection?
+    private var deadline: DispatchWorkItem?
+    private var heartbeat: DispatchSourceTimer?
+    private var stopped=false
+    private var awaitingPong=false
+    init(endpoint: URL, pin: String, receive: @escaping @Sendable ([String:Any]) -> Void, disconnected: @escaping @Sendable () -> Void) {
+        self.endpoint=endpoint;self.pin=pin;self.receive=receive;self.disconnected=disconnected
+    }
+    func start(endpoint: URL, envelope: [String:Any]) throws {
+        let payload=try json(envelope)
+        var parts=URLComponents(url:endpoint,resolvingAgainstBaseURL:false)!;parts.scheme="wss";parts.path="/v1/events"
+        let tls=hemiPinnedTLS(endpoint:endpoint,pin:pin,queue:queue,verification:verification)
+        let parameters=NWParameters(tls:tls,tcp:NWProtocolTCP.Options())
+        let webSocket=NWProtocolWebSocket.Options();webSocket.autoReplyPing=true;webSocket.maximumMessageSize=40*1024*1024
+        parameters.defaultProtocolStack.applicationProtocols.insert(webSocket,at:0)
+        let connection=NWConnection(to:.url(parts.url!),using:parameters)
+        queue.async {
+            guard !self.stopped else {connection.cancel();return}
+            self.connection=connection
+            let deadline=DispatchWorkItem {self.fail(HemiDeviceError.message("Bot 实时连接超时。","network"))}
+            self.deadline=deadline;self.queue.asyncAfter(deadline:.now()+12,execute:deadline)
+            connection.stateUpdateHandler={ [weak self] state in
+                guard let self=self,!self.stopped else{return}
+                switch state {
+                case .ready:
+                    self.deadline?.cancel();self.deadline=nil
+                    let metadata=NWProtocolWebSocket.Metadata(opcode:.text)
+                    let context=NWConnection.ContentContext(identifier:"device-proof",metadata:[metadata])
+                    connection.send(content:payload,contentContext:context,isComplete:true,completion:.contentProcessed {error in
+                        if let error=error {self.fail(error);return}
+                        self.listen();self.startHeartbeat()
+                    })
+                case .failed(let error),.waiting(let error):self.fail(error)
+                default:break
+                }
+            }
+            connection.start(queue:self.queue)
+        }
+    }
+    private func listen() {
+        guard !stopped,let connection=connection else{return}
+        connection.receiveMessage {data,context,_,error in
+            guard !self.stopped else{return}
+            if let error=error {self.fail(error);return}
+            let metadata=context?.protocolMetadata(definition:NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
+            if metadata?.opcode == .close {self.fail(HemiDeviceError.message("Bot 实时连接已关闭。","network"));return}
+            if let data=data,!data.isEmpty,metadata?.opcode == .text {
+                do {
+                    guard data.count<=40*1024*1024,let value=try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw HemiDeviceError.message("Bot 事件格式无效。","invalid")}
+                    self.receive(value)
+                } catch {self.fail(error);return}
+            }
+            self.listen()
+        }
+    }
+    private func startHeartbeat() {
+        let timer=DispatchSource.makeTimerSource(queue:queue);heartbeat=timer
+        timer.schedule(deadline:.now()+20,repeating:20)
+        timer.setEventHandler { [weak self] in
+            guard let self=self,!self.stopped,let connection=self.connection else{return}
+            if self.awaitingPong {self.fail(HemiDeviceError.message("Bot 实时连接心跳超时。","network"));return}
+            self.awaitingPong=true
+            let metadata=NWProtocolWebSocket.Metadata(opcode:.ping)
+            metadata.setPongHandler(self.queue) {error in
+                if let error=error {self.fail(error)} else {self.awaitingPong=false}
+            }
+            connection.send(content:nil,contentContext:NWConnection.ContentContext(identifier:"heartbeat",metadata:[metadata]),isComplete:true,completion:.contentProcessed {error in if let error=error {self.fail(error)}})
+        }
+        timer.resume()
+    }
+    private func fail(_ error:Error) {
+        guard !stopped else{return}
+        #if DEBUG
+        print("HemiBot events transport: \(verification.error ?? error.localizedDescription)")
+        #endif
+        finish();disconnected()
+    }
+    private func finish() {
+        stopped=true;deadline?.cancel();deadline=nil;heartbeat?.cancel();heartbeat=nil
+        connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil
+    }
+    func close() {queue.async {self.finish()}}
+}
+
 actor HemiDeviceClient {
     let store: HemiCredentialStore
+    private var eventSessions: [String:HemiEventSession] = [:]
     private var pairingSessions: [UUID:HemiPinnedSession] = [:]
     init(store: HemiCredentialStore = HemiKeychainStore()) { self.store = store }
     private func load(_ key: String) throws -> HemiDeviceCredential? { try store.read(key).map { try JSONDecoder().decode(HemiDeviceCredential.self, from: $0) } }
@@ -208,6 +308,9 @@ actor HemiDeviceClient {
         let connection = UUID()
         if route != "v1/rpc" { pairingSessions[connection] = session }
         defer { pairingSessions.removeValue(forKey: connection) }
+        return try await session.post(route, try await envelope(route, body:body, credential:credential, session:session))
+    }
+    private func envelope(_ route: String, body: [String:Any], credential: HemiDeviceCredential, session: HemiPinnedSession) async throws -> [String:Any] {
         let challenge = try await session.post("v1/challenge", [:])
         guard let result = challenge["result"] as? [String: Any], let nonce = result["nonce"] as? String, result["instanceId"] as? String == credential.botInstanceId else { throw HemiDeviceError.message("Bot 身份已变化，请重新配对。", "conflict") }
         let key = try P256.Signing.PrivateKey(rawRepresentation: credential.privateKey), publicKey = key.publicKey.x963Representation
@@ -217,7 +320,7 @@ actor HemiDeviceClient {
         let claims = try json(["iss":"hemi-device-v1", "sub":digest(try json(jwk)), "aud":"\(credential.botInstanceId):/\(route)", "iat":Int(Date().timeIntervalSince1970), "jti":UUID().uuidString, "nonce":nonce, "bodyHash":digest(payload)] as [String: Any])
         let input = "\(encoded(header)).\(encoded(claims))"
         let signature = try key.signature(for: Data(input.utf8)).rawRepresentation
-        return try await session.post(route, ["payload":String(decoding:payload,as:UTF8.self), "proof":"\(input).\(encoded(signature))"])
+        return ["payload":String(decoding:payload,as:UTF8.self), "proof":"\(input).\(encoded(signature))"]
     }
     func pairRequest() async throws -> [String: Any] {
         guard var pending = try load("pending") else { throw HemiDeviceError.message("请先扫描配对码。", "missing") }
@@ -251,6 +354,18 @@ actor HemiDeviceClient {
         guard let active = try load("active") else { throw HemiDeviceError.message("请先连接 Bot。", "missing") }
         return try await signed("v1/rpc", body:["method":method,"params":params], credential:active)
     }
-    func forget() throws { try save("active", nil) }
+    func openEvents(streamId: String, options: [String:Any], receive: @escaping @Sendable ([String:Any]) -> Void, disconnected: @escaping @Sendable () -> Void) async throws {
+        guard let active=try load("active"), let endpoint=URL(string:active.endpoint) else {throw HemiDeviceError.message("请先连接 Bot。","missing")}
+        eventSessions.removeValue(forKey:streamId)?.close()
+        let stream=HemiEventSession(endpoint:endpoint,pin:active.certificatePin,receive:receive,disconnected:disconnected)
+        eventSessions[streamId]=stream
+        do {
+            let proof=try await envelope("v1/events",body:options,credential:active,session:HemiPinnedSession(endpoint:endpoint,pin:active.certificatePin))
+            guard eventSessions[streamId] === stream, try load("active")?.botInstanceId==active.botInstanceId else {stream.close();return}
+            try stream.start(endpoint:endpoint,envelope:proof)
+        } catch {if eventSessions[streamId] === stream {eventSessions.removeValue(forKey:streamId)};stream.close();throw error}
+    }
+    func closeEvents(streamId: String) {eventSessions.removeValue(forKey:streamId)?.close()}
+    func forget() throws { for stream in eventSessions.values {stream.close()};eventSessions.removeAll();try save("active", nil) }
     func forgetPairing() throws { for connection in pairingSessions.values { connection.cancel() }; try save("pending", nil) }
 }

@@ -11,7 +11,7 @@ export function useConversationBridge() {
 export type ApplicationPage = 'home' | 'bot' | 'skills' | 'workflows' | 'settings';
 export const ApplicationNavigationContext = createContext<{
   page: ApplicationPage;
-  navigate: (page: ApplicationPage) => void;
+  navigate: (page: ApplicationPage, settingsPage?: 'general' | 'models', settingsEnvironment?: 'local' | 'bot') => void;
 } | null>(null);
 export function useApplicationNavigation() {
   return useContext(ApplicationNavigationContext);

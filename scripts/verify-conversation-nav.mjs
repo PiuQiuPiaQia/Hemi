@@ -10,7 +10,7 @@ import electronPath from 'electron';
 const runtime = process.env.HEMI_PLAYWRIGHT_MODULE ?? path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const { _electron } = await import(pathToFileURL(runtime).href);
 const mode = process.env.VITE_DEV_SERVER_URL ? 'dev' : 'built';
-const out = path.resolve(`.visual/workflow/vision/conversation-nav/${mode}`);
+const out = path.resolve(process.env.HEMI_NAV_EVIDENCE ?? `.visual/workflow/vision/conversation-nav/${mode}`);
 const userData = await fs.mkdtemp(path.join(os.tmpdir(), `hemi-conversation-nav-${mode}-`));
 await fs.mkdir(out, { recursive: true });
 await fs.writeFile(path.join(userData, 'onboarding.json'), JSON.stringify({ version: 2, phase: 'complete', step: 'done', permissionChoice: 'skipped', completedAt: Date.now() }));
@@ -48,6 +48,7 @@ try {
   });
   await page.waitForFunction(() => document.querySelectorAll('.h24-sidebar-item').length === 35);
   const resize = async width => {
+    await page.bringToFront();
     await app.evaluate(({ BrowserWindow }, width) => {
       const win = BrowserWindow.getAllWindows().find(win => !new URL(win.webContents.getURL()).searchParams.has('mode'));
       win.setMinimumSize(1, 1); win.setContentSize(width, 860); win.show();
@@ -61,6 +62,7 @@ try {
   const workspace = page.locator('.h24-workspace');
   const trigger = page.getByRole('button', { name: '对话', exact: true });
   const openPreview = async () => {
+    await page.bringToFront();
     await trigger.hover();
     await page.waitForFunction(() => document.querySelector('.h24-workspace').dataset.navPreview === 'true');
     await sidebar.waitFor({ state: 'visible' });

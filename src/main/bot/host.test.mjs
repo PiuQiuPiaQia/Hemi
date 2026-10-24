@@ -186,7 +186,7 @@ test('manual providers save atomically when one model fails, so corrected retrie
   await host.request('model.sync', { instanceId: info.instanceId, requestId: 'manual-batch-fixed', source: 'manual', models: [models[0]] });
   assert.equal((await host.request('snapshot', { instanceId: info.instanceId })).models.length, 1);
 });
-test('host owns one serial execution slot, frozen per-input model and directory survive selection changes', async (t) => {
+test('host runs different conversations independently and preserves each accepted model and directory', async (t) => {
   const f = await fixture(t),
     a = await f.req('session.create'),
     b = await f.req('session.create');
@@ -201,7 +201,9 @@ test('host owns one serial execution slot, frozen per-input model and directory 
     command: { type: 'send', input: { inputId: 'input-b', text: 'second' } },
   });
   await tick();
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
+  assert.equal((await f.req('session.open', {id: a.id})).status, 'running');
+  assert.equal((await f.req('session.open', {id: b.id})).status, 'running');
   await f.req('session.update', { id: b.id, dir });
   f.waiting.get(a.id).resolve({});
   await tick();

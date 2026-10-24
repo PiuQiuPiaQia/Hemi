@@ -5,7 +5,8 @@ import { useCallback, useState } from 'react';
 import { MessageSquareText, Trash2 } from 'lucide-react';
 
 import type { ConversationSummary } from '@/shared/types';
-import { ConversationStatusIcon } from './conversation-status-icon';
+import {ConversationList, ConversationRow, displayTitle} from '@hemi/conversation-flow/navigation';
+import {EmptyState} from '@hemi/ui';
 import { useConversationList } from './lib/use-conversation-list';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,7 +17,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ConversationContextMenu } from '@/windows/voice/conversation-context-menu';
-import { formatRelative, displayTitle } from '@/windows/voice/lib/conversation-format';
 
 /**
  * 015 会话列表：点一条载入继续聊（或回看详情——载入后完整对话就在右侧
@@ -150,81 +150,17 @@ export function ConversationHistoryDialog({
           {error ? <p className="history-error">{error}</p> : null}
           {list.storageError ? <p className="history-error">{list.storageError}</p> : null}
 
-          <div className="history-list">
-            {list.sessions.length ? (
-              list.sessions.map((session) => {
-                const editing = editingId === session.id;
-                const commit = () => {
-                  const next = draft.trim();
-                  if (!next || next === session.title) {
-                    setEditingId(null);
-                    return;
-                  }
-                  void commitRename(session.id, next);
-                };
-                return (
-                  <div
-                    key={session.id}
-                    className="history-item"
-                    data-corrupt={session.corrupt ? 'true' : 'false'}
-                    onContextMenu={(event) => {
-                      // 编辑输入框里保留系统右键（复制/粘贴）
-                      if (editing) return;
-                      event.preventDefault();
-                      setMenu({ session, x: event.clientX, y: event.clientY });
-                    }}
-                  >
-                    {editing ? (
-                      <input
-                        className="history-rename"
-                        value={draft}
-                        autoFocus
-                        spellCheck={false}
-                        aria-label="重命名会话"
-                        onChange={(event) => setDraft(event.target.value)}
-                        onBlur={commit}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            commit();
-                          } else if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setEditingId(null);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="history-item-main"
-                        onClick={() => handleOpen(session)}
-                        disabled={Boolean(session.corrupt) || busyId === session.id}
-                        title={session.corrupt ? '这条会话档案损坏，无法打开' : `${session.title}（右键可复制会话 ID 或重命名）`}
-                      >
-                        <span className="history-item-text">{displayTitle(session.title)}</span>
-                        {!session.corrupt && <ConversationStatusIcon status={session.status} unreadAt={session.unreadAt} />}
-                        <span className="history-time">
-                          {formatRelative(session.updatedAt)} · {session.turnCount} 条
-                        </span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="history-chip-btn"
-                      aria-label={`删除会话 ${session.title}`}
-                      title="删除会话"
-                      disabled={Boolean(session.corrupt) || busyId === session.id || editing}
-                      onClick={() => void handleDelete(session.id)}
-                    >
-                      {confirmDeleteId === session.id ? '确认？' : <Trash2 className="size-3" />}
-                    </button>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="history-empty">还没有存下的会话。聊过几句后自动保存。</p>
-            )}
-          </div>
+          <ConversationList className="history-list" items={list.sessions} empty={<EmptyState className="history-empty" description="还没有存下的会话。聊过几句后自动保存。"/>} renderItem={session => {
+            const editing = editingId === session.id;
+            return <div className="history-item" data-corrupt={session.corrupt ? 'true' : 'false'} onContextMenu={event => {
+              if (editing) return;
+              event.preventDefault();
+              setMenu({session,x:event.clientX,y:event.clientY});
+            }}>
+              <ConversationRow item={session} presentation="history" disabled={busyId===session.id} onOpen={()=>handleOpen(session)} editing={editing} draft={draft} onDraftChange={setDraft} onCancelEdit={()=>setEditingId(null)} onCommitEdit={title=>void commitRename(session.id,title)}/>
+              <button type="button" className="history-chip-btn" aria-label={`删除会话 ${session.title}`} title="删除会话" disabled={Boolean(session.corrupt)||busyId===session.id||editing} onClick={()=>void handleDelete(session.id)}>{confirmDeleteId===session.id ? '确认？' : <Trash2 className="size-3"/>}</button>
+            </div>;
+          }}/>
         </DialogContent>
       </Dialog>
       {/* 常挂：复制后的 toast 要在菜单收起、弹窗关闭后继续显示 */}

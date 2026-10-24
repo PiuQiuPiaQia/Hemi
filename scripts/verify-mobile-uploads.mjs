@@ -1,3 +1,4 @@
+import {installMobileBotEvents} from './lib/mobile-bot-events-fixture.mjs';
 // Renderer -> native picker/byte boundary fixture -> actual Bot/controller/filesystem.
 // System picker and real iOS TLS require the separate signed native build/device check.
 import assert from 'node:assert/strict';
@@ -27,6 +28,7 @@ try{for(const mode of ['dev','built']){
  const check=name=>{result.checks.push(name);console.log('PASS',mode,name);};
  try{
   if(mode==='dev')await server.listen();
+  await installMobileBotEvents(context,host,{});
   await context.exposeBinding('__uploadsNative',async(_source,{method,params})=>{
    if(method==='pickFiles')return{files:selection};
    if(method==='readPickedFile')return{base64:bytes.subarray(params.offset,params.offset+params.length).toString('base64'),size:params.length};

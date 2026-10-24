@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {Toast, UiProvider, useTransientMessage} from "@hemi/ui";
 import { Check, CircleAlert } from "lucide-react";
 import { createPortal } from "react-dom";
 import type {
@@ -81,6 +82,7 @@ export function FlowProvider({
   return (
     <ClockContext.Provider value={now}>
       <Context.Provider value={value}>
+        <UiProvider portal={value.portal} keyboardRoot={root} active={active}>
         <div
           ref={root}
           data-hemi-conversation-flow
@@ -95,6 +97,7 @@ export function FlowProvider({
           {children}
           <div className="hcf-portals" ref={setPortal} />
         </div>
+      </UiProvider>
       </Context.Provider>
     </ClockContext.Provider>
   );
@@ -131,14 +134,7 @@ export function useFlowAction() {
 }
 export function useClipboardCopy() {
   const { runtime } = useFlow();
-  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
-    null,
-  );
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 2600);
-    return () => clearTimeout(timer);
-  }, [toast]);
+  const [toast, setToast] = useTransientMessage<{ok: boolean; text: string}>();
   const copy = useCallback(
     async (text: string, label = "已复制") => {
       const result: FlowResult<void> = runtime.can("copyText")
@@ -159,18 +155,7 @@ export function useClipboardCopy() {
     copy,
     toastNode: toast ? (
       <FlowPortal>
-        <div
-          className="h37-toast h37-toast-card"
-          role="status"
-          data-tone={toast.ok ? undefined : "err"}
-        >
-          {toast.ok ? (
-            <Check className="size-3.5" />
-          ) : (
-            <CircleAlert className="size-3.5" />
-          )}
-          <span>{toast.text}</span>
-        </div>
+        <Toast tone={toast.ok ? undefined : 'error'} icon={toast.ok ? <Check className="size-3.5" aria-hidden="true"/> : <CircleAlert className="size-3.5" aria-hidden="true"/>}>{toast.text}</Toast>
       </FlowPortal>
     ) : null,
   };

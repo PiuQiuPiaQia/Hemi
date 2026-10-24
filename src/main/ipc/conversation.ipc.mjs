@@ -172,6 +172,25 @@ export function broadcastUsageChanged(conversationId) {
   usageApi?.notify(conversationId);
 }
 
+// ---- 上下文容量（输入框旁环形指示器）：快照查询 + 轮末落档/广播 ----
+let contextApi = null;
+
+/**
+ * 轮末收口：读在途会话快照落档（打开旧会话时兜底显示）并广播 context-usage:changed。
+ * 取消/失败停靠也算轮末——占用确实变了；读不到快照只广播不落档。
+ */
+export function recordContextUsage(conversationId) {
+  if (!conversationId) return;
+  let snapshot = null;
+  try { snapshot = getAgentRuntime().contextUsageFor(conversationId); }
+  catch { /* runtime 未就绪不算错误 */ }
+  if (snapshot) {
+    try { contextApi?.save?.(conversationId, snapshot); }
+    catch (error) { log.warn(`上下文容量落档失败（不阻断对话）：${error.message}`); }
+  }
+  contextApi?.notify(conversationId);
+}
+
 /**
  * 015 会话通道：最近 / 保存 / 列表 / 打开 / 删除。会话是纯对话事实——
  * 不复活任务、不触执行器（对齐 009 历史只读的边界）；保存失败不抛
@@ -372,6 +391,31 @@ export function registerConversationIpc() {
     const canonical = conversationId ? await getAgentRuntime().usageRecordsFor(conversationId) : [];
     const cutover = canonical.length ? Math.min(...canonical.map(row => row.at)) : Infinity;
     return { conversationId, records: [...(session?.usageLedger ?? []), ...taskRows].filter(row => row.at < cutover).concat(canonical) };
+  });
+
+  // 上下文容量快照：在途会话现场读；没有在途会话（刚启动/切会话）读档案里
+  // 上次轮末的真实读数——环形在打开旧会话时立即可见，下一轮刷新。
+  contextApi = {
+    save: (conversationId, snapshot) => store.saveContextUsage(conversationId, snapshot),
+    notify: (conversationId) => {
+      for (const win of [...BrowserWindow.getAllWindows()]) {
+        if (!win || win.isDestroyed()) continue;
+        win.webContents.send(IPC.contextUsage.changed, { conversationId });
+      }
+    },
+  };
+  ipcMain.handle(IPC.contextUsage.getSnapshot, (_event, payload) => {
+    const conversationId = typeof payload === 'string' ? payload : String(payload?.conversationId ?? '');
+    let snapshot = null;
+    if (conversationId) {
+      try { snapshot = getAgentRuntime().contextUsageFor(conversationId); }
+      catch (error) { log.warn(`上下文容量读取失败（不阻断对话）：${error.message}`); }
+      if (!snapshot) {
+        const archived = store.getSession(conversationId)?.contextUsage;
+        if (archived && Number(archived.contextWindow) > 0) snapshot = archived;
+      }
+    }
+    return { conversationId, snapshot };
   });
 
   // 载荷双形态兼容（字符串或 { id }）：019 合并时 preload 曾把 { id } 漂移成裸

@@ -1,151 +1,95 @@
-import { ShieldAlert } from "lucide-react";
-import type {
-  TaskStateSnapshot,
-  TaskPermissionChoice,
-} from "../types/presentation.js";
-/** 042 卡面按钮的规范顺序：拒绝 → 本任务允许 → 持续允许（授权卡）；拒绝 → 允许这次（风险卡）。 */
-const OPTION_ORDER = ["拒绝", "本任务允许", "允许这次", "持续允许"];
+import {useLayoutEffect} from 'react';
+import {ShieldAlert} from 'lucide-react';
+import type {TaskStateSnapshot, TaskPermissionChoice} from '../types/presentation.js';
 
-/** 按钮文案 → 决定。旧卡/旧 harness 的历史文案按语义映射，未知文案不擅自当拒绝以外的放行。 */
+const OPTION_ORDER = ['拒绝', '本任务允许', '允许这次', '持续允许'];
+
+/** Historical labels remain supported; an unknown label never grants access. */
 function choiceOf(option: string): TaskPermissionChoice {
   switch (option) {
-    case "本任务允许":
-    case "本会话允许":
-      return "task";
-    case "持续允许":
-    case "永远允许":
-      return "persistent";
-    case "允许这次":
-    case "仅此一次":
-    case "允许一次":
-      return "once";
-    default:
-      return "deny";
+    case '本任务允许': case '本会话允许': return 'task';
+    case '持续允许': case '永远允许': return 'persistent';
+    case '允许这次': case '仅此一次': case '允许一次': return 'once';
+    default: return 'deny';
   }
 }
 
-export function PermissionCard({
-  snap,
-  onDecide,
-  onStop,
-  queuedTitles = [],
-  disabled = false,
-}: {
+export interface PermissionRequest {
+  id: string;
+  title: string;
+  options: readonly string[];
+  kind?: 'grant' | 'action';
+  args?: Record<string, unknown>;
+  note?: string | null;
+  /** Omit for Bot requests, which wait until explicitly decided. */
+  remainingMs?: number;
+}
+
+export interface PermissionRequestCardProps {
+  request: PermissionRequest;
+  layout?: 'desktop' | 'touch';
+  taskText?: string;
+  queuedTitles?: readonly string[];
+  disabled?: boolean;
+  onChooseOption(option: string): void;
+  onStop?(): void;
+}
+
+/** Raw options round-trip unchanged. Host adapters retain transport and receipt ownership. */
+export function PermissionRequestCard({request, layout = 'desktop', taskText, queuedTitles = [], disabled = false, onChooseOption, onStop}: PermissionRequestCardProps) {
+  const remainingMs = request.remainingMs;
+  const timed = remainingMs !== undefined;
+  const blocked = disabled || (timed && remainingMs <= 0);
+  const rank = (option: string) => {const index = OPTION_ORDER.indexOf(option); return index < 0 ? OPTION_ORDER.length : index;};
+  const options = layout === 'touch' ? request.options : [...request.options].sort((a, b) => rank(a) - rank(b));
+  const primary = options.includes('持续允许') ? '持续允许' : options.find(option => choiceOf(option) !== 'deny') ?? options[0];
+  const command = typeof request.args?.command === 'string' ? request.args.command : typeof request.args?.path === 'string' ? request.args.path : '';
+  const foot = request.kind === 'grant' || options.includes('本任务允许')
+    ? '本任务允许：结束后收回。持续允许：下次可直接使用，随时可撤销。'
+    : '这次的选择不会被记住；下次同样的操作，还会再问。';
+
+  return <section role={layout === 'touch' ? 'group' : 'alertdialog'} aria-modal={layout === 'desktop' ? false : undefined} aria-label={layout === 'touch' ? 'Bot 操作确认' : '操作授权请求'} className={layout === 'touch' ? 'hcf-touch-permission' : `permission-card permission-anchor${timed && remainingMs <= 3000 ? ' urgent' : ''}`}>
+    {layout === 'desktop' ? <div className="permission-header">
+      <span><ShieldAlert aria-hidden="true"/>Hemi 需要你的允许</span>
+      <span className="count-label">{timed ? <><span data-count>{Math.max(0, Math.ceil(remainingMs / 1000))}</span> 秒</> : '等待确认'}</span>
+      {onStop ? <button type="button" className="text-btn" onClick={onStop} disabled={disabled}>停止任务</button> : null}
+    </div> : null}
+    {timed ? <div className="countdown-track"><div className="countdown-fill" style={{width: `${Math.max(0, Math.min(100, remainingMs / 300))}%`}}/></div> : null}
+    {layout === 'touch' ? <p>{request.title}</p> : <div className="permission-body">
+      {taskText ? <span className="perm-task" title={`属于任务：${taskText}`}>属于任务 · {taskText.slice(0, 12)}</span> : null}
+      <h3>{request.title}</h3>
+      {command ? <pre className="permission-command">{command}</pre> : null}
+      {request.note ? <p className="permission-note">{request.note}</p> : null}
+      {command ? <details><summary>查看完整命令与路径</summary><pre>{command}</pre></details> : null}
+    </div>}
+    <div className={layout === 'touch' ? 'hcf-touch-permission-actions' : 'permission-actions'}>{options.map(option => <button key={option} type="button" className={layout === 'touch' ? 'secondary-button' : `tbtn${option === primary ? ' primary' : ''}`} disabled={blocked} onClick={() => onChooseOption(option)}>{option}</button>)}</div>
+    {layout === 'desktop' ? <p className="permission-foot">{foot}</p> : null}
+    {queuedTitles.length ? <div className="perm-queued" role="status">处理完这张，还有 {queuedTitles.length} 项在等 · {queuedTitles[0]}</div> : null}
+  </section>;
+}
+
+/** Local task adapter: countdown, historical wording, and legacy Escape-to-deny. */
+export function PermissionCard({snap, onDecide, onStop, queuedTitles = [], disabled = false}: {
   snap: TaskStateSnapshot;
-  onDecide: (choice: TaskPermissionChoice) => void;
-  onStop: () => void;
+  onDecide(choice: TaskPermissionChoice): void;
+  onStop(): void;
   queuedTitles?: string[];
   disabled?: boolean;
 }) {
   const permission = snap.permission;
+  const legacy = Boolean(permission && !permission.kind);
+  useLayoutEffect(() => {
+    if (!legacy || disabled || !permission || permission.remainingMs <= 0) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('.h37-menu, .scope-popover, .h37-scrim, [role="dialog"][aria-modal="true"]')) return;
+      event.preventDefault(); onDecide('deny');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [legacy, disabled, permission, onDecide]);
   if (!permission) return null;
-  const isGrant = permission.kind === "grant";
-  // 042：选项由卡面携带（grant 三选一 / action 两钮），按规范顺序渲染；
-  // 主按钮：授权卡＝持续允许，风险卡＝允许这次。
-  const rawOptions = permission.options?.length
-    ? permission.options
-    : isGrant
-      ? ["本任务允许", "持续允许", "拒绝"]
-      : ["允许这次", "拒绝"];
-  const rank = (option: string) => {
-    const index = OPTION_ORDER.indexOf(option);
-    return index < 0 ? OPTION_ORDER.length : index;
-  };
-  const cardOptions = [...rawOptions].sort((a, b) => rank(a) - rank(b));
-  const primaryOption = cardOptions.includes("持续允许")
-    ? "持续允许"
-    : (cardOptions.find((o) => choiceOf(o) !== "deny") ?? cardOptions[0]);
-  const cardFoot =
-    isGrant || cardOptions.includes("本任务允许")
-      ? "本任务允许：结束后收回。持续允许：下次可直接使用，随时可撤销。"
-      : "这次的选择不会被记住；下次同样的操作，还会再问。";
-  const seconds = Math.ceil(permission.remainingMs / 1000);
-  const urgent = permission.remainingMs <= 3000;
-  const args = permission.args ?? {};
-  const command =
-    typeof args.command === "string"
-      ? args.command
-      : typeof args.path === "string"
-        ? args.path
-        : "";
-  // 005 精简（2026-09-19 用户反馈「卡片过大溢出」）：只留决策必需信息——
-  // 摘要（钳两行）＋命令预览（单行省略）＋审查/危险理由＋折叠的完整命令＋按钮。
-  // 042：grant/action 卡的 summary 是门控拼好的完整问句（「允许 Hemi 访问『微信』？」），
-  // 原样作标题；只有旧卡（无 kind）沿用「允许…吗？」包装，且 bash 的旧摘要嵌整条
-  // 命令（撑爆卡片的元凶），用固定短句＋预览替代。
-  const title = permission.kind
-    ? permission.summary
-    : `允许${permission.tool === "bash" ? "执行这条命令" : permission.summary}吗？`;
-
-  return (
-    <section
-      role="alertdialog"
-      aria-modal="false"
-      aria-label="操作授权请求"
-      className={`permission-card permission-anchor${urgent ? " urgent" : ""}`}
-    >
-      <div className="permission-header">
-        <span>
-          <ShieldAlert />
-          Hemi 需要你的允许
-        </span>
-        <span className="count-label">
-          <span data-count>{seconds}</span> 秒
-        </span>
-        <button
-          type="button"
-          className="text-btn"
-          onClick={onStop}
-          disabled={disabled}
-        >
-          停止任务
-        </button>
-      </div>
-      <div className="countdown-track">
-        <div
-          className="countdown-fill"
-          style={{
-            width: `${Math.max(0, Math.min(100, permission.remainingMs / 300))}%`,
-          }}
-        />
-      </div>
-      <div className="permission-body">
-        {snap.taskText ? (
-          <span className="perm-task" title={`属于任务：${snap.taskText}`}>
-            属于任务 · {snap.taskText.slice(0, 12)}
-          </span>
-        ) : null}
-        <h3>{title}</h3>
-        {command ? <pre className="permission-command">{command}</pre> : null}
-        {permission.note ? (
-          <p className="permission-note">{permission.note}</p>
-        ) : null}
-        {command ? (
-          <details>
-            <summary>查看完整命令与路径</summary>
-            <pre>{command}</pre>
-          </details>
-        ) : null}
-      </div>
-      <div className="permission-actions">
-        {cardOptions.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={`tbtn${option === primaryOption ? " primary" : ""}`}
-            disabled={disabled || permission.remainingMs <= 0}
-            onClick={() => onDecide(choiceOf(option))}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-      <p className="permission-foot">{cardFoot}</p>
-      {queuedTitles.length ? (
-        <div className="perm-queued" role="status">
-          处理完这张，还有 {queuedTitles.length} 项在等 · {queuedTitles[0]}
-        </div>
-      ) : null}
-    </section>
-  );
+  return <PermissionRequestCard request={{...permission,
+    title: permission.kind ? permission.summary : `允许${permission.tool === 'bash' ? '执行这条命令' : permission.summary}吗？`,
+    options: permission.options?.length ? permission.options : permission.kind === 'grant' ? ['本任务允许', '持续允许', '拒绝'] : ['允许这次', '拒绝'],
+  }} taskText={snap.taskText} queuedTitles={queuedTitles} disabled={disabled} onStop={onStop} onChooseOption={option => onDecide(choiceOf(option))}/>;
 }

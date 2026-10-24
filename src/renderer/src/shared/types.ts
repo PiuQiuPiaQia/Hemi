@@ -154,17 +154,7 @@ export type TextModelConfigForm = {
  * 二值格式：开思考），与执行器侧 SDK 默认档对齐；「关闭」只在支持关思考的
  * 端点生效（openai 格式降级为不发字段，见主进程映射层）。
  */
-export const THINKING_LEVEL_OPTIONS: Array<{
-  value: ThinkingLevel;
-  label: string;
-  hint: string;
-}> = [
-  { value: 'default', label: '默认', hint: '厂商中档思考，适合日常' },
-  { value: 'off', label: '关闭', hint: '不思考，出答案最快' },
-  { value: 'low', label: '低', hint: '少量思考，快问快答' },
-  { value: 'medium', label: '中', hint: '平衡速度与质量' },
-  { value: 'high', label: '高', hint: '想得更周全，等待更久' },
-];
+export {THINKING_LEVEL_OPTIONS} from '@hemi/conversation-flow/controls';
 
 /** 语音播报（豆包 TTS）的配置表单；与 ASR 同一把 Key,这里只管播报侧的选项。 */
 export type TtsConfigForm = {
