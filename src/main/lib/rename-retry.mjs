@@ -27,3 +27,16 @@ export function retryingRename(rename, { attempts = 5, baseDelayMs = 10, sleep =
     throw lastError;
   };
 }
+
+/** Synchronous stores retain their atomic commit boundary during a transient lock. */
+export function retryingRenameSync(rename, { attempts = 5, baseDelayMs = 10, sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  return (from, to) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try { return rename(from, to); }
+      catch (error) {
+        if (!TRANSIENT_CODES.has(error?.code) || attempt === attempts) throw error;
+        sleep(baseDelayMs * (attempt + 1));
+      }
+    }
+  };
+}

@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { retryingRenameSync } from '../lib/rename-retry.mjs';
+
+const replaceJson = retryingRenameSync((from, to) => fs.renameSync(from, to));
 
 export const BOT_PROTOCOL = 1;
 export const BOT_VERSION = '1.0.0';
@@ -31,7 +34,8 @@ export function atomicJson(file, data) {
   } finally {
     fs.closeSync(fd);
   }
-  fs.renameSync(tmp, file);
+  if (process.platform === 'win32') replaceJson(tmp, file);
+  else fs.renameSync(tmp, file);
 }
 export function publicModel(config, revision, source = 'local') {
   const endpoint = new URL(config.baseUrl);
