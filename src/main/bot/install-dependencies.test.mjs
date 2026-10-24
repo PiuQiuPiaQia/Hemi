@@ -163,6 +163,8 @@ test('production installation shell retains the active release, data and service
   const sourceDir = path.join(f.directory, 'src/main/bot');
   await fs.mkdir(sourceDir, { recursive: true });
   for (const name of ['install-dependencies.mjs', 'storage.mjs']) await fs.copyFile(path.join(import.meta.dirname, name), path.join(sourceDir, name));
+  await fs.mkdir(path.join(f.directory, 'src/main/lib'), {recursive: true});
+  await fs.copyFile(path.join(import.meta.dirname, '../lib/rename-retry.mjs'), path.join(f.directory, 'src/main/lib/rename-retry.mjs'));
   await fs.writeFile(path.join(f.directory, 'package.json'), JSON.stringify({ name: 'missing-lock-fixture', version: '1.0.0' }));
   const archivePath = path.join(f.dir, 'runtime.tgz');
   await exec('tar', ['-czf', archivePath, '-C', f.directory, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
