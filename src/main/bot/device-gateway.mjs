@@ -79,13 +79,17 @@ export async function createDeviceGateway({dataDir, instanceId, request, watch, 
         if(hasDevices && (renew || oldCert && hash(oldCert.raw)!==state.config?.fingerprint))fail('设备证书已过期或变化，请先撤销现有设备再重新启用。','conflict');
         await stop();
         if (endpoint !== state.config?.endpoint || renew) {
-          const tempKey = keyFile+'.tmp', tempCert = certFile+'.tmp';
+          const tempKey = keyFile+'.tmp', tempCert = certFile+'.tmp', tempConfig = path.join(dir,'tls-openssl.cnf.tmp');
           try {
-            try {await exec('openssl',['req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:prime256v1','-nodes','-sha256','-days','365','-subj','/CN=Hemi Bot','-addext','extendedKeyUsage=serverAuth','-addext','keyUsage=critical,digitalSignature','-addext','basicConstraints=critical,CA:FALSE','-addext',`subjectAltName=${net.isIP(host) ? 'IP' : 'DNS'}:${host}`,'-keyout',tempKey,'-out',tempCert],{timeout:15000});}
+            // OpenSSL 1.1.1 appends -addext to system x509_extensions instead of
+            // replacing them. A default CA:TRUE would duplicate CA:FALSE and
+            // produce an invalid certificate. Own the request configuration.
+            await fs.writeFile(tempConfig,'[req]\ndistinguished_name=dn\n[dn]\n',{mode:0o600});
+            try {await exec('openssl',['req','-config',tempConfig,'-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:prime256v1','-nodes','-sha256','-days','365','-subj','/CN=Hemi Bot','-addext','extendedKeyUsage=serverAuth','-addext','keyUsage=critical,digitalSignature','-addext','basicConstraints=critical,CA:FALSE','-addext',`subjectAltName=${net.isIP(host) ? 'IP' : 'DNS'}:${host}`,'-keyout',tempKey,'-out',tempCert],{timeout:15000});}
             catch(error) {fail(error.code==='ENOENT' ? '设备连接需要 OpenSSL，请先在服务器安装 openssl。' : '无法生成设备证书，请检查 OpenSSL 版本和目录写入权限。','unsupported');}
             await fs.chmod(tempKey,0o600); await fs.chmod(tempCert,0o600);
             await fs.rename(tempKey,keyFile); await fs.rename(tempCert,certFile);
-          } finally {await fs.rm(tempKey,{force:true}); await fs.rm(tempCert,{force:true});}
+          } finally {await fs.rm(tempKey,{force:true}); await fs.rm(tempCert,{force:true}); await fs.rm(tempConfig,{force:true});}
         }
         const cert = new X509Certificate(await fs.readFile(certFile));
         if (Date.parse(cert.validTo) <= now()) fail('设备连接证书已过期，请撤销设备后重新配置。','conflict');
