@@ -2582,7 +2582,7 @@ export type HemiVoiceBridge = {
     artifactId: string,
     linkPath?: string | null,
   ) => Promise<ConversationDeliverableReadResult>;
-  readConversationDeliverableText?: (conversationId:string,artifactId:string) => ReturnType<HemiVoiceBridge['readAttachmentPreview']>;
+  readConversationDeliverableText?: (conversationId:string,artifactId:string,linkPath?:string|null) => ReturnType<HemiVoiceBridge['readAttachmentPreview']>;
   /** 062：会话交付物受控打开（预览栏路径点击；范围外格式走系统应用）。 */
   openConversationDeliverable: (
     conversationId: string,

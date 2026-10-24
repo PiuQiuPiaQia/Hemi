@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('hemiVoice', {
     models: () => botInvoke('bot:models'),
     directory: (candidateId, path) => botInvoke('bot:directory', { candidateId, path }),
     command: (method, params) => botInvoke('bot:command', { method, params }),
+    commandResult: (method, params) => ipcRenderer.invoke('bot:command', { method, params }),
     upload: (payload) => botInvoke('bot:upload', payload),
     download: (id, artifactId) => botInvoke('bot:download', { id, artifactId }),
     environment: (environment) => botInvoke('bot:environment', { environment }),

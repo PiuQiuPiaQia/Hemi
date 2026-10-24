@@ -11,3 +11,12 @@ test('回卷后的菜单保留旧代有效文件，排除撤回运行，共享�
   } };
   assert.deepEqual(retainedDeliverables(flow).map(a => a.artifactId), ['old', 'shared']);
 });
+
+test('Bot 与旧档只有 producerRunId 时同样排除已撤回运行，无归属旧登记保持兼容', () => {
+  const flow = { generation: 2, timeline: [{ runId: 'kept' }], tasks: {}, artifacts: {
+    kept: { artifactId: 'kept', producerRunId: 'kept' },
+    removed: { artifactId: 'removed', producerRunId: 'cut' },
+    legacy: { artifactId: 'legacy' },
+  } };
+  assert.deepEqual(retainedDeliverables(flow).map(a => a.artifactId), ['kept', 'legacy']);
+});

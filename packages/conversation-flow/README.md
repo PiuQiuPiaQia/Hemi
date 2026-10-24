@@ -103,6 +103,8 @@ client 导入和构造不发请求。手动使用时调用 `start()`、订阅 `g
 
 容器须有界高度。通过 ref 调用 `scrollToBottom()` 或 `scrollToMessage(id)`；未加载目标返回 `{ok:true,value:{found:false}}`。`state.scrollIntent.id` 变化明确请求跟随最新内容。历史前插与普通流式更新不会隐式加载或重新排序。
 
+宿主因软键盘、面板或窗口调整容器高度时，虚拟列表在读取新视口尺寸后恢复滚动锚点：原本在底部则继续显示末尾，正在翻历史则保留位置。用户在尺寸调整期间发起新的滚动操作，会取消尚未执行的自动跟随。
+
 `/parts` 提供同一实现的 `ConversationFlowProvider`、`PermissionStack`、`RunActivity` 等部件，供宿主保留原来的外围排列。独立组合部件须放在 Provider 内，跨作用域时为 Provider 设置 `key`。不要同时将同一确认队列或运行摘要交给主组件和独立部件。
 
 ## 移动端

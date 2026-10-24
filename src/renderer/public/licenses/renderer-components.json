@@ -1,6 +1,6 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "d3624be80b10de8f3bca0914eeceb1dab19425c89f28815898329491065b1a13",
+  "lockfileSha256": "036093c64e190f4e7f9401592f6507417513d6483c0db8d9bcf5e2c4d4b1bcf3",
   "components": [
     {
       "name": "@aiden0z/pptx-renderer",
@@ -1490,6 +1490,27 @@
       ]
     },
     {
+      "name": "dijkstrajs",
+      "version": "1.0.3",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/tcort/dijkstrajs"
+      },
+      "locations": [
+        "node_modules/dijkstrajs"
+      ],
+      "modules": [
+        "node_modules/dijkstrajs/dijkstra.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/dijkstrajs/LICENSE.md",
+          "sha256": "c46324e45a005413535a6fb7a97e9eacd3cc6bf30335b7d5c10b8ee3af9e60c2"
+        }
+      ]
+    },
+    {
       "name": "docx-preview",
       "version": "0.4.0",
       "license": "Apache-2.0",
@@ -2359,6 +2380,7 @@
         "node_modules/lucide-react/dist/esm/icons/monitor.mjs",
         "node_modules/lucide-react/dist/esm/icons/package-check.mjs",
         "node_modules/lucide-react/dist/esm/icons/panel-right-close.mjs",
+        "node_modules/lucide-react/dist/esm/icons/pause.mjs",
         "node_modules/lucide-react/dist/esm/icons/pencil-line.mjs",
         "node_modules/lucide-react/dist/esm/icons/pencil.mjs",
         "node_modules/lucide-react/dist/esm/icons/phone-off.mjs",
@@ -2366,6 +2388,7 @@
         "node_modules/lucide-react/dist/esm/icons/play.mjs",
         "node_modules/lucide-react/dist/esm/icons/plus.mjs",
         "node_modules/lucide-react/dist/esm/icons/presentation.mjs",
+        "node_modules/lucide-react/dist/esm/icons/qr-code.mjs",
         "node_modules/lucide-react/dist/esm/icons/refresh-cw.mjs",
         "node_modules/lucide-react/dist/esm/icons/rotate-ccw.mjs",
         "node_modules/lucide-react/dist/esm/icons/rotate-cw.mjs",
@@ -2380,6 +2403,7 @@
         "node_modules/lucide-react/dist/esm/icons/shirt.mjs",
         "node_modules/lucide-react/dist/esm/icons/slash.mjs",
         "node_modules/lucide-react/dist/esm/icons/sliders-horizontal.mjs",
+        "node_modules/lucide-react/dist/esm/icons/smartphone.mjs",
         "node_modules/lucide-react/dist/esm/icons/sparkles.mjs",
         "node_modules/lucide-react/dist/esm/icons/square-mouse-pointer.mjs",
         "node_modules/lucide-react/dist/esm/icons/square.mjs",
@@ -2392,6 +2416,7 @@
         "node_modules/lucide-react/dist/esm/icons/undo-2.mjs",
         "node_modules/lucide-react/dist/esm/icons/user-check.mjs",
         "node_modules/lucide-react/dist/esm/icons/video.mjs",
+        "node_modules/lucide-react/dist/esm/icons/wifi-off.mjs",
         "node_modules/lucide-react/dist/esm/icons/workflow.mjs",
         "node_modules/lucide-react/dist/esm/icons/wrench.mjs",
         "node_modules/lucide-react/dist/esm/icons/x.mjs",
@@ -3283,6 +3308,53 @@
         {
           "source": "node_modules/property-information/license",
           "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        }
+      ]
+    },
+    {
+      "name": "qrcode",
+      "version": "1.5.4",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/soldair/node-qrcode.git"
+      },
+      "locations": [
+        "node_modules/qrcode"
+      ],
+      "modules": [
+        "node_modules/qrcode/lib/browser.js",
+        "node_modules/qrcode/lib/can-promise.js",
+        "node_modules/qrcode/lib/core/alignment-pattern.js",
+        "node_modules/qrcode/lib/core/alphanumeric-data.js",
+        "node_modules/qrcode/lib/core/bit-buffer.js",
+        "node_modules/qrcode/lib/core/bit-matrix.js",
+        "node_modules/qrcode/lib/core/byte-data.js",
+        "node_modules/qrcode/lib/core/error-correction-code.js",
+        "node_modules/qrcode/lib/core/error-correction-level.js",
+        "node_modules/qrcode/lib/core/finder-pattern.js",
+        "node_modules/qrcode/lib/core/format-info.js",
+        "node_modules/qrcode/lib/core/galois-field.js",
+        "node_modules/qrcode/lib/core/kanji-data.js",
+        "node_modules/qrcode/lib/core/mask-pattern.js",
+        "node_modules/qrcode/lib/core/mode.js",
+        "node_modules/qrcode/lib/core/numeric-data.js",
+        "node_modules/qrcode/lib/core/polynomial.js",
+        "node_modules/qrcode/lib/core/qrcode.js",
+        "node_modules/qrcode/lib/core/reed-solomon-encoder.js",
+        "node_modules/qrcode/lib/core/regex.js",
+        "node_modules/qrcode/lib/core/segments.js",
+        "node_modules/qrcode/lib/core/utils.js",
+        "node_modules/qrcode/lib/core/version-check.js",
+        "node_modules/qrcode/lib/core/version.js",
+        "node_modules/qrcode/lib/renderer/canvas.js",
+        "node_modules/qrcode/lib/renderer/svg-tag.js",
+        "node_modules/qrcode/lib/renderer/utils.js"
+      ],
+      "notices": [
+        {
+          "source": "node_modules/qrcode/license",
+          "sha256": "8df47c6ad9ac2c41eb9b2a72def9908959da0ede8dadd56c7b249c1bdb0c5ce6"
         }
       ]
     },

@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>用于在你选择保存图片时，将交付图片添加到照片。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>扫描 Hemi 配对码，连接你自己的 Bot。</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>连接你指定的 Bot 服务器。</string>
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>

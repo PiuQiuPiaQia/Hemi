@@ -36,8 +36,10 @@ export function BotDialog({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    ref.current?.showModal();
+    const dialog = ref.current;
+    dialog?.showModal();
     return () => {
+      dialog?.close();
       if (before?.isConnected) before.focus({ preventScroll: true });
     };
   }, []);

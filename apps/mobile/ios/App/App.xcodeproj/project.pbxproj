@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        AB2000000000000000000001 /* HemiResourceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000002; };
+        AB1000000000000000000001 /* HemiDeviceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000003; };
+        AB1000000000000000000002 /* HemiBotPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000004; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -19,6 +22,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        AB2000000000000000000002 /* HemiResourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HemiResourceStore.swift; sourceTree = "<group>"; };
+        AB1000000000000000000003 /* HemiDeviceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HemiDeviceClient.swift; sourceTree = "<group>"; };
+        AB1000000000000000000004 /* HemiBotPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HemiBotPlugin.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -64,6 +70,9 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+                AB2000000000000000000002 /* HemiResourceStore.swift */,
+                AB1000000000000000000003 /* HemiDeviceClient.swift */,
+                AB1000000000000000000004 /* HemiBotPlugin.swift */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -158,6 +167,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                AB2000000000000000000001 /* HemiResourceStore.swift in Sources */,
+                AB1000000000000000000001 /* HemiDeviceClient.swift in Sources */,
+                AB1000000000000000000002 /* HemiBotPlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);

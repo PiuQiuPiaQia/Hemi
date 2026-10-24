@@ -43,6 +43,7 @@
   cursor: default;
 }
 .h-bot-onboarding {
+  font-size: var(--fs-13);
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -58,13 +59,15 @@
   text-align: center;
   padding: var(--sp-24);
   max-width: 560px;
+  width: 100%;
+  flex-shrink: 0;
 }
 .h-bot-welcome > svg {
   margin: 0 auto var(--sp-20);
   color: var(--muted);
 }
 .h-bot-welcome h1 {
-  font-size: var(--fs-22);
+  font-size: var(--fs-20);
   font-weight: var(--fw-medium);
   margin-bottom: var(--sp-12);
 }
@@ -73,6 +76,15 @@
   line-height: 1.8;
   color: var(--muted);
   margin-bottom: var(--sp-24);
+}
+.h-bot-welcome-host {
+  overflow-wrap: anywhere;
+}
+.h-bot-welcome-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
 }
 .h-bot-dialog {
   margin: auto;
@@ -84,7 +96,7 @@
   border-radius: var(--r-lg);
   background: var(--bg-surface);
   color: var(--ink);
-  box-shadow: var(--shadow-3);
+  box-shadow: var(--shadow-2);
   font-family: var(--font);
   font-size: var(--fs-13);
 }
@@ -390,6 +402,19 @@
   flex-wrap: wrap;
   gap: var(--sp-8);
 }
+.h-bot-pairing-qr {margin:var(--sp-16) 0;text-align:center;}
+.h-bot-pairing-qr img {display:block;width:min(100%,288px);height:auto;margin:auto;}
+.h-bot-pairing-qr figcaption {font-size:var(--fs-12);color:var(--muted);}
+.h-bot-device-request {margin:var(--sp-16) 0;padding:var(--sp-16);border:1px solid var(--line);border-radius:var(--r-md);}
+.h-bot-device-request > p {margin-top:var(--sp-8);}
+.h-bot-verification-code {font-size:var(--fs-24);font-variant-numeric:tabular-nums;letter-spacing:var(--sp-4);}
+.h-bot-pairing-check {display:flex;align-items:center;gap:var(--sp-8);margin-bottom:var(--sp-16);}
+.h-bot-devices {margin-top:var(--sp-24);}
+.h-bot-devices h3 {font-size:var(--fs-13);font-weight:var(--fw-medium);}
+.h-bot-device {display:flex;align-items:center;gap:var(--sp-12);padding:var(--sp-12) 0;border-top:1px solid var(--line);}
+.h-bot-device > span {flex:1;min-width:0;overflow-wrap:anywhere;}
+.h-bot-device strong {font-weight:var(--fw-medium);}
+.h-bot-device small {display:block;color:var(--muted);font-size:var(--fs-12);}
 .h-bot-banner {
   display: flex;
   align-items: center;

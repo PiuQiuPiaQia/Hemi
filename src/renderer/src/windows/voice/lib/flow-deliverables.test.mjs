@@ -27,12 +27,36 @@ test('旧会话：已交付目录与已登记图片的成功读取相交，恢�
   assert.equal(noHandover.get('read-only').filter(p => p.kind === 'deliverable').length, 0);
 });
 
-test('只剩 registry 的成果恢复到对应回合；正文链接无登记仍提供受控读取候选', () => {
+test('只剩 registry 的成果恢复到对应回合；正文链接无登记不生成卡片', () => {
   const cards = flowDeliverableParts(snapshot([row('answer', 'r2', [text('[报告](<./本轮 报告.pdf>)')])]));
   const files = cards.get('answer').filter(p => p.kind === 'deliverable');
-  assert.deepEqual(files.map(p => p.artifactId), ['', 'image']);
-  assert.equal(files[0].linkPath, './本轮 报告.pdf');
-  assert.equal(files[1].contentVersion, 2);
+  assert.deepEqual(files.map(p => p.artifactId), ['image']);
+  assert.equal(files[0].contentVersion, 2);
+});
+
+test('配置路径、正文链接、图片及成功读写都不能代替交付登记', () => {
+  const content = '`~/.gitconfig` 和 `/home/ubuntu/.config/gh/hosts.yml`\n\n[报告](./report.pdf)\n\n![图片](./cover.png)';
+  const flow = { ...snapshot([row('answer', 'r1', [
+    read('/workspace/report.pdf'),
+    { partId: 'write', kind: 'tool', tool: 'write', status: 'done', args: { path: '/workspace/cover.png' } },
+    text(content),
+  ])]), artifacts: {} };
+  const before = structuredClone(flow);
+  const parts = flowDeliverableParts(flow).get('answer');
+  assert.equal(parts.some(p => p.kind === 'deliverable'), false);
+  assert.equal(parts.find(p => p.kind === 'text').content, content);
+  assert.deepEqual(flow, before);
+});
+
+test('无登记或已撤回的历史交付 part 不生成卡片', () => {
+  const flow = snapshot([row('answer', 'r1', [
+    { partId: 'missing', kind: 'deliverable', artifactId: 'missing', name: 'missing.pdf' },
+    { partId: 'withdrawn', kind: 'deliverable', artifactId: 'image', name: 'cover.png' },
+  ])]);
+  // image 的生产运行 r2 已被回卷移出时间线。
+  assert.deepEqual(flowDeliverableParts(flow).get('answer'), []);
+  flow.artifacts.image = { ...artifact, producers: undefined, producerRunId: 'r2' };
+  assert.deepEqual(flowDeliverableParts(flow).get('answer'), []);
 });
 
 test('相同快照的成果行缓存稳定，版本变化后重新投影；回卷撤掉的成果不恢复', () => {

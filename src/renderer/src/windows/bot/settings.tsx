@@ -1,12 +1,15 @@
 import { useState } from 'react';
+import { QrCode } from 'lucide-react';
 import type { BotMethod, BotState } from '@shared/bot';
 import { BotButton, BotDialog } from './dialogs';
+import { BotPairing } from './pairing';
 
 export function BotSettings({
   state,
   call,
   onClose,
   onSync,
+  initialScreen = 'settings',
 }: {
   state: BotState;
   call: <T = unknown>(
@@ -15,15 +18,17 @@ export function BotSettings({
   ) => Promise<T>;
   onClose: () => void;
   onSync: () => void;
+  initialScreen?: 'settings' | 'pairing';
 }) {
   const [screen, setScreen] = useState<
     | 'settings'
+    | 'pairing'
     | 'address'
     | 'stop'
     | 'remove'
     | 'forget'
     | 'update'
-  >('settings');
+  >(initialScreen);
   const [host, setHost] = useState(state.binding?.host ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -59,6 +64,7 @@ export function BotSettings({
   }
   const title = {
     settings: 'Bot 设置',
+    pairing: '连接新设备',
     address: '修改连接地址',
     stop: '停止云端 Bot？',
     remove: '停止并移除连接？',
@@ -71,6 +77,7 @@ export function BotSettings({
     forget: 'connection.forget',
     update: 'component.update',
   } as const;
+  if (screen === 'pairing') return <BotPairing state={state} call={call} onClose={onClose} onBack={() => setScreen('settings')}/>;
   return (
     <BotDialog
       title={title}
@@ -150,6 +157,10 @@ export function BotSettings({
             </dd>
           </dl>
           <div className="h-bot-setting-actions">
+            <BotButton disabled={busy} onClick={() => setScreen('pairing')}>
+              <QrCode size={14} aria-hidden="true" />
+              连接新设备
+            </BotButton>
             <BotButton disabled={busy || !state.online} onClick={onSync}>
               添加模型
             </BotButton>

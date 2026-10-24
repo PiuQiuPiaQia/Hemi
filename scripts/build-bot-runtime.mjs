@@ -39,6 +39,7 @@ export async function buildBotRuntime({
       'unpdf',
       '@xmldom/xmldom',
       'playwright-core',
+      'jose',
     ];
     const dependencies = Object.fromEntries(
       names.map((name) => [name, app.dependencies[name]]),

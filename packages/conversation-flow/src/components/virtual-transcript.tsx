@@ -68,6 +68,7 @@ export function VirtualTranscript({
   const [margin, setMargin] = useState(0);
   const [retained, setRetained] = useState<string[]>([]);
   const pinned = useRef(true);
+  const interactionVersion = useRef(0);
   const store = useMemo<TranscriptRowStates>(() => new Map(), []);
   const setPinned = useCallback(
     (value: boolean) => {
@@ -178,10 +179,26 @@ export function VirtualTranscript({
           el.scrollTop,
       );
     measureMargin();
-    const observer = new ResizeObserver(measureMargin);
+    let height = el.clientHeight;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      measureMargin();
+      if (height === el.clientHeight) return;
+      const follow = pinned.current ||
+        Math.abs(el.scrollHeight - el.scrollTop - height) < 3 ||
+        Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 3;
+      height = el.clientHeight;
+      const version = interactionVersion.current;
+      cancelAnimationFrame(frame);
+      // The virtualizer must observe the new viewport rect before computing its end offset.
+      // Geometry-induced scroll events can temporarily clear pinned; preserve the previous intent.
+      frame = requestAnimationFrame(() => {
+        if (follow && interactionVersion.current === version) jump();
+      });
+    });
     observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [jump]);
   const previousUser = useRef(lastUserId);
   const previousKeys = useRef(rowIds);
   useLayoutEffect(() => {
@@ -200,7 +217,9 @@ export function VirtualTranscript({
   }, [rowIds, store, virtualizer, parseCache]);
   useEffect(() => {
     if (!viewport) return;
+    const interact = () => { interactionVersion.current++; };
     const unpin = (e: WheelEvent) => {
+      interact();
       if (e.deltaY < 0) {
         virtualizer.cancelScroll();
         setPinned(false);
@@ -229,11 +248,18 @@ export function VirtualTranscript({
       );
     };
     viewport.addEventListener("wheel", unpin, { passive: true });
+    const scrollRoot = viewport.closest("[data-transcript-scroll]") ?? viewport;
+    scrollRoot.addEventListener("pointerdown", interact, { passive: true });
+    scrollRoot.addEventListener("touchstart", interact, { passive: true });
+    scrollRoot.addEventListener("keydown", interact);
     viewport.addEventListener("focusin", retain);
     viewport.addEventListener("focusout", retain);
     document.addEventListener("selectionchange", retain);
     return () => {
       viewport.removeEventListener("wheel", unpin);
+      scrollRoot.removeEventListener("pointerdown", interact);
+      scrollRoot.removeEventListener("touchstart", interact);
+      scrollRoot.removeEventListener("keydown", interact);
       viewport.removeEventListener("focusin", retain);
       viewport.removeEventListener("focusout", retain);
       document.removeEventListener("selectionchange", retain);

@@ -1,7 +1,7 @@
 import { retainedDeliverables } from '../voice/lib/retained-deliverables';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Folder, Plus, Server, Settings, ShieldCheck } from 'lucide-react';
+import { Check, Folder, Plus, QrCode, Server, Settings, ShieldCheck } from 'lucide-react';
 import type {
   BotBridge,
   BotDetail,
@@ -215,12 +215,18 @@ export function BotPage({
     async <T,>(
       method: Parameters<BotBridge['command']>[0],
       params: Record<string, unknown> = {},
-    ) =>
-      api.command<T>(method, {
+    ) => {
+      const request = {
         ...params,
         expectedInstanceId:
           params.expectedInstanceId ?? stateRef.current.binding?.instanceId,
-      }),
+      };
+      if (!api.commandResult) return api.command<T>(method,request);
+      // Error custom properties do not survive a thrown contextBridge Error.
+      const reply = await api.commandResult<T>(method,request);
+      if (!reply.ok) throw Object.assign(new Error(reply.message),{code:reply.code});
+      return reply.result;
+    },
     [api],
   );
   useEffect(() => {
@@ -681,6 +687,15 @@ export function BotPage({
         <span>添加模型</span>
       </button>
       <button
+        className="h-bot-sync"
+        aria-label="连接新设备"
+        title="连接新设备"
+        onClick={() => setPanel('pairing')}
+      >
+        <QrCode size={14} aria-hidden="true" />
+        <span aria-live="polite">{state.cache?.deviceAccess?.pendingCount ? `新设备请求 (${state.cache.deviceAccess.pendingCount})` : '连接新设备'}</span>
+      </button>
+      <button
         className="icon-btn"
         aria-label="Bot 设置"
         onClick={() => setPanel('settings')}
@@ -1051,40 +1066,50 @@ export function BotPage({
             />
           ) : (
             <main className="voice-shell compact-shell h24-shell min-h-dvh overflow-hidden">
-              <AppTopBar title="Hemi Bot" showBrand={false} />
+              <AppTopBar title="Hemi Bot" showBrand={false} actions={state.binding ? actions : undefined} />
               <div className="h24-frame">
                 <NavRail page="bot" />
                 <section className="h-bot-onboarding">
                   {state.binding ? (
-                    <div role="status">
-                      <p>
-                        {state.online
-                          ? '正在读取云端会话…'
-                          : '连接已断开，请重新连接以读取会话。'}
-                      </p>
-                      <BotButton
-                        onClick={() =>
-                          void call('service.start').catch((e) =>
-                            setError(message(e)),
-                          )
-                        }
-                      >
-                        启动 Bot
-                      </BotButton>
-                      <BotButton onClick={() => setPanel('settings')}>
-                        Bot 设置
-                      </BotButton>
-                      {!state.online && (
+                    <div className="h-bot-welcome" role="status">
+                      <Server size={26} aria-hidden="true" />
+                      <h1>
+                        {state.stoppedConfirmed || state.cache?.enabled === false
+                          ? 'Bot 已停止'
+                          : state.online
+                            ? '正在读取云端会话…'
+                            : 'Bot 连接已断开'}
+                      </h1>
+                      <p className="h-bot-welcome-host">{state.binding.host}</p>
+                      <div className="h-bot-welcome-actions">
                         <BotButton
+                          primary={state.stoppedConfirmed || state.cache?.enabled === false}
+                          disabled={!!state.busy}
                           onClick={() =>
-                            void call('connection.reconnect').catch((e) =>
+                            void call('service.start').catch((e) =>
                               setError(message(e)),
                             )
                           }
                         >
-                          重新连接
+                          启动 Bot
                         </BotButton>
-                      )}
+                        <BotButton disabled={!!state.busy} onClick={() => setPanel('settings')}>
+                          Bot 设置
+                        </BotButton>
+                        {!state.online && (
+                          <BotButton
+                            primary={!state.stoppedConfirmed && state.cache?.enabled !== false}
+                            disabled={!!state.busy}
+                            onClick={() =>
+                              void call('connection.reconnect').catch((e) =>
+                                setError(message(e)),
+                              )
+                            }
+                          >
+                            重新连接
+                          </BotButton>
+                        )}
+                      </div>
                     </div>
                   ) : loaded ? (
                     <BotSetup
@@ -1139,8 +1164,10 @@ export function BotPage({
               <code>{current?.dir}</code>
             </BotDialog>
           )}
-          {panel === 'settings' && (
+          {(panel === 'settings' || panel === 'pairing') && (
             <BotSettings
+              key={`${panel}:${state.binding?.instanceId}`}
+              initialScreen={panel === 'pairing' ? 'pairing' : 'settings'}
               state={state}
               call={call}
               onClose={() => setPanel(null)}

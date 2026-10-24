@@ -28,6 +28,7 @@ async function fixture(t) {
   const hello = await host.request('handshake');
   let network = true,
     dropReply = null;
+  let snapshotGate = null;
   const transport = {
     probe: async () => ({
       home: path.join(root, 'cloud'),
@@ -40,6 +41,10 @@ async function fixture(t) {
           code: 'offline',
         });
       const result = await host.request(method, p);
+      if (method === 'snapshot' && snapshotGate) {
+        const gate = snapshotGate; snapshotGate = null;
+        gate.started(); await gate.wait;
+      }
       if (dropReply === method) {
         dropReply = null;
         throw Object.assign(new Error('lost receipt'), {
@@ -101,6 +106,13 @@ async function fixture(t) {
     },
     setNetwork: (value) => {
       network = value;
+    },
+    holdNextSnapshot() {
+      let started, release;
+      const reached = new Promise(resolve => { started = resolve; });
+      const wait = new Promise(resolve => { release = resolve; });
+      snapshotGate = { started, wait };
+      return { started: reached, release };
     },
     async restart() {
       await client.close();
@@ -228,6 +240,20 @@ test('manual disconnect does not auto-reconnect, stale instance and unknown sess
       }),
     /已更换/,
   );
+});
+for (const changed of [false, true]) test(`manual disconnect ignores a late ${changed ? 'changed' : 'not-modified'} snapshot until explicit reconnect`, async t => {
+  const f = await fixture(t);
+  if (changed) await f.host.request('session.create', { instanceId: f.hello.instanceId, requestId: 'changed-snapshot' });
+  const held = f.holdNextSnapshot(), refresh = f.client.refresh();
+  await held.started;
+  await f.client.command('connection.disconnect');
+  held.release(); await refresh;
+  assert.equal(f.client.getState().online, false);
+  assert.match(f.client.getState().error, /连接已断开/);
+  await f.client.refresh();
+  assert.equal(f.client.getState().online, false);
+  await f.client.command('connection.reconnect');
+  assert.equal(f.client.getState().online, true);
 });
 test('confirmed stop permits removing binding while service is down, without deleting cloud records', async (t) => {
   const f = await fixture(t),

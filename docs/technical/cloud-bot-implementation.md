@@ -19,6 +19,8 @@
 | 文件 | 实际上传与受控预览／下载。交付限定生产运行的目录，按会话和 artifact 身份读取 |
 | 中断 | 稳定操作 ID 与持久回执；结果不明先核对；Host 重启不自动重放有副作用的任务 |
 
+交付卡片只展示当前会话保留的正式登记记录；正文路径、Markdown 链接和成功读写工具调用不会自动成为交付物。正文路径仍可点击：Bot Host 按当前会话解析相对路径、`~/` 与 file URL，在家目录或当前工作目录内检查真实普通文件、敏感路径和 20 MB 上限；预览时重新检查。未登记链接的身份绑定会话，不写入交付表或持久化状态，下载入口仍只接受正式登记的文件。
+
 每个会话可选择同一默认目录，也可选择其他云端目录。会话独立不代表文件系统隔离。Linux 文件及命令沿用 Hemi 门控；这里没有额外的容器沙箱。遇到需要用户确认的操作，Host 持续等待，后续任务排队，直至用户处理或停止。
 
 Host 默认工具为文件读写、检索、bash、交付登记和云端项目技能。显式技能选择复用普通对话的指令装配。不会复制本机技能库、记忆、工作流或 OAuth 登录；本版不提供云端浏览器、桌面接管及子 Agent 委派。界面提供能力说明。
@@ -122,3 +124,22 @@ cc 完成两轮只读 review。删除会话、待确认回执、初始化重试�
 本次 SSH 的 Linux／systemd 边界由隔离脚本替代，Host、SDK、IPC 及模型 HTTP 请求均实际执行；未连接真实云服务器或真实供应商账号。原有 Linux UI 验证脚本已适配新页签及文案并通过语法检查，未重跑 Linux/systemd 全流程。没有提交、推送或发版，工作区其余并行修改保持原状。
 
 模型保存成功提示改为复用现有 `h37-toast h37-toast-card`：底部居中白底绿勾，2.6 秒自动消失，移除成功横幅及“知道了”按钮；失败和待核对状态保留操作入口。到期按 instanceId／requestId 清理成功回执，旧 toast 不能清除更新的模型操作。验证仍基于上述提交与环境；`npm run typecheck`、`npm run build:renderer`、spacing／diff 检查通过，新增旧回执不能清除新结果的专项测试通过。`node scripts/verify-bot-models.mjs` 在开发／构建 renderer 均验证真实模型保存后的 toast 出现、自动消退、成功回执清理，以及失败横幅保留，console／renderer 异常为零。截图为 `.visual/workflow/bot-models/{dev,built}-model-saved-toast.png`，不涉及新依赖、全量测试或 Linux/systemd 回归。
+
+## Bot 启动页样式修复（2026-10-24）
+
+已绑定但尚无可展示对话的分支，原先只渲染状态文字和连续按钮，遗漏欢迎页的排版。现复用 `h-bot-welcome`，统一图标、标题、服务器地址及可换行的按钮组；已停止状态强调“启动 Bot”，连接断开状态强调“重新连接”。正文及按钮使用13px令牌。修正 Bot 样式中未定义的 `--fs-22`／`--shadow-3`，改用现有20px字号及第二档阴影，避免回退为继承字号或无阴影。未改变启动／重连的IPC或服务实现。
+
+验证基准 `5ca1f1e32ca0296c019da7453387a9cd22aec46f` 加未提交工作区，macOS26.5.1 arm64／Node22.22.3／Electron44.0.0。`npm run typecheck`、`npm run build:renderer`、spacing与diff检查通过。忽略目录脚本 `node .visual/workflow/verify-bot-startup.mjs` 使用全新临时 `HEMI_USER_DATA_DIR`，在真实Electron／preload／IPC中分别验证开发及构建renderer的未绑定、断开、已停止三种状态；覆盖1440/768/375宽度及375x360矮窗、单主操作、设置／创建连接弹窗和重连失败提示，异常为零。SSH替换为仅返回失败的本地脚本，没有连接真实服务器或执行云端启动。macOS会限制过高窗口，报告记录实际高度；检查过程中发现并修复无效字号令牌后，最终六组全部通过。临时Electron、Vite及测试数据均清理。未运行全套测试或无关桌面回归。
+
+源码摘要、实际视口尺寸及截图见 `.visual/workflow/pc-bot-startup/report.json`，视觉记录见 `.visual/workflow/vision-report-pc-bot-startup.md`。当前开发renderer可热更新，已生成新构建产物，尚未发布或替换已安装的桌面发行版。
+
+
+## 提交前综合复查（2026-10-24）
+
+基准为 `5ca1f1e32ca0296c019da7453387a9cd22aec46f` 加当前工作区，环境 macOS26.5.1 arm64／Node22.22.3／Electron44／Xcode26.6。审查发现设备网关逐片解码UTF-8会损坏跨分片的中文或emoji，实际TLS可复现为合法证明被拒绝；改为有界收齐字节后统一解码，真实TLS测试覆盖三字节及四字节字符的多种切点。两项旧交付去重测试缺少登记数据，按当前“只有登记成果生成卡片”规则补齐夹具，同时增加同回合重复入口，保留跨回合及缓存去重断言。
+
+扫码端到端复查另发现主动断开后的迟到轮询可恢复online状态；现断开立即发布离线意图，刷新在握手、快照、草稿及回执异步边界检查连接意图／身份，停止、断开、移除后丢弃旧结果。新增not-modified与完整快照的确定性回归测试，明确重连后才恢复。macOS扫码验证夹具保留实际PC二维码像素，Core Image未识别时使用Vision CPU路径，避免测试机ANE模型不可用；生产iOS扫码实现不变。
+
+最终 `node scripts/run-tests.mjs` 1704/1704通过（此前 `npm test` 首轮1699/1701、修复网关和夹具后1702/1702）；`npm test --workspace @hemi/mobile` 22/22通过，SDK单独41/41通过并包含于主套件。桌面与移动构建、renderer许可重生成（156项，无待补声明）、移动npm／原生许可复查（130项npm清单）、spacing及diff检查通过。`verify-device-pairing.mjs` 开发／构建均通过真实Electron/preload/IPC/CLI/Host到原生CryptoKit／固定证书TLS的扫码、核对、丢失回执、创建发送、撤销及断线隐藏／取消流程；SSH与Keychain为隔离夹具。`verify-mobile-resource-device.mjs`、`verify-mobile-resource-store.mjs` 通过生产原生TLS分片、摘要和暂存生命周期检查。`verify-registered-deliverables.mjs` 开发／构建均通过真实本地和Bot执行器的登记卡片、正文路径预览、错误与窄屏检查。独立临时HEMI_USER_DATA_DIR的Electron smoke通过，未配置模型／语音的拒绝属于其预期检查。
+
+证据在忽略目录 `.visual/workflow/commit-*.log`、`device-pairing/`、`vision/registered-deliverables/` 及最终提交快照清单。此前的移动端开发／构建和真机验收记录仍见移动实施文档。本轮未新增Android原生Bot桥验收、iPhone相机／系统文件面板人工复测、云服务器部署或桌面发行版升级；原生网络检查在macOS编译运行生产Swift客户端。凭据、签名配置、用户数据、二维码截图和临时验证产物均不纳入提交。

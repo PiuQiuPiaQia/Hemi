@@ -44,6 +44,8 @@ function visit(name, from) {
 for (const name of Object.keys(manifest.dependencies).sort()) visit(name, root);
 // SDK icons and compiled CSS carry notices beyond its runtime npm dependencies.
 text.push(fs.readFileSync(path.join(repository, 'packages/conversation-flow/THIRD-PARTY-NOTICES.md'), 'utf8'));
+// SwiftPM and the Apache-licensed Cordova native bridge are outside the npm license graph.
+text.push(fs.readFileSync(path.join(root, 'THIRD-PARTY-NOTICES.md'), 'utf8'));
 const output = path.join(root, 'public/licenses');
 fs.mkdirSync(output, { recursive: true });
 fs.writeFileSync(path.join(output, 'notices.txt'), text.join('\n'));

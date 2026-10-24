@@ -1,0 +1,142 @@
+// Actual Electron -> preload/IPC/SSH runner -> CLI/socket/Host -> TLS -> native Swift client.
+// Only the SSH network boundary, model execution, and Keychain storage are fixtures.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import net from 'node:net';
+import https from 'node:https';
+import assert from 'node:assert/strict';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {createHash,randomUUID} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {createServer} from 'vite';
+import {_electron} from 'playwright-core';
+import electronPath from 'electron';
+import {rpc} from '../src/main/bot/cli.mjs';
+const exec=promisify(execFile),repo=path.resolve(import.meta.dirname,'..'),root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-pairing-'));
+const evidence=path.join(repo,'.visual/workflow/device-pairing');await fs.mkdir(evidence,{recursive:true});
+const data=path.join(root,'cloud'),socket=path.join(data,'control.sock'),cli=path.join(repo,'src/main/bot/cli.mjs');
+const report={date:new Date().toISOString(),commit:(await exec('git',['rev-parse','HEAD'])).stdout.trim(),workingTree:true,node:process.version,platform:process.platform+'/'+process.arch,checks:[],errors:[],screenshots:[],sources:{}};
+for(const name of ['src/main/bot/device-gateway.mjs','src/main/bot/host.mjs','src/main/bot/desktop-service.mjs','src/renderer/src/windows/bot/pairing.tsx','src/renderer/src/windows/bot/page.tsx','src/preload/index.cjs','apps/mobile/ios/App/App/HemiDeviceClient.swift','apps/mobile/ios/App/App/HemiBotPlugin.swift'])report.sources[name]=createHash('sha256').update(await fs.readFile(path.join(repo,name))).digest('hex');
+const wait=async(fn,label,timeout=45000)=>{const until=Date.now()+timeout;while(Date.now()<until){if(await fn())return;await new Promise(r=>setTimeout(r,120));}throw new Error('Timed out: '+label);};
+const portServer=net.createServer();await new Promise(resolve=>portServer.listen(0,'127.0.0.1',resolve));const endpoint=`https://127.0.0.1:${portServer.address().port}`;await new Promise(resolve=>portServer.close(resolve));
+let host,app,vite,native,blockedServer,hostErrors='',nativeErrors='';
+try {
+  const boot=`const {serve}=await import(${JSON.stringify(pathToFileURL(cli).href)});const service=await serve({defaultDir:${JSON.stringify(path.join(root,'workspace'))},validateModel:async()=>{},executorFactory:()=>({run:async()=>({stopped:false}),stop:async()=>{},decide:()=>false,close:async()=>{}})});const h=await service.host.request('handshake');const p={instanceId:h.instanceId};await service.host.request('model.sync',{...p,requestId:'seed-model',models:[{modelKey:'isolated/model',providerId:'isolated',name:'Isolated',model:'fixture',api:'openai-completions',baseUrl:'https://example.invalid/v1',apiKey:'NOT_A_CREDENTIAL'}]});const s=await service.host.request('session.create',{...p,requestId:'seed-session'});await service.host.request('session.rename',{...p,id:s.id,title:'跨端真实会话',requestId:'seed-title'});process.once('SIGTERM',()=>void service.close().then(()=>process.exit(0)));`;
+  host=spawn(process.execPath,['--input-type=module','-e',boot],{cwd:repo,env:{...process.env,HEMI_BOT_DATA_DIR:data,HEMI_USER_DATA_DIR:path.join(root,'host-profile')},stdio:['ignore','ignore','pipe']});host.stderr.on('data',v=>{hostErrors+=v;});
+  await wait(async()=>{if(host.exitCode!==null)throw new Error(hostErrors);return fs.access(socket).then(()=>true,()=>false);},'real Host socket');
+  const hello=await rpc({method:'handshake'},{socket});
+  await wait(async()=>((await rpc({method:'snapshot',params:{instanceId:hello.instanceId}},{socket})).sessions??[]).some(s=>s.title==='跨端真实会话'),'seed actual session');
+  const wrapper=path.join(root,'ssh');
+  const dropApproval=path.join(root,'drop-approval'),legacyStatus=path.join(root,'legacy-status');
+  await fs.writeFile(wrapper,`#!${process.execPath}\nimport{spawn}from'node:child_process';import fs from'node:fs';if(process.argv.includes('-O'))process.exit(0);if(!process.argv.at(-1).includes('cli.mjs'))process.exit(1);let raw='';for await(const part of process.stdin)raw+=part;if(JSON.parse(raw).method==='pairing.status'&&fs.existsSync(${JSON.stringify(legacyStatus)})){const kind=fs.readFileSync(${JSON.stringify(legacyStatus)},'utf8');process.stdout.write(JSON.stringify({ok:false,code:'unsupported',message:kind==='desktop'?'不支持的 Bot 操作。':'不支持的操作。'}));process.exit(0);}const child=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(cli)},'rpc'],{env:{...process.env,HEMI_BOT_DATA_DIR:${JSON.stringify(data)}},stdio:['pipe','pipe','inherit']});child.stdin.end(raw);let output='';child.stdout.on('data',v=>output+=v);child.on('exit',code=>{if(JSON.parse(raw).method==='pairing.approve'&&fs.existsSync(${JSON.stringify(dropApproval)})){fs.unlinkSync(${JSON.stringify(dropApproval)});process.exit(255);}process.stdout.write(output);process.exit(code??1);});\n`,{mode:0o700});
+  const binary=path.join(root,'native-client');
+  await exec('xcrun',['swiftc','-parse-as-library',path.join(repo,'apps/mobile/ios/App/App/HemiDeviceClient.swift'),path.join(repo,'apps/mobile/test/NativeDeviceIntegration.swift'),'-o',binary],{timeout:60000});
+  vite=await createServer({configFile:path.join(repo,'vite.config.ts'),logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false}});await vite.listen();
+  for(const mode of ['dev','built']) {
+    const check=name=>{report.checks.push(mode+': '+name);console.log('PASS',mode,name);};
+    const profile=path.join(root,mode);await fs.mkdir(path.join(profile,'bot'),{recursive:true});
+    await fs.writeFile(path.join(profile,'onboarding.json'),JSON.stringify({version:2,phase:'complete',step:'done',permissionChoice:'skipped',completedAt:Date.now()}));
+    await fs.writeFile(path.join(profile,'appearance.json'),JSON.stringify({schemaVersion:1,skinId:'classic',mode:'light'}));
+    await fs.writeFile(path.join(profile,'bot/connection.json'),JSON.stringify({host:'isolated-pairing-bot',instanceId:hello.instanceId,protocol:hello.protocol,version:hello.version,home:root,dataDir:data,boundAt:Date.now()}));
+    const env={...process.env,HEMI_USER_DATA_DIR:profile,HEMI_SSH_BIN:wrapper,HEMI_TEST_MIC_GRANT:'1'};
+    if(mode==='dev')env.VITE_DEV_SERVER_URL=vite.resolvedUrls.local[0];else delete env.VITE_DEV_SERVER_URL;
+    app=await _electron.launch({executablePath:electronPath,args:['.'],cwd:repo,env});let page;
+    await wait(()=>{page=app.windows().find(p=>/^(file|http):/.test(p.url())&&!new URL(p.url()).searchParams.has('mode'));return!!page;},'actual Electron renderer');
+    page.setDefaultTimeout(15000);page.on('pageerror',e=>report.errors.push(mode+': '+e.message));
+    page.on('console',m=>{if(m.type()==='error')report.errors.push(mode+': '+m.text());});
+    await page.getByRole('button',{name:'Bot',exact:true}).click();
+    await page.getByRole('button',{name:'连接新设备',exact:true}).waitFor();
+    await wait(async()=>(await page.evaluate(()=>window.hemiVoice.bot.getState())).online,'actual SSH runner -> Host refresh');
+    const rejected=await page.evaluate(()=>window.hemiVoice.bot.commandResult('pairing.unknown'));assert.equal(rejected.ok,false);assert.equal(rejected.code,'unsupported');
+    await fs.writeFile(legacyStatus,'desktop');
+    await page.getByRole('button',{name:'连接新设备',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'连接新设备',exact:true});
+    await dialog.getByText('PC 后台仍是旧版本，请完全退出 Hemi 后重新启动，再打开设备连接。',{exact:true}).waitFor();
+    await fs.writeFile(legacyStatus,'cloud');
+    await dialog.getByRole('button',{name:'维护云端组件',exact:true}).waitFor();
+    await fs.rm(legacyStatus);
+    check('structured IPC retains unsupported error codes; old desktop explains restart and old Bot exposes real component update action');
+    if(mode==='dev'){
+      await dialog.getByRole('textbox',{name:'手机可访问的 Bot 地址',exact:true}).fill(endpoint);
+      await dialog.getByRole('button',{name:'启用设备连接',exact:true}).click();
+    }
+    await dialog.getByRole('button',{name:'生成配对二维码',exact:true}).click();
+    const image=dialog.getByRole('img',{name:'Hemi 一次性设备配对码',exact:true});await image.waitFor();
+    const work=path.join(root,'native-'+mode);await fs.mkdir(work);
+    const png=path.join(work,'qr.png'),src=await image.getAttribute('src');await fs.writeFile(png,Buffer.from(src.split(',')[1],'base64'));
+    const screenshot=async name=>{const file=path.join(evidence,`${mode}-${name}.png`);await page.screenshot({path:file,scale:'css'});report.screenshots.push(file);};
+    // QR pixels are sensitive until expiry; evidence stays ignored and invitation expires/consumes.
+    await screenshot('qr');
+    nativeErrors='';native=spawn(binary,[png,work,'Native '+mode],{stdio:['ignore','ignore','pipe']});native.stderr.on('data',v=>{nativeErrors+=v;});
+    const file=async name=>{if(native.signalCode||native.exitCode!==null&&native.exitCode!==0)throw new Error(nativeErrors);return fs.readFile(path.join(work,name),'utf8').then(JSON.parse,()=>null);};
+    await wait(()=>file('request.json'),'native TLS signed application');
+    const pending=await file('request.json');assert.equal(pending.status,'pending');
+    const code=dialog.locator('.h-bot-verification-code');await code.waitFor();assert.equal((await code.innerText()).replaceAll(' ',''),pending.code);
+    await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    assert.equal((await rpc({method:'pairing.status',params:{instanceId:hello.instanceId}},{socket})).invitation.request.status,'pending');
+    await page.getByRole('button',{name:'连接新设备',exact:true}).click();await code.waitFor();
+    assert.equal(await dialog.getByRole('button',{name:'允许连接',exact:true}).isDisabled(),true);
+    await page.evaluate(()=>window.hemiVoice.bot.command('connection.disconnect'));
+    await dialog.getByRole('button',{name:'隐藏配对页',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    assert.equal((await rpc({method:'pairing.status',params:{instanceId:hello.instanceId}},{socket})).invitation.request.status,'pending');
+    await page.getByRole('button',{name:'连接新设备',exact:true}).click();
+    await dialog.getByRole('button',{name:'重新连接',exact:true}).click();await code.waitFor();
+    await screenshot('confirm');
+    check('real QR pixels decoded by native Core Image/Vision CPU; native CryptoKit proof and TLS pin match PC; unconfirmed request has no approval');
+    await dialog.getByRole('checkbox',{name:'两台设备显示的验证码一致',exact:true}).check();
+    await fs.writeFile(dropApproval,'1');
+    await dialog.getByRole('button',{name:'允许连接',exact:true}).click();
+    await dialog.getByText('已核对设备操作结果，请查看当前状态。',{exact:true}).waitFor();
+    await fs.writeFile(path.join(work,'approved'),'1');
+    await wait(()=>file('ready.json'),'native approved -> real Host snapshot/create/send and pin rejection');
+    check('lost SSH approval receipt reconciles without replay; native client reads actual session, restores identity, creates/sends and rejects wrong certificate');
+    const row=dialog.locator('.h-bot-device').filter({hasText:'Native '+mode});await row.waitFor();
+    for(const width of [1440,768,375]){
+      await app.evaluate(({BrowserWindow},width)=>{const win=BrowserWindow.getAllWindows().find(w=>/^(file|http):/.test(w.webContents.getURL())&&!new URL(w.webContents.getURL()).searchParams.has('mode'));win.setMinimumSize(1,1);win.setContentSize(width,850);},width);
+      await page.waitForFunction(width=>innerWidth===width,width);
+      assert.ok(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth+1));await screenshot('devices-'+width);
+    }
+    await row.getByRole('button',{name:'撤销访问',exact:true}).click();
+    await dialog.getByRole('group',{name:'确认撤销设备',exact:true}).getByRole('button',{name:'确认撤销',exact:true}).click();
+    await row.getByText('访问已撤销',{exact:true}).waitFor();await fs.writeFile(path.join(work,'revoked'),'1');
+    await wait(()=>file('done.json'),'native revocation rejection');
+    await fs.copyFile(path.join(work,'ready.json'),path.join(evidence,mode+'-native-ready.json'));
+    await fs.copyFile(path.join(work,'done.json'),path.join(evidence,mode+'-native-done.json'));
+    await wait(()=>native.exitCode===0||native.signalCode&&Promise.reject(new Error(nativeErrors)),'native test completion');native=null;
+    check('revoke confirmation and actual native reconnect denial; compact device list 375/768/1440');
+    await dialog.getByRole('button',{name:'完成',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'连接新设备',exact:true}).click();
+    await dialog.getByRole('button',{name:'生成配对二维码',exact:true}).click();await image.waitFor();
+    await page.evaluate(()=>window.hemiVoice.bot.command('connection.disconnect'));
+    await image.waitFor({state:'hidden'});
+    await dialog.getByRole('button',{name:'隐藏配对页',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'连接新设备',exact:true}).click();
+    await dialog.getByRole('button',{name:'重新连接',exact:true}).click();
+    await dialog.getByRole('button',{name:'检查是否受理',exact:true}).click();
+    await dialog.getByText('Bot 尚未记录该操作，请核对当前状态后重试。',{exact:true}).waitFor();
+    await dialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    assert.equal((await rpc({method:'pairing.status',params:{instanceId:hello.instanceId}},{socket})).invitation,null);
+    check('disconnect hides QR; pending cancellation survives close; reconnect/read-only review and close cancel actual server invitation');
+    await app.close();app=null;
+  }
+  const cancellationFolder=path.join(root,'native-cancellation');await fs.mkdir(cancellationFolder);
+  const cert=await fs.readFile(path.join(data,'device-access/tls-cert.pem'));
+  const {X509Certificate}=await import('node:crypto');
+  blockedServer=https.createServer({cert,key:await fs.readFile(path.join(data,'device-access/tls-key.pem'))},()=>{void fs.writeFile(path.join(cancellationFolder,'request-started'),'1');});
+  await new Promise(resolve=>blockedServer.listen(0,'127.0.0.1',resolve));
+  await fs.writeFile(path.join(cancellationFolder,'invite.json'),JSON.stringify({type:'hemi-bot-pair',version:1,endpoint:`https://127.0.0.1:${blockedServer.address().port}`,botInstanceId:hello.instanceId,inviteId:randomUUID(),requestTicket:'A'.repeat(43),expiresAt:Date.now()+120000,certificatePin:createHash('sha256').update(new X509Certificate(cert).raw).digest('base64url')}));
+  const cancellationBinary=path.join(root,'native-cancellation-client');
+  await exec('xcrun',['swiftc','-parse-as-library',path.join(repo,'apps/mobile/ios/App/App/HemiDeviceClient.swift'),path.join(repo,'apps/mobile/test/NativeCancellationIntegration.swift'),'-o',cancellationBinary],{timeout:60000});
+  const cancelled=await exec(cancellationBinary,[cancellationFolder],{timeout:25000});console.log(cancelled.stdout.trim());
+  report.checks.push('native cancellation interrupts blocked TLS request; hard deadline bounds failed cancellation; explicit local exit preserves server uncertainty');
+  assert.deepEqual(report.errors,[]);
+} finally {
+  await app?.close();await vite?.close();if(blockedServer){blockedServer.closeAllConnections();await new Promise(resolve=>blockedServer.close(resolve));}
+  if(native?.exitCode===null)native.kill('SIGTERM');
+  if(host?.exitCode===null)await new Promise(resolve=>{host.once('exit',resolve);host.kill('SIGTERM');});
+  await fs.writeFile(path.join(evidence,'native-errors.log'),nativeErrors);
+  await fs.writeFile(path.join(evidence,'report.json'),JSON.stringify(report,null,2)+'\n');
+  await fs.rm(root,{recursive:true,force:true});
+}

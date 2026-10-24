@@ -16,7 +16,10 @@
     "ios": "cap open ios",
     "android": "cap open android",
     "doctor": "cap doctor",
-    "predev": "node scripts/notices.mjs"
+    "predev": "node scripts/notices.mjs",
+    "test": "node --test test/*.test.mjs",
+    "devices:ios": "cap run ios --list",
+    "run:ios": "cap run ios"
   },
   "dependencies": {
     "@capacitor/android": "8.5.3",
@@ -24,7 +27,9 @@
     "@capacitor/clipboard": "8.0.1",
     "@capacitor/core": "8.5.3",
     "@capacitor/ios": "8.5.3",
+    "@capacitor/keyboard": "8.0.6",
     "@hemi/conversation-flow": "file:../../packages/conversation-flow",
+    "lucide-react": "1.31.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

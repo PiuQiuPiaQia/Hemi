@@ -1,5 +1,7 @@
 # 移动端与 monorepo 初始化
 
+> 2026-10-23 更新：移动端已移除离线演示、模拟数据和示例文件，启动只显示正式连接页。共享 SDK 与真实 Bot 协议适配器保留；原生 SSH／安全存储仍待接入。当前状态见 [移动端实施记录](mobile-app-implementation.md)，下文初始化与演示验收数字属于历史记录。
+
 使用 npm workspaces，统一根目录锁文件和 `npm ci`。不引入额外任务调度工具。工作在 `codex/conversation-flow-sdk` worktree，保持主检出中的 Bot 等并行修改原状。
 
 ```text
@@ -56,3 +58,7 @@ React + Capacitor 直接复用已经抽离的 React DOM 对话流及 CSS。移�
 ## 会话核心扩展
 
 断线恢复、草稿、队列、消息投影与普通消息操作现统一由 `@hemi/conversation-flow/core` 管理。移动演示已移除页面中的独立会话状态和流式计时逻辑；具体范围、真实桌面 IPC 与移动验证见 [会话核心实施说明](conversation-flow-sdk-session-core.md)。以上初始化验收数字保留为当时记录，扩展后的结果以会话核心记录为准。
+
+## 确认交互稿后的移动端实现
+
+移动端正式工程已开始迁入确认后的布局和交互，继续位于 `apps/mobile`，复用原 SDK。实现范围、当前验证提交及原生连接缺口见 [移动端实施记录](mobile-app-implementation.md)。以上初始化阶段的结果保留为历史记录，不替代本轮验证。

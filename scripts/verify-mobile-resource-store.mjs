@@ -1,0 +1,3 @@
+import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFile} from 'node:child_process';import {promisify} from 'node:util';
+const exec=promisify(execFile),root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-native-files-'));
+try{const binary=path.join(root,'native-resource-test');await exec('xcrun',['swiftc','-parse-as-library','apps/mobile/ios/App/App/HemiDeviceClient.swift','apps/mobile/ios/App/App/HemiResourceStore.swift','apps/mobile/test/NativeResourceStoreIntegration.swift','-o',binary],{timeout:60000});const result=await exec(binary,[path.join(root,'cache')],{timeout:15000});console.log(result.stdout.trim());}finally{await fs.rm(root,{recursive:true,force:true});}

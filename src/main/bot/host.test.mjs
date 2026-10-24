@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
+import { pathToFileURL } from 'node:url';
 import { createBotHost } from './host.mjs';
 const tick = () => new Promise((r) => setTimeout(r, 30));
 async function fixture(t) {
@@ -89,6 +90,56 @@ test('cloud sessions, models and credentials are isolated; duplicate request ret
     (await fs.stat(path.join(f.root, 'data/state.json'))).mode & 0o777,
     0o600,
   );
+});
+
+test('正文路径可预览但不登记交付，链接身份隔离会话且不可作为交付下载', async t => {
+  const f = await fixture(t);
+  const a = await f.req('session.create'), b = await f.req('session.create');
+  const target = path.join(f.root, 'workspace', '正文 100% 报告.md');
+  await fs.writeFile(target, '# LINK_CONTENT');
+  const stateFile = path.join(f.root, 'data/state.json');
+  const before = await fs.readFile(stateFile, 'utf8');
+  for (const link of [target, './正文 100% 报告.md', pathToFileURL(target).href]) {
+    const resolved = await f.req('file.resolve', { id: a.id, path: link });
+    assert.match(resolved.artifactId, /^link-/);
+    const preview = await f.req('file.read', { id: a.id, artifactId: resolved.artifactId, path: resolved.path });
+    assert.equal(preview.text, '# LINK_CONTENT');
+    await assert.rejects(() => f.req('file.read', { id: b.id, artifactId: resolved.artifactId, path: resolved.path }), /不属于当前会话/);
+    await assert.rejects(() => f.req('file.download', { id: a.id, artifactId: resolved.artifactId }), /未登记/);
+  }
+  assert.deepEqual((await f.req('flow.snapshot', { id: a.id })).artifacts, {});
+  assert.equal(await fs.readFile(stateFile, 'utf8'), before);
+});
+
+test('正文路径预览重查范围、符号链接、文件类型与大小，拒绝控制数据和错误 URL', async t => {
+  const f = await fixture(t), a = await f.req('session.create');
+  const dir = path.join(f.root, 'workspace');
+  const target = path.join(dir, 'report.md'), outside = path.join(f.root, 'outside.md');
+  await fs.writeFile(target, 'allowed');
+  await fs.writeFile(outside, 'outside');
+  await fs.symlink(outside, path.join(dir, 'outside-link.md'));
+  await fs.symlink(path.join(f.root, 'data/state.json'), path.join(dir, 'control-link.json'));
+  const large = await fs.open(path.join(dir, 'large.md'), 'w');
+  await large.truncate(20 * 1024 * 1024 + 1); await large.close();
+  for (const link of ['../outside.md', './outside-link.md', './control-link.json', dir,
+    './large.md', 'file://other-host/report.md', 'file:///bad%ZZ', 'https://example.test/report.md', './absent.md']) {
+    await assert.rejects(() => f.req('file.resolve', { id: a.id, path: link }));
+  }
+  const resolved = await f.req('file.resolve', { id: a.id, path: target });
+  await fs.unlink(target);
+  await fs.symlink(outside, target);
+  await assert.rejects(() => f.req('file.read', { id: a.id, artifactId: resolved.artifactId, path: resolved.path }), /允许范围/);
+});
+
+test('正文 ~/ 路径按 Host 家目录展开，读取后仍不生成交付记录', async t => {
+  const f = await fixture(t), a = await f.req('session.create');
+  const dir = await fs.mkdtemp(path.join(os.homedir(), 'hemi-bot-link-test-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const target = path.join(dir, 'notes.md');
+  await fs.writeFile(target, 'HOME_LINK');
+  const resolved = await f.req('file.resolve', { id: a.id, path: '~/' + path.relative(os.homedir(), target) });
+  assert.equal((await f.req('file.read', { id: a.id, artifactId: resolved.artifactId, path: resolved.path })).text, 'HOME_LINK');
+  assert.deepEqual((await f.req('flow.snapshot', { id: a.id })).artifacts, {});
 });
 
 test('draft model probes run on the Host without saving credentials or operations; list failures are safe', async t => {

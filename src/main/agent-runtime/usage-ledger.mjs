@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { hydrateCandidate } from './model-policy.mjs';
 import { createModelRecovery, retryAfterMs } from './model-recovery.mjs';
+import { createRequestImageProjector, isRequestMediaTooLarge } from './request-images.mjs';
 
 const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 const candidateIndex = provider => provider === 'hemi-fallback' ? 1 : /^hemi-fallback-\d+$/.test(provider) ? Number(provider.split('-').at(-1)) : 0;
@@ -13,6 +14,8 @@ export function usageOf(message) {
 
 /** 包住 SDK 共用 streamFunction，压缩同样经过这里；fetch 边界逐次记真实 HTTP 尝试。 */
 export function controlledStream(stream, getExecution) {
+  const projectImages = createRequestImageProjector();
+  const reducedEndpoints = new Set();
   return (model, context, options = {}) => {
     const output = createAssistantMessageEventStream();
     void (async () => {
@@ -30,10 +33,14 @@ export function controlledStream(stream, getExecution) {
         if (!candidate || candidate.model !== model.id) throw new Error('实际模型不在冻结计划中');
         if (candidate.supportsVision !== true && (context.messages ?? []).some(message => Array.isArray(message.content) && message.content.some(block => block.type === 'image'))) throw new Error('unsupported-modality：实际候选不支持历史中的图像，未删图或发出请求');
         // The SDK may update its live message while streaming. Retries always use the pre-request context.
-        const requestContext = { ...context, messages: structuredClone(context.messages ?? []) };
         const logicalCallId = `call-${randomUUID()}`;
-        const hasTools = context.tools?.length || requestContext.messages.some(message => message.role === 'system' && message.toolsAdded?.length);
+        const hasTools = context.tools?.length || context.messages?.some(message => message.role === 'system' && message.toolsAdded?.length);
         const purpose = execution.purpose && !['main','subagent'].includes(execution.purpose) ? execution.purpose : execution.compacting?.() || !hasTools ? 'compaction' : execution.purpose;
+        const endpoint = `${candidate.api}:${candidate.baseUrl}`;
+        let projection = await projectImages(context.messages ?? [], { mode: reducedEndpoints.has(endpoint) ? 'retry' : 'normal', signal: options.signal });
+        const requestContext = { ...context, messages: structuredClone(projection.messages) };
+        if (projection.stats.omitted || projection.stats.resized) execution.onImageProjection?.(projection.stats);
+        let mediaRetried = false;
         execution.onRequestStart?.();
         while (true) {
           options.signal?.throwIfAborted();
@@ -44,7 +51,7 @@ export function controlledStream(stream, getExecution) {
           const ids = [], failure = {};
           const attempt = new AbortController();
           const signal = options.signal ? AbortSignal.any([options.signal, attempt.signal]) : attempt.signal;
-          let timedOut = false, resetSent = !retrying;
+          let timedOut = false, resetSent = !retrying, responseStarted = false;
           const timeoutMs = recovery.state ? Math.min(15000, Math.max(1, recovery.state.deadlineAt - (execution.recoveryTestClock?.now ?? Date.now)())) : 60000;
           let timeout = setTimeout(() => { timedOut = true; attempt.abort(new Error('模型连接超时')); }, timeoutMs);
           const trackedFetch = async (url, init) => {
@@ -75,7 +82,7 @@ export function controlledStream(stream, getExecution) {
                 if (!startForwarded) { output.push(event); startForwarded = true; }
               } else {
                 if (!resetSent) { execution.onRequestReset?.(); resetSent = true; }
-                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') { clearTimeout(timeout); timeout = null; }
+                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') { responseStarted = true; clearTimeout(timeout); timeout = null; }
                 output.push(event);
               }
             }
@@ -93,7 +100,27 @@ export function controlledStream(stream, getExecution) {
           if (!finalMessage) throw new Error('provider 流未返回终态');
           if (!['error','aborted'].includes(finalMessage.stopReason)) {
             if (!resetSent) execution.onRequestReset?.();
+            if (mediaRetried) reducedEndpoints.add(endpoint);
             recovery.success();
+            break;
+          }
+          // 参考 zcode 的 compact media retry：先缩减请求媒体，再重试同一次模型调用。
+          // 不重跑工具、不切模型，也不让 413 进入三十分钟的网络重试。
+          if (finalMessage.stopReason === 'error' && !responseStarted && isRequestMediaTooLarge({ ...failure, message: finalMessage.errorMessage })) {
+            if (!mediaRetried && projection.stats.bytesAfter > 0) {
+              const reduced = await projectImages(context.messages ?? [], { mode: 'retry', signal: options.signal });
+              if (reduced.stats.bytesAfter < projection.stats.bytesAfter) {
+                projection = reduced;
+                requestContext.messages = structuredClone(reduced.messages);
+                execution.onImageProjection?.(reduced.stats);
+                mediaRetried = true;
+                retrying = true;
+                continue;
+              }
+            }
+            const summary = failure.status === 413 || /\b413\b/.test(finalMessage.errorMessage ?? '')
+              ? '模型请求体超过服务限制（HTTP 413）' : '模型图片请求超过服务限制';
+            finalMessage = { ...finalMessage, errorMessage: `${summary}。请减少本轮附件或输入内容；原始会话记录已保留。` };
             break;
           }
           const enabled = ['main', 'subagent'].includes(execution.purpose);

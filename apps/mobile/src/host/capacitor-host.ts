@@ -9,7 +9,7 @@ const cancelled: FlowResult<void> = {
 };
 
 /** This is the mobile host boundary; the shared UI never imports Capacitor. */
-export function createMobileHost(): ConversationFlowHost {
+export function createMobileHost(resources?: ConversationFlowHost['resources']): ConversationFlowHost {
   return createWebHost({
     copyText: Capacitor.isNativePlatform() ? async ({ text }, { signal }) => {
       if (signal.aborted) return cancelled;
@@ -41,6 +41,6 @@ export function createMobileHost(): ConversationFlowHost {
         return { ok: false, error: { code: 'failed', message: '未能打开链接，请重试' } };
       }
     },
-    // File capabilities stay unavailable until a Bot resource adapter is wired.
+    resources,
   });
 }

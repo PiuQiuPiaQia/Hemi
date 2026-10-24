@@ -5,7 +5,6 @@ import { replyFileReferences } from './reply-file-references.js';
 type FlowPart = { partId: string; kind: string } & Record<string, unknown>;
 const referencesByItem = new WeakMap<object, ReturnType<typeof replyFileReferences>>();
 const cardsByArtifact = new WeakMap<object, Map<string, FlowPart>>();
-const linksByItem = new WeakMap<object, Map<string, FlowPart>>();
 
 /** Recover presentation from explicit evidence without mutating the archive or registering guessed files. */
 export function flowDeliverableParts(snapshot: FlowSnapshotView): Map<string, FlowPart[]> {
@@ -47,10 +46,11 @@ export function flowDeliverableParts(snapshot: FlowSnapshotView): Map<string, Fl
     for (const part of item.parts) {
       if (part.kind !== 'deliverable') { parts.push(part); continue; }
       const id = String(part.artifactId ?? '');
+      const artifact = byId.get(id);
+      if (!artifact) continue;
       if (keys(item.runId).has(id)) continue;
       keys(item.runId).add(id);
-      const artifact = byId.get(id);
-      parts.push(artifact ? delivery(artifact, part.partId) : { ...part, conversationId: snapshot.conversationId });
+      parts.push(delivery(artifact, part.partId));
     }
     // A read is evidence only when its image is already a registered deliverable AND
     // the assistant explicitly handed over its directory. Reference images stay tool activity.
@@ -71,20 +71,12 @@ export function flowDeliverableParts(snapshot: FlowSnapshotView): Map<string, Fl
       const produced = (byRun.get(item.runId) ?? []).filter(a =>
         (a.path === reference.path || relative && a.path.replaceAll('\\', '/').endsWith('/' + suffix)));
       const artifact = produced.at(-1) ?? byPath.get(reference.path);
-      const key = artifact?.artifactId ?? reference.path;
+      // 正文路径只提供点击入口；没有登记事实就不能冒充交付卡片。
+      if (!artifact) continue;
+      const key = artifact.artifactId;
       if (keys(item.runId).has(key)) continue;
       keys(item.runId).add(key);
-      if (artifact) parts.push(delivery(artifact, `file:${item.itemId}:${key}`));
-      else {
-        let links = linksByItem.get(item);
-        if (!links) { links = new Map(); linksByItem.set(item, links); }
-        if (!links.has(key)) links.set(key, {
-          partId: `file:${item.itemId}:${key}`, kind: 'deliverable', artifactId: '',
-          conversationId: snapshot.conversationId, linkPath: reference.path,
-          name: reference.name, description: reference.description,
-        });
-        parts.push(links.get(key)!);
-      }
+      parts.push(delivery(artifact, `file:${item.itemId}:${key}`));
     }
     tails.set(item.runId, target);
   }

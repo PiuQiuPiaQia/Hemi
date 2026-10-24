@@ -33,6 +33,9 @@ import { cloudDirectory, listCloudDirectories } from './directories.mjs';
 import { createBotExecutor, validateCloudModel } from './runtime.mjs';
 import { modelEndpoint } from './models.mjs';
 import { listRemoteModels } from '../services/text-model.mjs';
+import { createDeviceGateway } from './device-gateway.mjs';
+import { createResourceFiles } from './resource-files.mjs';
+import { createAttachmentUploads } from './attachment-uploads.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
@@ -156,6 +159,40 @@ export async function createBotHost({
   });
   const privatePath = (target) =>
     inside(controlDir, target) || hitsDenyPath(target, os.homedir());
+  function fileLinkPath(session, value) {
+    let raw = String(value ?? '').trim();
+    if (!raw || /[\x00-\x1f]/.test(raw)) fail('文件链接无效。');
+    if (/^file:/i.test(raw)) {
+      try {
+        const url = new URL(raw);
+        if (url.hostname && url.hostname !== 'localhost')
+          fail('文件链接主机不匹配。', 'permission');
+        raw = decodeURIComponent(url.pathname);
+      } catch (error) {
+        if (error.code === 'permission') throw error;
+        fail('文件链接无效。');
+      }
+    } else if (/^[a-z][a-z\d+.-]*:/i.test(raw)) fail('文件链接无效。');
+    if (raw === '~') raw = os.homedir();
+    else if (raw.startsWith('~/')) raw = path.join(os.homedir(), raw.slice(2));
+    else if (raw.startsWith('~')) fail('文件链接无效。');
+    return { raw, absolute: path.resolve(session.dir, raw) };
+  }
+  async function readLinkedFile(session, absolute) {
+    if (privatePath(absolute)) fail('链接指向的位置不能打开。', 'permission');
+    let real;
+    try { real = await fsp.realpath(absolute); }
+    catch { fail('云端文件不存在，可能已被移动或删除。', 'missing'); }
+    const home = await fsp.realpath(os.homedir());
+    const root = await fsp.realpath(session.dir);
+    if (privatePath(real) || !(inside(home, real) || inside(root, real)))
+      fail('链接不在家目录与当前工作目录的允许范围内。', 'permission');
+    const stat = await fsp.stat(real);
+    if (!stat.isFile() || stat.size > 20 * 1024 * 1024)
+      fail('文件不可读或超过 20 MB 预览限制。');
+    // 链接身份按会话隔离，仅供受控预览，不写入交付登记或持久化状态。
+    return { id: 'link-' + hash([session.id, real]).slice(0, 40), path: real, real, name: path.basename(real), stat };
+  }
   const readOwnedFile = async (session, id) => {
     const file = session.files?.[id];
     if (
@@ -812,7 +849,7 @@ export async function createBotHost({
           cmd.input.conversationId = s.id;
           cmd.input.inputSource = 'text';
           if (!validId(cmd.input.inputId)) fail('缺少稳定输入身份。');
-          if (!String(cmd.input.text ?? '').trim()) fail('消息不能为空。');
+          if (!String(cmd.input.text ?? '').trim() && !(Array.isArray(cmd.input.attachmentIds) && cmd.input.attachmentIds.length)) fail('消息不能为空。');
           if (cmd.input.workflow)
             fail('当前 Bot 尚未安装该工作流能力。', 'unsupported');
         }
@@ -838,7 +875,7 @@ export async function createBotHost({
         await persistSession(s.id);
         if (result.ok && cmd.type === 'send') {
           if (s.title === '新对话')
-            s.title = String(cmd.input.text).trim().slice(0, 24);
+            s.title = String(cmd.input.text ?? '').trim().slice(0, 24) || s.attachments[cmd.input.attachmentIds?.[0]]?.name.slice(0,24) || '新对话';
           save();
         }
         return result;
@@ -921,6 +958,10 @@ export async function createBotHost({
   async function request(method, p = {}) {
     if (method !== 'handshake' && p.instanceId !== state.instanceId)
       fail('云端 Bot 身份不同，请重新核对连接。', 'conflict');
+    if (method.startsWith('pairing.') || method.startsWith('devices.'))
+      return gateway.management(method, p);
+    if (method==='resource.stat'||method==='resource.chunk')return resourceFiles(method,p);
+    if (method.startsWith('attachment.upload.'))return uploads(method,p);
     if (method === 'handshake')
       return {
         instanceId: state.instanceId,
@@ -936,12 +977,14 @@ export async function createBotHost({
         defaultDir: state.defaultDir,
         enabled: state.enabled,
         configured: state.initialized === true,
+        capabilities: { devicePairing: 1 },
       };
     if (method === 'snapshot' && p.revision === state.revision)
       return {
         instanceId: state.instanceId,
         revision: state.revision,
         notModified: true,
+        deviceAccess: gateway.summary(),
       };
     if (method === 'model.test' || method === 'model.list') {
       const config = syncModelConfig(p.config ?? {});
@@ -968,6 +1011,7 @@ export async function createBotHost({
         defaultModel: state.defaultModel,
         lastConversationModelKey: state.lastConversationModelKey ?? null,
         recentDirs: state.recentDirs,
+        deviceAccess: gateway.summary(),
         models: Object.entries(state.models).map(([key, rev]) =>
           publicModel(state.versions[rev], rev),
         ),
@@ -1054,26 +1098,14 @@ export async function createBotHost({
     }
     if (method === 'file.resolve') {
       const s = requireSession(p.id);
-      let raw = String(p.path ?? '');
-      if (raw.startsWith('file:')) {
-        let url;
-        try {
-          url = new URL(raw);
-        } catch {
-          fail('文件链接无效。');
-        }
-        if (url.hostname && url.hostname !== 'localhost')
-          fail('文件链接主机不匹配。', 'permission');
-        raw = decodeURIComponent(url.pathname);
-      }
+      const { raw, absolute } = fileLinkPath(s, p.path);
       const retained = new Set(
         (s.flow?.timeline ?? []).map((item) => item.runId),
       );
       const files = Object.values(s.files).filter((file) =>
         retained.has(file.runId),
       );
-      const absolute = path.resolve(s.dir, raw),
-        exact = files.filter((file) => file.path === absolute);
+      const exact = files.filter((file) => file.path === absolute);
       const matches = exact.length
         ? exact
         : files.filter(
@@ -1081,17 +1113,23 @@ export async function createBotHost({
           );
       const paths = new Set(matches.map((file) => file.path)),
         file = paths.size === 1 ? matches.at(-1) : null;
-      if (!file) fail('此云端文件尚未登记为可访问的交付物。', 'missing');
+      const target = file ?? await readLinkedFile(s, absolute);
       return {
         ok: true,
-        artifactId: file.id,
-        path: file.path,
-        name: file.name,
+        artifactId: target.id,
+        path: target.path,
+        name: target.name,
       };
     }
     if (method === 'file.read' || method === 'file.download') {
-      const file = await readOwnedFile(requireSession(p.id), p.artifactId),
-        b = await fsp.readFile(file.real);
+      const s = requireSession(p.id);
+      const linked = method === 'file.read' && String(p.artifactId).startsWith('link-');
+      const file = linked
+        ? await readLinkedFile(s, fileLinkPath(s, p.path).absolute)
+        : await readOwnedFile(s, p.artifactId);
+      if (linked && file.id !== p.artifactId)
+        fail('文件链接不属于当前会话或原文件已变化。', 'missing');
+      const b = await fsp.readFile(file.real);
       const mime = MIME[path.extname(file.name).toLowerCase()];
       if (method === 'file.download')
         return { ok: true, name: file.name, base64: b.toString('base64') };
@@ -1233,6 +1271,28 @@ export async function createBotHost({
   // Recover interrupted runs before publishing any snapshot. Recovery never auto-resends accepted work.
   for (const id of state.order) controller(id);
   save();
+  const resourceFiles=createResourceFiles({resolve:async p=>{
+    const session=requireSession(p.id);
+    if(p.kind==='deliverable')return readOwnedFile(session,p.artifactId);
+    if(p.kind!=='attachment')fail('文件资源类型无效。');
+    const attachment=session.attachments[p.attachmentId];
+    if(!attachment)fail('附件不存在或不属于当前会话。','missing');
+    let real;try{real=await fsp.realpath(attachment.path);}catch{fail('附件原文件已被移动或删除。','missing');}
+    if(!inside(path.join(dataDir,'attachments',session.id),real))fail('附件不在本会话目录内。','permission');
+    return{real,name:attachment.name,stat:await fsp.stat(real)};
+  }});
+  const uploads=createAttachmentUploads({dataDir,requireSession,register(item,bytes){
+    const s=requireSession(item.conversationId),id='att-'+item.uploadId;
+    if(s.attachments[id]){
+      if(s.attachments[id].sha256!==item.sha256||s.attachments[id].name!==item.name)fail('附件身份已用于其他内容。','conflict');
+      return attachmentView(s.attachments[id]);
+    }
+    const dir=path.join(dataDir,'attachments',s.id);privateDirectory(dir);
+    const file=path.join(dir,id+path.extname(item.name));fs.writeFileSync(file,bytes,{mode:0o600});
+    const value={id,conversationId:s.id,name:item.name,kind:item.kind,path:file,size:bytes.length,source:'picker',at:Date.now(),sha256:item.sha256};
+    s.attachments[id]=value;save();return attachmentView(value);
+  }});
+  const gateway = await createDeviceGateway({ dataDir, instanceId: state.instanceId, request });
   return {
     request,
     subscribe: (fn) => {
@@ -1242,6 +1302,7 @@ export async function createBotHost({
     async close() {
       closed = true;
       clearTimeout(flushTimer);
+      await gateway.close();
       await executor.close();
       for (const c of controllers.values()) await c.close();
       save();

@@ -362,6 +362,7 @@ test('交付文件同回合去重，后续回合更新仍保留入口', () => {
     { kind: 'assistant', itemId: 'r1:a:in-1', runId: 'r1', parts: [
       { partId: 't1', kind: 'text', content: '做好了' },
       { partId: 'dl-1', kind: 'deliverable', artifactId: 'd-x', name: '图.svg' },
+      { partId: 'dl-duplicate', kind: 'deliverable', artifactId: 'd-x', name: '图.svg' },
     ] },
     user2,
     { kind: 'assistant', itemId: 'r2:a:in-2', runId: 'r2', parts: [
@@ -370,7 +371,10 @@ test('交付文件同回合去重，后续回合更新仍保留入口', () => {
       { partId: 'dl-3', kind: 'deliverable', artifactId: 'd-y', name: '表.md' },
     ] },
   ];
-  const rows = projectFlowTimeline(snapshot(timeline)).transcripts;
+  const rows = projectFlowTimeline({ ...snapshot(timeline), artifacts: {
+    'd-x': { artifactId: 'd-x', kind: 'file', name: '图.svg', path: '/workspace/图.svg', producers: [{ runId: 'r1', generation: 1 }, { runId: 'r2', generation: 1 }] },
+    'd-y': { artifactId: 'd-y', kind: 'file', name: '表.md', path: '/workspace/表.md', producerRunId: 'r2' },
+  } }).transcripts;
   const chips = rows.flatMap((row) => (row.parts ?? []).filter((part) => part.type === 'file-delivery'));
   assert.equal(chips.length, 3);
   assert.deepEqual(chips.map((chip) => chip.artifactId), ['d-x', 'd-x', 'd-y']);
@@ -420,7 +424,9 @@ test('067 缓存命中也参与交付去重，删除前一个入口后后一个�
   const project = createFlowTimelineProjector();
   const one = { itemId: 'one', kind: 'assistant', runId: 'r', parts: [{ partId: 'd1', kind: 'deliverable', artifactId: 'file', name: 'a.txt' }] };
   const two = { itemId: 'two', kind: 'assistant', runId: 'r', parts: [{ partId: 'd2', kind: 'deliverable', artifactId: 'file', name: 'a.txt' }] };
-  const f = { ...snapshot([one, two]), runs: { r: { closedAt: 2 } } };
+  const f = { ...snapshot([one, two]), runs: { r: { closedAt: 2 } }, artifacts: {
+    file: { artifactId: 'file', kind: 'file', name: 'a.txt', path: '/workspace/a.txt', producerRunId: 'r' },
+  } };
   assert.deepEqual(project(f).transcripts.map(t => t.id), ['one']);
   assert.deepEqual(project({ ...f, revision: 6 }).transcripts.map(t => t.id), ['one']);
   assert.deepEqual(project({ ...f, timeline: [two] }).transcripts.map(t => t.id), ['two']);

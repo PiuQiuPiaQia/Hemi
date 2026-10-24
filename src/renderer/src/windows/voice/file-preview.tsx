@@ -899,7 +899,7 @@ export function FilePreviewPanel({
           </div>
         ) : activeResult.kind === 'document' && activeResult.document && (activeTab.kind === 'attachment'||activeTab.kind==='deliverable') ? (
           <Suspense fallback={<p className="h24-preview-status" role="status">正在打开文档…</p>}>
-            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? '文档'} readText={() => activeTab.kind==='attachment'?bridge.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId):bridge.readConversationDeliverableText?.(activeTab.conversationId,activeTab.artifactId)??Promise.resolve({ok:false,message:'暂无法读取文档文字'})} />
+            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? '文档'} readText={() => activeTab.kind==='attachment'?bridge.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId):bridge.readConversationDeliverableText?.(activeTab.conversationId,activeTab.artifactId,activeTab.linkPath)??Promise.resolve({ok:false,message:'暂无法读取文档文字'})} />
           </Suspense>
         ) : activeResult.kind === 'video' && activeResult.mediaUrl ? (
           <VideoPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? '预览视频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />

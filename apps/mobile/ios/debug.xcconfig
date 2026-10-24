@@ -1,1 +1,2 @@
 CAPACITOR_DEBUG = true
+#include? "signing.local.xcconfig"

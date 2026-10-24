@@ -96,15 +96,18 @@ export function createBotConversationBridge(
     listSlashCandidates: (id: string) => command('skills', { id }),
     listReferences: (id: string, query: string) =>
       command('references', { id, query }),
-    resolveConversationLink: (id: string, target: string) =>
-      command('file.resolve', { id, path: target }),
-    readConversationDeliverableText: (id: string, artifactId: string) =>
-      command('file.read', { id, artifactId, textOnly: true }),
-    readConversationDeliverable: async (id: string, artifactId: string) => {
+    resolveConversationLink: async (id: string, target: string) => {
+      try { return await command('file.resolve', { id, path: target }); }
+      catch (error) { return { ok: false, message: error instanceof Error ? error.message : '云端文件链接无法打开' }; }
+    },
+    readConversationDeliverableText: (id: string, artifactId: string, linkPath?: string | null) =>
+      command('file.read', { id, artifactId, textOnly: true, ...(linkPath ? { path: linkPath } : {}) }),
+    readConversationDeliverable: async (id: string, artifactId: string, linkPath?: string | null) => {
       try {
         const file = await command<Record<string, unknown>>('file.read', {
           id,
           artifactId,
+          ...(linkPath ? { path: linkPath } : {}),
         });
         if (file.document) {
           const doc = file.document as { base64?: string };

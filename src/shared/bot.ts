@@ -5,6 +5,7 @@ import type {
   SkillSelectionView,
   ModelProviderSaveInput,
 } from './protocol';
+import type {BotDeviceAccess} from './bot-pairing';
 export type BotModel = {
   key: string;
   providerId: string;
@@ -74,6 +75,7 @@ export type BotBinding = {
   boundAt: number;
 };
 export type BotCache = {
+  deviceAccess?: BotDeviceAccess;
   selectedId?: string | null;
   instanceId: string;
   revision: number;
@@ -140,6 +142,16 @@ export type BotDirectory = {
   truncated?: boolean;
 };
 export type BotMethod =
+  | 'pairing.status'
+  | 'pairing.operation'
+  | 'pairing.configure'
+  | 'pairing.disable'
+  | 'pairing.create'
+  | 'pairing.approve'
+  | 'pairing.reject'
+  | 'pairing.cancel'
+  | 'devices.list'
+  | 'devices.revoke'
   | 'snapshot'
   | 'session.open'
   | 'session.create'
@@ -199,6 +211,10 @@ export type BotBridge = {
     method: BotMethod,
     params?: Record<string, unknown>,
   ) => Promise<T>;
+  commandResult?: <T = unknown>(
+    method: BotMethod,
+    params?: Record<string, unknown>,
+  ) => Promise<{ok: true; result: T} | {ok: false; code: string; message: string}>;
   upload: (p: {
     id: string;
     filePath?: string;

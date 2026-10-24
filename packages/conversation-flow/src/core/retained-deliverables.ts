@@ -4,7 +4,9 @@ import type { ConversationDeliverableView, FlowSnapshotView } from './protocol.j
 export function retainedDeliverables(flow: FlowSnapshotView): ConversationDeliverableView[] {
   const runs = new Set(flow.timeline.map(item => item.runId));
   return (Object.values(flow.artifacts ?? {}).filter(Boolean) as ConversationDeliverableView[])
-    .filter(item => !item.producers?.length || item.producers.some(producer => producer.runId
+    // Bot 与旧档可能只有 producerRunId；回卷后也必须排除已撤回的登记。
+    .filter(item => item.producers?.length ? item.producers.some(producer => producer.runId
       ? runs.has(producer.runId)
-      : producer.taskId ? Boolean(flow.tasks[producer.taskId]) : producer.generation === flow.generation));
+      : producer.taskId ? Boolean(flow.tasks[producer.taskId]) : producer.generation === flow.generation)
+      : !item.producerRunId || runs.has(item.producerRunId));
 }

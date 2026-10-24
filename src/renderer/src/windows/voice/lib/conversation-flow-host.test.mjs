@@ -8,7 +8,7 @@ function fixture(online = true) {
   const api = {
     async command(method, params) {
       calls.push({method, params});
-      if (method === 'file.resolve') return {ok: true, artifactId: 'remote-report'};
+      if (method === 'file.resolve') return {ok: true, artifactId: 'link-remote-report', path: '/project/report.md'};
       if (method === 'file.read') return {ok: true, text: 'REMOTE_CONTENT', name: 'report.md', path: '/project/report.md'};
       throw new Error(`Unexpected command: ${method}`);
     },
@@ -33,7 +33,15 @@ test('shared SDK resource host uses the injected Bot bridge and pins remote inst
   assert.equal(read.value.content.text, 'REMOTE_CONTENT');
   assert.deepEqual(calls.map(call => call.method), ['file.resolve', 'file.read']);
   assert.ok(calls.every(call => call.params.id === 'same-conversation-id' && call.params.expectedInstanceId === 'instance-b'));
+  assert.equal(calls[1].params.path, '/project/report.md');
   read.value.release();
+});
+
+test('Bot 正文路径解析失败保留宿主原因供界面展示', async () => {
+  const bridge = createBotConversationBridge({ command: async () => { throw new Error('链接指向的位置不能打开。'); } },
+    () => ({ binding: { instanceId: 'instance-b' } }), {});
+  assert.deepEqual(await bridge.resolveConversationLink('chat', '~/.ssh/id_ed25519'),
+    { ok: false, message: '链接指向的位置不能打开。' });
 });
 
 test('Bot SDK menus preserve remote download and reject local file actions or offline downloads', async () => {

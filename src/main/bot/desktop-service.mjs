@@ -33,6 +33,16 @@ const METHODS = new Set([
   'skills',
   'operation.get',
   'diagnostics',
+  'pairing.status',
+  'pairing.operation',
+  'pairing.configure',
+  'pairing.disable',
+  'pairing.create',
+  'pairing.approve',
+  'pairing.reject',
+  'pairing.cancel',
+  'devices.list',
+  'devices.revoke',
 ]);
 const fingerprint = (value) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -128,15 +138,18 @@ export function createBotDesktopService({
     });
   }
   async function refresh() {
-    if (!binding || closed) return getState();
+    if (!binding || closed || disconnected || stoppedConfirmed) return getState();
     if (polling) return polling;
     const identity = binding.instanceId,
       host = binding.host,
       target = activeId ?? cache?.sessions[0]?.id;
+    const stale = () => closed || disconnected || stoppedConfirmed ||
+      binding?.instanceId !== identity || binding?.host !== host;
     polling = (async () => {
       try {
         if (!online) {
           const hello = await direct('handshake');
+          if (stale()) return getState();
           if (hello.protocol !== BOT_PROTOCOL || hello.instanceId !== identity)
             fail('Bot 身份或协议不兼容，请核对后维护。', 'conflict');
         }
@@ -151,12 +164,15 @@ export function createBotDesktopService({
               : cache?.revision
             : -1,
         });
+        if (stale()) return getState();
         if (
           snapshot.notModified &&
           binding?.instanceId === identity &&
           binding?.host === host
         ) {
           const changed = !online;
+          const devicesChanged = JSON.stringify(cache?.deviceAccess) !== JSON.stringify(snapshot.deviceAccess);
+          if (cache) cache.deviceAccess = snapshot.deviceAccess;
           online = true;
           retryCount = 0;
           retryAt = 0;
@@ -165,7 +181,7 @@ export function createBotDesktopService({
             cache.syncedAt = lastConnectedAt;
             atomicJson(cacheFile, cache);
           }
-          return changed ? publish() : getState();
+          return changed || devicesChanged ? publish() : getState();
         }
         if (binding?.instanceId !== identity || binding?.host !== host)
           return getState();
@@ -192,6 +208,7 @@ export function createBotDesktopService({
             continue;
           }
           const ack = await direct('session.draft', { id, ...draft });
+          if (stale()) return getState();
           if (ack.ok) {
             if (localDrafts.items[id] === draft) delete localDrafts.items[id];
             detail.draft = localDrafts.items[id] ?? ack.draft;
@@ -236,6 +253,7 @@ export function createBotDesktopService({
           const receipt = await direct('operation.get', {
             operationId: syncStatus.requestId,
           });
+          if (stale()) return getState();
           if (receipt.status === 'interrupted') {
             syncStatus = { ...syncStatus, phase: 'interrupted' };
             atomicJson(syncFile, syncStatus);
@@ -253,7 +271,7 @@ export function createBotDesktopService({
         }
         return publish();
       } catch (e) {
-        if (binding?.instanceId === identity) {
+        if (!stale()) {
           online = false;
           retryCount = ['permission', 'conflict', 'unsupported'].includes(
             e.code,
@@ -532,11 +550,11 @@ export function createBotDesktopService({
       return result;
     }
     if (method === 'connection.disconnect') {
-      await transport.disconnect?.();
       disconnected = true;
       online = false;
       error = '连接已断开，云端可能仍在运行。';
       publish();
+      await transport.disconnect?.();
       return { ok: true };
     }
     if (method === 'service.start') {
@@ -650,7 +668,7 @@ export function createBotDesktopService({
         delete localDrafts.items[params.id];
       atomicJson(draftsFile, localDrafts);
     }
-    if (
+    if (!method.startsWith('pairing.') && !method.startsWith('devices.') &&
       ![
         'snapshot',
         'flow.snapshot',

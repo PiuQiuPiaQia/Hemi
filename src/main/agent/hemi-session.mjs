@@ -630,9 +630,16 @@ export function createHemiSession({
           break;
         }
         case 'compaction_start':
+          compacting = true;
+          log?.info?.(`[${label}] 上下文压缩开始`);
+          break;
         case 'compaction_end':
-          compacting = event.type === 'compaction_start';
-          log?.info?.(`[${label}] 上下文压缩${event.type === 'compaction_start' ? '开始' : '完成'}`);
+          compacting = false;
+          // SDK 失败／取消也会派发 end，不能把结束事件当作摘要已成功持久化。
+          if (event.errorMessage) log?.warn?.(`[${label}] 上下文压缩失败：${event.errorMessage}`);
+          else if (event.aborted) log?.info?.(`[${label}] 上下文压缩已取消`);
+          else if (event.result) log?.info?.(`[${label}] 上下文压缩完成`);
+          else log?.warn?.(`[${label}] 上下文压缩结束，未生成摘要`);
           break;
         case 'agent_settled': {
           const finished = run;
@@ -748,6 +755,7 @@ export function createHemiSession({
     if (executionContext) session.agent.streamFunction = controlledStream(session.agent.streamFunction, () => runtimeExecution ? {
       ...runtimeExecution, compacting: () => compacting, onCandidateSelected: candidate => { runtimeExecution.actualCandidate = candidate; },
       beforeRequest: async () => runtimeExecution.persistSession?.(await exportEntries(), runtimeExecution),
+      onImageProjection: stats => log?.info?.(`[${label}] 请求图片投影 ${stats.mode}：${stats.imagesBefore} 张，省略 ${stats.omitted} 张，压缩 ${stats.resized} 张，Base64 ${stats.bytesBefore} → ${stats.bytesAfter} 字节`),
       onRequestStart: () => emitter.emit('stream', { type: 'hemi_request_start' }),
       onRequestReset: () => emitter.emit('stream', { type: 'hemi_request_reset' }),
       onRecoveryControl: control => { modelRecoveryControl = control; if (!control) { modelRecoveryActive = false; touchStallWatchdog(); } },

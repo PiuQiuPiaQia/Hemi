@@ -4,6 +4,7 @@ App/output
 App/App/public
 DerivedData
 xcuserdata
+signing.local.xcconfig
 
 # Cordova plugins for Capacitor
 capacitor-cordova-ios-plugins
