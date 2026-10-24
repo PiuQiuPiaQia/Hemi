@@ -8,6 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { createHemiSession } from './hemi-session.mjs';
 import { createRunJournal } from '../agent-runtime/run-journal.mjs';
+import { createContextStore } from '../agent-runtime/context-store.mjs';
 import { testPng } from '../../../scripts/lib/local-image-fixtures.mjs';
 
 function finish(res, content) {
@@ -36,7 +37,7 @@ async function fixture(t, handler, { images = 0, settings = {} } = {}) {
   for (let i = 0; i < images; i++) {
     history.appendMessage({ role: 'user', content: [{ type: 'text', text: `frame-${i}.png` }, { type: 'image', mimeType: 'image/png', data }], timestamp: i });
   }
-  const execution = { journal, owner, purpose: 'main', plan: { role: 'main', primary: config, allowedFallbacks: [] },
+  const execution = { journal, owner, contextStore: createContextStore({dir: path.join(dir, 'contexts')}), allowedRefs: [], purpose: 'main', plan: { role: 'main', primary: config, allowedFallbacks: [] },
     store: { resolveStrict: async () => ({ ok: true, config }) }, budgets: { maxRequestsPerRun: 20 }, cancelled: () => false };
   const session = createHemiSession({ cwd: dir, agentDir: dir, model: config, tools: ['read'], features: {},
     executionContext: execution, entries: [history.getHeader(), ...history.getEntries()], settings,

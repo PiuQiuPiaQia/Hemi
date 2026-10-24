@@ -40,7 +40,11 @@ async function fixture(t) {
         throw Object.assign(new Error('test disconnected'), {
           code: 'offline',
         });
-      const result = await host.request(method, p);
+      // Windows exercises the actual desktop service and Host state. The remote
+      // Linux /bin/sh initialization probe is the only substituted OS boundary.
+      const result = process.platform === 'win32' && method === 'initialize.verify'
+        ? {ok: true} : await host.request(method, p);
+      if (process.platform === 'win32' && method === 'handshake') result.configured = true;
       if (method === 'snapshot' && snapshotGate) {
         const gate = snapshotGate; snapshotGate = null;
         gate.started(); await gate.wait;
@@ -80,7 +84,7 @@ async function fixture(t) {
     requestId: 'seed-model',
     models: [config],
   });
-  await host.request('initialize.verify', {
+  if (process.platform !== 'win32') await host.request('initialize.verify', {
     instanceId: hello.instanceId,
     requestId: 'seed-verify',
   });

@@ -18,7 +18,7 @@ async function until(fn) {
 
 test(
   'actual Hemi SDK executes and registers a cloud file, returns its bytes, and resumes conversation after reload',
-  { timeout: 30000 },
+  { timeout: 30000, skip: process.platform === 'win32' && 'Linux Host executes POSIX shell commands' },
   async (t) => {
     const root = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-sdk-')),

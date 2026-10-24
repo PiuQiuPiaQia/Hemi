@@ -7,6 +7,7 @@ import path from 'node:path';
 import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {createHemiSession} from './hemi-session.mjs';
 import {createRunJournal} from '../agent-runtime/run-journal.mjs';
+import {createContextStore} from '../agent-runtime/context-store.mjs';
 import {createRunPartProjector} from '../services/flow-parts-projection.mjs';
 import {applyFlowFact, createFlowSnapshot} from '../../shared/conversation-flow.mjs';
 
@@ -28,7 +29,7 @@ test('a failed stream retries the same model request, replacing only its partial
   const config={modelKey:'p/m',providerId:'p',credentialRef:'p',model:'model',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'};
   const journal=createRunJournal({dir:path.join(dir,'journal')}),owner={conversationId:'test',rootRunId:'run',generation:1};
   await journal.beginRoot(owner);
-  const execution={journal,owner,purpose:'main',plan:{role:'main',primary:config,allowedFallbacks:[]},store:{resolveStrict:async()=>({ok:true,config})},budgets:{maxRequestsPerRun:60},cancelled:()=>false};
+  const execution={journal,owner,contextStore:createContextStore({dir:path.join(dir,'contexts')}),allowedRefs:[],purpose:'main',plan:{role:'main',primary:config,allowedFallbacks:[]},store:{resolveStrict:async()=>({ok:true,config})},budgets:{maxRequestsPerRun:60},cancelled:()=>false};
   const session=createHemiSession({cwd:dir,agentDir:dir,model:config,tools:['read'],features:{},accessWorkspaceDir:dir,executionContext:execution,initTimeoutMs:2000,stallTimeoutMs:10000});
   t.after(async()=>{session.dispose();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
   let snapshot=createFlowSnapshot({conversationId:'test'});

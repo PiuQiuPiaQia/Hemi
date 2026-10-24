@@ -41,7 +41,11 @@ async function fixture(t) {
     rpc: async (_host, method, params) => {
       if (!network) throw Object.assign(new Error('Offline'), { code: 'offline' });
       requests.push({ method, params: structuredClone(params) });
-      const reply = await host.request(method, params);
+      // The client runs on Windows; the Host's /bin/sh residency probe runs on
+      // Linux. Keep the real model/receipt store and replace only that OS boundary.
+      const reply = process.platform === 'win32' && method === 'initialize.verify'
+        ? {ok: true} : await host.request(method, params);
+      if (process.platform === 'win32' && method === 'handshake') reply.configured = true;
       if (drop && method === 'model.sync') { drop = false; throw Object.assign(new Error('Lost receipt'), { code: 'needs-review' }); }
       return reply;
     },

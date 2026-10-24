@@ -86,13 +86,13 @@ test('cloud sessions, models and credentials are isolated; duplicate request ret
     () => f.host.request('snapshot', { instanceId: 'other' }),
     /身份不同/,
   );
-  assert.equal(
+  if (process.platform !== 'win32') assert.equal(
     (await fs.stat(path.join(f.root, 'data/state.json'))).mode & 0o777,
     0o600,
   );
 });
 
-test('正文路径可预览但不登记交付，链接身份隔离会话且不可作为交付下载', async t => {
+test('正文路径可预览但不登记交付，链接身份隔离会话且不可作为交付下载', {skip: process.platform === 'win32' && 'Linux Host file URL semantics'}, async t => {
   const f = await fixture(t);
   const a = await f.req('session.create'), b = await f.req('session.create');
   const target = path.join(f.root, 'workspace', '正文 100% 报告.md');
@@ -111,7 +111,7 @@ test('正文路径可预览但不登记交付，链接身份隔离会话且不�
   assert.equal(await fs.readFile(stateFile, 'utf8'), before);
 });
 
-test('正文路径预览重查范围、符号链接、文件类型与大小，拒绝控制数据和错误 URL', async t => {
+test('正文路径预览重查范围、符号链接、文件类型与大小，拒绝控制数据和错误 URL', {skip: process.platform === 'win32' && 'Linux Host POSIX filesystem and symlinks'}, async t => {
   const f = await fixture(t), a = await f.req('session.create');
   const dir = path.join(f.root, 'workspace');
   const target = path.join(dir, 'report.md'), outside = path.join(f.root, 'outside.md');
@@ -131,7 +131,7 @@ test('正文路径预览重查范围、符号链接、文件类型与大小，�
   await assert.rejects(() => f.req('file.read', { id: a.id, artifactId: resolved.artifactId, path: resolved.path }), /允许范围/);
 });
 
-test('正文 ~/ 路径按 Host 家目录展开，读取后仍不生成交付记录', async t => {
+test('正文 ~/ 路径按 Host 家目录展开，读取后仍不生成交付记录', {skip: process.platform === 'win32' && 'Linux Host home and file URL semantics'}, async t => {
   const f = await fixture(t), a = await f.req('session.create');
   const dir = await fs.mkdtemp(path.join(os.homedir(), 'hemi-bot-link-test-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));

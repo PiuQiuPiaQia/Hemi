@@ -79,7 +79,7 @@ function sse(res, model, { content = 'OK', tools = [] } = {}) {
   res.write('data: ' + JSON.stringify({ id: 'end', object: 'chat.completion.chunk', created: 1, model, choices: [{ index: 0, delta: {}, finish_reason: tools.length ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } }) + '\n\n');
   res.end('data: [DONE]\n\n');
 }
-test('real Hemi SDK selects each role model, falls back for main and roles, and keeps fixed mode on its exact model', { timeout: 60000 }, async t => {
+test('real Hemi SDK selects each role model, falls back for main and roles, and keeps fixed mode on its exact model', { timeout: 60000, skip: process.platform === 'win32' && 'Linux Host role commands and POSIX paths' }, async t => {
   const requests = [];
   let blockedReview = false;
   const server = http.createServer(async (req, res) => {

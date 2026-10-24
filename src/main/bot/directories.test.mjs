@@ -25,7 +25,7 @@ async function fixture(t) {
   return { root, runner, transport };
 }
 
-test('pre-install browser executes the production shell, preserving names and following directory symlinks', async t => {
+test('pre-install browser executes the production shell, preserving names and following directory symlinks', {skip: process.platform === 'win32' && 'Linux SSH directory probe uses POSIX shell and paths'}, async t => {
   const f = await fixture(t), parent = path.join(f.root, 'projects');
   await fs.mkdir(parent);
   const names = ['alpha', '项目 space', "folder'quoted", 'line\nbreak'];
@@ -41,7 +41,7 @@ test('pre-install browser executes the production shell, preserving names and fo
   assert.equal(result.truncated, false);
 });
 
-test('candidate directory flow distinguishes a not-yet-created default workspace and can browse its real parent', async t => {
+test('candidate directory flow distinguishes a not-yet-created default workspace and can browse its real parent', {skip: process.platform === 'win32' && 'Linux SSH directory probe uses POSIX shell and paths'}, async t => {
   const f = await fixture(t);
   const transport = { ...f.transport, probe: async () => ({ home: f.root, existing: false }) };
   const client = createBotDesktopService({ userDataDir: path.join(f.root, 'desktop'), runner: f.runner, profiles: {}, transport });
@@ -55,7 +55,7 @@ test('candidate directory flow distinguishes a not-yet-created default workspace
   await assert.rejects(client.candidatesDirectory(id, file), e => e.code === 'missing' && /不是一个文件夹/.test(e.message));
 });
 
-test('unreadable folders return a permission error rather than a missing-folder or SSH error', async t => {
+test('unreadable folders return a permission error rather than a missing-folder or SSH error', {skip: process.platform === 'win32' && 'Linux SSH directory probe uses POSIX shell and paths'}, async t => {
   if (process.getuid?.() === 0) return t.skip('permission check requires a non-root test account');
   const f = await fixture(t), locked = path.join(f.root, 'locked');
   await fs.mkdir(locked); await fs.chmod(locked, 0);
@@ -66,7 +66,7 @@ test('unreadable folders return a permission error rather than a missing-folder 
   finally { await fs.chmod(locked, 0o700); }
 });
 
-test('large directories have a bounded result and explicit truncation', async t => {
+test('large directories have a bounded result and explicit truncation', {skip: process.platform === 'win32' && 'Linux SSH directory probe uses POSIX shell and paths'}, async t => {
   const f = await fixture(t);
   await Promise.all(Array.from({ length: 1002 }, (_, i) => fs.mkdir(path.join(f.root, 'folder-' + String(i).padStart(4, '0')))));
   const result = await f.transport.directory('fixture', '~');
@@ -74,7 +74,7 @@ test('large directories have a bounded result and explicit truncation', async t 
   assert.equal(result.truncated, true);
 });
 
-test('untrusted directory text is quoted and never executed as a shell command', async t => {
+test('untrusted directory text is quoted and never executed as a shell command', {skip: process.platform === 'win32' && 'Linux SSH directory probe uses POSIX shell and paths'}, async t => {
   const f = await fixture(t), target = path.join(f.root, "a'$(touch INJECTED)");
   await fs.mkdir(target);
   assert.equal((await f.transport.directory('fixture', target)).path, target);

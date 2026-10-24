@@ -9,7 +9,7 @@ import { rpc } from './cli.mjs';
 
 test(
   'deployed symlink entry starts a real resident Host, socket is private and a second Host cannot replace it',
-  { timeout: 15000 },
+  { timeout: 15000, skip: process.platform === 'win32' && 'Linux Host Unix socket, symlink and POSIX permissions' },
   async (t) => {
     const root = await fs.realpath(
         await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-cli-')),
