@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createProfileStore } from '../lib/model-profiles.mjs';
@@ -87,9 +88,9 @@ test('saving local credentials automatically rotates all initialized models whil
   await wait(() => f.client.getState().syncStatus?.phase === 'confirmed');
   assert.equal(f.client.getState().cache.models.length, 2);
   assert.equal(f.runs.get(f.id).config.apiKey, 'FIXTURE-ONE');
-  const state = JSON.parse(await fs.readFile(path.join(f.root, 'host/state.json'), 'utf8'));
+  const state = JSON.parse(readFileSync(path.join(f.root, 'host/state.json'), 'utf8'));
   assert.equal(state.versions[state.models[f.keys[0]]].apiKey, 'FIXTURE-TWO');
-  for (const name of await fs.readdir(path.join(f.root, 'desktop/bot'))) assert.ok(!(await fs.readFile(path.join(f.root, 'desktop/bot', name), 'utf8')).includes('FIXTURE-TWO'), name);
+  for (const name of await fs.readdir(path.join(f.root, 'desktop/bot'))) assert.ok(!readFileSync(path.join(f.root, 'desktop/bot', name), 'utf8').includes('FIXTURE-TWO'), name);
 });
 test('invalid updates keep the previous Host revision and block selecting the failed model until corrected', async t => {
   const f = await fixture(t), revision = f.client.getState().cache.models[0].revision;
@@ -142,7 +143,9 @@ test('a rejected first-use model never changes the conversation; configuration s
   await f.edit({ apiKey: 'FIXTURE-RESTARTED' });
   await f.restart();
   await wait(async () => {
-    const state = JSON.parse(await fs.readFile(path.join(f.root, 'host/state.json'), 'utf8'));
+    // Do not hold an async Windows read handle across the Host's synchronous
+    // atomic replacement. Production reads this same private store synchronously.
+    const state = JSON.parse(readFileSync(path.join(f.root, 'host/state.json'), 'utf8'));
     return state.versions[state.models[f.keys[0]]].apiKey === 'FIXTURE-RESTARTED';
   });
 });

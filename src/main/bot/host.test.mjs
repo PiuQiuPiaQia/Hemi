@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -488,8 +489,8 @@ test('queued inputs keep the original model secret until their final run settles
   await f.req('model.sync', {
     models: [{ ...f.config, apiKey: 'ROTATED-KEY' }],
   });
-  const state = async () =>
-    JSON.parse(await fs.readFile(path.join(f.root, 'data/state.json'), 'utf8'));
+  // Avoid an open async Windows read handle while the same process commits.
+  const state = () => JSON.parse(readFileSync(path.join(f.root, 'data/state.json'), 'utf8'));
   assert.ok((await state()).versions[revision]);
   f.waiting.get(a.id).resolve({});
   await tick();
