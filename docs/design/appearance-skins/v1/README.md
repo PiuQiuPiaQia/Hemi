@@ -2,11 +2,7 @@
 
 日期：2026-10-21。配套：[产品需求](../../../requirements/appearance-and-skins.md)、[技术方案](../../../technical/appearance-and-skins.md)。
 
-新增：[晴海蓝 6 秒启动动效预演](../motion-preview-v1/README.md)，包含可播放 MP4 与可拖动进度的网页版本。
-
-新增：[主页背景视觉稿](../home-background-v1/README.md)，采用右侧人物、左侧原图英文大字与名称；五款文案映射已补入 manifest 的 backgroundCopy。
-
-最新：[冷启动与主页两段动效预演 v2](../motion-preview-v2/README.md)，包含连续交接与会话阅读静态状态。人物完整表情和关节动画尚需制作素材。
+当前应用接入见[实施与验证记录](../../../technical/appearance-implementation.md)，已确认的视觉依据见[完整预演 v3](../motion-preview-v3/README.md)。本目录保留生产资源导出所需的母版、头像与来源记录，不代表当前应用状态。已被替代的首版启动演示和静态主页稿通过 Git 历史查看，见[文档维护约定](../../../README.md)。
 
 包含五款人物的透明母版、卡片与头像共用裁切、六款起始配色、使用参数和检查记录。保留人物各自的画风；橙色已正向，海报文字已移除。经典使用现有 Hemi 标记。
 

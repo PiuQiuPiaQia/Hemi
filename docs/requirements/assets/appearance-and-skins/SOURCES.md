@@ -4,6 +4,7 @@
 
 | 文件 | 来源和用途 | SHA256 |
 | --- | --- | --- |
+| [composition-reference.png](composition-reference.png) | 用户提供的主页构图截图，仅作视觉参考；从旧静态主页稿原样保留 | `595a62309a4b0e8dca3ef6d600018e7ec6deb27372ce969879a9f8171f8f8741` |
 | [approved-full.png](approved-full.png) | 已确认的第三稿完整界面，当前 renderer 上的本地视觉原型 | `117241cee3d8eb56f8bf9232706eb3e207d5d6e8ba1e1b9a48818a503d9a615c` |
 | [approved-picker.png](approved-picker.png) | 已确认的换肤浮层局部，无人物背景开关 | `ea3cebb28ff2b9de66fe2268e2f7fb2dd43b7d24a1b9338de504f0def6900c02` |
 | [sidebar-full-list.png](sidebar-full-list.png) | 50 条演示会话的侧栏背景原型 | `3874a603f2e7b8d8b28c52b4fdb7d2a3dc4973a6cfb584124dbfa98cfa1380be` |
