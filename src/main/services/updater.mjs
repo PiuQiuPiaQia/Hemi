@@ -9,12 +9,14 @@
  *   自研换包（未签名，见 detectSigningMode 注释）；win 的 NSIS 静默更新不校验
  *   签名，一律 quitAndInstall 原生路。
  * - autoDownload=false：发现新版本只亮状态，下载由用户在设置页点按钮。
- * - autoInstallOnAppQuit=true：下载完成后正常退出也会自动装上，按钮只是
- *   「立刻重启安装」的捷径。
+ * - 真证书/Windows 可由原生更新器在退出时安装；ad-hoc/未签名实例下载后
+ *   通过「重启安装」换包，避免 Squirrel 提前按旧包的指定要求拒绝新包。
  * - 关闭差量更新（blockmap）：直接全量下载，保留 sha512 完整性校验。
  */
 import path from 'node:path';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 
 import { UPDATE_FEED_URL } from '../../shared/release-info.mjs';
@@ -24,12 +26,6 @@ import { formatUpdateError } from './updater-error.mjs';
 const nodeRequire = createRequire(import.meta.url);
 
 const STARTUP_CHECK_DELAY_MS = 15_000;
-
-/**
- * electron-updater 的下载缓存目录名（打在 app-update.yml 的 updaterCacheDirName，
- * 由 appId 派生）。下载完成后 zip + update-info.json 落 ~/Library/Caches/<此名>/pending/。
- */
-const UPDATER_CACHE_DIR_NAME = 'hemi-desktop-updater';
 
 async function defaultUpdaterFactory() {
   const mod = await import('electron-updater');
@@ -54,8 +50,15 @@ async function defaultUpdaterFactory() {
  */
 export function detectSigningMode({ execPath, exec = null } = {}) {
   try {
-    const execFn = exec ?? ((...args) => nodeRequire('node:child_process').execFileSync(...args));
-    const out = `${execFn('codesign', ['-dv', '--verbose=2', execPath], { encoding: 'utf8' })}`;
+    const args = ['-dv', '--verbose=2', execPath];
+    let out;
+    if (exec) out = String(exec('codesign', args, { encoding: 'utf8' }));
+    else {
+      // codesign writes its signing identity to stderr even on success.
+      const result = nodeRequire('node:child_process').spawnSync('codesign', args, { encoding: 'utf8' });
+      if (result.status !== 0) return 'unsigned';
+      out = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    }
     const match = /TeamIdentifier=(.+)/.exec(out);
     const team = match?.[1]?.trim();
     if (team && team !== 'not set') return 'certified';
@@ -65,19 +68,22 @@ export function detectSigningMode({ execPath, exec = null } = {}) {
   }
 }
 
-/** 找下载缓存里最新的 zip（单更新流里只有一个；字节已经过 sha512 校验）。 */
-export async function findCachedUpdateZip({ cacheDir, readdirImpl = readdir } = {}) {
-  const pending = path.join(cacheDir, 'pending');
-  let entries;
-  try {
-    entries = await readdirImpl(pending, { withFileTypes: true });
-  } catch {
-    return null;
+async function verifyDownloadedZip(info) {
+  const file = info?.downloadedFile;
+  if (typeof file !== 'string' || path.extname(file).toLowerCase() !== '.zip') throw new Error('下载回执缺少 ZIP 安装包');
+  const entry = info.files?.find(item => {
+    try { return path.basename(decodeURIComponent(new URL(item.url, UPDATE_FEED_URL + '/').pathname)) === path.basename(file); }
+    catch { return false; }
+  });
+  const expected = entry?.sha512 ?? info.sha512;
+  const hash = createHash('sha512');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  if (!expected || hash.digest('base64') !== expected) {
+    const error = new Error('sha512 checksum mismatch before installation');
+    error.code = 'ERR_UPDATER_CHECKSUM_MISMATCH';
+    throw error;
   }
-  const zips = entries.filter((e) => e.isFile() && e.name.endsWith('.zip'));
-  if (zips.length === 0) return null;
-  // pending 不带 mtime 元数据，取字典序最大即可（单更新流；并发下载本来不支持）。
-  return path.join(pending, zips.map((e) => e.name).sort().at(-1));
+  return file;
 }
 
 /**
@@ -117,6 +123,7 @@ export function createUpdaterService({
   homeDir = null,
   appBundlePath = null,
   platform = process.platform,
+  feedUrl = UPDATE_FEED_URL,
 } = {}) {
   if (!app || typeof app.getVersion !== 'function') {
     throw new Error('createUpdaterService 需要有效的 app');
@@ -157,6 +164,8 @@ export function createUpdaterService({
   let autoUpdater = null;
   let setupPromise = null;
   let operation = '检查更新';
+  let swapInstaller = false;
+  let downloadedUpdate = null;
 
   function getState() {
     return { ...state };
@@ -186,13 +195,17 @@ export function createUpdaterService({
     if (!setupPromise) {
       setupPromise = (async () => {
         autoUpdater = await updaterFactory();
+        // MacUpdater starts Squirrel from updateDownloaded when this is true,
+        // before install() can select our ad-hoc installer. Keep its verified
+        // HTTP download, but never hand ad-hoc packages to native Squirrel.
+        swapInstaller = platform === 'darwin' && detectSigningMode({ execPath: process.execPath, exec: execFn }) !== 'certified';
         autoUpdater.autoDownload = false;
-        autoUpdater.autoInstallOnAppQuit = true;
+        autoUpdater.autoInstallOnAppQuit = !swapInstaller;
         autoUpdater.disableDifferentialDownload = true;
         // electron-updater 自带 logger 直写 console——统一走本服务的日志，
         // 别在生产控制台刷噪声。
         autoUpdater.logger = null;
-        autoUpdater.setFeedURL({ provider: 'generic', url: UPDATE_FEED_URL });
+        autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
         autoUpdater.on('checking-for-update', () => setPhase('checking'));
         autoUpdater.on('update-available', (info) =>
           setPhase('available', { availableVersion: info?.version ?? null }));
@@ -202,13 +215,15 @@ export function createUpdaterService({
           setPhase('downloading', {
             progressPercent: Math.max(0, Math.round(progress?.percent ?? 0)),
           }));
-        autoUpdater.on('update-downloaded', (info) =>
+        autoUpdater.on('update-downloaded', (info) => {
+          downloadedUpdate = info;
           setPhase('downloaded', {
             availableVersion: info?.version ?? state.availableVersion,
             progressPercent: 100,
-          }));
+          });
+        });
         autoUpdater.on('error', (error) => fail(error));
-        log?.info?.(`更新服务就绪（公开下载 ${UPDATE_FEED_URL}）`);
+        log?.info?.(`更新服务就绪（公开下载 ${feedUrl}）`);
       })().catch((error) => {
         setupPromise = null;
         throw error;
@@ -260,11 +275,10 @@ export function createUpdaterService({
    * 4. app.quit() 走正常退出清理（before-quit 收尾都执行）。
    */
   async function installViaSwap() {
-    const cacheDir = path.join(home, 'Library', 'Caches', UPDATER_CACHE_DIR_NAME);
-    const zipPath = await findCachedUpdateZip({ cacheDir });
-    if (!zipPath) {
-      return { ok: false, code: 'not-downloaded', message: '下载缓存里没有安装包' };
+    if (downloadedUpdate?.version !== state.availableVersion) {
+      return { ok: false, code: 'not-downloaded', message: '下载回执与待装版本不一致，请重新下载' };
     }
+    const zipPath = await verifyDownloadedZip(downloadedUpdate);
     const staging = `${bundlePath}.update-${Date.now()}`;
     exec('rm', ['-rf', staging]);
     exec('ditto', ['-x', '-k', zipPath, staging]);
@@ -275,6 +289,10 @@ export function createUpdaterService({
       exec('rm', ['-rf', staging]);
       return { ok: false, code: 'staged-mismatch', message: `暂存包版本异常：${staged ?? '读不到'}（预期 ${state.availableVersion}）` };
     }
+    // Check the new bundle's resource seal without requiring the old ad-hoc
+    // binary's cdhash identity to match the new version.
+    try { exec('codesign', ['--verify', '--deep', '--strict', path.join(staging, 'Hemi.app')]); }
+    catch (error) { exec('rm', ['-rf', staging]); throw error; }
     const { writeFile: writeFileImpl } = await import('node:fs/promises');
     const scriptPath = path.join(home, '.hemi-update-swap.sh');
     await writeFileImpl(scriptPath, SWAP_SCRIPT, { mode: 0o755 });
@@ -303,8 +321,7 @@ export function createUpdaterService({
       return { ok: true };
     }
     // 真证书签名走 Squirrel 原生路；未签名/ad-hoc 自研换包（见 detectSigningMode 注释）。
-    const signingMode = detectSigningMode({ execPath: process.execPath, exec: execFn });
-    if (signingMode === 'certified') {
+    if (!swapInstaller) {
       // quitAndInstall 走正常退出流程（before-quit 清理会执行），装完后拉起。
       autoUpdater.quitAndInstall();
       return { ok: true };

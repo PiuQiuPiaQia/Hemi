@@ -1,19 +1,17 @@
-本次修复会话存档持续膨胀的问题，改用 Pi SDK 原生持久化。
+本次修复 macOS 临时签名包的应用内更新，让“下载 → 重启安装”完整走通。
 
-- 增量保存：聊天上下文直接追加到原生会话文件，Hemi 只保存必要的业务信息和恢复校验，不再重复生成整份状态快照。
-- 兼容旧记录：自动迁移旧快照，旧聊天中的内嵌存档在首次恢复时导入；校验成功后切换到新存档，并保留迁移原件。
-- 重启续聊：恢复明确绑定原会话，保留聊天记录、工具结果和停止状态；恢复会话不会重复执行已完成的工具。
-- 恢复保护：保留会话归属、回卷代次、模型及工作区校验，损坏或缺失的存档不会被空会话静默覆盖。
+- 下载时按签名类型选择更新方式，临时签名包使用已校验的下载文件交给 Hemi 换包安装器，避免 Squirrel 提前按旧版身份拒绝新包。
+- 安装前再次核对 SHA-512、目标版本和新包自身的代码签名，下载文件被修改或签名损坏时拒绝安装。
+- 更新器自动退出、替换应用并重新启动，保留现有聊天和配置；替换失败时回滚旧应用。
+- 修正签名探测读取 codesign 标准错误输出的方式，正确识别 Developer ID 证书。Windows 和证书签名的 macOS 应用使用各自原生安装器。
 
 下载：macOS（Apple 芯片）用 `.dmg`，Windows（64 位）用 `-setup.exe`。
 
 ---
 
-This patch fixes growing session snapshots by adopting native Pi SDK persistence.
+This patch fixes in-app updates for ad-hoc-signed macOS builds.
 
-- Append conversation context to native session files instead of repeatedly copying the entire session. Hemi retains only application metadata and recovery checks.
-- Migrate legacy snapshots automatically and import embedded archives when resumed. Validate imports before activation and retain the original migration sources.
-- Continue existing conversations after restart with chat history, tool results and stop state preserved, without replaying completed tools.
-- Validate session ownership, rewind generation, model and workspace compatibility. Missing or damaged archives cannot silently become empty sessions.
-
-Downloads: `.dmg` for macOS (Apple silicon), `-setup.exe` for Windows (64-bit).
+- Select the installation path before downloading, keeping verified downloads out of Squirrel's old-bundle identity checks for ad-hoc builds.
+- Recheck SHA-512, target version and the new bundle's own code signature before installation. Modified downloads and invalid signatures are rejected.
+- Quit, replace and relaunch the application automatically while retaining conversations and settings, with rollback if replacement fails.
+- Read codesign identity information from stderr. Developer ID macOS builds and Windows retain their native installers.

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
-import { createUpdaterService, detectSigningMode, findCachedUpdateZip } from './updater.mjs';
+import { createUpdaterService, detectSigningMode } from './updater.mjs';
 import { UPDATE_FEED_URL } from '../../shared/release-info.mjs';
 
 /** 假 electron-updater：EventEmitter + 记录调用与关键配置。
@@ -25,6 +26,7 @@ function fakeAutoUpdater() {
     set autoDownload(v) { this.config.autoDownload = v; },
     get autoDownload() { return this.config.autoDownload; },
     set autoInstallOnAppQuit(v) { this.config.autoInstallOnAppQuit = v; },
+    get autoInstallOnAppQuit() { return this.config.autoInstallOnAppQuit; },
     set disableDifferentialDownload(v) { this.config.disableDifferentialDownload = v; },
     set logger(v) { this.config.logger = v; },
     setFeedURL(feed) { this.calls.push({ kind: 'setFeedURL', feed }); },
@@ -40,6 +42,11 @@ function fakeAutoUpdater() {
   };
 }
 
+function downloadInfo(file, version = '0.4.0') {
+  const sha512 = createHash('sha512').update(readFileSync(file)).digest('base64');
+  return { version, downloadedFile: file, files: [{ url: path.basename(file), sha512 }] };
+}
+
 function fakeApp({ isPackaged = true, version = '0.3.0' } = {}) {
   return { isPackaged, getVersion: () => version };
 }
@@ -52,6 +59,7 @@ function setup({ isPackaged = true } = {}) {
     // 钉 darwin 测 mac 分支（安装分流到 Squirrel/换包的那套）；win 有专属用例。
     platform: 'darwin',
     updaterFactory: async () => autoUpdater,
+    execFn: () => 'TeamIdentifier=not set',
   });
   service.setBroadcast((state) => broadcasts.push(state));
   return { service, autoUpdater, broadcasts };
@@ -95,6 +103,7 @@ test('打包的 Windows 实例：完整更新流走通，公开下载、安装�
   assert.equal(service.getState().phase, 'available');
   assert.equal((await service.download()).ok, true);
   assert.equal(service.getState().phase, 'downloaded');
+  assert.equal(autoUpdater.config.autoInstallOnAppQuit, true);
   assert.equal((await service.install()).ok, true);
   assert.equal(autoUpdater.calls.some((c) => c.kind === 'install'), true);
   assert.deepEqual(autoUpdater.calls[0].feed, { provider: 'generic', url: UPDATE_FEED_URL });
@@ -130,7 +139,7 @@ test('检查流程：checking → available（事件驱动），版本号进状�
   assert.equal(state.phase, 'available');
   assert.equal(state.availableVersion, '0.4.0');
   assert.ok(autoUpdater.config.autoDownload === false);
-  assert.equal(autoUpdater.config.autoInstallOnAppQuit, true);
+  assert.equal(autoUpdater.config.autoInstallOnAppQuit, false);
   assert.equal(autoUpdater.config.disableDifferentialDownload, true);
   assert.deepEqual(autoUpdater.calls[0], {
     kind: 'setFeedURL',
@@ -199,6 +208,7 @@ test('安装（真证书形态）：downloaded 才放行，走 Squirrel quitAndI
   autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', { version: '0.4.0' });
   await certified.check();
   await certified.download();
+  assert.equal(autoUpdater.config.autoInstallOnAppQuit, true);
   assert.equal((await certified.install()).ok, true);
   assert.equal(autoUpdater.calls.some((c) => c.kind === 'install'), true);
 });
@@ -211,6 +221,7 @@ test('安装（未签名形态）：自研换包——ditto 解包、版本护�
   const cacheDir = path.join(home, 'Library', 'Caches', 'hemi-desktop-updater', 'pending');
   mkdirSync(cacheDir, { recursive: true });
   writeFileSync(path.join(cacheDir, 'Hemi-0.4.0-arm64-mac.zip'), 'zip-bytes');
+  writeFileSync(path.join(cacheDir, 'ZZZ-stale.zip'), 'another cached archive');
 
   const execCalls = [];
   const spawned = [];
@@ -242,15 +253,17 @@ test('安装（未签名形态）：自研换包——ditto 解包、版本护�
   });
   service.setBroadcast(() => {});
   autoUpdater.onCheck = () => autoUpdater.emitter.emit('update-available', { version: '0.4.0' });
-  autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', { version: '0.4.0' });
+  autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', downloadInfo(path.join(cacheDir, 'Hemi-0.4.0-arm64-mac.zip')));
   await service.check();
   await service.download();
 
+  assert.equal(autoUpdater.config.autoInstallOnAppQuit, false);
   const result = await service.install();
   assert.equal(result.ok, true);
   // 命令序列：codesign 探测 → rm 暂存 → ditto 解包 → （版本护栏过）不再 rm。
   assert.ok(execCalls.some(([file]) => file === 'codesign'));
-  assert.ok(execCalls.some(([file]) => file === 'ditto'));
+  assert.ok(execCalls.some(([file, ...args]) => file === 'ditto' && args[2] === path.join(cacheDir, 'Hemi-0.4.0-arm64-mac.zip')));
+  assert.ok(execCalls.some(([file, ...args]) => file === 'codesign' && args.includes('--verify') && args.includes('--strict')));
   // 分离脚本拿到了 bundle/staging/pid/日志四参。
   assert.equal(spawned.length, 1);
   const [sh, script, bundleArg, stagingArg, pidArg, logArg] = spawned[0];
@@ -298,7 +311,7 @@ test('换包版本护栏：暂存包版本与待装版本不符 → 拒装并清
   });
   service.setBroadcast(() => {});
   autoUpdater.onCheck = () => autoUpdater.emitter.emit('update-available', { version: '0.4.0' });
-  autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', { version: '0.4.0' });
+  autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', downloadInfo(path.join(cacheDir, 'Hemi-0.9.9-arm64-mac.zip')));
   await service.check();
   await service.download();
 
@@ -318,16 +331,62 @@ test('detectSigningMode：TeamIdentifier 有值＝certified，not set＝ad-hoc�
   assert.equal(detectSigningMode({ execPath: '/x', exec: run('', true) }), 'unsigned');
 });
 
-test('findCachedUpdateZip：pending 里取 zip；没有返回 null', async () => {
-  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-test-'));
-  const cacheDir = path.join(home, 'Library', 'Caches', 'hemi-desktop-updater');
-  assert.equal(await findCachedUpdateZip({ cacheDir }), null);
-  mkdirSync(path.join(cacheDir, 'pending'), { recursive: true });
-  writeFileSync(path.join(cacheDir, 'pending', 'update-info.json'), '{}');
-  assert.equal(await findCachedUpdateZip({ cacheDir }), null);
-  writeFileSync(path.join(cacheDir, 'pending', 'Hemi-0.4.0-arm64-mac.zip'), 'z');
-  assert.match(String(await findCachedUpdateZip({ cacheDir })), /Hemi-0\.4\.0-arm64-mac\.zip$/);
-  rmSync(home, { recursive: true, force: true });
+test('ad-hoc 安装拒绝下载后被篡改的 ZIP；不解包、不退出、不交给原生安装器', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-tamper-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const zip = path.join(home, 'current.zip'); writeFileSync(zip, 'verified bytes');
+  const info = downloadInfo(zip), updater = fakeAutoUpdater();
+  let extracted = false, quit = false, spawned = false;
+  const service = createUpdaterService({ app: { ...fakeApp(), quit: () => { quit = true; } }, platform: 'darwin',
+    updaterFactory: async () => updater, homeDir: home,
+    execFn: (file) => { if (file === 'codesign') return 'TeamIdentifier=not set'; extracted = true; },
+    spawnFn: () => { spawned = true; },
+  });
+  updater.onCheck = () => updater.emitter.emit('update-available', { version: '0.4.0' });
+  updater.onDownload = () => updater.emitter.emit('update-downloaded', info);
+  await service.check(); await service.download();
+  writeFileSync(zip, 'modified after download');
+  const result = await service.install();
+  assert.equal(result.ok, false); assert.match(result.message, /校验失败/);
+  assert.equal(extracted || quit || spawned, false);
+  assert.equal(updater.calls.some(c => c.kind === 'install'), false);
+});
+
+test('新包签名校验失败时清理暂存，不退出、不启动换包脚本', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-seal-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const zip = path.join(home, 'current.zip'); writeFileSync(zip, 'verified bytes');
+  const updater = fakeAutoUpdater(); let quit = false, spawned = false, removals = 0;
+  const service = createUpdaterService({ app: { ...fakeApp(), quit: () => { quit = true; } }, platform: 'darwin',
+    updaterFactory: async () => updater, homeDir: home, appBundlePath: path.join(home, 'Hemi.app'),
+    execFn: (file, args) => {
+      if (file === 'codesign' && args[0] === '-dv') return 'TeamIdentifier=not set';
+      if (file === 'codesign') throw new Error('resource seal invalid');
+      if (file === 'rm') removals++;
+      if (file === 'ditto') {
+        const contents = path.join(args[3], 'Hemi.app/Contents'); mkdirSync(contents, { recursive: true });
+        writeFileSync(path.join(contents, 'Info.plist'), '<key>CFBundleShortVersionString</key><string>0.4.0</string>');
+      }
+    }, spawnFn: () => { spawned = true; },
+  });
+  updater.onCheck = () => updater.emitter.emit('update-available', { version: '0.4.0' });
+  updater.onDownload = () => updater.emitter.emit('update-downloaded', downloadInfo(zip));
+  await service.check(); await service.download();
+  assert.equal((await service.install()).ok, false);
+  assert.equal(removals, 2); assert.equal(quit || spawned, false);
+});
+
+test('ad-hoc 下载回执缺失时不猜测缓存里的其他 ZIP', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-receipt-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const updater = fakeAutoUpdater();
+  const service = createUpdaterService({ app: fakeApp(), platform: 'darwin', updaterFactory: async () => updater,
+    homeDir: home, execFn: () => 'TeamIdentifier=not set' });
+  updater.onCheck = () => updater.emitter.emit('update-available', { version: '0.4.0' });
+  updater.onDownload = () => updater.emitter.emit('update-downloaded', { version: '0.4.0' });
+  await service.check(); await service.download();
+  assert.equal((await service.install()).ok, false);
+  assert.equal(updater.calls.some(c => c.kind === 'install'), false);
 });
 
 test('错误事件：phase=error 带消息；后续可再检查恢复', async () => {
