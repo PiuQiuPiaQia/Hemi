@@ -969,14 +969,19 @@ test("人工输入：按动作必填／选项冻结／表单版本 CAS 的宿主
 test("人工输入：真实时钟到期走超时分支（不伪造人工响应），迟到提交拒收", async (t) => {
   const env = makeHiEnv(t);
   t.after(env.cleanup);
-  await publishHi(env.service, buttonsDoc({ withTimeout: true, timeoutMs: 60 }));
+  const timeoutMs = 250;
+  await publishHi(env.service, buttonsDoc({ withTimeout: true, timeoutMs }));
   const conversationId = "conv-hi-timeout";
-  const { invocationId } = await startAndWaitInteraction(env, conversationId);
-  const suspended = await env.service.getInvocation(invocationId);
+  const startedAt = Date.now();
+  const { invocationId, invocation: suspended } = await startAndWaitInteraction(env, conversationId);
   const interactionId = suspended.run.currentInteractionId;
-  assert.ok(suspended.run.interactions[interactionId].expiresAt > Date.now());
+  const expiresAt = suspended.run.interactions[interactionId].expiresAt;
+  // A delayed observer may see the waiting snapshot after its deadline. Check
+  // the configured deadline and actual expiry rather than observer latency.
+  assert.ok(expiresAt >= startedAt + timeoutMs);
 
   const finished = await waitRunStatus(env, invocationId, "completed");
+  assert.ok(Date.now() >= expiresAt, "超时分支不能早于实际期限完成");
   const interaction = finished.run.interactions[interactionId];
   assert.equal(interaction.status, "expired");
   assert.equal(interaction.response.source, "timeout", "超时不是人工响应");

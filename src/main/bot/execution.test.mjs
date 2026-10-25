@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -55,11 +56,12 @@ test('independent model requests run together; stopping one does not abort anoth
   await f.call('flow.command',{id:a,command:{type:'stop',targetRunId:runId}});
   assert.equal((await f.done(a)).flow.runs[runId].outcome,'stopped');
   await f.send(a,'PLAIN_NEW_GOAL');await f.done(a);
-  const saved=JSON.parse(await fs.readFile(path.join(f.root,'data/state.json'),'utf8'));
+  // Close inspection handles before same-process synchronous Windows commits.
+  const saved=JSON.parse(readFileSync(path.join(f.root,'data/state.json'),'utf8'));
   const reference=saved.sessions[a].agent.payload;
   assert.equal(reference.storage,'pi');
   const sessionDir=path.join(f.root,'data/runtime-v2/sessions');
-  const metadata=JSON.parse(await fs.readFile(path.join(sessionDir,'metadata',`${reference.ref}.json`),'utf8'));
+  const metadata=JSON.parse(readFileSync(path.join(sessionDir,'metadata',`${reference.ref}.json`),'utf8'));
   const persisted=SessionManager.open(path.join(sessionDir,'pi',metadata.native.file));
   assert.match(JSON.stringify(persisted.getEntries()),/hemi_goal_stopped/,'the common stop fact survives in the native transcript');
   const nextRequest=f.requests.find(body=>JSON.stringify(body.messages.filter(message=>message.role==='user').at(-1)).includes('PLAIN_NEW_GOAL'));
