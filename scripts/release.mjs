@@ -31,8 +31,9 @@ if (!bump) {
   process.exit(1);
 }
 
-function run(cmd, argsList, { cwd = repoRoot, shell = false } = {}) {
-  return execFileSync(cmd, argsList, { cwd, encoding: 'utf8', shell }).trim();
+function run(cmd, argsList, { cwd = repoRoot, shell = false, inheritOutput = false } = {}) {
+  const output = execFileSync(cmd, argsList, { cwd, encoding: 'utf8', shell, ...(inheritOutput ? { stdio: 'inherit' } : {}) });
+  return output?.trim() ?? '';
 }
 
 // Windows 上跑 npm 的口径：npm 是 .cmd 批处理——直接 spawn 报 ENOENT，
@@ -93,7 +94,7 @@ const gates = [
 for (const [cmd, argsList] of gates) {
   console.log(`\n▶ ${cmd} ${argsList.join(' ')}`);
   const useShell = cmd === npmCommand && npmShell;
-  run(cmd, argsList, { shell: useShell });
+  run(cmd, argsList, { shell: useShell, inheritOutput: true });
 }
 console.log('门禁全过。');
 
