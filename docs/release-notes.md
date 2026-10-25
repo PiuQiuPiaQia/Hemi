@@ -1,21 +1,19 @@
-本次更新完善云端 Bot、手机接入与模型自动配置，并统一本地和 Bot 的执行机制。
+本次修复会话存档持续膨胀的问题，改用 Pi SDK 原生持久化。
 
-- 会话独立运行：Bot 复用本地执行核心，不同会话可以同时执行；只有冲突资源的操作需要等待。同一会话保持消息顺序，停止只影响所属会话。
-- 模型自动配置：初始化和后续变更自动更新本机 API Key 模型、主模型、角色模型与备用模型。来源图标区分本机与云端配置，本机配置在本机修改，云端配置仍可独立新增和编辑。
-- 手机接入：支持安全配对、实时回复、模型切换、会话管理、附件上传与资源预览；修复模型选项可见却无法点击的问题。
-- 界面一致：桌面与手机共用输入、选择、授权和会话列表组件，精简 Bot 模型设置与自动路由展示，并补充资源等待状态和上下文容量指示。
-- 兼容性：修复旧版 OpenSSL 生成设备证书时重复写入扩展、导致连接验证失败的问题；改善 Windows 短暂文件占用时的 Bot 配置写入。
+- 增量保存：聊天上下文直接追加到原生会话文件，Hemi 只保存必要的业务信息和恢复校验，不再重复生成整份状态快照。
+- 兼容旧记录：自动迁移旧快照，旧聊天中的内嵌存档在首次恢复时导入；校验成功后切换到新存档，并保留迁移原件。
+- 重启续聊：恢复明确绑定原会话，保留聊天记录、工具结果和停止状态；恢复会话不会重复执行已完成的工具。
+- 恢复保护：保留会话归属、回卷代次、模型及工作区校验，损坏或缺失的存档不会被空会话静默覆盖。
 
-下载：macOS（Apple 芯片）用 `.dmg`，Windows（64 位）用 `-setup.exe`。macOS 安装包未签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中允许。
+下载：macOS（Apple 芯片）用 `.dmg`，Windows（64 位）用 `-setup.exe`。
 
 ---
 
-This update improves the cloud Bot, mobile access and automatic model configuration, and shares the desktop execution core with the Bot.
+This patch fixes growing session snapshots by adopting native Pi SDK persistence.
 
-- Independent conversations: Bot conversations run concurrently, with conflicting operations waiting for their resources. Inputs within a conversation stay ordered, and stopping a run affects only its conversation.
-- Automatic model configuration: local API-key models and primary, role and fallback selections update automatically. Source icons distinguish local settings from editable cloud settings.
-- Mobile access: secure pairing, live replies, model switching, conversation management, uploads and resource previews. Model-picker options are clickable again.
-- Consistent interface: desktop and mobile share composer, selection, permission and conversation-list components. Bot model settings and routing details are more compact, with resource-wait status and a context-capacity indicator.
-- Compatibility: avoid duplicate certificate extensions with older OpenSSL versions, and retry Bot configuration writes during transient Windows file locks.
+- Append conversation context to native session files instead of repeatedly copying the entire session. Hemi retains only application metadata and recovery checks.
+- Migrate legacy snapshots automatically and import embedded archives when resumed. Validate imports before activation and retain the original migration sources.
+- Continue existing conversations after restart with chat history, tool results and stop state preserved, without replaying completed tools.
+- Validate session ownership, rewind generation, model and workspace compatibility. Missing or damaged archives cannot silently become empty sessions.
 
-Downloads: `.dmg` for macOS (Apple silicon), `-setup.exe` for Windows (64-bit). The macOS build is unsigned and unnotarized; allow it on first launch under System Settings → Privacy & Security.
+Downloads: `.dmg` for macOS (Apple silicon), `-setup.exe` for Windows (64-bit).

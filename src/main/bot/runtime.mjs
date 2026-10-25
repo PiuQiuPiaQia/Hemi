@@ -2,6 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createAgentRuntime } from '../agent-runtime/core.mjs';
+import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
 import { resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
 import { createRunPartProjector } from '../services/flow-parts-projection.mjs';
@@ -79,6 +80,7 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
     loadArchiveAgent(id) {
       const owner = active.get(id);if (!owner) return null;
       const entries = readEntries(id, owner.spec.generation, owner.spec.envelope.inputId);
+      if (isNativeSessionReference(entries)) return entries;
       return entries?.length ? {header: entries[0], entries: entries.slice(1)} : null;
     },
     loadArchiveTurns: () => [],

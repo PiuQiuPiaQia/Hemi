@@ -1,4 +1,5 @@
 import { freezeModelPolicy } from '../agent-runtime/model-policy.mjs';
+import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -428,6 +429,7 @@ export async function createBotHost({
     readEntries: (id, generation, inputId) => {
       const s = requireSession(id),
         saved = s.agent;
+      if (saved?.generation === generation && isNativeSessionReference(saved.payload)) return saved.payload;
       if (saved?.generation === generation)
         return [
           saved.payload.header,

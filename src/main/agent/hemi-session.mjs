@@ -1,6 +1,6 @@
 import { getInteractiveResourceCoordinator } from '../workflows/interactive-resource-coordinator.mjs';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -23,6 +23,7 @@ import hemiDelivery from './gate/pi-delivery.mjs';
 import hemiVision from './gate/pi-vision.mjs';
 import hemiWeb from './gate/pi-web.mjs';
 import { AgentSessionError } from './session-contract.mjs';
+import { nativeSessionReference } from '../agent-runtime/session-reference.mjs';
 import { controlledStream } from '../agent-runtime/usage-ledger.mjs';
 import { contextExtension } from '../agent-runtime/context-extension.mjs';
 import { resourceGateway } from '../agent-runtime/resource-leases.mjs';
@@ -39,8 +40,8 @@ import { createRoutingExtension, resetRoutingForApplicationTurn, sessionSettings
  * 浏览器/桌面/视觉/联网工具、访问上下文、038 路由虚拟模型、049 远端后端原样
  * 保留；去掉了「一个实例只跑一个任务」与收尾轮/结构化收尾协议（056 起结果直接
  * 回到派单的主 agent，由它验收）。一个实例＝一个 Pi 会话，可多次 prompt，历史
- * 在 SessionManager 里累积（主 agent 的条目由宿主持久化，子 agent 随会话保活
- * 以支持续用）。
+ * 在 SessionManager 里累积；生产会话使用宿主校验后打开的 Pi 原生存档，
+ * 瞬时模型验证等无恢复需求的会话仍可使用内存模式。
  *
  * 探针钉死的 SDK 行为（scripts/pi-sdk-probe.mjs、
  * pi-056-agent-probe.mjs）：
@@ -217,6 +218,7 @@ export function createHemiSession({
   boundary = null,
   extraExtensions = [],
   entries = null,
+  sessionSource = undefined,
   settings = {},
   maxRunRequests = 0,
   executionContext = null,
@@ -229,6 +231,7 @@ export function createHemiSession({
 }) {
   const emitter = new EventEmitter();
   let runtimeExecution = executionContext;
+  let nativeSession = null;
   let compacting = false;
   let session = null;
   let sessionManager = null;
@@ -531,7 +534,7 @@ export function createHemiSession({
         if (remoteFs && target.abs) return { ...target, real: await remoteFs.realpath(target.abs) ?? target.abs };
         return target;
       }, fileHost: remoteInfo?.host ?? 'local', browserOwner: effectiveAccessId, getExecution: () => runtimeExecution,
-      beforeExecute: async () => runtimeExecution?.persistSession?.(await exportEntries(), runtimeExecution),
+      beforeExecute: () => persistExecution(),
       onActivity: event => {
         if (event.finished) resourceWaits.delete(event.toolCallId);
         else resourceWaits.set(event.toolCallId, event);
@@ -713,7 +716,10 @@ export function createHemiSession({
         noContextFiles: !loadContextFiles || Boolean(remoteInfo),
       });
       await resourceLoader.reload();
-      sessionManager = SessionManager.inMemory(sessionCwd, undefined, entries ?? undefined);
+      if (runtimeExecution?.openSession) {
+        nativeSession = await runtimeExecution.openSession({ cwd: sessionCwd, entries, source: sessionSource, execution: runtimeExecution });
+        sessionManager = nativeSession.manager;
+      } else sessionManager = SessionManager.inMemory(sessionCwd, undefined, entries ?? undefined);
       const { session: created } = await createAgentSession({
         cwd: sessionCwd,
         agentDir,
@@ -755,7 +761,7 @@ export function createHemiSession({
     });
     if (executionContext) session.agent.streamFunction = controlledStream(session.agent.streamFunction, () => runtimeExecution ? {
       ...runtimeExecution, compacting: () => compacting, onCandidateSelected: candidate => { runtimeExecution.actualCandidate = candidate; },
-      beforeRequest: async () => runtimeExecution.persistSession?.(await exportEntries(), runtimeExecution),
+      beforeRequest: () => persistExecution(),
       onImageProjection: stats => log?.info?.(`[${label}] 请求图片投影 ${stats.mode}：${stats.imagesBefore} 张，省略 ${stats.omitted} 张，压缩 ${stats.resized} 张，Base64 ${stats.bytesBefore} → ${stats.bytesAfter} 字节`),
       onRequestStart: () => emitter.emit('stream', { type: 'hemi_request_start' }),
       onRequestReset: () => emitter.emit('stream', { type: 'hemi_request_reset' }),
@@ -876,7 +882,7 @@ export function createHemiSession({
         append(await promptOnce('', { hostEvent: { customType: 'hemi_background_command_result',
           content, eventIds: events.map(event => event.id),
         } }));
-        await execution?.persistSession?.(await exportEntries(), execution);
+        await persistExecution();
       }
       if (result.aborted || result.modelError || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
       return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
@@ -986,7 +992,7 @@ export function createHemiSession({
     return true;
   }
 
-  /** 导出会话条目（宿主持久化；Pi 不落盘）。 */
+  /** 导出条目供上下文查询与旧档导入；生产保存不再复制这些条目。 */
   async function exportEntries() {
     await ensurePromise?.catch(() => {});
     if (!sessionManager) return null;
@@ -996,6 +1002,16 @@ export function createHemiSession({
       log?.warn?.(`[${label}] 条目导出失败：${error?.message ?? error}`);
       return null;
     }
+  }
+
+  async function exportSession() {
+    await ensurePromise?.catch(() => {});
+    if (nativeSession && !existsSync(sessionManager?.getSessionFile())) return null;
+    return nativeSession ? nativeSessionReference(nativeSession.checkpoint.ref) : exportEntries();
+  }
+  async function persistExecution() {
+    if (!runtimeExecution?.persistSession) return;
+    return runtimeExecution.persistSession(nativeSession?.checkpoint ?? await exportEntries(), runtimeExecution);
   }
 
   function getEntries() {
@@ -1032,7 +1048,7 @@ export function createHemiSession({
     ready,
     retryConnection: id => modelRecoveryControl?.tryNow(id) ?? false,
     setExecutionContext: value => { runtimeExecution = value; },
-    persistExecution: async () => runtimeExecution?.persistSession?.(await exportEntries(), runtimeExecution),
+    persistExecution,
     prompt,
     steer,
     followUp,
@@ -1041,6 +1057,7 @@ export function createHemiSession({
     requestHandoff,
     respondPermission,
     exportEntries,
+    exportSession,
     appendContextFact,
     // 上下文容量：Pi 会话的占用读数（{tokens, contextWindow, percent}；压缩后 tokens 为 null）。
     contextUsage: () => { try { return session?.getContextUsage?.() ?? undefined; } catch { return undefined; } },

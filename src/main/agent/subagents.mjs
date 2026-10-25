@@ -920,7 +920,7 @@ export function createSubagentManager({
       task.phase = 'running'; task.progressText = '准备中';
       try {
         if (!task.session) task.session = await createSession({
-          role, conversationId, accessId: task.historyId ?? task.key, workspace, inputSource, modelPlan,
+          role, conversationId, accessId: task.historyId ?? task.key, workspace, inputSource, modelPlan, sessionRef: task.sessionRef,
         });
       } catch (error) {
         const reason = `没能启动：${error?.message ?? error}`;

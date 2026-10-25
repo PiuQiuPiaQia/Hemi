@@ -9,7 +9,7 @@
  *     后续请求与恢复原样重放，不在请求钩子里改写已发送的历史；
  *   - 第 4 缓存断点经 before_provider_request 补在「本回合用户消息前一条」（B5）；
  *   - 对话侧记忆视图投影（context_with_system，037；与执行侧记忆桥二选一）；
- *   - 条目导出/重建（header＋entries 存 conversations/*.json 的 agentSession）；
+ *   - 条目导出供上下文读取；生产持久化由 Pi 管理，Hemi 档案仅存会话引用；
  *   - 子 agent 后台完成经 notify 唤醒（空闲 triggerTurn、忙时 followUp，探针 A5）。
  */
 import { createHemiSession, messageText } from './hemi-session.mjs';
@@ -252,6 +252,8 @@ export function createMainAgent({
     notify: (customType, content) => session.notify(customType, content),
     respondPermission: (id, outcome) => session.respondPermission(id, outcome),
     exportEntries: () => session.exportEntries(),
+    exportSession: () => session.exportSession(),
+    persistExecution: () => session.persistExecution(),
     /** 上下文容量快照（轮末广播给渲染层；无会话/无模型返回 null）。 */
     contextUsage: () => buildContextSnapshot({ usage: session.contextUsage?.(), breakdown: requestBreakdown.current }),
     recentUserTurns,

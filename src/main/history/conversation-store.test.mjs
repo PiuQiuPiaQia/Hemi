@@ -25,6 +25,24 @@ function turn(author, text, extra = {}) {
   return { id: `id-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: 1, author, ...extra };
 }
 
+test('原生会话引用跨重启保留聊天，编辑仅记录回卷目标且不把条目写回公开档案', t => {
+  const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ dir }), id = 'conv-native';
+  const turns = [turn('user', '保留前文', { id: 'first' }), turn('hemi', '旧回答'), turn('user', '编辑这一轮', { id: 'second' }), turn('hemi', '需撤回的回答')];
+  store.saveSession({ id, turns });
+  const reference = { storage: 'pi', version: 1, ref: 'main-conv-native' };
+  assert.equal(store.saveAgentSession(id, reference), true);
+  assert.deepEqual(createConversationStore({ dir }).getAgentSession(id), reference);
+  assert.deepEqual(store.getSession(id).turns.map(turn => turn.text), turns.map(turn => turn.text));
+  assert.equal(store.applyCutKeys(id, [], { targetInputId: 'second' }).ok, true);
+  assert.deepEqual(store.getAgentSession(id), { ...reference, rewindBeforeInputId: 'second' });
+  assert.deepEqual(store.getSession(id).turns.map(turn => turn.text), ['保留前文', '旧回答']);
+  assert.equal(store.saveAgentSession(id, reference), true);
+  assert.deepEqual(store.getAgentSession(id), reference);
+  const file = JSON.parse(readFileSync(path.join(dir, `${id}.json`), 'utf8'));
+  assert.equal(file.agentSession.entries, undefined);
+});
+
 test('未读保留于保存／改名／重启，清读不改排序时间且旧版本不能清新结果', () => {
   const dir = makeDir();
   try {

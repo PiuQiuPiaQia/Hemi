@@ -15,6 +15,7 @@ import { budgetSummaryFacts } from './budget-summary.mjs';
 import { sessionCompatibility } from './model-policy.mjs';
 import { sessionLoadoutRevision, roleSessionRevision } from './session-revision.mjs';
 import { createSessionStore } from './session-store.mjs';
+import { isNativeSessionReference, nativeSessionReference } from './session-reference.mjs';
 
 import { createMainAgent, buildAgentAppendSystem, entriesFromTurns } from '../agent/main-agent.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
@@ -33,7 +34,7 @@ import { createWorkflowNodeAgent } from '../agent/workflow-node-agent.mjs';
  * 056 · 主 agent 与子 agent 的运行时装配（取代 055 的 brain-registry 与 task.ipc 的执行器工厂）。
  *
  * 职责：
- *   - 每对话一个主 agent（LRU 驻留，条目随 Hemi 会话档案走：agentSession 字段）；
+ *   - 每对话一个主 agent（LRU 驻留，Pi 原生保存条目，Hemi 档案仅存 agentSession 引用）；
  *     模型/工作区/系统段变化时导出条目换新实例（缓存随 system 变化自然失效）；
  *   - 子 agent 管理器单例（四个角色），会话工厂按角色定义裁工具面与模型；
  *   - 后台子 agent 终态 → 主 agent 隐藏消息唤醒（空闲 triggerTurn、忙时 followUp）；
@@ -130,22 +131,30 @@ export function createAgentRuntime({
   const agentDir = path.join(userDataDir, 'pi-agent');
   try { mkdirSync(agentDir, { recursive: true }); } catch { /* inMemory 会话仍可跑 */ }
   const journal = createRunJournal({ dir: path.join(userDataDir, 'runtime-v2') });
-  const sessionStore = createSessionStore({ dir: path.join(userDataDir, 'runtime-v2/sessions') });
+  const sessionStore = createSessionStore({ dir: path.join(userDataDir, 'runtime-v2/sessions'), log });
   const contextStore = createContextStore({ dir: path.join(userDataDir, 'runtime-v2/contexts') });
   const conversationHistory = loadArchiveSession ? createConversationHistoryReader({ loadSession: loadArchiveSession, contextStore }) : null;
   const journalReady = journal.ready().then(() => recoverOwnedProcesses(journal)).then(() => journal.recover());
   void journalReady.catch(error => log?.error?.(error.message));
   const dispatchInFlight = new Map();
   const ownerOf = ctx => ({ conversationId: ctx.conversationId, rootRunId: ctx.runId, generation: ctx.generation ?? 0 });
+  const sessionRefOf = (ctx, execution) => execution.sessionRef ?? ctx.sessionRef ?? `main-${safeDirName(ctx.conversationId)}`;
+  const sessionRecord = (ctx, execution) => {
+    const publicCandidate = candidate => { const { apiKey, ...rest } = candidate; return rest; };
+    return { owner: execution.owner, role: execution.plan.role, workspace: ctx.workspace,
+      sessionRef: sessionRefOf(ctx, execution), worklineId: execution.worklineId ?? null, roleRevision: execution.roleRevision ?? null,
+      runCount: execution.runCount ?? null, contextRefs: execution.allowedRefs ?? null,
+      modelPlan: { ...execution.plan, primary: publicCandidate(execution.plan.primary), allowedFallbacks: execution.plan.allowedFallbacks.map(publicCandidate) } };
+  };
   const executionFor = (ctx, plan, purpose = 'main') => ({ isOnline, journal, contextStore, store: getProfiles(ctx), owner: ownerOf(ctx), plan,
     validateConversationSource: source => conversationHistory?.validateSource(source) ?? false,
     budgets: ctx.policySnapshot.budgets, sessionRef: ctx.sessionRef, purpose, onRequestRecorded: () => onModelUsage?.({ conversationId: ctx.conversationId }), allowedRefs: null, cancelled: () => Boolean(ctx.cancelled),
-    persistSession: async (payload, execution) => {
-      const ref = execution.sessionRef ?? `main-${safeDirName(ctx.conversationId)}`;
-      const publicCandidate = candidate => { const { apiKey, ...rest } = candidate; return rest; };
-      await sessionStore.save(ref, { owner: execution.owner, role: execution.plan.role, workspace: ctx.workspace,
-        sessionRef: execution.sessionRef ?? ref, worklineId: execution.worklineId ?? null, roleRevision: execution.roleRevision ?? null, runCount: execution.runCount ?? null, contextRefs: execution.allowedRefs ?? null,
-        modelPlan: { ...execution.plan, primary: publicCandidate(execution.plan.primary), allowedFallbacks: execution.plan.allowedFallbacks.map(publicCandidate) }, payload });
+    openSession: ({ cwd, entries, source, execution }) => sessionStore.open(sessionRefOf(ctx, execution), {
+      cwd, entries, source, record: sessionRecord(ctx, execution), reset: purpose === 'main' && source === null,
+    }),
+    persistSession: async (checkpoint, execution) => {
+      if (checkpoint.ref !== sessionRefOf(ctx, execution)) throw new Error('会话保存引用不匹配');
+      await sessionStore.checkpoint(checkpoint, sessionRecord(ctx, execution));
       if (purpose === 'main' && agents.get(ctx.conversationId)?.ctx === ctx) await persist(ctx.conversationId);
     },
   });
@@ -175,7 +184,7 @@ export function createAgentRuntime({
 
   async function auxiliarySession({ plan, conversationId = '__workflow-preparation__', purpose, prompt, signal }) {
     await journalReady;
-    const ctx = { conversationId, runId: `aux-${randomUUID()}`, policySnapshot: plan.policySnapshot, modelPlan: plan.modelPlan, workspace: null, cancelled: false };
+    const ctx = { conversationId, runId: `aux-${randomUUID()}`, sessionRef: `session-${randomUUID()}`, policySnapshot: plan.policySnapshot, modelPlan: plan.modelPlan, workspace: null, cancelled: false };
     await journal.beginRoot(ownerOf(ctx), { kind: 'auxiliary', purpose });
     const session = createHemiSession({ cwd: userDataDir, agentDir, ...sessionModelOptions({config:plan.config,fallbacks:plan.modelPlan.allowedFallbacks}),
       mode:'run', tools:[], label:purpose, executionContext:executionFor(ctx,plan.modelPlan,purpose), log });
@@ -232,7 +241,7 @@ export function createAgentRuntime({
     finally { skills.release(); }
   }
 
-  async function createRoleSession({ role, conversationId, accessId, workspace, inputSource, modelPlan, entries = null }) {
+  async function createRoleSession({ role, conversationId, accessId, workspace, inputSource, modelPlan, sessionRef, sessionSource, sessionState = null }) {
     const caps = await resolveCapabilities();
     const placement = await resolvePlacement(workspace, { log });
     const skills = collectSkills({ skillService: getSkillService(), workspace });
@@ -244,7 +253,7 @@ export function createAgentRuntime({
     const session = createHemiSession({
       ...sessionOptions,
       ...placement,
-      agentDir, entries,
+      agentDir, sessionSource,
       ...modelOptions,
       // 只读角色（explorer/oracle）走 052 只读边界，不走 055 的 verify 阶段：verify 对未授权
       // 路径一律自动拒绝、不弹卡（那是「复核已授权产物」的语义）；侦察是一等调查者，读新
@@ -252,7 +261,8 @@ export function createAgentRuntime({
       mode: 'run',
       ...(role.mode === 'verify' ? { boundary: 'readonly' } : {}),
       tools: roleTools(role.tools),
-      executionContext: modelPlan.executionContext,
+      executionContext: { ...modelPlan.executionContext, sessionRef, roleRevision: roleSessionRevision(role, modelPlan),
+        worklineId: sessionState?.worklineId, runCount: sessionState?.runCount },
       // 057：产出文件的角色可声明正式交付（白名单里有才挂，verify 只读不挂）。
       delivery: role.mode === 'run' && role.tools.includes('register_delivery'),
       appendSystem: [
@@ -299,7 +309,7 @@ export function createAgentRuntime({
       if ((record.owner.generation ?? 0) !== (modelPlan.executionContext?.owner?.generation ?? 0)) throw new Error('对话已回卷，旧子会话不能恢复执行');
       const reason = sessionCompatibility({ previous: record.modelPlan, next: modelPlan, workspace, previousWorkspace: record.workspace, roleRevision, previousRoleRevision: record.roleRevision });
       if (reason) throw new Error(reason);
-      const session = await createRoleSession({ role, conversationId, accessId: sessionId, workspace, inputSource, modelPlan, entries: [record.payload.header, ...record.payload.entries] });
+      const session = await createRoleSession({ role, conversationId, accessId: sessionId, workspace, inputSource, modelPlan, sessionRef: sessionId, sessionSource: nativeSessionReference(sessionId), sessionState: record });
       return { role, conversationId, workspace, modelPlan, generation: record.owner.generation ?? 0, phase: 'terminal', finalized: true, session, historyId: record.owner.taskId, sessionRef: sessionId, worklineId: record.worklineId, contextRefs: record.contextRefs ?? [], runs: record.runCount ?? 1 };
     },
     history,
@@ -377,19 +387,20 @@ export function createAgentRuntime({
       existing.activeRootRunId = turn.runId ?? null;
       return existing.agent;
     }
-    let entries = null;
+    let entries = null, sessionSource = null;
     if (existing) {
       if (existing.agent.isDisposed()) log?.info?.(`[agent] ${conversationId} 旧实例已释放，保留条目重建主会话`);
-      const exported = await existing.agent.exportEntries();
-      entries = exported ? [exported.header, ...exported.entries] : null;
+      sessionSource = await existing.agent.exportSession();
+      entries = Array.isArray(sessionSource?.entries) ? [sessionSource.header, ...sessionSource.entries] : null;
       existing.agent.dispose();
       existing.skills?.release();
       agents.delete(conversationId);
     } else {
       const archived = loadArchiveAgent(conversationId);
+      sessionSource = archived ?? null;
       if (archived?.entries?.length) {
         entries = [archived.header, ...archived.entries];
-      } else {
+      } else if (!isNativeSessionReference(archived) || archived.rewindBeforeInputId) {
         const turns = loadArchiveTurns(conversationId);
         if (turns?.length) {
           const historyRef = await contextStore.put({ owner: ownerOf(turn), kind: 'history', source: { kind: 'tool', tool: 'predecessor-history' }, content: [{ type: 'text', text: JSON.stringify(turns) }] });
@@ -420,6 +431,7 @@ export function createAgentRuntime({
         agentDir,
         ...modelOptions,
         executionContext: executionFor(turn, turn.modelPlan),
+        sessionSource,
         mode: 'run',
         features: caps.features,
         extensionConfig: caps.extensionConfig,
@@ -532,7 +544,7 @@ export function createAgentRuntime({
       .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
     for (const [id, entry] of candidates) {
       if (agents.size <= MAX_RESIDENT) break;
-      void entry.agent.exportEntries().then((payload) => {
+      void entry.agent.exportSession().then((payload) => {
         if (payload && archiveWriters.get(id) === entry.archiveToken) saveArchiveAgent(id, payload);
       }).catch(() => {});
       entry.agent.dispose();
@@ -668,7 +680,7 @@ export function createAgentRuntime({
         if (combined.modelError) throw new Error(`回合未完成：${describeModelError(combined.modelError)}`);
         if (combined.aborted || ctx.cancelled) break;
         const exported = await agent.exportEntries();
-        await agent.exportEntries().then(payload => executionFor(ctx,ctx.modelPlan).persistSession(payload, { ...executionFor(ctx,ctx.modelPlan), sessionRef: ctx.sessionRef }));
+        await agent.persistExecution();
         await journal.consume(events.map(event => event.eventId), exported?.entries?.findLast(item => item.type === 'custom_message' && item.details?.eventIds?.some(id => events.some(event => event.eventId === id)))?.id ?? exported?.entries?.at(-1)?.id ?? 'unknown');
       }
       if (combined.aborted || ctx.cancelled) await subagents.cancelByRootRun(owner.rootRunId, { reason: 'stop' });
@@ -690,7 +702,7 @@ export function createAgentRuntime({
           const facts = budgetSummaryFacts({ limit: limited.limit, userText: args.userText, texts: combined.texts, tasks: owned, observations, artifacts: args.getBudgetArtifacts?.() ?? [], toolResults });
           const report = await agent.summarizeLimit({ execution, ...facts });
           if (ctx.cancelled) throw new DOMException('任务已停止', 'AbortError');
-          await execution.persistSession(await agent.exportEntries(), execution);
+          await agent.persistExecution();
           return { ...combined, modelError: null, aborted: false, budgetLimited: true, lastText: report.text, texts: [...combined.texts, report.text] };
         } catch (summaryError) { error = summaryError; }
       }
@@ -732,7 +744,7 @@ export function createAgentRuntime({
   async function persist(conversationId) {
     const entry = agents.get(String(conversationId ?? ''));
     if (!entry) return false;
-    const payload = await entry.agent.exportEntries();
+    const payload = await entry.agent.exportSession();
     return payload && agents.get(String(conversationId)) === entry && archiveWriters.get(String(conversationId)) === entry.archiveToken
       ? saveArchiveAgent(String(conversationId), payload) : false;
   }
@@ -799,6 +811,7 @@ export function createAgentRuntime({
     // Initialization/recovery also writes the journal when no conversation ran.
     await journalReady;
     disposeAll();
+    await sessionStore.flush();
     await journal.flush();
   }
 

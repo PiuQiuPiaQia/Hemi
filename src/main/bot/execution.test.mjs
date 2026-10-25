@@ -7,6 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createBotHost} from './host.mjs';
+import {SessionManager} from '@earendil-works/pi-coding-agent';
 
 async function until(read) {
   const end=Date.now()+12000;
@@ -55,7 +56,14 @@ test('independent model requests run together; stopping one does not abort anoth
   assert.equal((await f.done(a)).flow.runs[runId].outcome,'stopped');
   await f.send(a,'PLAIN_NEW_GOAL');await f.done(a);
   const saved=JSON.parse(await fs.readFile(path.join(f.root,'data/state.json'),'utf8'));
-  assert.match(JSON.stringify(saved.sessions[a].agent),/hemi_goal_stopped/,'the common stop fact survives and the next input does not resume the old goal');
+  const reference=saved.sessions[a].agent.payload;
+  assert.equal(reference.storage,'pi');
+  const sessionDir=path.join(f.root,'data/runtime-v2/sessions');
+  const metadata=JSON.parse(await fs.readFile(path.join(sessionDir,'metadata',`${reference.ref}.json`),'utf8'));
+  const persisted=SessionManager.open(path.join(sessionDir,'pi',metadata.native.file));
+  assert.match(JSON.stringify(persisted.getEntries()),/hemi_goal_stopped/,'the common stop fact survives in the native transcript');
+  const nextRequest=f.requests.find(body=>JSON.stringify(body.messages.filter(message=>message.role==='user').at(-1)).includes('PLAIN_NEW_GOAL'));
+  assert.match(JSON.stringify(nextRequest.messages),/未完成部分已经取消/,'the next input receives the stop fact and cannot resume the old goal');
   assert.equal((await f.detail(b)).status,'running');assert.equal(f.held.get('b').destroyed,false);
   reply(f.held.get('b'));await f.done(b);
   const c=await f.create(),d=await f.create();await fs.writeFile(path.join(f.root,'outside.txt'),'preserve');

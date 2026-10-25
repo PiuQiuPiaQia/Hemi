@@ -183,6 +183,11 @@ app.whenReady().then(async () => {
     const stopped = await invoke(IPC.flow.command, { conversationId: cid, command: { type: 'stop', targetRunId: first.runId } });
     check('从正常停止入口收口', stopped.ok);
     const afterStop = await settled(cid, first); check('原目标确实停止', afterStop.runs[first.runId].outcome === 'stopped');
+    if (!real) {
+      await getAgentRuntime().persist(cid);
+      getAgentRuntime().invalidate(cid);
+      check('释放桌面驻留实例，下一轮必须从原生存档恢复', !getAgentRuntime().get(cid));
+    }
     const next = await send(cid, real ? '字幕和配音有什么区别？请用两句话解释。' : 'AUDIT_CONTEXT 回答新问题。');
     const current = await settled(cid, next, 120000);
     check('停止后新问题正常完成', current.runs[next.runId].outcome === 'completed');
@@ -191,6 +196,14 @@ app.whenReady().then(async () => {
     evidence.samples.push({ name: 'new-question-after-stop', text });
     if (!real) {
       check('真实 provider 收到锚点与停止事实的新表达指引', evidence.requests.some(r => r.marker === 'AUDIT_CONTEXT' && r.factsGuidance && r.stopGuidance));
+      await getAgentRuntime().persist(cid);
+      const archive = JSON.parse(fs.readFileSync(path.join(userData, 'runtime-v2/conversations', `${cid}.json`), 'utf8'));
+      check('公开聊天档案只保留 Pi 引用，原聊天记录仍在', archive.agentSession?.storage === 'pi' && !archive.agentSession.entries && archive.turns.length > 0);
+      const sessionDir = path.join(userData, 'runtime-v2/sessions');
+      const metadata = JSON.parse(fs.readFileSync(path.join(sessionDir, 'metadata', `${archive.agentSession.ref}.json`), 'utf8'));
+      const transcript = fs.readFileSync(path.join(sessionDir, 'pi', metadata.native.file), 'utf8');
+      check('真实桌面主会话已使用原生 JSONL 并保留停止事实', transcript.includes('hemi_goal_stopped') && transcript.includes('AUDIT_CONTEXT'));
+      check('真实桌面链路不再生成整会话快照副本', !fs.readdirSync(sessionDir).some(name => /^entries-[a-f0-9]{64}\.json$/.test(name)));
     } else {
       check('真实模型正常回答不复述宿主标签和内部编号', text.trim() && !/事实锚点|宿主目标终态|run-[a-z0-9-]+|用户看不到/.test(text), text);
       const diagnostic = await send(cid, '请解释刚才我点击停止后，之前那个列整数的任务是否还会自动继续？用一句话说明。');

@@ -19,6 +19,7 @@ import { snapshotFromRecord } from './task-history.mjs';
 import { firstReply, titleSource } from './conversation-title.mjs';
 import { noteActivity } from '../lib/perf.mjs';
 import { conversationStatus } from '../../shared/conversation-status.mjs';
+import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
 
 // 057 S3-2d：v2＝flow 快照随档（骨架；turns 仍是载荷/档案层）。旧档启动时一次性
 // 迁移（备份原档后写 v2，幂等）；缺 flow 的旧档由流服务打开时现场引导兜底。
@@ -827,7 +828,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
   }
 
   /**
-   * 056：主 agent 的 Pi 会话条目专字段读写。写＝读改写原文件（只换
+   * 主 agent 的 Pi 会话引用（兼容读取旧内嵌条目）。写＝读改写原文件（只换
    * agentSession 字段，不动 updatedAt——条目落档不是「最近对话」活动，
    * 回合本身已经通过 appendHostTurns 刷过时间）；结构异常按无处理。
    */
@@ -835,7 +836,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     const record = readSessionFile(String(id ?? ''));
     if (!record || record.corrupt) return null;
     const stored = record.agentSession;
-    if (!stored || typeof stored !== 'object' || !Array.isArray(stored.entries)) return null;
+    if (!stored || typeof stored !== 'object' || (!Array.isArray(stored.entries) && !isNativeSessionReference(stored))) return null;
     return stored;
   }
 
@@ -874,7 +875,9 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
       const anchor = Array.isArray(stored?.entries) ? stored.entries.findIndex((entry) => entry.type === 'custom'
         && entry.customType === 'hemi.input' && entry.data?.inputId === targetInputId) : -1;
       // 无锚点的旧档（或编辑点已被压缩）不能保留含旧目标的摘要，按保留 turns 重建。
-      const agentSessionOverride = anchor >= 0
+      const agentSessionOverride = isNativeSessionReference(stored)
+        ? { ...stored, rewindBeforeInputId: targetInputId }
+        : anchor >= 0
         ? { ...stored, entries: stored.entries.slice(0, anchor) }
         : null;
       return saveSession({
@@ -895,9 +898,11 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
   function saveAgentSession(id, payload) {
     const record = readSessionFile(String(id ?? ''));
     if (!record || record.corrupt) return false;
-    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.entries)) return false;
+    if (!payload || typeof payload !== 'object' || (!Array.isArray(payload.entries) && !isNativeSessionReference(payload))) return false;
     const { brainSession: _retired, ...rest } = record;
-    const next = { ...rest, agentSession: { header: payload.header ?? null, entries: payload.entries } };
+    const agentSession = isNativeSessionReference(payload) ? { storage: 'pi', version: 1, ref: payload.ref }
+      : { header: payload.header ?? null, entries: payload.entries };
+    const next = { ...rest, agentSession };
     try {
       writeFile(next);
       return true;
