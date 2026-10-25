@@ -82,9 +82,14 @@ if (run('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`])) {
 run('node', ['scripts/verify-release-materials.mjs']);
 
 // 2. 本地门禁：单测 + typecheck + vite 构建 + 间距门禁 + 原生口径门禁。
-const gates = skipTests
-  ? [[npmCommand, ['run', 'typecheck']], [npmCommand, ['run', 'build']], ['node', ['scripts/check-spacing.mjs']], ['node', ['scripts/check-native.mjs']]]
-  : [[npmCommand, ['test']], [npmCommand, ['run', 'typecheck']], [npmCommand, ['run', 'build']], ['node', ['scripts/check-spacing.mjs']], ['node', ['scripts/check-native.mjs']]];
+const gates = [
+  ...(skipTests ? [] : [[npmCommand, ['test']]]),
+  [npmCommand, ['run', 'typecheck']],
+  [npmCommand, ['run', 'build']],
+  ['node', ['scripts/generate-renderer-notices.mjs', '--check']],
+  ['node', ['scripts/check-spacing.mjs']],
+  ['node', ['scripts/check-native.mjs']],
+];
 for (const [cmd, argsList] of gates) {
   console.log(`\n▶ ${cmd} ${argsList.join(' ')}`);
   const useShell = cmd === npmCommand && npmShell;

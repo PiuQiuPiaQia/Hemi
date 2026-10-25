@@ -58,6 +58,9 @@ jobs:
 
       - run: npm run build
 
+      - name: 前端第三方声明与实际 bundle 一致
+        run: node scripts/generate-renderer-notices.mjs --check
+
       # targets 在 package.json build.mac.target（dmg+zip）；26.x CLI 的
       # 「--mac dmg,zip」会被当单个 target 名解析报 Unknown target（本地实测）。
       # 只打包不发布：electron-builder 的双 target publisher 会竞争建 release
