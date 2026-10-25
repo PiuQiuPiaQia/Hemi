@@ -72,10 +72,10 @@ try {
       } else if (modal) {
         await page.keyboard.press('Escape');
         await page.locator('.h-oauth-dialog').waitFor({ state: 'detached' });
-        assert.equal(await page.locator('.h-oauth-row').count(), 3);
+        assert.equal(await page.locator('.h-oauth-row').count(), 4);
         behavior.escapeCancelsAndCloses = true;
       }
-      const ok = actionsReachable && !checks.overflow && checks.allButtonsAccessible && checks.dialogInViewport && checks.dialogNamed && checks.focusInDialog && checks.accounts.length === 3 && !errors.length && (scene !== 'settings-oauth-device' || checks.deviceCode === 'HEMI-TEST') && (scene !== 'settings-oauth-error' || Boolean(checks.alert));
+      const ok = actionsReachable && !checks.overflow && checks.allButtonsAccessible && checks.dialogInViewport && checks.dialogNamed && checks.focusInDialog && checks.accounts.length === 4 && !errors.length && (scene !== 'settings-oauth-device' || checks.deviceCode === 'HEMI-TEST') && (scene !== 'settings-oauth-error' || Boolean(checks.alert));
       results.push({ scene, width, ok, actionsReachable, checks, behavior, errors, screenshot });
       console.log(`${ok ? 'PASS' : 'FAIL'} ${scene}@${width}`);
       await page.close();

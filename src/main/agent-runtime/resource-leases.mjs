@@ -1,6 +1,5 @@
 import { withExecutionScope } from './execution-scope.mjs';
 import { createHash } from 'node:crypto';
-import { normalizeCommandDescription } from '../../shared/command-display.mjs';
 const overlap = (a, b) => a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`) || b.startsWith(a.endsWith('/') ? a : `${a}/`);
 const conflicts = (a, b) => a.host === b.host && (a.scope === '*' || b.scope === '*' || overlap(a.scope, b.scope)) && (a.mode === 'write' || b.mode === 'write');
 
@@ -42,14 +41,8 @@ export const sharedResourceLeases = createResourceLeases();
 /** 装饰注册工具，不在 tool_call 预处理时等待。两条独立路径仍可并发。 */
 export function resourceGateway({ factories, resolvePath, fileHost = 'local', browserOwner, getExecution, callAnchor, sourceFor, beforeExecute, onActivity, leases = sharedResourceLeases }) {
   const resourceOf = async (tool, args) => {
-    // Shell 的文件调度边界是其工作区；不把独立浏览器、桌面或其他项目一起锁住。
-    // 这仍是协作锁，不承诺任意 shell 脚本的 OS 文件隔离。
-    if (['bash','powershell'].includes(tool)) {
-      const target = await resolvePath('.');
-      let scope = String(target.real ?? target.abs).replaceAll('\\', '/').replace(/\/$/, '') || '/';
-      if (process.platform === 'win32' && fileHost === 'local') scope = scope.toLowerCase();
-      return { host: fileHost, scope: `file:${scope}`, mode: 'write' };
-    }
+    // Coordinate explicit file targets. A shell's cwd does not identify its writes,
+    // so ordinary commands do not reserve the entire directory across conversations.
     if (['read','write','edit','ls','grep','glob'].includes(tool)) {
       const target = await resolvePath(args.path ?? args.cwd ?? '.');
       let scope = String(target.real ?? target.abs).replaceAll('\\','/').replace(/\/$/,'');
@@ -69,13 +62,11 @@ export function resourceGateway({ factories, resolvePath, fileHost = 'local', br
       const resource = await resourceOf(definition.name, args ?? {});
       const startedAt = Date.now();
       const lease = resource ? await leases.acquire({ ...resource, owner: execution?.owner ?? browserOwner,
-        tool: definition.name, description: ['bash', 'powershell'].includes(definition.name)
-          ? normalizeCommandDescription(args?.description) || '执行命令' : String(args?.path ?? '').slice(0, 120),
+        tool: definition.name, description: String(args?.path ?? '').slice(0, 120),
       }, signal, { onWait: blockers => onActivity?.({ toolCallId: id, tool: definition.name, since: startedAt, resource, blockers }) })
         .finally(() => onActivity?.({ toolCallId: id, finished: true })) : null;
       let observationId;
-      let retainedUntil;
-      const resources = { toolCallId: id, retainResourceUntil: promise => { retainedUntil = promise; } };
+      const resources = { toolCallId: id };
       try {
         if (execution?.fatalError) throw new Error(execution.fatalError);
         if (signal?.aborted || execution?.cancelled?.()) throw new DOMException('根目标已停止','AbortError');
@@ -109,10 +100,7 @@ export function resourceGateway({ factories, resolvePath, fileHost = 'local', br
         }
         throw error;
       } finally {
-        const release = () => { if (!execution?.cleanupUnconfirmed) lease?.release(); };
-        // 转后台只释放前台调用；工作区写租约跟随实际进程退出，不能制造后台写入竞态。
-        if (retainedUntil) void retainedUntil.then(release, release);
-        else release();
+        if (!execution?.cleanupUnconfirmed) lease?.release();
       }
     } });
   } })) }));

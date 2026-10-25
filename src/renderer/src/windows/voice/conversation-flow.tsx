@@ -36,6 +36,7 @@ type Props = {
   notice?: string;
   interimText?: string;
   busy: boolean;
+  readOnly?: boolean;
   retryBusy?: boolean;
   retryBlocked?: string;
   editingMessageId: string | null;
@@ -427,6 +428,7 @@ export function DesktopConversationFlow(props: Props) {
           notice: props.notice,
           interimText: props.interimText,
           busy: props.busy,
+          readOnly: props.readOnly,
           retryBusy: props.retryBusy,
           retryBlocked: props.retryBlocked,
           editingMessageId: props.editingMessageId,

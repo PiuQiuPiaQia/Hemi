@@ -30,27 +30,39 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 .app-topbar{display:flex;align-items:center;gap:var(--s1);min-height:var(--s12);padding:0 var(--s2);flex-shrink:0}
 .topbar-title{display:flex;flex:1;flex-direction:column;align-items:center;min-width:0;gap:2px}
 .topbar-title strong{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--text-ui);font-weight:550}
-.topbar-title small{display:flex;align-items:center;gap:var(--s1);color:var(--m-muted);font-size:var(--text-small)}
+.topbar-title small{display:flex;align-items:center;min-width:0;max-width:100%;gap:var(--s1);color:var(--m-muted);font-size:var(--text-small)}
+.topbar-title small>span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .title-button{height:var(--s11)}
-.topbar-spacer{width:var(--s11);flex-shrink:0}
 
 .conversation-frame{display:flex;flex:1;min-height:0;min-width:0}.conversation-frame>.hcf-root{width:100%}
-.navigation-stage [data-hemi-conversation-flow]{--fs-15:var(--text-body)}
-.queue-region{min-width:0}.queue-region:has(.h24-queue-tray){border-bottom:1px solid var(--m-line)}.queue-region>.hcf-root{display:block}
-.queue-region .h24-queue-tray{border:0;border-radius:0;margin:0;padding:var(--s1)}
-.queue-region .h24-queue-body{max-height:calc(var(--s11)*3 + var(--s1))}
+.navigation-stage [data-hemi-conversation-flow]{--fs-15:var(--text-body);--hcf-message-action-size:var(--s7)}
+.queue-region{--queue-control-size:calc(var(--s8) + var(--s1));min-width:0}.queue-region:has(.h24-queue-tray){border-bottom:1px solid var(--m-line)}.queue-region>.hcf-root{display:block;--hcf-touch-target:var(--queue-control-size)}
+.queue-region .h24-queue-tray{border:0;border-radius:0;margin:0;padding:0 var(--s2)}
+.queue-region .h24-queue-body{max-height:min(calc((var(--app-height,100dvh) - var(--keyboard-inset,0px))*.24),calc(var(--queue-control-size)*4))}
 .queue-region .h24-queue-list{gap:0;scrollbar-gutter:auto;scrollbar-width:thin}
-.queue-region .h24-queue-item{grid-template-columns:auto minmax(0,1fr) auto;column-gap:var(--s2);min-height:var(--s11);padding:0 0 0 var(--s1);flex-shrink:0}
+.queue-region .h24-queue-item{grid-template-columns:var(--queue-control-size) minmax(0,1fr) auto;column-gap:var(--s1);padding:0 var(--s1);border-radius:0;flex-shrink:0}
+.queue-region .h24-queue-item+.h24-queue-item{border-top:1px solid var(--m-line)}
+.queue-region .h24-queue-item:hover{background:transparent}
+.queue-region .h24-queue-content{grid-column:2;grid-row:1}
 .queue-region .h24-queue-item-actions{grid-column:3;grid-row:1;justify-self:end;gap:0;margin:0}
-.queue-region .h24-queue-tool{width:var(--s11);height:var(--s11)}
-.queue-region .h24-queue-drag{touch-action:none}
-.queue-region .h24-queue-run{min-height:var(--s11);padding:0 var(--s2);gap:2px;font-size:var(--text-small);white-space:nowrap;flex-shrink:0}
-.queue-region .h24-queue-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:var(--text-label);white-space:normal;line-height:1.6;overflow-wrap:anywhere}
+.queue-region .h24-queue-tool{width:var(--queue-control-size);height:var(--queue-control-size)}
+.queue-region .h24-queue-drag{grid-column:1;grid-row:1;touch-action:none;color:var(--m-faint)}
+.queue-region .h24-queue-drag:disabled{display:none}
+.queue-region .h24-queue-item:has(>.h24-queue-drag:disabled){grid-template-columns:minmax(0,1fr) auto}
+.queue-region .h24-queue-item:has(>.h24-queue-drag:disabled)>.h24-queue-content{grid-column:1}
+.queue-region .h24-queue-item:has(>.h24-queue-drag:disabled)>.h24-queue-item-actions{grid-column:2}
+.queue-region .h24-queue-run{width:var(--queue-control-size);height:var(--queue-control-size);padding:0;gap:0;border:0;border-radius:var(--r-control);background:transparent;color:var(--m-green);flex-shrink:0}
+.queue-region .h24-queue-run>span{display:none}
+.queue-region .h24-queue-run:hover:not(:disabled),.queue-region .h24-queue-run:active:not(:disabled){background:var(--m-green-soft)}
+.queue-region .h24-queue-text{display:block;font-size:var(--text-label);white-space:nowrap;line-height:1.5;overflow:hidden;text-overflow:ellipsis}
 .queue-region .h24-queue-error,.queue-region .h24-queue-status{grid-column:1/-1}
-.queue-region .h24-queue-head{min-height:var(--s11);padding:0 var(--s2)}
-.queue-region .h24-queue-paused{min-height:var(--s11);padding:0 var(--s2);margin:0 0 var(--s1)}
+.queue-region .h24-queue-head{min-height:var(--s8);padding:0 var(--s2);font-size:var(--text-small)}
+.queue-region .h24-queue-head small{margin-left:auto}
+.queue-region .h24-queue-paused{min-height:var(--queue-control-size);padding:0 var(--s2);margin:0 0 var(--s1)}
+.queue-region .h24-queue-paused .h24-queue-resume{min-height:var(--queue-control-size)}
 .queue-region .h24-queue-resume{min-height:var(--s11);padding:0 var(--s3)}
 .queue-region .h24-queue-resume-only{margin:0;padding:var(--s1) var(--s2)}
+.queue-region-outside{flex-shrink:0;margin-inline:var(--s3)}
 .empty-chat{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:var(--s5);gap:var(--s4);text-align:center}
 .welcome-mark{display:block;width:40px;height:40px}.empty-chat h1{font-size:var(--text-heading);font-weight:550}.empty-chat button{border:1px solid var(--m-line);border-radius:var(--r-control);padding:var(--s3);min-height:var(--s11);font-size:var(--text-label)}
 .drawer-layer{position:absolute;inset:0;z-index:3}
@@ -98,5 +110,5 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 .connection-advanced{margin-top:var(--s3);font-size:var(--text-label);color:var(--m-muted)}.connection-advanced>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--s11);cursor:pointer}.connection-advanced[open]>summary>svg{transform:rotate(90deg)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @keyframes drawer-enter{from{transform:translateX(-100%)}to{transform:translateX(0)}}
-@media(max-height:620px){.queue-region .h24-queue-body{max-height:calc(var(--s11)*2 + var(--s1))}.connection-intro{padding:var(--s4) 0}.connect-scroll{padding-top:var(--s2)}}
+@media(max-height:620px){.connection-intro{padding:var(--s4) 0}.connect-scroll{padding-top:var(--s2)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

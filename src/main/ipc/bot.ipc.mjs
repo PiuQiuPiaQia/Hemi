@@ -25,6 +25,8 @@ export function registerBotIpc() {
   });
   service = createBotDesktopService({
     userDataDir: app.getPath('userData'),
+    // A development checkout may inspect the production Bot, but must not replace its model catalog.
+    primaryUserDataDir: !app.isPackaged && !process.env.HEMI_USER_DATA_DIR ? path.join(app.getPath('appData'), 'hemi') : null,
     runner: { ...runner, rememberPassword: remote.rememberPassword },
     profiles: getProfiles(),
     archivePath,

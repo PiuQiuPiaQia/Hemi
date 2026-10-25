@@ -32,7 +32,6 @@ import {
   guessVision,
   hostOf,
   isLocalEndpoint,
-  matchPreset,
   modelUsage,
   presetById,
   providerSaveInput,
@@ -44,6 +43,7 @@ import {
 import { NewApiImportView, type ImportLock } from '@/windows/voice/newapi-import-section';
 import { OAuthAccountSection } from '@/windows/voice/oauth-account-section';
 import { copyTextViaBridge } from '@/lib/use-clipboard-copy';
+import { useRemoteModels } from './lib/use-remote-models';
 
 /**
  * 037 模型页 v2（文本 tab）：「看图」即时保存 → 供应商摘要行 → 下钻供应商详情 / 添加供应商。
@@ -1022,7 +1022,6 @@ function OverviewView({
 
 function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProviderView }) {
   const { directory, readOnly, mutate, saveProvider } = ctl;
-  const preset = matchPreset(provider.baseUrl);
   const status = ctl.statuses[provider.id];
   const [nameDraft, setNameDraft] = useState(provider.name);
   const [urlDraft, setUrlDraft] = useState(provider.baseUrl);
@@ -1030,25 +1029,13 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
   const [fieldError, setFieldError] = useState<{ name?: string; baseUrl?: string; key?: string }>({});
   const [newModel, setNewModel] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
-  // 041 拉取模型列表：GET /models 的结果（供应商详情用已存 Key，一键拉取）。
-  const [remoteModels, setRemoteModels] = useState<string[] | null>(null);
-  const [remoteBusy, setRemoteBusy] = useState(false);
-  const [remoteError, setRemoteError] = useState('');
-
-  const fetchRemoteModels = async () => {
-    setRemoteBusy(true);
-    setRemoteError('');
-    try {
-      const result = await window.hemiVoice?.listRemoteModels({ providerId: provider.id });
-      if (!result?.ok) throw new Error(result?.error || '拉取失败，请重试。');
-      setRemoteModels(result.models ?? []);
-      if (!result.models?.length) setRemoteError('服务没有返回任何模型。');
-    } catch (error) {
-      setRemoteError(errorText(error));
-    } finally {
-      setRemoteBusy(false);
-    }
-  };
+  const [keyRevision, setKeyRevision] = useState(0);
+  const loadRemoteModels = useCallback(
+    () => window.hemiVoice.listRemoteModels({ providerId: provider.id }),
+    [provider.id, provider.baseUrl, provider.hasApiKey, provider.oauthProvider, keyRevision],
+  );
+  const canFetchModels = !ctl.external && !readOnly && Boolean(provider.hasApiKey || isLocalEndpoint(provider.baseUrl));
+  const remote = useRemoteModels(canFetchModels ? loadRemoteModels : null);
   const [modelTests, setModelTests] = useState<Record<string, ProviderStatus>>({});
   const [flashModel, setFlashModel] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1077,6 +1064,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
       },
     );
     if (error) return error;
+    if (patch.apiKey) setKeyRevision(value => value + 1);
     // 连接变了就重新测（名字/协议变不用测——协议只影响请求方言，不影响连通性）。
     if (patch.baseUrl !== undefined || patch.apiKey) void ctl.testProvider(apply(provider));
     return null;
@@ -1162,7 +1150,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
       return;
     }
     const probeKey = provider.models[0]?.modelKey;
-    const draft = draftModelEntry(provider.id, name, guessVision(preset, name));
+    const draft = draftModelEntry(provider.id, name, guessVision(name));
     setNewModel('');
     setAddError(null);
     const error = await mutate(
@@ -1206,10 +1194,6 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
 
   const usedCount = provider.models.filter((model) => modelUsage(directory, model)).length;
   const onlyProvider = directory.providers.length <= 1;
-  const suggestions = (preset?.models ?? [])
-    .filter((item) => !provider.models.some((model) => model.model === item.id))
-    .slice(0, 4);
-
   const setVisionHere = (modelKey: string) =>
     void mutate(
       (dir) => ({ ...dir, visionModelKey: modelKey }),
@@ -1436,94 +1420,69 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
               </div>
             );
           })}
-          {!ctl.external ? <><div className="h37m-add-row">
-            <input
-              className="h37-input h37m-mono"
-              value={newModel}
-              placeholder="输入型号 ID，回车添加"
-              aria-label="新型号 ID"
-              spellCheck={false}
-              disabled={readOnly}
-              aria-invalid={addError ? true : undefined}
-              onChange={(event) => {
-                setNewModel(event.target.value);
-                setAddError(null);
-              }}
-              onKeyDown={onFieldKey(() => void addModel(newModel))}
-            />
-            <button
-              type="button"
-              className="h37-btn h37-btn-secondary"
-              disabled={readOnly}
-              onClick={() => void addModel(newModel)}
-            >
-              添加
-            </button>
-          </div>
-          {addError ? (
-            <div className="h37m-add-error h37-error-text" role="alert">
-              {addError}
-            </div>
-          ) : null}
-          {/* 041：从服务的 /models 拉真实可用列表，点选哪个加哪个；已添加的禁选标注。 */}
-          <div className="h37m-fetch">
-            <button
-              type="button"
-              className="h37-btn h37-btn-secondary h37-btn-sm"
-              disabled={readOnly || remoteBusy}
-              onClick={() => void fetchRemoteModels()}
-            >
-              {remoteBusy ? '拉取中…' : remoteModels ? '重新拉取' : '从服务拉取模型'}
-            </button>
-            <span className="h37-help">
-              {remoteModels
-                ? `拉到 ${remoteModels.length} 个型号，点型号直接添加。`
-                : '拉取这个服务实际可用的型号列表。'}
-            </span>
-            {remoteError ? (
-              <span className="h37-error-text" role="alert">
-                {remoteError}
-              </span>
-            ) : null}
-          </div>
-          {remoteModels?.length ? (
-            <div className="h37m-fetch-list">
-              {remoteModels.map((id) => {
-                const added = provider.models.some((model) => model.model === id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className="h37-chip h37m-chip-sm"
-                    disabled={readOnly || added}
-                    onClick={() => void addModel(id)}
-                  >
-                    {added ? <Check aria-hidden /> : <Plus aria-hidden />}
-                    <span className="h37m-mono">{id}</span>
-                    {added ? <span className="h37-tag h37m-chip-tag">已添加</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {suggestions.length ? (
-            <div className="h37m-suggest">
-              <span>常用型号</span>
-              {suggestions.map((item) => (
+          {!ctl.external ? (
+            <div className="h37m-model-browser">
+              <div className="h37m-fetch">
+                <span className="h37m-fetch-copy" role="status" aria-live="polite">
+                  <b>从服务获取型号</b>
+                  <span>{remote.busy ? '正在拉取可用模型…' : remote.models
+                    ? `共 ${remote.models.length} 个型号，点击添加。`
+                    : canFetchModels ? '可刷新模型列表，也可手动添加。' : '保存 API Key 后自动获取模型列表。'}</span>
+                </span>
                 <button
-                  key={item.id}
                   type="button"
-                  className="h37-chip h37m-chip-sm"
-                  disabled={readOnly}
-                  onClick={() => void addModel(item.id)}
+                  className="h37-btn h37-btn-secondary"
+                  disabled={!canFetchModels || remote.busy}
+                  onClick={remote.refresh}
                 >
-                  <Plus aria-hidden />
-                  {item.id}
+                  {remote.busy ? <span className="h37-spinner" aria-hidden /> : null}
+                  {remote.busy ? '拉取中…' : '刷新列表'}
                 </button>
-              ))}
+              </div>
+              {remote.error ? <div className="h37-error-text" role="alert">{remote.error}</div> : null}
+              {remote.models?.length ? (
+                <div className="h37m-fetch-list" aria-label="服务可用型号">
+                  {remote.models.map((id) => {
+                    const added = provider.models.some((model) => model.model === id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className="h37-chip h37m-chip-sm"
+                        title={id}
+                        disabled={readOnly || ctl.saveState === 'saving' || added}
+                        onClick={() => void addModel(id)}
+                      >
+                        {added ? <Check aria-hidden /> : <Plus aria-hidden />}
+                        <span className="h37m-mono">{id}</span>
+                        {added ? <span className="h37-tag h37m-chip-tag">已添加</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="h37m-add-row">
+                <input
+                  className="h37-input h37m-mono"
+                  value={newModel}
+                  placeholder="手动输入型号 ID，回车添加"
+                  aria-label="新型号 ID"
+                  spellCheck={false}
+                  disabled={readOnly}
+                  aria-invalid={addError ? true : undefined}
+                  onChange={(event) => { setNewModel(event.target.value); setAddError(null); }}
+                  onKeyDown={onFieldKey(() => void addModel(newModel))}
+                />
+                <button
+                  type="button"
+                  className="h37-btn h37-btn-secondary"
+                  disabled={readOnly || ctl.saveState === 'saving' || !newModel.trim()}
+                  onClick={() => void addModel(newModel)}
+                >添加</button>
+              </div>
+              {addError ? <div className="h37-error-text" role="alert">{addError}</div> : null}
             </div>
           ) : null}
-          </> : null}
         </div>
         <div className="h37-section-foot">
           {ctl.external ? '在 Bot 对话中切换要使用的模型。' : '添加时自动测试这个型号能不能用；「能看图」在行内直接改，看图模型在页面顶部的「看图」里换。'}
@@ -1652,7 +1611,7 @@ export function AddProviderScreen({
       <div className="h37-page-head">
         <div>
           <h2>添加供应商</h2>
-          <p>登录 ChatGPT、Claude 或 GitHub Copilot，也可从 New API 导入或手动配置。</p>
+          <p>登录 ChatGPT、Claude、GitHub Copilot 或 GLM Coding Plan，也可从 New API 导入或手动配置。</p>
         </div>
       </div></>}
 
@@ -1660,7 +1619,7 @@ export function AddProviderScreen({
         <div className="h47n-methods" role="radiogroup" aria-label="配置方式">
           <button type="button" role="radio" disabled={childBusy} aria-checked={method === 'oauth'} className="h47n-method" data-on={method === 'oauth' ? 'true' : undefined} onClick={() => choose('oauth')}>
             <span className="h37-tile h37m-tile-sm" data-tone={method === 'oauth' ? 'g' : undefined} aria-hidden><ExternalLink size={16} /></span>
-            <span className="h47n-method-text"><b>账号登录</b><span>ChatGPT · Claude · GitHub Copilot</span></span>
+            <span className="h47n-method-text"><b>账号登录</b><span>ChatGPT · Claude · Copilot · GLM</span></span>
           </button>
           <button
             type="button"
@@ -1757,39 +1716,25 @@ export function AddProviderView({
   const [api, setApi] = useState<ModelProviderApi>('openai-completions');
   const [test, setTest] = useState<ProviderStatus | null>(initial?.status ?? null);
   const [extras, setExtras] = useState<string[]>([]);
-  const [picked, setPicked] = useState<string[]>(
-    initialPreset ? initialPreset.models.filter((item) => item.pick).map((item) => item.id) : [],
-  );
+  const [picked, setPicked] = useState<string[]>([]);
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherDraft, setOtherDraft] = useState('');
-  // 041 拉取模型列表：地址/Key 填好即可拉（Key 尚未保存也行，直接用输入值请求）。
-  const [remoteBusy, setRemoteBusy] = useState(false);
-  const [remoteError, setRemoteError] = useState('');
-  const fetchRemote = async () => {
-    setRemoteBusy(true);
-    setRemoteError('');
-    try {
-      const result = await formServices.listRemoteModels?.({
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-      });
-      if (!result?.ok) throw new Error(result?.error || '拉取失败，请重试。');
-      const models = result.models ?? [];
-      setExtras((prev) => [...prev, ...models.filter((id) => !allModels.includes(id))]);
-      if (!models.length) setRemoteError('服务没有返回任何模型。');
-    } catch (error) {
-      setRemoteError(errorText(error));
-    } finally {
-      setRemoteBusy(false);
-    }
-  };
+  const remoteUrl = baseUrl.trim();
+  const remoteKey = apiKey.trim();
+  const listRemoteModels = formServices.listRemoteModels;
+  const canFetchModels = Boolean(listRemoteModels && remoteUrl && (remoteKey || isLocalEndpoint(remoteUrl)));
+  const loadRemoteModels = useCallback(
+    () => listRemoteModels!({ baseUrl: remoteUrl, apiKey: remoteKey }),
+    [listRemoteModels, remoteUrl, remoteKey],
+  );
+  const remote = useRemoteModels(canFetchModels ? loadRemoteModels : null);
   const [error, setError] = useState<string | null>(null);
   const [linkNote, setLinkNote] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
-    onBusyChange?.(submitting || remoteBusy);
+    onBusyChange?.(submitting || remote.busy);
     return () => onBusyChange?.(false);
-  }, [submitting, remoteBusy, onBusyChange]);
+  }, [submitting, remote.busy, onBusyChange]);
   const skipFirstTest = useRef(Boolean(initial?.status));
   const generation = useRef(0);
   const slowTest = useDelayed(test?.state === 'testing');
@@ -1797,7 +1742,7 @@ export function AddProviderView({
 
   const preset: ProviderPreset | null = presetById(presetId);
   const keyless = Boolean(preset?.keyless) || isLocalEndpoint(baseUrl);
-  const allModels = [...(preset?.models.map((item) => item.id) ?? []), ...extras];
+  const allModels = [...new Set([...(remote.models ?? []), ...extras])];
   const ordered = allModels.filter((id) => picked.includes(id));
   const probeModel = ordered[0] ?? '';
 
@@ -1806,7 +1751,7 @@ export function AddProviderView({
     setName(next.id === 'custom' ? '' : uniqueProviderName(next.name, existingNames));
     setBaseUrl(next.baseUrl);
     setEditingUrl(next.id === 'custom');
-    setPicked(next.models.filter((item) => item.pick).map((item) => item.id));
+    setPicked([]);
     setExtras([]);
     setTest(null);
     setError(null);
@@ -1867,7 +1812,7 @@ export function AddProviderView({
     if (ordered.length === 0) return setError('至少配一个模型（填型号 ID）。');
     setError(null);
     setSubmitting(true);
-    const models = ordered.map((id) => draftModelEntry('', id, guessVision(preset, id)));
+    const models = ordered.map((id) => draftModelEntry('', id, guessVision(id)));
     const input: SaveInput = {
       ...providerSaveInput({ id: '', name, baseUrl, api, models }, { apiKey: key || KEYLESS_PLACEHOLDER_KEY }),
       id: undefined,
@@ -1897,7 +1842,7 @@ export function AddProviderView({
           <div className="h37-page-head">
             <div>
               <h2>添加供应商</h2>
-              <p>选一家，接口地址自动填好；粘贴 Key 后自动测试并列出可用型号。</p>
+              <p>选一家，接口地址自动填好；粘贴 Key 后获取型号，勾选后自动测试。</p>
             </div>
           </div>
         </>
@@ -1990,7 +1935,7 @@ export function AddProviderView({
                     spellCheck={false}
                     className="h37-input h37m-mono"
                     value={apiKey}
-                    placeholder={keyless ? '本地服务不需要 Key（可留空）' : formServices.testModelProfile ? '粘贴后自动测试' : '粘贴 API Key'}
+                    placeholder={keyless ? '本地服务不需要 Key（可留空）' : listRemoteModels ? '粘贴后自动获取模型列表' : '粘贴 API Key'}
                     autoFocus={!initial}
                     onChange={(event) => {
                       setApiKey(event.target.value);
@@ -2055,33 +2000,33 @@ export function AddProviderView({
           </section>
 
           <section className="h37-section">
-            <div className="h37-section-head">
+            <div className="h37-section-head h37m-catalog-head">
               <h3>3 · 勾选要用的型号</h3>
               <span className="h37-actions">
                 {formServices.listRemoteModels ? <button
                   type="button"
                   className="h37-btn h37-btn-secondary h37-btn-sm"
-                  disabled={!preset || remoteBusy || submitting}
-                  onClick={() => void fetchRemote()}
+                  disabled={!canFetchModels || remote.busy || submitting}
+                  onClick={remote.refresh}
                 >
-                  {remoteBusy ? '拉取中…' : '从服务拉取'}
+                  {remote.busy ? '拉取中…' : '刷新列表'}
                 </button> : null}
                 <span className="h37-count">已选 {ordered.length}</span>
               </span>
             </div>
-            {remoteError ? (
+            {remote.error ? (
               <div className="h37m-add-error h37-error-text" role="alert">
-                {remoteError}
+                {remote.error}
               </div>
             ) : null}
             <div className="h37m-chips">
               {allModels.map((id) => {
                 const on = picked.includes(id);
                 return (
-                  <button key={id} type="button" className="h37-chip" aria-pressed={on} onClick={() => toggle(id)}>
+                  <button key={id} type="button" className="h37-chip" title={id} aria-pressed={on} onClick={() => toggle(id)}>
                     {on ? <Check aria-hidden /> : null}
                     <span className="h37m-mono">{id}</span>
-                    {guessVision(preset, id) ? <span className="h37-tag h37m-chip-tag">看图</span> : null}
+                    {guessVision(id) ? <span className="h37-tag h37m-chip-tag">看图</span> : null}
                   </button>
                 );
               })}
@@ -2113,7 +2058,9 @@ export function AddProviderView({
               )}
             </div>
             <div className="h37-section-foot">
-              能看图的型号自动标出；对话中可随时切换模型。
+              {remote.busy ? '正在从服务获取可用型号…' : remote.models
+                ? `已获取 ${remote.models.length} 个型号，勾选后自动测试连接。`
+                : canFetchModels ? '可刷新列表，也可手动添加型号。' : '填好接口地址和 API Key 后自动获取型号，也可手动添加。'}
             </div>
           </section>
 

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {randomUUID} from 'node:crypto';
 import { createProfileStore } from '../lib/model-profiles.mjs';
 import { createBotHost } from './host.mjs';
 import { createBotDesktopService } from './desktop-service.mjs';
@@ -65,9 +66,43 @@ async function fixture(t) {
   t.after(async () => { await client.close(); await host.close(); await fs.rm(root, { recursive: true, force: true }); });
   return { root, profiles, keys, id, requests, runs, host, edit, get client() { return client; },
     dropNext: () => { drop = true; }, setNetwork: value => { network = value; },
-    async restart() { await client.close(); client = createBotDesktopService(options); await client.refresh(); },
+    async restart(patch = {}) { await client.close(); Object.assign(options, patch); client = createBotDesktopService(options); await client.refresh(); },
   };
 }
+test('development uses the production Bot catalog without uploading or removing another profile models', async t => {
+  const f = await fixture(t);
+  const binding = f.client.getState().binding;
+  await f.client.close();
+  const primaryUserDataDir = path.join(f.root, 'production');
+  await fs.mkdir(path.join(primaryUserDataDir, 'bot'), {recursive:true});
+  await fs.writeFile(path.join(primaryUserDataDir, 'bot/connection.json'), JSON.stringify(binding));
+  const model = {modelKey:'formal/main',providerId:'formal',name:'正式版供应商',model:'formal-main',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',apiKey:'FIXTURE_FORMAL'};
+  const request=(method,params={})=>f.host.request(method,{instanceId:binding.instanceId,requestId:randomUUID(),...params});
+  await request('model.sync',{models:[model]});
+  await request('model.local-config',{keys:[model.modelKey],roleModels:{main:model.modelKey}});
+  const start=f.requests.length;
+  await f.restart({primaryUserDataDir});
+  await f.edit({name:'dev changed'});
+  await f.client.refresh();
+  await f.client.command('session.update',{id:f.id,modelKey:model.modelKey});
+  await assert.rejects(f.client.command('session.update',{id:f.id,modelKey:f.keys[0]}),/正式版 Hemi 管理/);
+  await assert.rejects(f.client.command('models.sync',{keys:f.keys}),/正式版 Hemi 管理/);
+  const snapshot=await request('snapshot');
+  assert.deepEqual(snapshot.models.map(item=>item.key),[model.modelKey]);
+  assert.deepEqual(snapshot.roleModels,{main:model.modelKey});
+  assert.deepEqual(f.client.getState().localModels,[]);
+  assert.deepEqual(f.client.getState().localRoleModels,{main:model.modelKey});
+  assert.ok(!f.requests.slice(start).some(item=>['model.sync','model.local-config'].includes(item.method)));
+});
+test('production binding to a different Bot does not disable development model synchronization', async t => {
+  const f = await fixture(t), primaryUserDataDir = path.join(f.root, 'production');
+  await fs.mkdir(path.join(primaryUserDataDir, 'bot'), {recursive:true});
+  await fs.writeFile(path.join(primaryUserDataDir, 'bot/connection.json'), JSON.stringify({instanceId:'another-bot'}));
+  await f.restart({primaryUserDataDir});
+  await f.edit({name:'Independent development provider'});
+  await wait(()=>f.client.getState().cache.models.every(model=>model.name==='Independent development provider'));
+  assert.ok(f.client.getState().localModels.length>0);
+});
 test('initialization automatically configures local models and selecting an existing model never duplicates verification', async t => {
   const f = await fixture(t);
   assert.equal(f.client.getState().localModels.length, 2);

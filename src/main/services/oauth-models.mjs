@@ -2,8 +2,9 @@ import { createModels } from '@earendil-works/pi-ai';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { githubCopilotProvider } from '@earendil-works/pi-ai/providers/github-copilot';
+import { bigModelCodingProvider } from './bigmodel-coding.mjs';
 
-export const OAUTH_PROVIDERS = Object.freeze({ openai: 'ChatGPT', anthropic: 'Claude', 'github-copilot': 'GitHub Copilot' });
+export const OAUTH_PROVIDERS = Object.freeze({ openai: 'ChatGPT', anthropic: 'Claude', 'github-copilot': 'GitHub Copilot', bigmodel: 'GLM Coding Plan（BigModel）' });
 export const isOAuthProvider = id => Object.hasOwn(OAUTH_PROVIDERS, id ?? '');
 let activeRuntime = null;
 export function setOAuthRuntime(runtime) { activeRuntime = runtime; }
@@ -18,7 +19,7 @@ export function streamOAuthModel(candidate, context, options = {}) {
 }
 
 /** Only these providers, only this app's encrypted credentials, no ambient API-key fallback. */
-export function createOAuthModels(credentials, providers = [openaiProvider(), anthropicProvider(), githubCopilotProvider()]) {
+export function createOAuthModels(credentials, providers = [openaiProvider(), anthropicProvider(), githubCopilotProvider(), bigModelCodingProvider(credentials)]) {
   const models = createModels({ credentials, authContext: { env: async () => undefined, fileExists: async () => false } });
   for (const provider of providers) models.setProvider(provider);
   return {

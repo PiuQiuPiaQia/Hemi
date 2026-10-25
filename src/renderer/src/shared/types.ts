@@ -68,6 +68,10 @@ export type TranscriptItem = {
   inputSource?: 'voice' | 'text';
   /** 024 消息编辑：用户消息被编辑的时间戳（存在即显示「已编辑」）。 */
   editedAt?: number;
+  /** Local submission preview; never stored as a delivered Host message. */
+  pendingDelivery?: boolean;
+  /** Restore a rejected edit without replacing its authoritative message text. */
+  editDraft?: { revision: string; text: string };
   /**
    * 005：任务卡作为对话流的一等公民（用户 2026-09-19 裁决「任务框跟着对话走」）——
    * kind='task' 的条目在流内原位渲染任务卡，历史对话与任务卡交错排布；

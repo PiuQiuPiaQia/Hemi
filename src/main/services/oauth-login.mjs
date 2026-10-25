@@ -8,6 +8,7 @@ function loginError(error) {
   if (/1455|EADDRINUSE|port .*in use/i.test(message)) return '登录回调端口被占用，请先结束其他 ChatGPT 登录后重试。';
   if (/keychain|钥匙串|凭据文件|无法解密/.test(message)) return message;
   if (/chatgpt.tokens.use.direct/.test(message)) return '尚未授权使用 ChatGPT 额度，请重新登录并同意该权限。';
+  if (/^GLM 编程套餐/.test(message)) return message;
   if (/^(配置目录损坏|环境变量正在覆盖|ChatGPT 模型目录|这个账号没有返回)/.test(message)) return message;
   return '账号登录未完成，请检查浏览器中的授权结果和网络后重试。';
 }
@@ -44,7 +45,7 @@ export function createOAuthLogin({ runtime, credentials, profiles, openExternal,
   function authUrl(op, raw) {
     const provider = op.state.provider;
     const url = new URL(raw);
-    const allowed = provider === 'openai' ? ['auth.openai.com'] : provider === 'anthropic' ? ['claude.ai', 'platform.claude.com'] : ['github.com', op.enterpriseHost].filter(Boolean);
+    const allowed = provider === 'bigmodel' ? ['bigmodel.cn', 'www.bigmodel.cn'] : provider === 'openai' ? ['auth.openai.com'] : provider === 'anthropic' ? ['claude.ai', 'platform.claude.com'] : ['github.com', op.enterpriseHost].filter(Boolean);
     if (url.protocol !== 'https:' || url.username || url.password || (allowed && !allowed.includes(url.hostname))) throw new Error('登录地址无效');
     return url.href;
   }

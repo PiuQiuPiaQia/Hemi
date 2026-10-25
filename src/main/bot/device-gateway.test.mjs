@@ -184,6 +184,7 @@ test('actual WSS authenticates device proofs, replays cursors, isolates subscrip
   first.ws.terminate();await once(first.ws,'close');
   await f.manage('session.rename',{id,title:'断线期间更新',requestId:randomUUID()});
   const second=await connect({id,cursor});assert.ok(second.frames.some(f=>f.type==='catalog'));assert.ok(!second.frames.some(f=>f.type==='reset'));
+  const control=await f.signed('/v1/rpc',{method:'session.control',params:{id,action:'takeover'}});assert.equal(control.result?.ok,true);
   const sent=await f.signed('/v1/rpc',{method:'flow.command',params:{id,requestId:randomUUID(),command:{type:'send',input:{inputId:'wss-input',text:'真实推送'}}}});assert.equal(sent.result?.ok,true,JSON.stringify(sent));
   await wait(()=>second.frames.some(f=>f.type==='flow'));assert.ok(second.frames.filter(f=>f.type==='flow').every(f=>f.id===id));
   const closed=once(second.ws,'close');await f.manage('devices.revoke',{deviceId:f.deviceId,operationId:randomUUID()});await closed;

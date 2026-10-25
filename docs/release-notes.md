@@ -1,19 +1,23 @@
-本次修复 macOS 临时签名包的应用内更新，让“下载 → 重启安装”完整走通。
+本次更新改善多设备对话、模型配置与消息交互，仅提供 macOS（Apple 芯片）安装包。
 
-- 下载时按签名类型选择更新方式，临时签名包使用已校验的下载文件交给 Hemi 换包安装器，避免 Squirrel 提前按旧版身份拒绝新包。
-- 安装前再次核对 SHA-512、目标版本和新包自身的代码签名，下载文件被修改或签名损坏时拒绝安装。
-- 更新器自动退出、替换应用并重新启动，保留现有聊天和配置；替换失败时回滚旧应用。
-- 修正签名探测读取 codesign 标准错误输出的方式，正确识别 Developer ID 证书。Windows 和证书签名的 macOS 应用使用各自原生安装器。
-- 下载完成后明确提示重启安装，避免误以为普通退出就会完成临时签名包更新。
+- 支持会话占用与明确接管，避免 PC 和手机同时修改同一对话；查看历史不会打断云端任务。
+- 优化发送后的即时反馈、断线恢复和队列显示，修复编辑回卷可能重复执行，以及键盘、长列表下的滚动问题。
+- 正式版和开发版连接同一个 Bot 时，以正式版的模型与路由为准，避免相互覆盖；失效模型显示明确提示。
+- 模型目录自动从供应商获取，支持手动补充型号；新增 GLM Coding Plan（BigModel）账号登录。
+- 模型和思考强度点选后立即更新显示，后台同步；改善消息间距与移动端复制、编辑按钮。
+- 普通命令不再占用整个工作区的协作锁，独立会话可并行执行；明确文件目标继续参与资源协调。
+- 上下文入口改为静态图标和实际用量明细，避免容量进度造成误解。
 
-下载：macOS（Apple 芯片）用 `.dmg`，Windows（64 位）用 `-setup.exe`。
+下载 `.dmg` 安装；已有 macOS 用户可在“设置 → 通用 → 关于与更新”检查更新。
 
 ---
 
-This patch fixes in-app updates for ad-hoc-signed macOS builds.
+This update improves multi-device conversations, model configuration and message interaction. This release ships macOS Apple Silicon artifacts only.
 
-- Select the installation path before downloading, keeping verified downloads out of Squirrel's old-bundle identity checks for ad-hoc builds.
-- Recheck SHA-512, target version and the new bundle's own code signature before installation. Modified downloads and invalid signatures are rejected.
-- Quit, replace and relaunch the application automatically while retaining conversations and settings, with rollback if replacement fails.
-- Read codesign identity information from stderr. Developer ID macOS builds and Windows retain their native installers.
-- Clarify that ad-hoc downloads are installed through the restart-and-update action.
+- Coordinate conversation ownership and explicit takeover across desktop and mobile without interrupting cloud work when viewing history.
+- Improve immediate send feedback, reconnection, queue presentation, editing and scroll anchoring.
+- Keep the production model catalog authoritative when development and production connect to the same Bot.
+- Fetch model catalogs from providers and add GLM Coding Plan account sign-in.
+- Apply model/thinking selections immediately while syncing in the background; refine message spacing and mobile inline actions.
+- Allow ordinary commands in independent conversations to run concurrently while retaining explicit file coordination.
+- Show actual context usage through a static entry instead of a capacity progress ring.

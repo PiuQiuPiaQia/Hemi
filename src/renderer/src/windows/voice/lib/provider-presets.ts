@@ -6,23 +6,7 @@ import type {
   ThinkingLevel,
 } from '@/shared/types';
 
-/**
- * 037 模型页 v2：服务商预设（静态数据）＋页面用到的纯函数。
- *
- * 现有 IPC 没有「从接口拉型号列表」的能力（surfaces 稿「模型页 v2 对实现的要求」），
- * 添加服务商时可勾选的型号来自这里的常用清单，「其他型号」手填兜底；
- * 粘贴 Key 后的自动测试走 testModelProfile（不带 modelKey＝显式三项探活）。
- * 本文件只有类型导入，node --test 可直接加载。
- */
-
-export type PresetModel = {
-  id: string;
-  /** 能看图（勾选时 supportsVision=true）。 */
-  vision?: boolean;
-  /** 添加页默认勾上。 */
-  pick?: boolean;
-};
-
+/** 供应商预设只提供连接信息；可用型号由服务实时返回。 */
 export type ProviderPreset = {
   id: string;
   name: string;
@@ -37,7 +21,6 @@ export type ProviderPreset = {
   keySite: string;
   /** 不需要 Key（本地服务）：测试与保存时用占位 Key。 */
   keyless?: boolean;
-  models: PresetModel[];
 };
 
 /** 本地服务不校验 Key，但探活与回合解析都要求非空——用这个占位。 */
@@ -52,7 +35,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.deepseek.com/v1',
     keyUrl: 'https://platform.deepseek.com/api_keys',
     keySite: 'DeepSeek',
-    models: [{ id: 'deepseek-chat', pick: true }, { id: 'deepseek-reasoner' }],
   },
   {
     id: 'qwen',
@@ -62,13 +44,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
     keySite: '阿里云',
-    models: [
-      { id: 'qwen-max', pick: true },
-      { id: 'qwen-vl-max', vision: true, pick: true },
-      { id: 'qwen-plus' },
-      { id: 'qwen-turbo' },
-      { id: 'qwen-long' },
-    ],
   },
   {
     id: 'kimi',
@@ -78,11 +53,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.moonshot.cn/v1',
     keyUrl: 'https://platform.moonshot.cn/console/api-keys',
     keySite: 'Moonshot',
-    models: [
-      { id: 'kimi-k2-turbo-preview', pick: true },
-      { id: 'kimi-latest', vision: true },
-      { id: 'moonshot-v1-32k' },
-    ],
   },
   {
     id: 'zhipu',
@@ -92,12 +62,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
     keySite: '智谱',
-    models: [
-      { id: 'glm-4.5', pick: true },
-      { id: 'glm-4.5v', vision: true },
-      { id: 'glm-4.5-air' },
-      { id: 'glm-4-flash' },
-    ],
   },
   {
     id: 'openai',
@@ -107,12 +71,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.openai.com/v1',
     keyUrl: 'https://platform.openai.com/api-keys',
     keySite: 'OpenAI',
-    models: [
-      { id: 'gpt-4.1', vision: true, pick: true },
-      { id: 'gpt-4.1-mini', vision: true },
-      { id: 'gpt-4o', vision: true },
-      { id: 'o4-mini', vision: true },
-    ],
   },
   {
     id: 'openrouter',
@@ -122,12 +80,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     keyUrl: 'https://openrouter.ai/keys',
     keySite: 'OpenRouter',
-    models: [
-      { id: 'deepseek/deepseek-chat', pick: true },
-      { id: 'openai/gpt-4.1', vision: true },
-      { id: 'google/gemini-2.5-flash', vision: true },
-      { id: 'anthropic/claude-sonnet-4', vision: true },
-    ],
   },
   {
     id: 'ollama',
@@ -138,7 +90,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: '',
     keySite: '',
     keyless: true,
-    models: [{ id: 'qwen2.5:14b', pick: true }, { id: 'qwen2.5vl:7b', vision: true }, { id: 'llama3.1:8b' }],
   },
   {
     id: 'custom',
@@ -148,7 +99,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: '',
     keyUrl: '',
     keySite: '',
-    models: [],
   },
 ];
 
@@ -260,10 +210,8 @@ export function draftModelEntry(providerId: string, model: string, vision = fals
   };
 }
 
-/** 预设里这个型号能看图吗（手填的型号按名字猜：含 vl / vision / 4o / 4.1 / gemini 等）。 */
-export function guessVision(preset: ProviderPreset | null, model: string): boolean {
-  const known = preset?.models.find((item) => item.id === model);
-  if (known) return known.vision === true;
+/** 根据型号名猜测看图能力；用户可以在保存后修正。 */
+export function guessVision(model: string): boolean {
   return /(^|[-/:._])(vl|vision)([-/:._]|$)|-vl-|4\.5v|gpt-4o|gpt-4\.1|gemini|claude/i.test(model);
 }
 

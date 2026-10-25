@@ -1,7 +1,7 @@
 import type { FlowActionHandler, MessageView } from '../types/api.js';
 import type { TranscriptItem } from '../types/presentation.js';
-import type { FlowSnapshotView } from './protocol.js';
-import type { ConversationClient } from './conversation.js';
+import type { FlowInputView, FlowSnapshotView } from './protocol.js';
+import type { ConversationClient, ConversationClientState } from './conversation.js';
 import { createFlowTimelineProjector } from './flow-timeline-view.js';
 import { retryInput } from './turn-retry.js';
 
@@ -10,14 +10,46 @@ export function messageViewFromTranscript(item: TranscriptItem): MessageView {
     ...item, author: item.author === 'hemi' ? 'assistant' : 'user', task: item.taskSnap,
     runId: item.flow?.runId, inputId: item.flow?.inputId, itemId: item.flow?.itemId, partIds: item.flow?.partIds,
     revision: String(item.editedAt ?? item.createdAt),
-    actions: { edit: item.author === 'user' && item.kind !== 'task', retry: item.kind === 'error', stop: true, preview: true },
+    actions: { edit: item.author === 'user' && item.kind !== 'task' && !item.pendingDelivery, retry: item.kind === 'error', stop: true, preview: true },
   };
 }
 
 export function createConversationPresenter() {
   const project = createFlowTimelineProjector();
-  return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = []) => snapshot
-    ? project(snapshot, archive).transcripts.map(messageViewFromTranscript) : [];
+  const observed = new Set<string>();
+  return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = [], delivery?: Pick<ConversationClientState, 'operations' | 'connection'>): MessageView[] => {
+    if (!snapshot) return [];
+    const messages = project(snapshot, archive).transcripts.map(messageViewFromTranscript);
+    const known = new Set([...snapshot.timeline.filter(item => item.kind === 'user').map(item => item.id), ...snapshot.pending.map(input => input.inputId)]);
+    const blocked = delivery?.operations.some(operation => operation.state === 'unknown');
+    const operationIds = new Set(delivery?.operations.map(operation => operation.id));
+    for (const id of observed) if (!operationIds.has(id)) observed.delete(id);
+    for (const operation of delivery?.operations ?? []) {
+      if (operation.command.type !== 'send' || (operation.generation !== null && operation.generation !== snapshot.generation)) continue;
+      const input = operation.command.input as Partial<FlowInputView> | undefined;
+      if (!input?.inputId) continue;
+      if (known.has(input.inputId)) {observed.add(operation.id); continue;}
+      if (observed.has(operation.id)) continue;
+      // Bridge the journal/receipt/snapshot gap without inventing a Host queue entry.
+      // Uncertain or rejected deliveries keep their existing recovery UI and draft.
+      if (operation.state !== 'accepted' && (delivery?.connection !== 'online' || blocked
+        || !['waiting', 'sending'].includes(operation.state) || operation.result?.ok === false)) continue;
+      if (operation.state === 'accepted' && operation.result?.revision !== undefined && snapshot.revision >= operation.result.revision) continue;
+      known.add(input.inputId);
+      const message: MessageView = {id: input.inputId, inputId: input.inputId, author: 'user', text: input.text ?? '',
+        revision: `${operation.id}:${operation.state}`, inputSource: input.inputSource ?? 'text',
+        attachments: input.attachmentViews, references: input.references, skills: input.skills, actions: {edit: false}};
+      // A preparing run is published before its input is durably delivered. Its waiting
+      // row already exists, so place that input before its own reply, not after it.
+      const replyIndex = messages.findIndex(row => {
+        const inputIds = row.runId && snapshot.runs[row.runId]?.inputIds;
+        return row.author === 'assistant' && Array.isArray(inputIds) && inputIds.includes(input.inputId);
+      });
+      if (replyIndex < 0) messages.push(message);
+      else messages.splice(replyIndex, 0, message);
+    }
+    return messages;
+  };
 }
 
 /** Shared ordinary conversation actions. Hosts can supply task/workflow/preview-specific commands. */

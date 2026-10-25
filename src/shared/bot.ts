@@ -29,6 +29,7 @@ export type BotDraft = {
 };
 export type BotSession = {
   id: string;
+  control?: {ownerId: string; epoch: string; expiresAt: number} | null;
   title: string;
   dir: string;
   modelKey: string;
@@ -122,6 +123,7 @@ export type BotSyncStatus = {
   results?: Array<{ key: string; ok: boolean; message?: string }>;
 };
 export type BotState = {
+  clientId?: string;
   binding: BotBinding | null;
   online: boolean;
   error: string;
@@ -176,6 +178,7 @@ export type BotMethod =
   | 'session.remove'
   | 'session.order'
   | 'session.draft'
+  | 'session.control'
   | 'flow.command'
   | 'flow.snapshot'
   | 'permission.decide'

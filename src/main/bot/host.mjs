@@ -39,6 +39,7 @@ import { createDeviceGateway } from './device-gateway.mjs';
 import { createResourceFiles } from './resource-files.mjs';
 import { createAttachmentUploads } from './attachment-uploads.mjs';
 import { createBotEventStream } from './event-stream.mjs';
+import {createSessionControl} from './session-control.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
@@ -123,6 +124,22 @@ export async function createBotHost({
     if (operation.status === 'pending') operation.status = 'interrupted';
   const commandTails = new Map(), editLeases = new Map(), liveClients = new Map();
   const events = createBotEventStream({ instanceId: state.instanceId, bootId, snapshot: id => catalog(id) });
+  const controls = createSessionControl({now, leaseMs: editLeaseMs,
+    active: id => Boolean(jobs.has(id) || controllers.get(id)?.getSnapshot().activeRunId),
+    connected: (owner, id) => [...(liveClients.get(owner) ?? [])].some(ids => ids.has(id)),
+    changed(id, previous, next) {
+      if (previous && next && previous.ownerId !== next.ownerId) {
+        const lease = editLeases.get(id), c = controllers.get(id);
+        if (lease && c) {
+          c.applyFact({type: 'queue-paused'});
+          const input = c.getSnapshot().pending.find(item => item.inputId === lease.inputId);
+          if (input?.state === 'editing') c.applyFact({type: 'input-edit-restored', inputId: input.inputId, input: {...input, state: 'pending'}});
+          editLeases.delete(id);
+        }
+      }
+      save();
+    },
+  });
   const serialize = (id, work) => {
     const next = (commandTails.get(id) ?? Promise.resolve()).catch(() => {}).then(work);
     commandTails.set(id, next);
@@ -163,6 +180,7 @@ export async function createBotHost({
   const resourceWait = session => session.flow?.runs?.[session.flow.activeRunId]?.activity;
   const view = (session) => ({
     id: session.id,
+    control: controls.get(session.id),
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
@@ -302,6 +320,8 @@ export async function createBotHost({
         await persistSession(job.id);
       }
       if (jobs.get(job.id) === job) jobs.delete(job.id);
+      const owner = controls.get(job.id);
+      if (owner && (owner.leaving || !hasLiveEditor(owner.ownerId, job.id))) controls.release(job.id, owner.ownerId, owner.epoch);
       job.settled.resolve();
       pruneVersions();
       save();
@@ -1061,7 +1081,18 @@ export async function createBotHost({
     if (method.startsWith('pairing.') || method.startsWith('devices.'))
       return gateway.management(method, p);
     if (method==='resource.stat'||method==='resource.chunk')return resourceFiles(method,p);
-    if (method.startsWith('attachment.upload.'))return uploads(method,p);
+    if (method.startsWith('attachment.upload.')) {
+      requireSession(p.id);
+      return serialize(p.id, () => {controls.requireWriter(p.id, clientId, p.controlEpoch); return uploads(method,p);});
+    }
+    if (method === 'session.control') {
+      requireSession(p.id);
+      return serialize(p.id, () => {
+        if (p.action === 'release') return {ok: true, released: controls.release(p.id, clientId, p.controlEpoch)};
+        if (!['acquire', 'takeover'].includes(p.action)) fail('会话占用操作无效。');
+        return controls.acquire(p.id, clientId, p.action === 'takeover');
+      });
+    }
     if (method === 'handshake')
       return {
         instanceId: state.instanceId,
@@ -1077,7 +1108,7 @@ export async function createBotHost({
         defaultDir: state.defaultDir,
         enabled: state.enabled,
         configured: state.initialized === true,
-        capabilities: { devicePairing: 1, realtime: 1, modelRouting: 1, modelSources: 1 },
+        capabilities: { devicePairing: 1, realtime: 1, modelRouting: 1, modelSources: 1, sessionControl: 1 },
       };
     if (method === 'snapshot' && p.revision === state.revision)
       return {
@@ -1102,7 +1133,7 @@ export async function createBotHost({
         return { ok: false, error: method === 'model.list' ? '服务器无法拉取模型列表，请检查接口地址和 API Key，或手动填写型号。' : '服务器未能验证模型连接，请检查接口地址、API Key 和型号。' };
       }
     }
-    if (method === 'snapshot') return catalog(p.id);
+    if (method === 'snapshot') return {...catalog(p.id), clientId};
     if (method === 'session.open') {
       const session = requireSession(p.id);
       // Opening a conversation counts as the last model choice, just like local
@@ -1325,8 +1356,14 @@ export async function createBotHost({
     state.operations[key] = { hash: digest, status: 'pending' };
     save();
     try {
-      const work = () => mutate(method, p, clientId);
-      const result = p.id && (method.startsWith('session.') || method === 'flow.command' || method === 'permission.decide')
+      const work = () => {
+        if (p.id && ['session.update', 'session.rename', 'session.remove', 'session.draft', 'flow.command', 'permission.decide', 'attachment.add'].includes(method)) {
+          requireSession(p.id);
+          controls.requireWriter(p.id, clientId, p.controlEpoch);
+        }
+        return mutate(method, p, clientId);
+      };
+      const result = p.id && (method.startsWith('session.') || method === 'flow.command' || method === 'permission.decide' || method === 'attachment.add')
         ? await serialize(p.id, work) : await work();
       state.operations[key] = { hash: digest, status: 'done', result };
       const keys = Object.keys(state.operations);
@@ -1411,7 +1448,7 @@ export async function createBotHost({
     };
   }
   const hasLiveEditor = (owner, id) => [...(liveClients.get(owner) ?? [])].some(ids => ids.has(id));
-  const leaseTimer = setInterval(() => { void expireEditLeases().catch(() => {}); }, Math.min(5000, editLeaseMs));
+  const leaseTimer = setInterval(() => { controls.sweep(); void expireEditLeases().catch(() => {}); }, Math.min(5000, editLeaseMs));
   leaseTimer.unref?.();
   async function expireEditLeases() {
     for (const [id, lease] of editLeases) {
@@ -1433,7 +1470,7 @@ export async function createBotHost({
   }
   const gateway = await createDeviceGateway({ dataDir, instanceId: state.instanceId, request, watch });
   return {
-    request, watch, expireEditLeases,
+    request, watch, expireEditLeases, expireSessionControls: controls.sweep,
     subscribe: (fn) => {
       listeners.add(fn);
       return () => listeners.delete(fn);

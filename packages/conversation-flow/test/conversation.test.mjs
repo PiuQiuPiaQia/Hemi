@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUnderTest } from './compile.mjs';
-const { createConversation, createComposerDraft, createDraftPersistence, createFlowReplica, projectConversationQueue } = await moduleUnderTest('../src/core.ts');
+const { createConversation, createComposerDraft, createDraftPersistence, createFlowReplica, createConversationPresenter, projectConversationQueue } = await moduleUnderTest('../src/core.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const scope = { environmentId: 'test-bot', conversationId: 'same' };
@@ -124,6 +124,8 @@ test('journal write failure prevents transmission and preserves the composer', a
   const f = fixture({storage: {operations: {async load() {return [];}, async save() {throw Error('Disk full');}}}, transport: {async command() {calls++; return {ok: true};}}});
   await f.client.start(); f.client.draft.setText('do not lose');
   assert.equal((await f.client.sendDraft()).code, 'storage-failed');
+  const state = f.client.getSnapshot();
+  assert.deepEqual(createConversationPresenter()(state.snapshot, [], state), [], 'a failed local save must not leave a sent bubble');
   assert.equal(calls, 0); assert.equal(f.client.draft.getSnapshot().text, 'do not lose'); f.client.dispose();
 });
 
@@ -237,10 +239,16 @@ test('a failed durable withdrawal restores the waiting item instead of claiming 
 });
 
 test('explicitly retrying a draft after storage recovery uses the original queued operation', async () => {
-  let fail=true;const f=fixture({storage:{operations:{async load(){return [];},async save(){if(fail)throw Error('Unavailable');}}}});
+  const receipt = deferred();
+  let fail=true;const f=fixture({storage:{operations:{async load(){return [];},async save(){if(fail)throw Error('Unavailable');}}},transport:{command:()=>receipt.promise},client:{requestTimeoutMs:5000}});
   await f.client.start();f.client.draft.setText('retry same input');assert.equal((await f.client.sendDraft()).code,'storage-failed');
-  const id=f.client.getSnapshot().operations[0].id;fail=false;assert.equal((await f.client.sendDraft()).ok,true);
-  assert.equal(f.client.getSnapshot().operations.length,1);assert.equal(f.commands[0].requestId,id);f.client.dispose();
+  const id=f.client.getSnapshot().operations[0].id;fail=false;
+  const pending=f.client.sendDraft();await tick();
+  const state=f.client.getSnapshot();
+  assert.equal(state.operations[0].id,id);assert.equal(state.operations[0].state,'sending');
+  assert.equal(createConversationPresenter()(state.snapshot,[],state)[0].text,'retry same input');
+  receipt.resolve({ok:true});assert.equal((await pending).ok,true);
+  assert.equal(f.client.getSnapshot().operations.length,1);f.client.dispose();
 });
 
 test('offline stop/edit operations are rejected rather than silently scheduled for later execution', async () => {
@@ -263,4 +271,138 @@ test('an in-flight message stays visible until the Host snapshot includes its st
   f.set(snapshot({revision: 1, timeline: [{kind: 'user', id: inputId}]}));
   assert.equal(projectConversationQueue(f.client.getSnapshot().snapshot, state.operations).items.length, 0);
   receipt.resolve({ok: true}); await pending; f.client.dispose();
+});
+
+test('online submission retains its draft without showing a queue before the Host queues it', async () => {
+  const receipt = deferred();
+  const f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
+  await f.client.start(); f.client.draft.setText('send directly');
+  const queues = [];
+  const release = f.client.subscribe(() => {
+    const state = f.client.getSnapshot();
+    queues.push(projectConversationQueue(state.snapshot, state.operations, state.connection).items);
+  });
+  const pending = f.client.sendDraft(); await tick();
+  assert.ok(queues.length > 0);
+  assert.ok(queues.every(items => items.length === 0), 'journal writes and transmission must not flash a queue');
+  assert.equal(f.client.draft.getSnapshot().text, 'send directly');
+  const inputId = f.client.getSnapshot().operations[0].command.input.inputId;
+  f.set(snapshot({revision: 1, pending: [{inputId, text: 'send directly', state: 'pending'}]}));
+  assert.equal(queues.at(-1).length, 1, 'only the Host can decide that an online message is queued');
+  receipt.resolve({ok: true, disposition: 'queued'}); await pending;
+  assert.equal(f.client.draft.getSnapshot().text, '');
+  release(); f.client.dispose();
+});
+
+test('online messages bridge command acceptance and snapshot delivery without duplicates', async () => {
+  const receipt = deferred(), f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
+  const present = createConversationPresenter();
+  const messages = () => {const state = f.client.getSnapshot(); return present(state.snapshot, [], state);};
+  await f.client.start(); f.client.draft.setText('show immediately');
+  const pending = f.client.sendDraft(); await tick();
+  const inputId = f.client.getSnapshot().operations[0].command.input.inputId;
+  assert.deepEqual(messages().map(message => [message.id, message.text]), [[inputId, 'show immediately']]);
+  assert.equal(messages()[0].actions.edit, false);
+  receipt.resolve({ok: true}); await pending;
+  assert.equal(f.client.draft.getSnapshot().text, '');
+  assert.equal(messages().length, 1, 'receipt before snapshot must not remove the message');
+  f.set(snapshot({revision: 1, timeline: [{kind: 'user', id: inputId, text: 'show immediately', runId: 'run', inputSource: 'text'}]}));
+  assert.equal(messages().length, 1);
+  assert.equal(messages()[0].id, inputId);
+  assert.equal(messages()[0].actions.edit, true);
+  f.set(snapshot({generation: 2, revision: 2}));
+  assert.deepEqual(messages(), [], 'a rewind must not resurrect old accepted inputs');
+  f.client.dispose();
+});
+
+test('preparing-run status stays after its optimistic input through delivery and first output', () => {
+  const present = createConversationPresenter();
+  const input = {inputId: 'new-input', text: 'new message'};
+  const delivery = {connection: 'online', operations: [{id: 'send', generation: 1, state: 'sending', command: {type: 'send', input}}]};
+  const history = [{kind: 'user', id: 'previous-input', text: 'previous message', runId: 'previous-run'}];
+  const preparing = snapshot({revision: 1, phase: 'preparing', activeRunId: 'new-run', timeline: history,
+    runs: {'new-run': {inputIds: [input.inputId], startedAt: 10}}});
+  const waitingId = 'new-run:a:new-input';
+  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  delivery.operations[0].state = 'accepted';
+  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  const delivered = {...preparing, revision: 2, timeline: [...history, {kind: 'user', id: input.inputId, text: input.text, runId: 'new-run'}]};
+  assert.deepEqual(present(delivered, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  const output = {...delivered, revision: 3, phase: 'running', timeline: [...delivered.timeline,
+    {kind: 'assistant', itemId: waitingId, runId: 'new-run', parts: [{partId: 'first-output', kind: 'text', content: 'reply'}]}]};
+  const rows = present(output, [], delivery);
+  assert.deepEqual(rows.map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  assert.equal(rows.at(-1).text, 'reply');
+});
+
+test('a new optimistic send does not move the status belonging to an earlier active input', () => {
+  const present = createConversationPresenter();
+  const active = snapshot({phase: 'running', activeRunId: 'active',
+    timeline: [{kind: 'user', id: 'current', text: 'current input', runId: 'active'}], runs: {active: {inputIds: ['current']}}});
+  const delivery = {connection: 'online', operations: [{id: 'send-next', generation: 1, state: 'sending',
+    command: {type: 'send', input: {inputId: 'next', text: 'next input'}}}]};
+  assert.deepEqual(present(active, [], delivery).map(row => row.id), ['current', 'active:a:current', 'next']);
+  assert.deepEqual(present({...active, revision: 1, pending: [{inputId: 'next', text: 'next input', state: 'pending'}]}, [], delivery).map(row => row.id),
+    ['current', 'active:a:current']);
+});
+
+test('Host queue takes over optimistic messages and unknown delivery restores recovery without replay', async () => {
+  const receipt = deferred(), f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
+  const present = createConversationPresenter();
+  const messages = () => {const state = f.client.getSnapshot(); return present(state.snapshot, [], state);};
+  await f.client.start(); f.client.draft.setText('keep recoverable');
+  const pending = f.client.sendDraft(); await tick();
+  const inputId = f.client.getSnapshot().operations[0].command.input.inputId;
+  assert.equal(messages().length, 1);
+  f.set(snapshot({revision: 1, pending: [{inputId, text: 'keep recoverable', state: 'pending'}]}));
+  assert.deepEqual(messages(), [], 'the actual queue must not also appear as a user bubble');
+  f.set(snapshot({revision: 2}));
+  assert.deepEqual(messages(), [], 'withdrawn Host inputs must not reappear from the in-flight operation');
+  receipt.resolve({ok: false, code: 'unknown'}); await pending;
+  assert.deepEqual(messages(), []);
+  assert.equal(f.client.draft.getSnapshot().text, 'keep recoverable');
+  const state = f.client.getSnapshot();
+  assert.equal(projectConversationQueue(state.snapshot, state.operations, state.connection).items[0].error, '投递结果不明，待核对');
+  f.client.dispose();
+});
+
+test('a withdrawn queued input stays absent after recreating its presenter', () => {
+  const state = {connection: 'online', operations: [{id: 'operation', state: 'accepted', generation: 1,
+    command: {type: 'send', input: {inputId: 'withdrawn', text: 'already withdrawn'}}, result: {ok: true, disposition: 'queued', revision: 1}}]};
+  assert.deepEqual(createConversationPresenter()(snapshot({revision: 2}), [], state), []);
+});
+
+test('offline and rejected sends stay drafts; outgoing attachments keep their identities', async () => {
+  const receipt = deferred(), f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
+  const present = createConversationPresenter();
+  const messages = () => {const state = f.client.getSnapshot(); return present(state.snapshot, [], state);};
+  await f.client.start(); f.lifecycle('offline'); f.client.draft.setText('with an attachment');
+  const attachment = {attachmentId: 'file-1', name: 'sample.txt', status: 'ready'};
+  f.client.draft.setAttachments([attachment]); await f.client.sendDraft();
+  assert.deepEqual(messages(), []);
+  f.lifecycle('online'); await tick(); await tick();
+  assert.deepEqual(messages()[0].attachments, [attachment]);
+  receipt.resolve({ok: false, code: 'denied', message: 'Rejected for verification'});
+  await f.client.flushQueue();
+  assert.deepEqual(messages(), []);
+  assert.equal(f.client.draft.getSnapshot().text, 'with an attachment');
+  assert.deepEqual(f.client.draft.getSnapshot().attachments, [attachment]);
+  f.client.dispose();
+});
+
+test('connection-aware queue preserves offline outbox and unknown delivery warnings', async () => {
+  const f = fixture({transport: {async command() {throw Error('Lost receipt');}}});
+  await f.client.start(); f.lifecycle('offline');
+  f.client.draft.setText('do not lose this message'); await f.client.sendDraft();
+  let state = f.client.getSnapshot();
+  assert.equal(projectConversationQueue(state.snapshot, state.operations, state.connection).items.length, 1);
+  f.client.draft.setText('waiting behind the first message'); await f.client.sendDraft();
+  await f.client.refresh();
+  state = f.client.getSnapshot();
+  assert.equal(state.operations[0].state, 'unknown');
+  const queue = projectConversationQueue(state.snapshot, state.operations, state.connection);
+  assert.equal(queue.items.length, 2);
+  assert.equal(queue.items[0].error, '投递结果不明，待核对');
+  assert.equal(queue.items[1].text, 'waiting behind the first message');
+  f.client.dispose();
 });

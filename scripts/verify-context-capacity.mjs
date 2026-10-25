@@ -1,11 +1,11 @@
-// 上下文容量指示器真机走查（真实 renderer→preload→IPC→主 agent Pi 会话→本机 mock
-// SSE→轮末广播→环形/面板渲染）。唯一替身为本机模型端点；输入走真实 textarea 与
+// 当前上下文入口真机走查（真实 renderer→preload→IPC→主 agent Pi 会话→本机 mock
+// SSE→轮末广播→图标/面板渲染）。唯一替身为本机模型端点；输入走真实 textarea 与
 // 回车发送。证据：
-//   - 首回合前无环形（无在途会话）；
-//   - 轮后环形出现，快照＝{tokens>0, contextWindow>0, 四分类}，分类比例凑满 100；
+//   - 首回合前静态叠页入口常驻，面板显示待计量；
+//   - 轮后图标保持不变，快照＝{tokens>0, contextWindow>0, 四分类}，分类比例凑满 100；
 //   - 第二轮上下文累计（mock 的 prompt_tokens 随请求数递增→usage 锚点变大）；
-//   - 点环形开面板：标题/总量/四类目/平均缓存命中率（与 048 账本自洽）；
-//   - 窗口重载后环形恢复；无 renderer error；附两张截图（工具行/展开面板）。
+//   - 悬浮开面板：当前上下文/总量/四类目，无容量进度或告警；
+//   - 窗口重载后入口恢复；无 renderer error；附两张截图（工具行/展开面板）。
 import { app, Menu } from 'electron';
 import http from 'node:http';
 import assert from 'node:assert/strict';
@@ -23,7 +23,7 @@ import { disposeTaskManager } from '../src/main/ipc/task.ipc.mjs';
 
 const label = process.env.VITE_DEV_SERVER_URL ? 'dev' : 'build';
 const output = path.resolve(`.visual/workflow/vision/context-capacity-${label}`);
-const ud = await mkdtemp(path.join(os.homedir(), 'Library/Caches/hemi-ctx-cap-'));
+const ud = process.env.HEMI_USER_DATA_DIR ?? await mkdtemp(path.join(os.tmpdir(), 'hemi-ctx-cap-'));
 const evidence = { label, userData: ud, checks: [], errors: [], requests: [] };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const check = (name, value) => { assert(value, name); evidence.checks.push(name); console.log(`PASS ${name}`); };
@@ -81,14 +81,15 @@ app.whenReady().then(async () => {
     state.mainWindow.webContents.debugger.attach('1.3');
     await wait(() => exec('!!document.querySelector("textarea[aria-label=输入消息]")'), '真实输入框');
 
-    // 1. 首回合前：环形常驻（空态）——只留轨道、无弧线，提示无数据。
-    check('首回合前环形常驻（空态）', await exec(`(()=>{const t=document.querySelector('.ctx-cap-trigger');if(!t)return false;const svg=t.querySelector('.ctx-cap-ring');const arc=svg.querySelector('.ctx-cap-arc');return svg.dataset.level==='unknown' && Number(arc.getAttribute('stroke-dashoffset'))>=37.6 && t.getAttribute('aria-label').includes('还没有')})()`));
+    // 1. 首回合前：静态叠页入口常驻，提示待计量。
+    const initialIcon = await exec(`document.querySelector('.ctx-cap-icon')?.outerHTML`);
+    check('首回合前静态叠页入口常驻（待计量）', initialIcon && await exec(`document.querySelector('.ctx-cap-trigger')?.getAttribute('aria-label').includes('尚未计量')`));
 
     // 2. 第一轮：真实输入路径发送，等收口。
     await sendText('这是第一轮，请直接回答。');
     const cid = await wait(async () => { const result = await exec('window.hemiVoice.listConversations()'); return result.sessions?.[0]?.id; }, '新会话');
     await wait(async () => { const flow = await exec(`window.hemiVoice.flowGetSnapshot(${JSON.stringify(cid)})`); return flow?.phase === 'idle' && Object.values(flow.runs).some(run => run.outcome === 'completed'); }, '第一轮收口');
-    await wait(() => exec('!!document.querySelector(".ctx-cap-trigger")'), '轮末广播后环形出现');
+    await wait(() => exec(`document.querySelector('.ctx-cap-trigger')?.getAttribute('aria-label').includes('token')`), '轮末广播后用量更新');
 
     // 3. 快照与渲染核对。
     const snap1 = await exec(`window.hemiVoice.getContextSnapshot(${JSON.stringify(cid)})`);
@@ -97,18 +98,19 @@ app.whenReady().then(async () => {
     check('快照百分比合法', typeof snap1?.snapshot?.percent === 'number' && snap1.snapshot.percent >= 0 && snap1.snapshot.percent <= 100);
     check('四分类齐且比例凑满 100', Math.abs(snap1.snapshot.categories.reduce((acc, c) => acc + c.percent, 0) - 100) < 1
       && JSON.stringify(snap1.snapshot.categories.map(c => c.key)) === JSON.stringify(['tools', 'conversation', 'toolResults', 'system']));
-    check('环形 svg 就位且占用档为 ok', await exec(`(()=>{const svg=document.querySelector('.ctx-cap-ring');return !!svg && svg.dataset.level==='ok' && svg.querySelector('.ctx-cap-arc')})()`));
+    check('有用量后图标保持不变，无容量进度或告警', initialIcon === await exec(`document.querySelector('.ctx-cap-icon')?.outerHTML`)
+      && await exec(`!document.querySelector('.ctx-cap-ring, .ctx-cap-trigger [data-level], .ctx-cap-trigger [stroke-dashoffset]')`));
 
-    // 4. 截图：工具行里的环形。
+    // 4. 截图：工具行里的静态叠页入口。
     await pause(400);
-    await writeFile(path.join(output, 'ring.png'), (await state.mainWindow.webContents.capturePage()).toPNG());
+    await writeFile(path.join(output, 'icon.png'), (await state.mainWindow.webContents.capturePage()).toPNG());
 
     // 5. 悬浮展开面板（openOnHover）：结构与 048 账本自洽。
     await hover('.ctx-cap-trigger');
     await wait(() => exec('!!document.querySelector(".ctx-cap-pop")'), '悬浮面板展开');
     const panel = await exec(`(()=>({title:document.querySelector('.ctx-cap-pop .h37-info-title')?.textContent,total:document.querySelector('.ctx-cap-total')?.textContent,cats:[...document.querySelectorAll('.ctx-cap-cat')].map(li=>li.textContent.replace(/\\s+/g,' ').trim())}))()`);
     evidence.panel1 = panel;
-    check('面板标题与已用量（纯数字，无百分比无上限）', panel.title === '上下文容量' && panel.total.startsWith(String(Math.round(snap1.snapshot.tokens))) && !panel.total.includes('/') && !panel.total.includes('%'));
+    check('面板标题与当前用量（纯数字，无百分比无上限）', panel.title === '当前上下文' && panel.total.startsWith(String(Math.round(snap1.snapshot.tokens))) && !panel.total.includes('/') && !panel.total.includes('%'));
     check('四类目文案', panel.cats.length === 4 && panel.cats.join('|').includes('系统工具') && panel.cats.join('|').includes('对话消息') && panel.cats.join('|').includes('工具结果') && panel.cats.join('|').includes('系统提示词'));
     check('面板无缓存命中率行（已裁决不展示）', await exec('!document.querySelector(".ctx-cap-cache")'));
     check('面板无进度条（百分比已裁决不展示）', await exec('!document.querySelector(".ctx-cap-bar")'));
@@ -116,6 +118,23 @@ app.whenReady().then(async () => {
     // 6. 截图：悬浮面板（设计稿对照；指针保持在触发钮上）。
     await pause(400);
     await writeFile(path.join(output, 'panel.png'), (await state.mainWindow.webContents.capturePage()).toPNG());
+    for (const width of [560, 1440]) {
+      state.mainWindow.setContentSize(width, 900);
+      await pause(250);
+      await hover('.ctx-cap-trigger');
+      await wait(() => exec('!!document.querySelector(".ctx-cap-pop")'), `${width}px 面板展开`);
+      await pause(300);
+      const bounds = await exec(`(()=>{const p=document.querySelector('.ctx-cap-pop').getBoundingClientRect();const t=document.querySelector('.ctx-cap-trigger').getBoundingClientRect();return {width:innerWidth,panel:{x:p.x,right:p.right,y:p.y,bottom:p.bottom},trigger:{x:t.x,right:t.right,y:t.y,bottom:t.bottom},height:innerHeight}})()`);
+      check(`${width}px 图标与面板均在窗口内`, [bounds.panel, bounds.trigger].every(rect => rect.x >= 0 && rect.right <= bounds.width && rect.y >= 0 && rect.bottom <= bounds.height));
+      await writeFile(path.join(output, `panel-${width}.png`), (await state.mainWindow.webContents.capturePage()).toPNG());
+      if (width === 560) {
+        const x = Math.max(0, Math.floor(Math.min(bounds.panel.x, bounds.trigger.x) - 16));
+        const y = Math.max(0, Math.floor(bounds.panel.y - 16));
+        const right = Math.min(bounds.width, Math.ceil(Math.max(bounds.panel.right, bounds.trigger.right) + 16));
+        const bottom = Math.min(bounds.height, Math.ceil(bounds.trigger.bottom + 16));
+        await writeFile(path.join(output, 'detail.png'), (await state.mainWindow.webContents.capturePage({ x, y, width: right - x, height: bottom - y })).toPNG());
+      }
+    }
 
     // 7. 第二轮：usage 锚点随上下文累计变大（mock prompt_tokens 递增）。
     await sendText('第二轮，再回答一次。');
@@ -124,10 +143,10 @@ app.whenReady().then(async () => {
     evidence.snapshot2 = snap2;
     check('第二轮上下文累计（用量锚点变大）', snap2.tokens > snap1.snapshot.tokens);
 
-    // 8. 重载窗口：主进程会话仍在，环形随启动种子恢复。
+    // 8. 重载窗口：主进程会话仍在，入口随启动种子恢复。
     state.mainWindow.reload();
     await wait(() => exec('!!document.querySelector("textarea[aria-label=输入消息]")'), '重载完成');
-    await wait(() => exec('!!document.querySelector(".ctx-cap-trigger")'), '重载后环形恢复');
+    await wait(() => exec('!!document.querySelector(".ctx-cap-icon")'), '重载后上下文入口恢复');
     check('重载后快照仍在', (await exec(`window.hemiVoice.getContextSnapshot(${JSON.stringify(cid)})`))?.snapshot?.tokens > 0);
 
     // 9. 兜底：清空在途会话（等价应用重启后直接打开旧会话）——快照从档案读回。

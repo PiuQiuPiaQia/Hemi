@@ -5,7 +5,9 @@
 [data-hemi-conversation-flow] .hcf-resource-more { display:none; }
 @media (hover:none), (pointer:coarse) {
   [data-hemi-conversation-flow] .h24-user-actions, [data-hemi-conversation-flow] .h24-reply-actions { opacity:1; visibility:visible; }
-  [data-hemi-conversation-flow] .h24-msg-copy, [data-hemi-conversation-flow] .h24-edit-btn, [data-hemi-conversation-flow] .h56-delegation-stop, [data-hemi-conversation-flow] .hcf-resource-more { min-width:var(--hcf-touch-target); min-height:var(--hcf-touch-target); }
+  [data-hemi-conversation-flow] .h24-user-actions > button { opacity:1; }
+  [data-hemi-conversation-flow] .h24-msg-copy, [data-hemi-conversation-flow] .h24-edit-btn { min-width:var(--hcf-message-action-size,var(--hcf-touch-target)); min-height:var(--hcf-message-action-size,var(--hcf-touch-target)); }
+  [data-hemi-conversation-flow] .h56-delegation-stop, [data-hemi-conversation-flow] .hcf-resource-more { min-width:var(--hcf-touch-target); min-height:var(--hcf-touch-target); }
   [data-hemi-conversation-flow] .hcf-resource-more { display:inline-flex; align-items:center; justify-content:center; }
   [data-hemi-conversation-flow] input, [data-hemi-conversation-flow] textarea, [data-hemi-conversation-flow] select { font-size:var(--hcf-input-size); }
 }

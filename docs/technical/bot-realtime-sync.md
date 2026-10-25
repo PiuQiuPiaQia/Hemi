@@ -65,3 +65,27 @@ WebSocket 使用 20 秒心跳检测断开的连接；SSH 流含心跳并设接�
 原生 WebSocket 修改经真实固定证书／ES256 Host 通道验证；更新后的开发／构建 renderer 各 5 项检查通过。补充验证命令：npm run build、npm run build:mobile、npm test --workspace @hemi/conversation-flow（42 项）、npm test --workspace @hemi/mobile（23 项）、node --test src/main/bot/desktop-service.test.mjs（包含在 24 项定向回归中）、node scripts/check-spacing.mjs，以及真机 xcodebuild 与 codesign --verify --deep --strict。Renderer 与手机许可清单生成无未解决项目。
 
 部署、发送时延、冲突、断线和后台恢复记录位于 Git 忽略目录 .visual/workflow/bot-realtime-live/。真机 Web Inspector 在后台切换时会抢占检查连接，第一次自动验收因此中断；重新附着后以同一组三条输入核对最终状态，没有重发测试消息。
+
+## iOS 重连提示的迟到请求修复（2026-10-25）
+
+聊天页的离线判断同时读取会话目录和当前会话连接。原先实时通道恢复不会直接清除目录的离线标记；更早发起的快照请求也可能在恢复后失败，把已恢复的会话重新标成离线。现以已认证实时帧更新目录连接状态，SDK 的 `ready` 与已接受的快照／补丁确认会话在线，并忽略在这些在线证据之前发起、随后失败的旧读取。没有较新在线证据的请求失败仍会进入离线状态；原有前台连续断线 10 秒才提示的规则保留。
+
+验证基准为 `750e4c374d27e62723946a58db1e5ef597859ad3` 加工作区修改，环境 macOS 26.5.1 arm64、Node 22.22.3。`node --test packages/conversation-flow/test/conversation.test.mjs packages/conversation-flow/test/reconnection.test.mjs apps/mobile/test/realtime.test.mjs apps/mobile/test/reconnection.test.mjs apps/mobile/test/workspace-client.test.mjs apps/mobile/test/bot-transport.test.mjs` 共 46 项通过；`npm run build:mobile`、`npm run typecheck` 通过。
+
+`node scripts/verify-mobile-reconnection.mjs` 在 Vite 开发 renderer 与打包 renderer 各验证 3 项：持续断线提示、目录与会话旧请求仍挂起时收到认证 `ready` 即消除提示、旧请求随后失败仍保持在线且草稿恰好发送一次。实际使用 Bot Host，原生桥接与网络延迟由隔离夹具控制；未修改原生 TLS 或服务器实现。证据、源码摘要与截图见 `.visual/workflow/mobile-reconnection/report.json`。本轮未重新安装实体 iPhone，也未验证实体设备的 Wi-Fi／蜂窝切换。
+
+随后于同日将修复覆盖安装到已连接的 iPhone 16 Pro／iOS 27.0.1。使用 Xcode 26.6（17F113），执行 `npm run build:mobile`、移动项目内 `npx cap sync ios`，再以 App／Debug／generic iOS destination 和独立 APFS DerivedData 构建。签名校验通过，原生 App 内 JS 资源摘要与上述已验证移动构建一致；`devicectl device install app`、`process launch --terminate-existing ai.hemi.mobile` 成功，安装列表与进程读取确认新版已安装并保持运行。覆盖安装未执行卸载或清除数据。部署记录见 `.visual/workflow/mobile-reconnection/ios-update.json`；安装后未重跑真机网络切换及延迟请求场景。
+
+## 会话活跃占用与显式抢占（2026-10-25）
+
+会话改为同一时刻只有一个设备可写。仅打开查看不占用；编辑、保存草稿、发送或执行任务时由 Bot Host 受理占用。其他端继续订阅消息和任务进展，输入区变为只读并显示“会话已被占用”和“抢占会话”。抢占转移编辑权，保留旧端本机草稿、已受理队列和当前任务，不停止或重新执行模型。
+
+唯一占用注册表为 `src/main/bot/session-control.mjs`，按会话记录认证设备身份、占用代次和 60 秒有效期。正常查看／目录读取不写占用；写操作在 Host 的会话串行入口统一校验。抢占与写操作使用同一串行入口，前一占用代次的迟到请求及释放不能作用于新占用者。上传提交也经过相同校验。设备身份取自已认证的 SSH 客户端／设备网关上下文。
+
+空闲离开会话立即释放。任务尚在执行时保留占用，离开标记使任务结束后释放；空闲且连接失效的占用最长 60 秒后过期。已有队列编辑在抢占时保留未提交草稿、解除旧设备编辑锁并暂停队列，交给新占用者明确处理。占用状态为 Host 进程内状态，重启后重新获取，不回放旧写请求。
+
+发送和编辑重发在本机立即预显示，云端按输入 ID 接替；客户端不写预测时间线。错误和不明回执仍保留内容、按原操作身份查证，不能用重复执行恢复界面。原有输入 ID、会话代次和队列版本校验继续使用，本轮新增的并发历史尾部检查已撤下，所有设备写权限由占用机制统一处理。
+
+验证基准：`750e4c374d27e62723946a58db1e5ef597859ad3` 加工作区修改，macOS arm64／Node 22.22.3。全量 `node scripts/run-tests.mjs` 1789 项、移动端 30 项通过；最终 Host 占用／附件／桌面服务专项 28 项通过。SDK、桌面类型检查、桌面与移动 renderer 构建、spacing／diff 检查通过。
+
+`node scripts/verify-bot-send-feedback.mjs` 在开发／构建 Electron renderer 各验证立即反馈、重发单次执行、只读／抢占／迟到拒绝、回执查证；`node scripts/verify-session-control-mobile.mjs` 在移动开发／构建 renderer 各验证只读查看不占用、抢占保留草稿和执行、重新抢占恢复编辑。测试连接实际 Host／控制器，SSH 网络、原生桥和模型执行器由隔离夹具控制。记录与截图见 `.visual/workflow/bot-send-feedback/`、`.visual/workflow/session-control-mobile/`、`.visual/workflow/session-control-validation.json`。本轮尚未部署云端或覆盖安装实体手机，需要更新云端 Bot、桌面和手机客户端后使用新行为。

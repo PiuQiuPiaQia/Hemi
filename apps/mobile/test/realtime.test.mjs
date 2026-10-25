@@ -9,7 +9,7 @@ import {moduleUnderTest} from '../../../packages/conversation-flow/test/compile.
 const {createBotWorkspace,BotCommandRejected}=await moduleUnderTest('../../../apps/mobile/test/workspace-test-api.ts');
 const wait=async predicate=>{const end=Date.now()+4000;while(!await predicate()){assert.ok(Date.now()<end,'mobile realtime timed out');await new Promise(r=>setTimeout(r,10));}};
 
-test('two actual workspace clients share queue/output, reconcile a lost receipt and resume one multiplexed stream',async t=>{
+test('two workspace clients share output, require explicit takeover to write, and reconcile a lost receipt without replay',async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-mobile-live-')),runs=[],live=new Map();
   const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:path.join(root,'workspace'),validateModel:async()=>{},executorFactory:()=>({
     run(spec,apply){runs.push(spec);return new Promise(resolve=>live.set(spec.conversationId,{spec,apply,resolve}));},async stop(id){live.get(id)?.resolve({stopped:true});},async close(){for(const run of live.values())run.resolve({stopped:true});},
@@ -31,10 +31,14 @@ test('two actual workspace clients share queue/output, reconcile a lost receipt 
   const a=pc.workspace.getClient(id),b=phone.workspace.getClient(id);const releaseA=a.retain(),releaseB=b.retain();t.after(releaseA);t.after(releaseB);
   await wait(()=>a.getSnapshot().connection==='online'&&b.getSnapshot().connection==='online');
   a.draft.setText('电脑发起');await a.sendDraft();await wait(()=>runs.length===1);
+  b.draft.setText('尚未抢占');assert.equal((await b.sendDraft()).ok,false);
+  assert.equal(b.draft.getSnapshot().text,'尚未抢占');
+  await phone.workspace.acquireControl(id,true);
   b.draft.setText('手机排队');await b.sendDraft();await wait(()=>a.getSnapshot().snapshot.pending.some(item=>item.text==='手机排队'));
   phone.lostReply();b.draft.setText('回执丢失');await b.sendDraft();b.draft.setText('后写草稿');
-  await wait(()=>b.getSnapshot().operations.every(op=>op.state==='accepted'));assert.equal(b.draft.getSnapshot().text,'后写草稿');
-  assert.equal(phone.methods.filter(method=>method==='flow.command').length,2);
+  await wait(()=>b.getSnapshot().operations.every(op=>['accepted','rejected'].includes(op.state)));assert.equal(b.draft.getSnapshot().text,'后写草稿');
+  assert.equal(phone.methods.filter(method=>method==='flow.command').length,3);
+  a.draft.setText('旧端不能再发');assert.equal((await a.sendDraft()).ok,false);
   const run=live.get(id);run.apply({type:'part-appended',runId:run.spec.runId,generation:run.spec.generation,part:{partId:'text',kind:'text',content:'双端输出'}});
   await wait(()=>JSON.stringify(a.getSnapshot().snapshot.timeline).includes('双端输出')&&JSON.stringify(b.getSnapshot().snapshot.timeline).includes('双端输出'));
   phone.disconnect();run.apply({type:'part-updated',runId:run.spec.runId,generation:run.spec.generation,partId:'text',patch:{content:'掉线期间输出'}});phone.online();

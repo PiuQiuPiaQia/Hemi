@@ -16,6 +16,7 @@ import { applyFlowChange } from '../../shared/conversation-flow.mjs';
 const METHODS = new Set([
   'snapshot',
   'session.open',
+  'session.control',
   'session.create',
   'session.update',
   'session.rename',
@@ -51,6 +52,7 @@ export function createBotDesktopService({
   userDataDir,
   runner,
   profiles,
+  primaryUserDataDir = null,
   archivePath,
   onChanged = () => {},
   transport = createBotTransport({ runner, archivePath }),
@@ -112,6 +114,14 @@ export function createBotDesktopService({
     closed = false,
     polling = null;
   if (cache?.instanceId !== binding?.instanceId) cache = null;
+  function modelsManagedByPrimary(instanceId = binding?.instanceId) {
+    if (!instanceId || !primaryUserDataDir || path.resolve(primaryUserDataDir) === path.resolve(userDataDir)) return false;
+    try {
+      const primary = JSON.parse(fs.readFileSync(path.join(primaryUserDataDir, 'bot/connection.json'), 'utf8'));
+      return primary.instanceId === instanceId;
+    } catch { return false; }
+  }
+  const primaryModelMessage = '此 Bot 的模型由正式版 Hemi 管理，请在正式版修改模型与路由。';
   activeId = cache?.selectedId ?? null;
   if (syncStatus?.instanceId !== binding?.instanceId) syncStatus = null;
   if (localDrafts.instanceId !== binding?.instanceId)
@@ -123,7 +133,9 @@ export function createBotDesktopService({
     return value;
   };
   function getState() {
+    const primaryModels = modelsManagedByPrimary();
     return {
+      clientId,
       binding: binding ? { ...binding } : null,
       online,
       error,
@@ -131,8 +143,8 @@ export function createBotDesktopService({
       lastConnectedAt,
       stoppedConfirmed,
       syncStatus: syncStatus ? structuredClone(syncStatus) : null,
-      localModels: structuredClone(localModels),
-      localRoleModels: structuredClone(localRoleModels),
+      localModels: primaryModels ? [] : structuredClone(localModels),
+      localRoleModels: structuredClone(primaryModels ? cache?.roleModels ?? {} : localRoleModels),
       modelConfigError: [...modelFailures.values()].map(value => value.message).join('；'),
       cache: cache ? structuredClone(cache) : null,
       candidate: candidate
@@ -142,6 +154,7 @@ export function createBotDesktopService({
   }
   async function direct(method, params = {}) {
     if (!binding) fail('请先创建 Bot 连接。', 'missing');
+    if (modelsManagedByPrimary() && method === 'model.local-config') fail(primaryModelMessage, 'permission');
     return transport.rpc(binding.host, method, {
       ...params,
       instanceId: binding.instanceId,
@@ -425,6 +438,10 @@ export function createBotDesktopService({
   // Serialize first use and background updates. Only models already configured
   // on this Host are updated automatically; listing never uploads credentials.
   async function ensureModel(key) {
+    if (modelsManagedByPrimary()) {
+      if (key === 'auto' ? cache?.roleModels?.main : cache?.models.some(model => model.key === key)) return;
+      fail(primaryModelMessage, 'missing');
+    }
     if (key === 'auto') return ensureRouting();
     const identity = binding?.instanceId, host = binding?.host;
     // An unrelated model may be validating for tens of seconds. Ready models
@@ -461,6 +478,10 @@ export function createBotDesktopService({
     return run;
   }
   async function ensureRouting(prepare = true) {
+    if (modelsManagedByPrimary()) {
+      if (cache?.roleModels?.main) return;
+      fail(primaryModelMessage, 'missing');
+    }
     await modelCandidates();
     if (localCatalogError) fail(localCatalogError, 'invalid');
     const identity = binding?.instanceId;
@@ -479,6 +500,7 @@ export function createBotDesktopService({
     await refresh();
   }
   function scheduleModelUpdates() {
+    if (modelsManagedByPrimary()) return;
     if (closed || localCatalogError) return;
     let cleared = false;
     // Clear stale failures as soon as a corrected local configuration matches
@@ -536,6 +558,7 @@ export function createBotDesktopService({
     if (!closed) changedCatalog();
   });
   async function sync(host, instanceId, keys, requestId, signal, isCurrent = () => true) {
+    if (modelsManagedByPrimary(instanceId)) fail(primaryModelMessage, 'permission');
     if (!Array.isArray(keys) || !keys.length || new Set(keys).size > 50)
       fail('请选择要同步的模型。');
     const models = [];
@@ -882,9 +905,20 @@ export function createBotDesktopService({
     }
     if (binding?.instanceId !== identity) fail('Bot 连接已更换。', 'conflict');
     if (method === 'session.remove' && activeId === params.id) activeId = null;
-    if (method === 'session.open' && params.activate !== false)
+    if (method === 'session.open' && params.activate !== false) {
+      if (activeId && activeId !== params.id) void direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
       activeId = params.id;
+    }
+    if (params.id && ['flow.command', 'session.draft', 'session.update', 'permission.decide'].includes(method)) {
+      const control = cache?.sessions.find(item => item.id === params.id)?.control;
+      if (control?.ownerId === clientId && params.controlEpoch === undefined) params = {...params, controlEpoch: control.epoch};
+    }
     const result = await direct(method, params);
+    if (method === 'session.control' && result.control && cache) {
+      cache.sessions = cache.sessions.map(item => item.id === params.id ? {...item, control: result.control} : item);
+      if (cache.details[params.id]) cache.details[params.id].control = result.control;
+      publish();
+    }
     if (binding?.instanceId !== identity)
       fail('连接已更换，旧结果已丢弃。', 'conflict');
     if (method === 'session.open' && params.activate !== false && cache) {
@@ -1131,6 +1165,7 @@ export function createBotDesktopService({
       return direct('file.download', { id, artifactId });
     },
     async close() {
+      if (online && activeId) await direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
       closed = true;
       offProfiles?.();
       stream?.abort();clearTimeout(eventRefresh);clearTimeout(streamReconnect);

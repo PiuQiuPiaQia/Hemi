@@ -161,11 +161,12 @@ try {
     await fs.writeFile(slowFlag, '');
     await page.getByRole('textbox', { name: '输入消息', exact: true }).fill('Reply OK');
     await page.getByRole('button', { name: '发送消息', exact: true }).click();
-    await page.getByText('正在发送…', { exact: true }).waitFor();
+    await page.locator('.h24-user-bubble').filter({hasText: 'Reply OK'}).waitFor();
+    assert.equal(await page.getByText('正在发送…', {exact: true}).count(), 0);
     assert.equal(await page.getByText('工作区目录不可用，重新选择后才能发送', { exact: true }).count(), 0);
     await wait(async () => await page.getByRole('textbox', { name: '输入消息', exact: true }).inputValue() === '', 'draft clears after receipt');
     await fs.rm(slowFlag);
-    note(mode + ': delayed real SSH send shows the correct pending hint and avoids a second blocking catalog request');
+    note(mode + ': delayed real SSH send immediately shows its input without a sending notice or a second blocking catalog request');
     await wait(async () => {
       const detail = (await state()).cache.details[id];
       return detail?.flow.timeline.some(item => item.kind === 'assistant') && detail.flow.phase === 'idle';

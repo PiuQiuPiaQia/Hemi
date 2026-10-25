@@ -4,7 +4,7 @@ import type {BotRpc} from './conversation-transport';
 export type BotEvent = {version: number; instanceId: string; bootId: string; sequence: number; type: string; id?: string; change?: FlowChangeView; snapshot?: {detail?: {id: string; flow: FlowSnapshotView}; details?: Array<{id: string; flow: FlowSnapshotView}>}; ok?: boolean};
 
 /** One native connection multiplexes active conversation subscriptions and workspace invalidations. */
-export function createBotRealtime(rpc: BotRpc, instanceId: string, catalog: () => void) {
+export function createBotRealtime(rpc: BotRpc, instanceId: string, catalog: () => void, connected: () => void = () => {}) {
   const subscribers=new Map<string,Set<{receive:(change:FlowChangeView)=>void; offline:()=>void; online:()=>void}>>();
   let release:(()=>void)|undefined, timer:ReturnType<typeof setTimeout>|undefined, cursor:Record<string,unknown>|undefined;
   let closed=false, suspended=false, retains=0, failures=0, epoch=0, scope='';
@@ -24,6 +24,7 @@ export function createBotRealtime(rpc: BotRpc, instanceId: string, catalog: () =
       if(frame.ok===false){disconnected();return;}
       if(frame.version!==1||frame.instanceId!==instanceId||!Number.isSafeInteger(frame.sequence)||frame.sequence<0){disconnected();return;}
       if(cursor?.bootId===frame.bootId && frame.sequence<(cursor.sequence as number))return;
+      connected();
       if(frame.type==='reset'){
         const details=frame.snapshot?.details ?? (frame.snapshot?.detail?[frame.snapshot.detail]:[]);
         for(const detail of details)for(const sub of subscribers.get(detail.id)??[])sub.receive({kind:'snapshot',snapshot:detail.flow});

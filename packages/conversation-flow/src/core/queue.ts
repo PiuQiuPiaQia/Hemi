@@ -1,7 +1,9 @@
 import type { FlowSnapshotView, TurnQueueState } from './protocol.js';
 import type { ConversationOperation } from './conversation.js';
+import type { ReplicaConnection } from './flow-replica.js';
 
-export function projectConversationQueue(snapshot: FlowSnapshotView | null, operations: readonly ConversationOperation[] = []): TurnQueueState {
+export function projectConversationQueue(snapshot: FlowSnapshotView | null, operations: readonly ConversationOperation[] = [], connection?: ReplicaConnection): TurnQueueState {
+  const blocked = operations.some(operation => operation.state === 'unknown');
   return {
     paused: snapshot?.queuePaused ?? false,
     items: [...(snapshot?.pending ?? []).filter(input => ['pending', 'needs-review', 'editing'].includes(input.state)).map<TurnQueueState['items'][number]>(input => ({
@@ -13,6 +15,9 @@ export function projectConversationQueue(snapshot: FlowSnapshotView | null, oper
       inputSource: input.inputSource ?? 'text', createdAt: input.createdAt ?? 0,
     })), ...operations.flatMap(operation => {
       if (operation.command.type !== 'send' || !['waiting', 'sending', 'unknown'].includes(operation.state)) return [];
+      // Online submissions await the Host's decision; only its pending inputs are queued.
+      // Offline outbox entries and sends blocked by an uncertain outcome stay recoverable.
+      if (connection === 'online' && !blocked) return [];
       const input = operation.command.input as { inputId?: string; text?: string } | undefined;
       if (snapshot?.pending.some(item => item.inputId === input?.inputId) || snapshot?.timeline.some(item => item.kind === 'user' && item.id === input?.inputId)) return [];
       return [{ operationId: operation.id, queueItemId: `operation:${operation.id}`, conversationId: snapshot?.conversationId ?? '',

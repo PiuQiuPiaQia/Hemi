@@ -127,8 +127,13 @@ test('mobile uses Host automatic routing and source metadata without defining an
   t.after(()=>workspace.dispose());await workspace.reconnect();
   const snapshot=workspace.getSnapshot();
   assert.equal(snapshot.models[0].id,'auto');assert.equal(snapshot.models[0].source,'local');
+  assert.equal(snapshot.models[0].description,'主 agent main');
   assert.equal(snapshot.models.find(model=>model.id==='cloud/model').source,'cloud');
   assert.equal(snapshot.items.find(item=>item.id===id).model,'auto');
+  await call('model.local-config',{keys:models.map(model=>model.modelKey),roleModels:{...roles,main:'local/role'}});
+  await workspace.reconnect();assert.equal(workspace.getSnapshot().models[0].description,'主 agent role');
+  await call('model.local-config',{keys:models.map(model=>model.modelKey),roleModels:roles});
+  await workspace.reconnect();assert.equal(workspace.getSnapshot().models[0].description,'主 agent main');
   const client=workspace.getClient(id),release=client.retain();t.after(release);
   await wait(()=>client.getSnapshot().connection==='online');
   client.draft.setText('自动路由');await client.sendDraft();await wait(()=>runs.length===1);

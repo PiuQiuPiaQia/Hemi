@@ -304,6 +304,7 @@ type VoiceScreenProps = {
   /** 033：目录失效 → 禁发（提示条在上下文栏，禁用在输入区）。 */
   workspaceSendBlocked?: boolean;
   workspaceSendBlockedHint?: string;
+  conversationReadOnly?: boolean;
   /** 033 fixtures 用：菜单初始展开（静态取证）。 */
   workspaceFixtureOpen?: boolean;
   /** 066 fixtures 用：顶栏打开方式菜单初始展开（静态取证）。 */
@@ -442,6 +443,7 @@ export function VoiceScreen({
   workspaceCurrent = null,
   workspaceSendBlocked = false,
   workspaceSendBlockedHint,
+  conversationReadOnly = false,
   workspaceFixtureOpen = false,
   topbarOpenFixtureOpen = false,
   onWorkspaceSelect,
@@ -961,6 +963,7 @@ export function VoiceScreen({
               messages={visibleTranscripts} taskSnaps={flowTaskSnaps} waitingTasks={waitingTasks}
               loading={conversationLoading} notice={timelineNotice} interimText={interimText}
               busy={textModelBusy} retryBusy={retryTurnBusy} retryBlocked={retryTurnBlocked}
+              readOnly={conversationReadOnly}
               editingMessageId={editingMessageId} models={modelProfiles}
               active={!skillMarketOpen && !workflowStudioOpen}
               onTaskAction={onTaskAction} onStartEdit={onStartEditMessage} onCancelEdit={onCancelEditMessage}
@@ -1073,6 +1076,7 @@ export function VoiceScreen({
                 onOpenSettings={onOpenModelSettings ?? onOpenSettings}
                 focusToken={(composerFocusToken ?? 0) + suggestionFocus}
                 sendBlocked={workspaceSendBlocked}
+                readOnly={conversationReadOnly}
                 sendBlockedHint={
                   workspaceSendBlockedHint ?? (recoveryInProgress ? '停止重连后可发送' : workspaceCurrent?.kind === 'view' && workspaceCurrent.view.host
                     ? '连不上服务器，恢复连接后才能发送'

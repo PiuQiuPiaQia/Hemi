@@ -8,6 +8,7 @@ const ACCOUNTS: Array<{ id: OAuthProvider; name: string; description: string }> 
   { id: 'openai', name: 'ChatGPT', description: '使用 ChatGPT 账号授权的模型与额度' },
   { id: 'anthropic', name: 'Claude', description: '使用 Claude 账号授权的模型与额度' },
   { id: 'github-copilot', name: 'GitHub Copilot', description: '通过设备验证码连接 Copilot 账号' },
+  { id: 'bigmodel', name: 'GLM Coding Plan', description: '登录 BigModel 账号，使用编程套餐的 ZCode 通道' },
 ];
 
 export function OAuthAccountSection({ providers, onlyProvider, disabled = false, onConnected, onChanged, onBusyChange }: {

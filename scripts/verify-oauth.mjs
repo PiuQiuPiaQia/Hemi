@@ -91,7 +91,7 @@ if (!process.versions.electron) {
     if (process.env.HEMI_OAUTH_PHASE === 'first') {
       await clickText('开始设置');
       await until('Boolean(document.querySelector(".h-oauth"))');
-      check('首启提供三种账号登录', await execute('document.querySelectorAll(".h-oauth-row").length === 3'));
+      check('首启提供四种账号登录', await execute('document.querySelectorAll(".h-oauth-row").length === 4'));
       const claudeTrigger = '[...document.querySelectorAll(".h-oauth-row")].find(row => row.textContent.includes("Claude")).querySelector("button")';
       await execute(`(${claudeTrigger}).click()`);
       const pendingClaude = await loginState(s => s?.provider === 'anthropic' && s?.prompt?.type === 'select');
@@ -110,6 +110,17 @@ if (!process.versions.electron) {
       await execute('document.querySelector(".h-oauth-close").click()');
       await until('!document.querySelector(".h-oauth-dialog")');
       check('关闭按钮取消登录并恢复按钮焦点', (await invoke('getOAuthLoginState')).phase === 'cancelled' && await execute(`(${claudeTrigger}) === document.activeElement`));
+      transport.bigmodel.state.pending = 1000;
+      transport.bigmodel.state.polls = 0;
+      const pendingBigModel = await invoke('startOAuthLogin', 'bigmodel');
+      await loginState(s => s?.provider === 'bigmodel' && s?.url);
+      mainWindow.webContents.reload();
+      await until('document.querySelector(".h-oauth-dialog")?.textContent.includes("GLM Coding Plan")');
+      check('GLM 轮询授权在 renderer 重载后恢复', (await invoke('getOAuthLoginState')).id === pendingBigModel.id);
+      await execute('document.querySelector(".h-oauth-close").click()');
+      await until('!document.querySelector(".h-oauth-dialog")');
+      check('取消 GLM 授权不会导入未完成的账号', (await invoke('getOAuthLoginState')).phase === 'cancelled' && !(await invoke('listModelProfiles')).providers.some(provider => provider.oauthProvider === 'bigmodel'));
+      transport.bigmodel.state.pending = 0;
       await execute('[...document.querySelectorAll(".h-oauth-row")].find(row => row.textContent.includes("ChatGPT")).querySelector("button").click()');
       await waitForOAuth(() => Boolean(completeChatGPT), Boolean);
       await until('document.querySelector(".h-oauth-dialog")?.textContent.includes("登录 ChatGPT")');
@@ -120,10 +131,12 @@ if (!process.versions.electron) {
       await clickText('验证并继续');
       await until('document.querySelector(".setup-shell")?.dataset.step === "capabilities"');
       check('真实 OAuth 工具调用探活通过首启门槛', true);
-      for (const provider of ['anthropic', 'github-copilot']) {
+      for (const provider of ['anthropic', 'github-copilot', 'bigmodel']) {
         const start = await invoke('startOAuthLogin', provider);
-        const prompt = await loginState(s => s?.prompt);
-        await invoke('answerOAuthLogin', { id: start.id, promptId: prompt.prompt.id, value: provider === 'anthropic' ? 'copy_code' : '' });
+        if (provider !== 'bigmodel') {
+          const prompt = await loginState(s => s?.prompt);
+          await invoke('answerOAuthLogin', { id: start.id, promptId: prompt.prompt.id, value: provider === 'anthropic' ? 'copy_code' : '' });
+        }
         if (provider === 'anthropic') {
           const manual = await loginState(s => s?.prompt?.type === 'manual_code');
           await invoke('answerOAuthLogin', { id: start.id, promptId: manual.prompt.id, value: `test-code#${browserUrls.at(-1).searchParams.get('state')}` });
@@ -132,7 +145,7 @@ if (!process.versions.electron) {
         check(`${provider} 通过真实 preload/IPC 完成登录`, completed.phase === 'success');
       }
       const directory = await invoke('listModelProfiles');
-      check('三家账号均可用且目录不含凭据', directory.providers.filter(provider => provider.oauthProvider && provider.hasApiKey).length === 3 && !JSON.stringify(directory).includes('test-access'));
+      check('四家账号均可用且目录不含凭据', directory.providers.filter(provider => provider.oauthProvider && provider.hasApiKey).length === 4 && !/test-access|synthetic-bigmodel|synthetic-project/.test(JSON.stringify(directory)));
       await clickText('继续');
       await until('document.querySelector(".setup-shell")?.dataset.step === "done"');
       await clickText('开始使用');
@@ -167,17 +180,19 @@ if (!process.versions.electron) {
       await mainWindow.webContents.capturePage().then(image => fs.writeFile(path.join(out, `oauth-electron-${process.env.VITE_DEV_SERVER_URL ? 'dev' : 'built'}.png`), image.toPNG()));
     } else {
       const directory = await invoke('listModelProfiles');
-      check('进程重启后加密账号与模型选择恢复', directory.providers.filter(provider => provider.oauthProvider && provider.hasApiKey).length === 3 && Boolean(directory.defaultModelId));
+      check('进程重启后加密账号与模型选择恢复', directory.providers.filter(provider => provider.oauthProvider && provider.hasApiKey).length === 4 && Boolean(directory.defaultModelId));
       const modelKey = directory.defaultModelId;
       const probe = await invoke('testModelProfile', { modelKey });
       check('重启后的账号凭据可用于真实请求通道', probe.ok);
+      const codingKey = directory.providers.find(provider => provider.oauthProvider === 'bigmodel').models[0].modelKey;
+      check('重启后的 GLM 账号可重新握手并调用模型', (await invoke('testModelProfile', { modelKey: codingKey })).ok);
       await invoke('logoutOAuth', 'openai');
       const after = await invoke('listModelProfiles');
       check('退出后模型仍保留并标记未登录', after.providers.find(provider => provider.oauthProvider === 'openai')?.hasApiKey === false);
       check('退出后原模型请求被拒绝', !(await invoke('testModelProfile', { modelKey })).ok);
     }
     const secrets = await fs.readFile(path.join((await import('../src/main/agent-runtime/storage-migration.mjs')).runtimeDataDir(app.getPath('userData')), 'oauth-credentials.json'), 'utf8');
-    check('磁盘只包含加密凭据', !/test-access|test-refresh|test-github-token/.test(secrets));
+    check('磁盘只包含加密凭据', !/test-access|test-refresh|test-github-token|synthetic-bigmodel|synthetic-project/.test(secrets));
     console.log(`HEMI_OAUTH_REPORT=${JSON.stringify({ phase: process.env.HEMI_OAUTH_PHASE, rendererUrl: mainWindow.webContents.getURL(), checks, externalAccounts: false })}`);
     await transport.close(); mainWindow.destroy(); app.exit(0);
   } catch (error) { console.error(error); if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.webContents.capturePage().then(image => fs.writeFile(path.join(out, 'oauth-electron-failure.png'), image.toPNG())).catch(() => {}); await transport.close(); app.exit(1); }

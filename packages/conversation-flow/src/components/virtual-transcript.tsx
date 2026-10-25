@@ -100,6 +100,7 @@ export function VirtualTranscript({
     directDomUpdates: true,
     directDomUpdatesMode: "position",
     useFlushSync: false,
+    useAnimationFrameWithResizeObserver: true,
     getScrollElement: () => viewport,
     getItemKey: getKey,
     estimateSize: () => 220,
@@ -180,23 +181,25 @@ export function VirtualTranscript({
       );
     measureMargin();
     let height = el.clientHeight;
+    let contentHeight = body.current.offsetHeight;
     let frame = 0;
     const observer = new ResizeObserver(() => {
-      measureMargin();
-      if (height === el.clientHeight) return;
-      const follow = pinned.current ||
-        Math.abs(el.scrollHeight - el.scrollTop - height) < 3 ||
-        Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 3;
+      const nextContentHeight = body.current!.offsetHeight;
+      if (height === el.clientHeight && contentHeight === nextContentHeight) return;
+      const follow = pinned.current;
       height = el.clientHeight;
+      contentHeight = nextContentHeight;
       const version = interactionVersion.current;
       cancelAnimationFrame(frame);
-      // The virtualizer must observe the new viewport rect before computing its end offset.
-      // Geometry-induced scroll events can temporarily clear pinned; preserve the previous intent.
+      // Both keyboard/composer resizing and asynchronous row measurements move the end.
+      // Let the virtualizer consume those measurements before restoring the user's end intent.
       frame = requestAnimationFrame(() => {
-        if (follow && interactionVersion.current === version) jump();
+        measureMargin();
+        if (follow && pinned.current && interactionVersion.current === version) jump();
       });
     });
     observer.observe(el);
+    observer.observe(body.current);
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, [jump]);
   const previousUser = useRef(lastUserId);
@@ -204,7 +207,9 @@ export function VirtualTranscript({
   useLayoutEffect(() => {
     if (!viewport || loading) return;
     // Initial open and own sends position directly; asynchronous measurements keep the end anchored.
-    if (previousUser.current !== lastUserId || pinned.current) jump();
+    // A local echo moving into the Host queue exposes an older last user; it is not another send.
+    const userAdded = previousUser.current !== lastUserId && lastUserId !== null && !previousKeys.current.includes(lastUserId);
+    if (userAdded || pinned.current) jump();
     previousUser.current = lastUserId;
   }, [viewport, loading, lastUserId, jump]);
   useEffect(() => {

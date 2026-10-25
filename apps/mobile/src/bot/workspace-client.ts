@@ -7,15 +7,17 @@ import {BotCommandRejected, createBotConversationTransport, type BotRpc} from '.
 import type {BotTarget} from './native';
 
 type Detail = {id: string; permissions: Record<string,{id: string;title: string;options: string[];status: string}>};
-type Snapshot = {instanceId: string; defaultDir: string; recentDirs: string[]; roleModels?: Record<string, string | null>; models: Array<{key: string; name: string; model: string; source?: 'local' | 'cloud'}>; sessions: Array<{id: string; title: string; modelKey: string; thinking: MobileThinking; dir: string; status: 'queued' | 'running' | null; waitingPermission?: boolean; waitingResource?: boolean; blockedBy?: string[]}>; detail?: Detail};
+type Snapshot = {clientId?: string; instanceId: string; defaultDir: string; recentDirs: string[]; roleModels?: Record<string, string | null>; models: Array<{key: string; name: string; model: string; source?: 'local' | 'cloud'}>; sessions: Array<{id: string; title: string; modelKey: string; thinking: MobileThinking; dir: string; status: 'queued' | 'running' | null; waitingPermission?: boolean; waitingResource?: boolean; blockedBy?: string[]; control?: {ownerId: string; epoch: string; expiresAt: number} | null}>; detail?: Detail};
 export function createBotWorkspace({rpc, target, files, resourceFiles, storage = localStorage}: {rpc: BotRpc; target: BotTarget; files?: MobileFileSource; resourceFiles?: MobileResourceFiles; storage?: Storage}): MobileWorkspace {
   const environmentId = `bot:${target.botInstanceId}`, prefix = `hemi-mobile:${environmentId}:`;
   const clients = new Map<string, ConversationClient>(), listeners = new Set<() => void>(), removedIds = new Set<string>();
   const managing = new Set<string>();
+  const acquiring = new Map<string, Promise<boolean>>();
   const read = <T>(key: string): T | null => {const raw = storage.getItem(prefix+key); return raw ? JSON.parse(raw) as T : null;};
   const write = (key: string, value: unknown) => storage.setItem(prefix+key, JSON.stringify(value));
   let snapshot: MobileWorkspaceSnapshot = {items: [], activeId: null, models: [], botName: new URL(target.endpoint).host, offline: true, error: ''};
-  try {const cached = read<MobileWorkspaceSnapshot>('catalog'); if (cached && Array.isArray(cached.items) && Array.isArray(cached.models)) snapshot = {...cached, offline: true, error: ''};} catch { /* Metadata can be refreshed without discarding drafts or the operation journal. */ }
+  let catalogReady = false, connectionEpoch = 0;
+  try {const cached = read<MobileWorkspaceSnapshot>('catalog'); if (cached && Array.isArray(cached.items) && Array.isArray(cached.models)) {snapshot = {...cached, offline: true, error: ''};catalogReady=true;}} catch { /* Metadata can be refreshed without discarding drafts or the operation journal. */ }
   let retains = 0, timer: ReturnType<typeof setInterval> | null = null, stop: ReturnType<typeof setTimeout> | null = null, closed = false, loading: Promise<void> | null = null;
   const pending = new Set<AbortController>();
   const publish = (patch: Partial<MobileWorkspaceSnapshot>) => {if (closed) return; snapshot = {...snapshot,...patch}; for (const listener of listeners) listener();};
@@ -25,31 +27,45 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
     const abort=()=>controller.abort();
     signal?.addEventListener('abort',abort,{once:true});
     if(signal?.aborted)controller.abort();
-    try {return await rpc.request<T>(method,{...params, instanceId: target.botInstanceId},{signal:controller.signal});}
+    try {
+      const owner = snapshot.items.find(item => item.id === params.id)?.control;
+      const epoch = owner?.ownerId === snapshot.clientId ? owner?.epoch : undefined;
+      return await rpc.request<T>(method,{...params, ...(epoch && params.controlEpoch === undefined && ['flow.command','session.update','session.draft','permission.decide'].includes(method) ? {controlEpoch: epoch} : {}), instanceId: target.botInstanceId},{signal:controller.signal});
+    }
     catch(error){if((error as {code?:string}).code==='permission')resources?.clear();throw error;}
     finally {signal?.removeEventListener('abort',abort);pending.delete(controller);}
   }
   async function refresh() {
     if (closed) return;
     if (loading) return loading;
+    const epoch = connectionEpoch;
     loading = (async()=>{
       try {
         const requestedId=snapshot.activeId;
         const value = await request<Snapshot>('snapshot',requestedId ? {id:requestedId} : {});
         if (value.instanceId !== target.botInstanceId || !Array.isArray(value.sessions) || !Array.isArray(value.models)) throw new Error('Bot 会话列表身份或格式无效');
-        const items = value.sessions.filter(item=>!removedIds.has(item.id)).map(item=>({id:item.id,title:item.title,pinned:false,model:item.modelKey,thinking:item.thinking??'default',directory:item.dir,running:!!item.status,waitingResource:item.waitingResource,blockedBy:item.blockedBy,status:item.status==='queued'?'queued' as const:item.waitingPermission?'waiting' as const:item.status}));
+        const items = value.sessions.filter(item=>!removedIds.has(item.id)).map(item=>({id:item.id,title:item.title,pinned:false,model:item.modelKey,thinking:item.thinking??'default',directory:item.dir,running:!!item.status,waitingResource:item.waitingResource,blockedBy:item.blockedBy,control:item.control,status:item.status==='queued'?'queued' as const:item.waitingPermission?'waiting' as const:item.status}));
         const activeId = items.some(item=>item.id===snapshot.activeId) ? snapshot.activeId : items[0]?.id ?? null;
         const detail=value.detail ?? (activeId ? await request<Detail>('session.open',{id:activeId,activate:false}) : null);
         const permissions=detail?.id===activeId ? Object.values(detail.permissions ?? {}).filter(p=>p.status==='pending').map(p=>({...p,conversationId:activeId!})) : [];
+        catalogReady = true;
+        const mainModel = value.models.find(model=>model.key===value.roleModels?.main);
+        const autoHint = mainModel ? `主 agent ${mainModel.model}` : '角色模型已失效';
         // 服务器 publicModel 的 name 是供应商名（PC 端用作分组目录），行标题须用 model（型号）。
-        publish({items,activeId,permissions,defaultDirectory:value.defaultDir,recentDirectories:value.recentDirs??[],models:[...(value.roleModels?.main ? [{id:'auto',name:'自动路由',description:'复用本机主模型、角色模型与备用模型',source:'local' as const}] : []),...value.models.map(model=>({id:model.key,name:model.model||model.key,description:model.name&&model.name!==model.model?model.name:undefined,source:model.source}))],offline:false,error:''});
+        publish({clientId: value.clientId,items,activeId,permissions,defaultDirectory:value.defaultDir,recentDirectories:value.recentDirs??[],models:[...(value.roleModels?.main ? [{id:'auto',name:'自动路由',description:autoHint,source:'local' as const}] : []),...value.models.map(model=>({id:model.key,name:model.model||model.key,description:model.name&&model.name!==model.model?model.name:undefined,source:model.source}))],offline:false,error:''});
         write('catalog',snapshot);
-      } catch (error) {publish({offline:true,error:error instanceof Error ? error.message : '未能读取 Bot，请检查网络后重试。'});}
+      } catch (error) {
+        // Authenticated events received after this request began are newer connection evidence.
+        if (epoch === connectionEpoch || !catalogReady) publish({offline:true,error:error instanceof Error ? error.message : '未能读取 Bot，请检查网络后重试。'});
+      }
     })().finally(()=>{loading=null;});
     return loading;
   }
   let realtimeRefresh:ReturnType<typeof setTimeout>|undefined;
-  const realtime=createBotRealtime(rpc,target.botInstanceId,()=>{if(!realtimeRefresh)realtimeRefresh=setTimeout(()=>{realtimeRefresh=undefined;void refreshAfterMutation();},60);});
+  const realtime=createBotRealtime(rpc,target.botInstanceId,()=>{if(!realtimeRefresh)realtimeRefresh=setTimeout(()=>{realtimeRefresh=undefined;void refreshAfterMutation();},60);},()=>{
+    connectionEpoch++;
+    if(catalogReady && (snapshot.offline || snapshot.error))publish({offline:false,error:''});
+  });
   async function refreshAfterMutation() {
     // A poll begun before the mutation may still hold the previous settings.
     if(loading)await loading;
@@ -100,7 +116,7 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
   }
   const lifecycle = {subscribe(receive: (event: 'resume'|'suspend'|'online'|'offline')=>void) {
     if(typeof document==='undefined')return()=>{};
-    const visibility=()=>receive(document.hidden ? 'suspend':'resume'), online=()=>receive('online'), offline=()=>receive('offline');
+    const visibility=()=>{if(document.hidden && snapshot.activeId)void request('session.control',{id:snapshot.activeId,action:'release',controlEpoch:snapshot.items.find(item=>item.id===snapshot.activeId)?.control?.epoch}).catch(()=>{});receive(document.hidden ? 'suspend':'resume');}, online=()=>receive('online'), offline=()=>receive('offline');
     document.addEventListener('visibilitychange',visibility);window.addEventListener('online',online);window.addEventListener('offline',offline);
     return()=>{document.removeEventListener('visibilitychange',visibility);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
   }};
@@ -120,7 +136,7 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
       if(removedIds.has(id))throw new Error('会话已删除。');
       if(!clients.has(id)) {
         const key=(scope: ConversationIdentity,kind: string)=>`${scope.conversationId}:${kind}`;
-        const client=createConversation({scope:{environmentId,conversationId:id},transport:createBotConversationTransport(rpc,target.botInstanceId,id,realtime.available?(_scope,receive,offline,online)=>realtime.subscribe(id,receive,offline??(()=>{}),online):undefined),lifecycle,requestTimeoutMs:35000,pollIntervalMs:realtime.available?30000:2000,storage:{
+        const client=createConversation({scope:{environmentId,conversationId:id},transport:createBotConversationTransport({...rpc,request:(method,params,context)=>request(method,params,context.signal)},target.botInstanceId,id,realtime.available?(_scope,receive,offline,online)=>realtime.subscribe(id,receive,offline??(()=>{}),online):undefined),lifecycle,requestTimeoutMs:35000,pollIntervalMs:realtime.available?30000:2000,storage:{
           drafts:{async load(scope){return read<StoredConversationDraft>(key(scope,'draft'));},async save(scope,value){if(!removedIds.has(id))write(key(scope,'draft'),value);return {ok:true};}},
           operations:{async load(scope){return read<ConversationOperation[]>(key(scope,'operations'));},async save(scope,value){if(!removedIds.has(id))write(key(scope,'operations'),value);}},
           snapshots:{async load(scope){return read<FlowSnapshotView>(key(scope,'snapshot'));},async save(scope,value){if(!removedIds.has(id))write(key(scope,'snapshot'),value);}},
@@ -131,7 +147,13 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
       }
       return clients.get(id)!;
     },
-    select(id){if(!snapshot.items.some(item=>item.id===id))return;publish({activeId:id,permissions:[]});write('catalog',snapshot);void refresh();},
+    select(id){if(!snapshot.items.some(item=>item.id===id))return;const previous=snapshot.items.find(item=>item.id===snapshot.activeId);if(previous&&previous.id!==id)void request('session.control',{id:previous.id,action:'release',controlEpoch:previous.control?.epoch}).catch(()=>{});publish({activeId:id,permissions:[]});write('catalog',snapshot);void refresh();},
+    async acquireControl(id,takeover=false){
+      if(acquiring.has(id))return acquiring.get(id)!;
+      const work=(async()=>{const result=await request<{ok:boolean;message?:string}>('session.control',{id,action:takeover?'takeover':'acquire'});
+        await refreshAfterMutation();if(!result.ok)throw new Error(result.message??'会话已被占用，请先抢占会话。');return true;
+      })().finally(()=>acquiring.delete(id));acquiring.set(id,work);return work;
+    },
     async create(){
       let requestId=read<string>('create-operation');
       if(requestId){

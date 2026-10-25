@@ -258,7 +258,38 @@ test('回卷：preempt 取消（不暂停队列）→ 关闭后裁剪＋generati
   await settle();
   controller.applyFact({ type: 'run-closed', runId: controller.getSnapshot().activeRunId, outcome: 'completed', at: 2710 });
   await settle();
+  assert.equal(effects.runtime.starts.length, 3, '在途回卷替换收口后不再次执行');
+  assert.equal(controller.getSnapshot().phase, 'idle');
 });
+
+for (const outcome of ['completed', 'failed', 'stopped']) {
+  test(`空闲回卷：替换运行 ${outcome} 后不重复执行同一输入或再次裁剪历史`, async () => {
+    const effects = makeEffects();
+    const controller = makeController(effects);
+    const { sent } = await runAndClose(controller, effects, { text: '原问题' });
+    await settle();
+    const rewind = controller.command({
+      type: 'rewind', targetInputId: sent.inputId,
+      input: { inputId: 'edited-input', text: '修改后的问题' },
+    });
+    await settle();
+    assert.equal(effects.runtime.starts.length, 2);
+    effects.runtime.starts.at(-1).resolve({ modelUsed: 'm' });
+    const replacement = await rewind;
+    assert.equal(replacement.ok, true);
+    controller.applyFact({ type: 'part-appended', runId: replacement.runId,
+      part: { partId: 'edited-answer', kind: 'text', content: '保留这次回答' } });
+    controller.applyFact({ type: 'run-closed', runId: replacement.runId, outcome, at: 2800 });
+    await settle();
+    const snapshot = controller.getSnapshot();
+    assert.equal(effects.runtime.starts.length, 2, '同一替换输入只启动一次');
+    assert.equal(snapshot.phase, 'idle');
+    assert.equal(snapshot.generation, 2, '替换收口不再次触发回卷');
+    assert.equal(Object.values(snapshot.runs).filter(run => run.inputIds.includes('edited-input')).length, 1);
+    assert.deepEqual(snapshot.timeline.filter(item => item.kind === 'user').map(item => item.id), ['edited-input']);
+    assert.ok(snapshot.timeline.some(item => item.parts?.some(part => part.partId === 'edited-answer')));
+  });
+}
 
 test('受理保存失败（SDK 未执行）：运行收口、输入回可见队列、不自动重发', async () => {
   const effects = makeEffects({ storeFails: 1 });

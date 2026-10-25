@@ -4,8 +4,8 @@
  * 顶到阅读列左缘（走查裁决：去掉对话流 Orb 头像）。叠在 globals.css 旧规则之后。
  */
 
-/* Model errors are one compact system notice, with raw diagnostics folded away. */
-.compact-shell .turn-error-notice {
+/* Keep the legacy voice error card separate from inline model recovery notices. */
+.compact-shell .turn-error-notice:not(.model-recovery-notice) {
   display: flex;
   align-items: flex-start;
   gap: var(--sp-10);
@@ -167,7 +167,7 @@ html.kb-nav .compact-shell .h24-suggestion:focus-visible {
 
 /* —— 用户消息 —— */
 .compact-shell .h24-user-message {
-  margin: 0 0 var(--sp-8);
+  margin: 0 0 var(--sp-4);
   animation: hemi-fade-up var(--dur-3) var(--ease-out);
 }
 

@@ -175,6 +175,8 @@ export interface MessageView {
   taskFrozen?: boolean;
   inputSource?: "voice" | "text";
   editedAt?: number;
+  pendingDelivery?: boolean;
+  editDraft?: TranscriptItem['editDraft'];
   attachments?: TranscriptItem["attachments"];
   references?: TranscriptItem["references"];
   skills?: TranscriptItem["skills"];
@@ -197,6 +199,7 @@ export interface PermissionView {
   readOnly?: boolean;
 }
 export interface FlowSurfaceState {
+  readOnly?: boolean;
   loading?: boolean;
   notice?: string;
   busy?: boolean;

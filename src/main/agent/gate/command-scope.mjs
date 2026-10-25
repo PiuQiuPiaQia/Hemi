@@ -125,7 +125,6 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
     record.background = true;
     // 已转后台的进程随目标取消，不随当前 SDK 模型回合结束而丢失。
     options.signal?.removeEventListener('abort', onAbort);
-    scope?.retainResourceUntil?.(record.promise);
     if (registered) await execution.journal.processBackground(record.id);
     publish();
     return { status: 'background', jobId: record.id, cleanupConfirmed: false, code: null,

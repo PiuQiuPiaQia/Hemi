@@ -6,6 +6,11 @@
   font-size: var(--fs-13);
 }
 
+/* The user action row already separates the opening process from the question. */
+.compact-shell .h24-hemi-message[data-lead='true'] > .turn-activity:first-child {
+  margin-top: 0;
+}
+
 .compact-shell .turn-activity-head {
   display: flex;
   align-items: center;

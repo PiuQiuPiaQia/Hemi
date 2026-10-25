@@ -1,10 +1,13 @@
 // Synthetic provider HTTP boundary. Never reads an account, browser profile, or real token.
 import http from 'node:http';
+import { createBigModelTestProvider } from './bigmodel-test-fixture.mjs';
 const json = value => Response.json(value);
 const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
 
-export function oauthTestReply(rawUrl, init = {}) {
+export function oauthTestReply(rawUrl, init = {}, bigmodel) {
   const url = new URL(rawUrl);
+  const codingReply = bigmodel?.reply(rawUrl, init);
+  if (codingReply) return codingReply;
   if (url.pathname.endsWith('/oauth/token')) return json({ access_token: url.hostname.includes('claude') ? 'sk-ant-oat-test-access' : 'openai-test-access', refresh_token: 'test-refresh-rotated', expires_in: 7200, scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct', id_token: 'test-presence-only' });
   if (url.pathname === '/login/device/code') return json({ device_code: 'test-device', user_code: 'HEMI-TEST', verification_uri: 'https://github.com/login/device', interval: 0.01, expires_in: 60 });
   if (url.pathname === '/login/oauth/access_token') return json({ access_token: 'test-github-token', token_type: 'bearer' });
@@ -41,13 +44,14 @@ export function oauthTestReply(rawUrl, init = {}) {
 
 export async function startOAuthTestServer() {
   const requests = [];
+  const bigmodel = createBigModelTestProvider();
   const originalFetch = globalThis.fetch;
   const server = http.createServer(async (request, response) => {
     try {
       let body = ''; for await (const chunk of request) body += chunk;
       const target = new URL(request.url, 'http://localhost').searchParams.get('target');
       requests.push({ url: target, body, headers: request.headers });
-      const reply = oauthTestReply(target, { body });
+      const reply = oauthTestReply(target, { body, headers: request.headers, method: request.method }, bigmodel);
       response.writeHead(reply.status, Object.fromEntries(reply.headers));
       response.end(Buffer.from(await reply.arrayBuffer()));
     } catch (error) { response.writeHead(500); response.end(error.message); }
@@ -55,7 +59,7 @@ export async function startOAuthTestServer() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const fetch = (url, init) => new URL(String(url)).hostname === '127.0.0.1' ? originalFetch(url, init) : originalFetch(`${origin}/?target=${encodeURIComponent(String(url))}`, init);
-  return { requests, fetch, close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }, originalFetch };
+  return { requests, fetch, bigmodel, close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }, originalFetch };
 }
 
 export async function waitForOAuth(read, predicate, timeoutMs = 15000) {

@@ -38,31 +38,31 @@ test('bounded event replay has no subscription gap; old process/scope/expired cu
   assert.doesNotThrow(()=>{stream.subscribe({instanceId:'bot'},()=>{throw new Error('slow');});stream.publish({type:'catalog'});});
 });
 
-test('two devices append concurrently once, share streamed output and reject edit/reorder/stop conflicts',async t=>{
+test('one device writes while both receive output; explicit takeover fences the previous writer',async t=>{
   const f=await fixture(t),pc=[],phone=[];
   const release=f.host.watch({instanceId:f.instanceId,id:f.id},frame=>pc.push(frame),undefined,{clientId:'pc'});
   const stop=f.host.watch({instanceId:f.instanceId,id:f.id},frame=>phone.push(frame),undefined,{clientId:'phone'});t.after(release);t.after(stop);
   const send=(inputId,text)=>({type:'send',input:{inputId,text}});
-  const operation=randomUUID();
-  await Promise.all([f.command('pc',send('a','电脑')),f.command('phone',send('b','手机'),{requestId:operation}),f.command('pc',send('c','再排一条'))]);
-  await wait(()=>f.runs.length===1);
-  let snapshot=await f.request('pc','flow.snapshot',{id:f.id});assert.deepEqual(snapshot.pending.map(i=>i.inputId),['b','c']);
+  await f.command('pc',send('a','电脑'));await wait(()=>f.runs.length===1);
+  await assert.rejects(()=>f.command('phone',send('blocked','手机')),/会话已被/);
+  const before=await f.request('phone','snapshot',{id:f.id});
+  assert.equal(before.sessions.find(item=>item.id===f.id).control.ownerId,'pc');
+  const claimed=await f.request('phone','session.control',{id:f.id,action:'takeover'});assert.equal(claimed.ok,true);
+  const operation=randomUUID();await f.command('phone',send('b','手机'),{requestId:operation});
+  await f.command('phone',send('c','再排一条'));
   assert.equal((await f.command('phone',send('b','手机'),{requestId:operation})).ok,true);
-  assert.equal((await f.request('pc','flow.snapshot',{id:f.id})).pending.length,2);
-  const running=f.live.get(f.id);running.apply({type:'part-appended',runId:running.spec.runId,generation:running.spec.generation,part:{partId:'text',kind:'text',content:'开始'}});
-  running.apply({type:'part-updated',runId:running.spec.runId,generation:running.spec.generation,partId:'text',patch:{content:'实时输出🙂'}});
-  await wait(()=>pc.some(f=>f.type==='flow'&&JSON.stringify(f.change).includes('实时输出🙂')));
-  assert.deepEqual(pc.filter(f=>f.type==='flow'),phone.filter(f=>f.type==='flow'));
-  assert.equal((await f.command('pc',{type:'beginEditInput',inputId:'b',expectedEditRevision:0})).ok,true);
-  assert.equal((await f.command('phone',{type:'beginEditInput',inputId:'b',expectedEditRevision:0})).code,'locked');
-  assert.equal((await f.command('phone',{type:'finishEditInput',inputId:'b',expectedEditRevision:0,patch:{text:'覆盖'}})).code,'locked');
-  await f.command('pc',{type:'finishEditInput',inputId:'b',expectedEditRevision:0,patch:{text:'电脑改过'}});
-  assert.equal((await f.command('phone',{type:'updateInput',inputId:'b',expectedEditRevision:0,patch:{text:'旧修改'}})).code,'stale-input');
-  await f.command('pc',{type:'reorderInput',inputId:'c',overInputId:'b',expectedInputIds:['b','c']});
-  assert.equal((await f.command('phone',{type:'reorderInput',inputId:'b',overInputId:'c',expectedInputIds:['b','c']})).code,'stale-queue');
+  let snapshot=await f.request('phone','flow.snapshot',{id:f.id});assert.deepEqual(snapshot.pending.map(i=>i.inputId),['b','c']);
+  await assert.rejects(()=>f.command('pc',{type:'stop',targetRunId:snapshot.activeRunId}),/会话已被/);
+  const running=f.live.get(f.id);running.apply({type:'part-appended',runId:running.spec.runId,generation:running.spec.generation,part:{partId:'text',kind:'text',content:'实时输出🙂'}});
+  await wait(()=>pc.some(frame=>frame.type==='flow'&&JSON.stringify(frame.change).includes('实时输出🙂')));
+  assert.deepEqual(pc.filter(frame=>frame.type==='flow'),phone.filter(frame=>frame.type==='flow'));
+  await f.command('phone',{type:'beginEditInput',inputId:'b',expectedEditRevision:0});
+  await f.command('phone',{type:'saveInputEditDraft',inputId:'b',draftRevision:1,patch:{text:'手机未提交修改'}});
+  await f.request('pc','session.control',{id:f.id,action:'takeover'});
+  await assert.rejects(()=>f.command('phone',{type:'finishEditInput',inputId:'b',patch:{text:'迟到的覆盖'}},{controlEpoch:claimed.control.epoch}),/会话已被/);
+  snapshot=await f.request('pc','flow.snapshot',{id:f.id});
+  assert.equal(snapshot.pending[0].editDraft.text,'手机未提交修改');assert.equal(snapshot.queuePaused,true);
   await f.command('pc',{type:'stop',targetRunId:running.spec.runId});await wait(async()=>(await f.request('pc','flow.snapshot',{id:f.id})).phase==='idle');
-  assert.equal((await f.command('phone',{type:'stop',targetRunId:running.spec.runId})).code,'run-changed');
-  assert.equal((await f.command('phone',{type:'send',input:{inputId:'stale',text:'旧分支'}},{generation:99})).code,'conflict');
 });
 
 test('disconnected editor releases with draft preserved and queue paused; reconnect/restart recover without replay',async t=>{

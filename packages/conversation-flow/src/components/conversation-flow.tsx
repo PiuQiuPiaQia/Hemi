@@ -373,6 +373,7 @@ function ConversationFlowBody({
             taskTitleOf={(id) => taskSnaps[id]?.taskText}
             editing={editingId === item.id}
             busy={Boolean(state?.busy) || busy}
+            readOnly={state?.readOnly}
             canEdit={editAllowed && runtime.actionable}
             onStartEdit={(id) => {
               setEditingId(id);

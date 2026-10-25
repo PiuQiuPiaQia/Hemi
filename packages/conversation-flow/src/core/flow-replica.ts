@@ -72,6 +72,12 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
   let controller: AbortController | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let buffered: FlowChangeView[] = [];
+  let connectionEpoch = 0;
+  const connected = () => {
+    if (disposed || suspended) return;
+    connectionEpoch++; failures = 0;
+    if (current && !buffered.length) onConnection?.('online');
+  };
   const commit = (next: FlowSnapshotView) => {
     if (disposed || !isFlowSnapshot(next) || (conversationId && next.conversationId !== conversationId)
       || (current && (next.conversationId !== current.conversationId || next.revision < current.revision || next.generation < current.generation))) return false;
@@ -95,13 +101,17 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
     if (retry) { clearTimeout(retry); retry = null; }
     controller = new AbortController();
     const signal = controller.signal;
+    const epoch = connectionEpoch;
     fetching = Promise.resolve().then(() => fetchSnapshot(signal)).then(fresh => {
       if (disposed || signal.aborted) return;
       if (!isFlowSnapshot(fresh) || (conversationId && fresh.conversationId !== conversationId)) throw new Error('Invalid conversation snapshot');
       commit(fresh);
       failures = 0; onConnection?.('online'); drain();
     }).catch(() => {
-      if (!disposed && !signal.aborted) { failures += 1; onConnection?.('offline'); }
+      // A live subscription may recover while an older snapshot request is still pending.
+      if (!disposed && !signal.aborted && (epoch === connectionEpoch || !current || buffered.length)) {
+        failures += 1; onConnection?.('offline');
+      }
     }).finally(() => {
       fetching = null;
       if (!disposed && !suspended && (!current || failures || buffered.length) && !retry) {
@@ -112,6 +122,7 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
   };
   return {
     refresh,
+    connected,
     restore: commit,
     receive(change: FlowChangeView) {
       if (disposed || suspended) return;
@@ -119,7 +130,9 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
       const source = change.kind === 'snapshot' ? change.snapshot?.conversationId : change.conversationId;
       if (source !== (conversationId ?? current?.conversationId ?? source)) return;
       if (buffered.length >= 512) buffered = [];
+      const before = current;
       buffered.push(change); drain();
+      if (current !== before) connected();
       if (!current || buffered.length) void refresh();
     },
     suspend() { suspended = true; controller?.abort(); if (retry) clearTimeout(retry); retry = null; },

@@ -55,14 +55,13 @@ const directory = () => ({
   ],
 });
 
-test('预设清单：8 家、id 唯一、除自定义外都有接口地址与常用型号', () => {
+test('预设清单：8 家、id 唯一、只提供连接信息，不内置型号', () => {
   assert.equal(PROVIDER_PRESETS.length, 8);
   assert.equal(new Set(PROVIDER_PRESETS.map((p) => p.id)).size, 8);
   for (const preset of PROVIDER_PRESETS) {
+    assert.equal('models' in preset, false, preset.id);
     if (preset.id === 'custom') continue;
     assert.ok(/^https?:\/\//.test(preset.baseUrl), preset.id);
-    assert.ok(preset.models.length > 0, preset.id);
-    assert.ok(preset.models.some((model) => model.pick), `${preset.id} 至少默认勾一个`);
     if (!preset.keyless) assert.ok(preset.keyUrl.startsWith('https://'), preset.id);
   }
 });
@@ -120,11 +119,10 @@ test('modelUsage：只有目录的 visionModelKey 指向的型号算看图占用
 });
 
 test('guessVision / uniqueProviderName', () => {
-  const qwen = PROVIDER_PRESETS.find((p) => p.id === 'qwen');
-  assert.equal(guessVision(qwen, 'qwen-vl-max'), true);
-  assert.equal(guessVision(qwen, 'qwen-max'), false);
-  assert.equal(guessVision(null, 'my-vl-model'), true);
-  assert.equal(guessVision(null, 'deepseek-chat'), false);
+  assert.equal(guessVision('qwen-vl-max'), true);
+  assert.equal(guessVision('qwen-max'), false);
+  assert.equal(guessVision('my-vl-model'), true);
+  assert.equal(guessVision('deepseek-chat'), false);
   assert.equal(uniqueProviderName('DeepSeek', ['DeepSeek']), 'DeepSeek 2');
   assert.equal(uniqueProviderName('Kimi', ['DeepSeek']), 'Kimi');
 });

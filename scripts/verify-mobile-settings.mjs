@@ -19,7 +19,8 @@ const browser=await chromium.launch({executablePath:process.env.HEMI_CHROME_PATH
 try {
  for(const mode of ['dev','built']) {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-settings-ui-'))),work=path.join(root,'workspace'),project=path.join(work,'项目'),slow=path.join(work,'迟到的目录'),longProject=path.join(work,'用于检查较长名称换行和点击区域的项目文件夹');
-  const runs=[],requests=[];let dropUpdate=false,networkDown=false,releaseDirectory,heldDirectory,holdRun=false,releaseRun;
+  process.env.HEMI_USER_DATA_DIR=path.join(root,'profile');
+  const runs=[],requests=[];let dropUpdate=false,networkDown=false,releaseDirectory,heldDirectory,holdRun=false,releaseRun,holdUpdate=false,releaseUpdate,rejectUpdate=false;
   const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:work,validateModel:async()=>{},executorFactory:()=>({run:async spec=>{runs.push(spec);if(holdRun)await new Promise(resolve=>{releaseRun=resolve;});return{stopped:false};},stop:async()=>{releaseRun?.();},close:async()=>{releaseRun?.();}})});
   await fs.mkdir(project,{recursive:true});await fs.mkdir(slow);await fs.mkdir(longProject);
   const {instanceId}=await host.request('handshake'),target={endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Isolated settings Bot'};
@@ -40,6 +41,8 @@ try {
    await context.exposeBinding('__hemiSettingsRpc',async(_source,{method,params})=>{
     requests.push({method,params});
     if(networkDown)return{ok:false,code:'network',message:'Isolated connection unavailable'};
+    if(method==='session.update'&&holdUpdate){holdUpdate=false;await new Promise(resolve=>{releaseUpdate=resolve;});}
+    if(method==='session.update'&&rejectUpdate){rejectUpdate=false;return{ok:false,code:'invalid',message:'测试模型切换被拒绝'};}
     if(method==='directory.list'&&params.path===heldDirectory)await new Promise(resolve=>{releaseDirectory=resolve;});
     try {const value=await host.request(method,params);if(dropUpdate&&method==='session.update'){dropUpdate=false;return{ok:false,code:'network',message:'Isolated reply lost'};}return{ok:true,result:value};}
     catch(error){return{ok:false,code:error.code??'failed',message:error.message};}
@@ -69,23 +72,64 @@ try {
    assert.equal(await thinkingDialog.getByRole('button',{name:/^自动/}).getAttribute('aria-pressed'),'true');
    await shot('thinking-390');await thinkingDialog.getByRole('button',{name:/^高/}).click();await thinkingDialog.waitFor({state:'hidden'});
    await page.getByRole('button',{name:'思考强度：高',exact:true}).waitFor();
-   await page.getByRole('button',{name:/^切换模型：/}).click();const models=page.getByRole('dialog',{name:'选择模型',exact:true});
+   const modelTrigger=page.getByRole('button',{name:'选择模型',exact:true});
+   assert.equal(await modelTrigger.count(),1);
+   assert.equal(await modelTrigger.evaluate(node=>!!node.closest('.app-topbar')),true);
+   assert.equal(await page.locator('.input-dock .composer-model').count(),0);
+   assert.equal(await page.getByRole('button',{name:/^切换模型：/}).count(),0);
+   await modelTrigger.click();const models=page.getByRole('dialog',{name:'选择模型',exact:true});
    assert.equal(await models.evaluate(node=>!!node.closest('[inert]')),false,'model sheet must stay outside the inert conversation surface');
    await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
-   await page.getByRole('button',{name:/^切换模型：/}).click();
+   await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='选择模型');
+   await modelTrigger.click();
    assert.ok(await models.getByLabel('本机配置',{exact:true}).count());
    assert.ok(await models.getByLabel('云端配置',{exact:true}).count());
    await shot('model-routing-sources-390');
    await models.getByRole('button',{name:/自动路由/}).click();await models.waitFor({state:'hidden'});
    assert.equal((await call('session.open',{id:session.id})).modelKey,'auto');
-   await page.getByRole('button',{name:/^切换模型：/}).click();await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
+   await modelTrigger.click();await models.getByRole('button',{name:/模型二/}).click();await models.waitFor({state:'hidden'});
    check('automatic routing uses the Host local role/fallback policy and both source icons remain visible on mobile');
    assert.equal(await input.inputValue(),'保留草稿，使用新的设置');
-   check('composer model and thinking selectors persist through actual Host updates without clearing the SDK draft');
+   check('header model and composer thinking selectors persist through actual Host updates without clearing the SDK draft');
+
+   holdUpdate=true;releaseUpdate=null;
+   const beforeSwitch=requests.filter(item=>item.method==='session.update').length;
+   await modelTrigger.click();await models.getByRole('button',{name:/模型一/}).click();
+   await expect(()=>!!releaseUpdate);await models.waitFor({state:'hidden'});
+   assert.equal(await page.locator('.topbar-title small').innerText(),'one');
+   assert.equal(await page.getByText('正在保存…',{exact:true}).count(),0);
+   assert.equal(await page.getByRole('button',{name:'发送消息',exact:true}).isDisabled(),true);
+   await page.getByRole('button',{name:'思考强度：高',exact:true}).click();await thinkingDialog.getByRole('button',{name:/^低/}).click();
+   await thinkingDialog.waitFor({state:'hidden'});await page.getByRole('button',{name:'思考强度：低',exact:true}).waitFor();
+   assert.equal(requests.filter(item=>item.method==='session.update').length,beforeSwitch+1,'consecutive choices persist in selection order');
+   await shot('selection-immediate-before-receipt');releaseUpdate();releaseUpdate=null;
+   await expect(async()=>{const current=await call('session.open',{id:session.id});return current.modelKey==='fixture/one'&&current.thinking==='low';});
+   await expect(async()=>await page.getByRole('button',{name:'发送消息',exact:true}).isEnabled());
+   await modelTrigger.click();await models.getByRole('button',{name:/模型二/}).click();
+   await page.getByRole('button',{name:'思考强度：低',exact:true}).click();await thinkingDialog.getByRole('button',{name:/^高/}).click();
+   await expect(async()=>await page.getByRole('button',{name:'发送消息',exact:true}).isEnabled());
+   holdUpdate=true;releaseUpdate=null;rejectUpdate=true;
+   await modelTrigger.click();await models.getByRole('button',{name:/模型一/}).click();
+   await expect(()=>!!releaseUpdate);assert.equal(await page.locator('.topbar-title small').innerText(),'one');releaseUpdate();releaseUpdate=null;
+   await page.getByText('测试模型切换被拒绝',{exact:true}).waitFor();
+   await expect(async()=>await page.locator('.topbar-title small').innerText()==='very-long-model-name-two');
+   assert.equal(await input.inputValue(),'保留草稿，使用新的设置');
+   check('model/thinking switch immediately without a saving step, persist in order, and rejected changes restore confirmed state');
+
+   const oldKey='mpi-removed/gpt-old';
+   await call('model.sync',{models:[{modelKey:oldKey,providerId:'mpi-removed',name:'旧供应商',model:'gpt-old',api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'NOT_A_CREDENTIAL'}]});
+   await call('session.update',{id:session.id,modelKey:oldKey});
+   await call('model.local-config',{keys:['fixture/one','fixture/two'],roleModels:{main:'fixture/one',explorer:'fixture/two',fallback:'fixture/two'}});
+   await expect(async()=>await page.locator('.topbar-title small').innerText()==='模型已移除');
+   await modelTrigger.click();assert.equal(await models.getByRole('button',{name:/模型已移除/}).isDisabled(),true);
+   assert.ok(!(await models.innerText()).includes('mpi-'));
+   await shot('removed-model-readable');await models.getByRole('button',{name:/模型二/}).click();
+   await expect(async()=>await page.getByRole('button',{name:'发送消息',exact:true}).isEnabled());
+   check('removed development model IDs are never displayed as a provider/model name; a valid selection recovers the conversation');
 
    const folderTrigger=page.getByRole('button',{name:/^工作目录：/});
-   assert.equal(await folderTrigger.count(),1);assert.equal(await folderTrigger.evaluate(node=>!!node.closest('.composer-toolbar')),true);
-   assert.equal(await page.locator('.composer-context').count(),0);assert.equal(await page.locator('.app-topbar').getByRole('button',{name:/工作目录/}).count(),0);
+   assert.equal(await folderTrigger.count(),1);assert.equal(await folderTrigger.evaluate(node=>!!node.closest('.app-topbar')),true);
+   assert.equal(await page.locator('.composer-context').count(),0);assert.equal(await page.locator('.input-dock').getByRole('button',{name:/工作目录/}).count(),0);
    heldDirectory=work;await folderTrigger.click();
    const folders=page.getByRole('dialog',{name:'选择工作目录',exact:true}),pathInput=folders.getByRole('textbox',{name:'服务器目录路径',exact:true}),choose=folders.getByRole('button',{name:'使用此目录',exact:true});
    await expect(()=>!!releaseDirectory);await pathInput.fill(path.join(root,'missing'));releaseDirectory();heldDirectory=null;
@@ -102,6 +146,7 @@ try {
    await fs.rename(project,project+'-moved');await choose.click();await folders.getByRole('alert').waitFor();assert.equal(await input.inputValue(),'保留草稿，使用新的设置');await fs.rename(project+'-moved',project);
    await choose.click();await folders.waitFor({state:'hidden'});
    await page.getByRole('button',{name:`工作目录：${project}`,exact:true}).waitFor();
+   await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')?.startsWith('工作目录：'));
    check('real server directory navigation, manual paths, parent, unreadable path rejection and stale response guard; selected directory is saved');
 
    dropUpdate=true;const previous=requests.filter(item=>item.method==='session.update').length;
@@ -117,6 +162,14 @@ try {
     const boxes=await page.locator('.composer-toolbar button').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return{label:node.getAttribute('aria-label'),x:box.x,right:box.right,y:box.y,width:box.width,height:box.height};}));
     for(let i=0;i<boxes.length;i++){const box=boxes[i];assert.ok(box.width>=44&&box.height>=44,`${box.label} has a small touch target: ${JSON.stringify(box)}`);if(i)assert.ok(boxes[i-1].right<=box.x+1,'composer controls overlap');}
     assert.equal(await page.locator('.composer-toolbar').evaluate(node=>node.scrollWidth>node.clientWidth),false);
+    const header=await page.locator('.app-topbar').evaluate(node=>{
+     const buttons=[...node.querySelectorAll('button')].map(button=>button.getBoundingClientRect());
+     return{overflow:node.scrollWidth>node.clientWidth,buttons:buttons.map(({left,right,width,height})=>({left,right,width,height})),center:node.getBoundingClientRect().left+node.getBoundingClientRect().width/2};
+    });
+    assert.equal(header.overflow,false);
+    assert.ok(header.buttons.every(button=>button.width>=44&&button.height>=44));
+    for(let i=1;i<header.buttons.length;i++)assert.ok(header.buttons[i-1].right<=header.buttons[i].left+1,'header controls overlap');
+    assert.ok(Math.abs((header.buttons[1].left+header.buttons[1].right)/2-header.center)<1,'title stays centered between menu and folder');
    };
    for(const width of [320,375,376,390,768,1440]) {
     await page.setViewportSize({width,height:844});await checkToolbar();await shot(`composer-${width}`);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -188,14 +241,14 @@ try {
    assert.equal(await web.evaluate(()=>scrollY),0);await web.screenshot({path:path.join(output,`${mode}-keyboard-browser.png`)});await web.close();
    check('browser fallback follows visualViewport with a fixed root and scrollable sheet; no native height subtraction');
 
-   networkDown=true;await expect(async()=>await page.getByRole('button',{name:'思考强度：自动',exact:true}).isDisabled());assert.equal(await page.getByRole('button',{name:/^切换模型：/}).isDisabled(),true);assert.equal(await folderTrigger.isDisabled(),true);
+   networkDown=true;await expect(async()=>await page.getByRole('button',{name:'思考强度：自动',exact:true}).isDisabled());assert.equal(await modelTrigger.isDisabled(),true);assert.equal(await folderTrigger.isDisabled(),true);
    check('offline model/thinking/directory controls are disabled');
    assert.deepEqual(result.errors,[]);
   } catch(error) {
    const failed=context.pages()[0];
    if(failed){await failed.screenshot({path:path.join(output,`${mode}-failure.png`)});result.failure=await failed.evaluate(()=>({dialogs:[...document.querySelectorAll('[role="dialog"]')].map(node=>({label:node.getAttribute('aria-label'),text:node.textContent})),buttons:[...document.querySelectorAll('button')].map(node=>({label:node.getAttribute('aria-label'),text:node.textContent,inert:!!node.closest('[inert]')})),rootY:scrollY}));}
    throw error;
-  } finally {releaseDirectory?.();releaseRun?.();await context.close();await server.close();await host.close();await fs.rm(root,{recursive:true,force:true});}
+  } finally {releaseUpdate?.();releaseDirectory?.();releaseRun?.();await context.close();if(mode==='dev')await server.close();else await new Promise(resolve=>server.httpServer.close(resolve));await host.close();await fs.rm(root,{recursive:true,force:true});}
  }
 } finally {await browser.close();await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2)+'\n');}
 

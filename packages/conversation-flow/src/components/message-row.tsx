@@ -188,6 +188,7 @@ export function ChatTurnItem({
   onRetry,
   retryBusy,
   retryBlocked,
+  readOnly = false,
   onRecoveryAction,
 }: {
   item: TranscriptItem;
@@ -212,6 +213,7 @@ export function ChatTurnItem({
   editing: boolean;
   canEdit?: boolean;
   busy: boolean;
+  readOnly?: boolean;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onEditResend: (id: string, nextText: string) => void;
@@ -220,14 +222,17 @@ export function ChatTurnItem({
 }) {
   const [editDraft, setEditDraft] = useTranscriptRowState<string>(
     "edit-draft",
-    item.text,
+    item.editDraft?.text ?? item.text,
   );
   // 进入编辑时以当前文本为底稿；消息文本被并发改写（罕见）时同步一次。
   const wasEditing = useRef(editing);
+  const restoredEdit = useRef(item.editDraft?.revision);
   useEffect(() => {
-    if (editing !== wasEditing.current) setEditDraft(item.text);
+    if (editing !== wasEditing.current || restoredEdit.current !== item.editDraft?.revision)
+      setEditDraft(item.editDraft?.text ?? item.text);
     wasEditing.current = editing;
-  }, [editing, item.text, setEditDraft]);
+    restoredEdit.current = item.editDraft?.revision;
+  }, [editing, item.text, item.editDraft?.revision, item.editDraft?.text, setEditDraft]);
   // 026 R-11：就近复制（用户/助手消息通用）——反馈短暂可见，不打断选中与编辑。
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -244,7 +249,7 @@ export function ChatTurnItem({
     setCopied(ok);
   };
 
-  const editable = canEdit && isEditableMessage(item) && !busy && !editing;
+  const editable = canEdit && isEditableMessage(item) && !busy && !editing && !readOnly;
   const streaming = item.live && item.streaming !== false;
 
   // —— 用户消息：右对齐气泡（设计稿 user-message）——
@@ -258,6 +263,7 @@ export function ChatTurnItem({
                 className="h24-edit-input"
                 value={editDraft}
                 rows={3}
+                readOnly={readOnly}
                 aria-label="编辑消息"
                 spellCheck={false}
                 onChange={(event) => setEditDraft(event.target.value)}
@@ -283,7 +289,7 @@ export function ChatTurnItem({
                   <button
                     type="button"
                     className="h24-resend-btn"
-                    disabled={!editDraft.trim()}
+                    disabled={readOnly || !editDraft.trim()}
                     onClick={() => onEditResend(item.id, editDraft)}
                   >
                     重新发送

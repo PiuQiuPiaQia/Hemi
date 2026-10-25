@@ -1502,7 +1502,7 @@ export type ModelEntryView = {
 /** 046：供应商线协议——OpenAI 兼容（chat/completions）或 Anthropic 原生（/v1/messages）。 */
 export type ModelProviderApi = 'openai-completions' | 'anthropic-messages' | 'openai-responses';
 
-export type OAuthProvider = 'openai' | 'anthropic' | 'github-copilot';
+export type OAuthProvider = 'openai' | 'anthropic' | 'github-copilot' | 'bigmodel';
 export type OAuthLoginState = {
   id: string;
   revision: number;

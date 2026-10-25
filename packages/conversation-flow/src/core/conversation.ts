@@ -163,7 +163,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
         const result = { ok: false, code: 'conflict', message: '会话已回卷，请核对待发送内容后重新提交' };
         await confirm(operation, result); return result;
       }
-      setOperation(operation.id, { state: 'sending' });
+      setOperation(operation.id, { state: 'sending', result: undefined });
       try { await persistOperations(); }
       catch {
         const result = { ok: false, code: 'storage-failed', message: '记录未保存，消息尚未发送' };
@@ -225,7 +225,10 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     const operation: ConversationOperation = { id: makeId(), command: frozen, generation: state.snapshot?.generation ?? null, state: 'waiting', draftRevision, draftToken };
     update({ operations: [...state.operations.filter(item => !['accepted', 'rejected'].includes(item.state)).concat(state.operations.filter(item => ['accepted', 'rejected'].includes(item.state)).slice(-32)), operation], error: '' });
     try { await persistOperations(); }
-    catch { return { ok: false, code: 'storage-failed', message: '记录未保存，消息尚未发送' }; }
+    catch {
+      const result = { ok: false, code: 'storage-failed', message: '记录未保存，消息尚未发送' };
+      setOperation(operation.id, { result }); return result;
+    }
     await flushQueue();
     const live = state.operations.find(item => item.id === operation.id);
     if (live?.state === 'unknown') return { ok: false, code: 'unknown', message: '操作结果待核对，恢复连接后会查询状态' };
@@ -237,11 +240,10 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     try {
     if (transport.subscribe) subscriptions.push(transport.subscribe(identity, change => {
       if(suspended||disposed)return;
-      const before=state.snapshot;replica.receive(change);
-      if(state.snapshot!==before){update({connection:'online'});void reconcileUnknown().then(flushQueue);}
+      replica.receive(change);
     }, () => {
       update({ connection: 'offline' }); if (!suspended) void replica.refresh();
-    }, () => { if(!suspended&&!disposed&&hydrated)void replica.refresh().then(reconcileUnknown); }));
+    }, () => { if(!suspended&&!disposed&&hydrated){replica.connected();void replica.refresh().then(reconcileUnknown);} }));
     if (lifecycle) subscriptions.push(lifecycle.subscribe(event => {
       suspended = event === 'suspend' || event === 'offline';
       if (suspended) { replica.suspend(); update({ connection: 'offline' }); void persistence?.flush(); }

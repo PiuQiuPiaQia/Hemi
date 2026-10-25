@@ -132,6 +132,7 @@ export type ConversationComposerProps = {
     modelNotice?: string;
     /** 033 R-07：工作区目录失效 → 硬禁发（原因条在上下文栏，草稿保留）。 */
     sendBlocked?: boolean;
+    readOnly?: boolean;
     /** 033/049：禁发提示文案（工作区类型区分：本机＝目录不可用，远端＝连不上服务器）。 */
     /** Empty text keeps a transient block silent. */
     sendBlockedHint?: string;
@@ -152,7 +153,7 @@ type PanelItem = {
     key: string;
     disabled: boolean;
 };
-export function ConversationComposer({ adapter, layout = 'desktop', placeholder, offline = false, stopBlocked = false, hasAttachments = false, children, value, onChange, onSend, busy, waiting = false, pendingSpeech = false, modelReady = true, callActive = false, onOpenSettings, toolbar, focusToken, attachments = [], attachError = '', onAttachPaste, onAttachDrop, onRemoveAttachment, onPreviewAttachment, onStopTurn, tasksRunning = false, inputHistory = [], modelProfiles = null, onSelectModelProfile, mentionConversationId = null, mentionWorkspaceId = null, references = [], trailing, header, onAddReference, onRemoveReference, onPreviewReference, onSetReferences, skills = [], onSetSkills, modelNotice = '', sendBlocked = false, sendBlockedHint, fresh = false, queueEditing = false, queueEditSaving = false, onCancelQueueEdit, }: ConversationComposerProps) {
+export function ConversationComposer({ adapter, layout = 'desktop', placeholder, offline = false, stopBlocked = false, hasAttachments = false, children, value, onChange, onSend, busy, waiting = false, pendingSpeech = false, modelReady = true, callActive = false, onOpenSettings, toolbar, focusToken, attachments = [], attachError = '', onAttachPaste, onAttachDrop, onRemoveAttachment, onPreviewAttachment, onStopTurn, tasksRunning = false, inputHistory = [], modelProfiles = null, onSelectModelProfile, mentionConversationId = null, mentionWorkspaceId = null, references = [], trailing, header, onAddReference, onRemoveReference, onPreviewReference, onSetReferences, skills = [], onSetSkills, modelNotice = '', sendBlocked = false, readOnly = false, sendBlockedHint, fresh = false, queueEditing = false, queueEditSaving = false, onCancelQueueEdit, }: ConversationComposerProps) {
     const instanceId = useId();
     const descriptionId = instanceId + '-description';
     const hintId = instanceId + '-hint';
@@ -728,7 +729,7 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
     const hasOutgoingContent = Boolean(value.trim()) || attachments.length > 0 || hasAttachments;
     // 063：候选面板打开时不发送（先选择能力或 Esc）；停止键不受影响。
     const panelOpen = panel != null;
-    const canSend = hasOutgoingContent && !pendingSpeech && modelReady && !hasUnreadyAttachment && !sendBlocked && !queueEditSaving && !panelOpen;
+    const canSend = hasOutgoingContent && !pendingSpeech && modelReady && !hasUnreadyAttachment && !sendBlocked && !readOnly && !queueEditSaving && !panelOpen;
     const primaryIsStop = !queueEditing && busy && Boolean(onStopTurn) && !hasOutgoingContent;
     const primaryLabel = primaryIsStop ? '停止当前任务' : queueEditing ? '保存修改' : busy ? '加入队列' : '发送消息';
     const handleSendClick = () => {
@@ -789,9 +790,9 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
     {children}
     <form className="mobile-composer" aria-label="消息输入区" onSubmit={event => { event.preventDefault(); if (canSend)
             onSend(); }}>
-      <textarea ref={textareaRef} id={instanceId} aria-label="消息" rows={1} value={value} onChange={event => { undoRef.current.push(snapshotForUndo()); setCaret(event.target.selectionStart); onChange(event.target.value); }} onKeyDown={handleKeyDown} placeholder={placeholder ?? (queueEditing ? '修改待发送消息…' : offline ? '连接恢复后发送…' : '发送消息…')} enterKeyHint="enter"/>
+      <textarea ref={textareaRef} id={instanceId} aria-label="消息" rows={1} readOnly={readOnly} value={value} onChange={event => { undoRef.current.push(snapshotForUndo()); setCaret(event.target.selectionStart); onChange(event.target.value); }} onKeyDown={handleKeyDown} placeholder={placeholder ?? (queueEditing ? '修改待发送消息…' : offline ? '连接恢复后发送…' : '发送消息…')} enterKeyHint="enter"/>
       <div className="composer-toolbar">{toolbar}{trailing ? <div className="composer-options">{trailing}</div> : <span className="toolbar-spacer"/>}
-        {busy ? <button type="button" className="icon-control stop-control" aria-label="停止任务" title="停止任务" disabled={offline || stopBlocked} onClick={onStopTurn}><Square size={14}/></button> : null}
+        {busy ? <button type="button" className="icon-control stop-control" aria-label="停止任务" title="停止任务" disabled={offline || stopBlocked || readOnly} onClick={onStopTurn}><Square size={14}/></button> : null}
         <button className="send-control" type="submit" disabled={!canSend} aria-label={queueEditing ? '保存修改' : busy ? '加入待发送' : '发送消息'}><ArrowUp size={20}/></button>
       </div>
     </form>
@@ -861,7 +862,7 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
             ? waiting ? '可继续输入，发送后排队…' : '正在回应，可先写下一句…'
             : fresh
                 ? '问点什么，或交给 Hemi 一件事…'
-                : '继续聊聊，或交给 Hemi 一件事…'} aria-label="输入消息" aria-describedby={hint ? `${descriptionId} ${hint.id}` : descriptionId} spellCheck={false} readOnly={queueEditSaving} onChange={(event) => {
+                : '继续聊聊，或交给 Hemi 一件事…'} aria-label="输入消息" aria-describedby={hint ? `${descriptionId} ${hint.id}` : descriptionId} spellCheck={false} readOnly={queueEditSaving || readOnly} onChange={(event) => {
             undoRef.current.push(snapshotForUndo());
             setCaret(event.target.selectionStart ?? event.target.value.length);
             onChange(event.target.value);
@@ -873,10 +874,10 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
         </div>
         {/* ZCode 同位：模型选择等提交控制簇在发送键左侧 */}
         {trailing}
-        {busy && onStopTurn && !primaryIsStop ? (<button type="button" className="text-composer-stop" onClick={onStopTurn} aria-label="停止当前任务" title="停止当前任务及其所属工作">
+        {busy && onStopTurn && !primaryIsStop ? (<button type="button" className="text-composer-stop" disabled={readOnly} onClick={onStopTurn} aria-label="停止当前任务" title="停止当前任务及其所属工作">
             <Square className="size-3 fill-current" aria-hidden="true"/>
           </button>) : null}
-        <button type="button" className={`text-composer-send${primaryIsStop ? ' is-stop' : ''}`} data-action={primaryIsStop ? 'stop' : queueEditing ? 'save' : 'send'} onClick={primaryIsStop ? onStopTurn : handleSendClick} disabled={primaryIsStop ? false : !canSend} aria-label={panelOpen ? PANEL_OPEN_SEND_HINT : primaryLabel} title={queueEditing ? 'Enter 保存修改，保留原队列位置' : primaryIsStop ? '停止当前任务及其所属工作' : busy ? '加入待发送队列' : composerHint}>
+        <button type="button" className={`text-composer-send${primaryIsStop ? ' is-stop' : ''}`} data-action={primaryIsStop ? 'stop' : queueEditing ? 'save' : 'send'} onClick={primaryIsStop ? onStopTurn : handleSendClick} disabled={readOnly || (primaryIsStop ? false : !canSend)} aria-label={panelOpen ? PANEL_OPEN_SEND_HINT : primaryLabel} title={queueEditing ? 'Enter 保存修改，保留原队列位置' : primaryIsStop ? '停止当前任务及其所属工作' : busy ? '加入待发送队列' : composerHint}>
           {primaryIsStop ? <Square className="size-3.5 fill-current" aria-hidden="true"/> : queueEditing ? <Check className="size-4" aria-hidden="true"/> : <ArrowUp className="size-4" aria-hidden="true"/>}
         </button>
       </div>

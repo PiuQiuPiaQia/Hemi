@@ -370,8 +370,9 @@ export function createConversationController({
       skills: command.input?.skills ?? null,
       createdAt: now(),
     };
-    pendingNext = { input: replacement, cutAfterInputId: command.targetInputId };
     if (snapshot.phase === 'running' || snapshot.phase === 'preparing') {
+      // 只有等待旧运行关闭时才登记接续；空闲直启不能留给 postClose 再消费一次。
+      pendingNext = { input: replacement, cutAfterInputId: command.targetInputId };
       const stopResult = await commandStop({ type: 'stop', reason: 'preempt', targetRunId: snapshot.activeRunId });
       if (!stopResult.ok) return stopResult;
       return { ok: true, disposition: 'rewinding', runId: stopResult.runId ?? null, replacementInputId: replacement.inputId };

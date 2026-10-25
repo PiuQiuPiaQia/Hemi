@@ -413,6 +413,12 @@ test('rewind freezes current cloud model/directory while retaining original uplo
     attachment.attachmentId,
   ]);
   assert.ok(f.calls.at(-1).envelope.modelPolicySnapshot.revision);
+  f.waiting.get(a.id).resolve({});
+  await tick();
+  assert.equal(f.calls.filter(call => call.envelope.inputId === 'rewind-replacement').length, 1);
+  const completed = await f.req('flow.snapshot', { id: a.id });
+  assert.equal(completed.phase, 'idle');
+  assert.equal(completed.generation, 2);
 });
 
 test('deleting a running session waits for cancellation and leaves other sessions and Host usable', async (t) => {

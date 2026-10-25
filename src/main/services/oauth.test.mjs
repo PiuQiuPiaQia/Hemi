@@ -60,9 +60,9 @@ async function fixture(t) {
   return { dir, filePath, safeStorage, transport, credentials, runtime, profiles, login, urls, state, connect };
 }
 
-test('三家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与轻量/看图请求', async t => {
+test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与轻量/看图请求', async t => {
   const f = await fixture(t);
-  for (const provider of ['openai', 'anthropic', 'github-copilot']) {
+  for (const provider of ['openai', 'anthropic', 'github-copilot', 'bigmodel']) {
     await f.connect(provider);
     const directory = await f.profiles.list();
     const account = directory.providers.find(item => item.oauthProvider === provider);
