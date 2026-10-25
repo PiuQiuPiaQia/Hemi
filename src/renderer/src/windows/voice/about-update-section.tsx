@@ -69,7 +69,7 @@ export function AboutUpdateSection() {
         break;
       }
       case 'downloaded':
-        statusText = `v${state?.availableVersion ?? ''} 已下载好，退出时会自动装上；也可以现在重启换到新版。`;
+        statusText = `v${state?.availableVersion ?? ''} 已下载好，重启即可安装更新。`;
         actionButton = (
           <button
             type="button"
