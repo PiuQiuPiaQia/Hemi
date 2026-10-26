@@ -89,7 +89,16 @@ export async function buildBotRuntime({
       for (const entry of (await fs.readdir(dir, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
         const name = path.posix.join(relative, entry.name), file = path.join(dir, entry.name);
         if (entry.isDirectory()) await fingerprint(file, name);
-        else {hash.update(name + '\0'); hash.update(await fs.readFile(file)); hash.update('\0');}
+        else {
+          const bytes = await fs.readFile(file);
+          // Git on Windows can check out source with CRLF. The component
+          // fingerprint identifies source content across PCs; archiveSha256
+          // below still verifies the exact payload, including binary files.
+          const text = /\.(?:mjs|js|json|md|txt)$/.test(name) || name === 'LICENSE';
+          hash.update(name + '\0');
+          hash.update(text ? bytes.toString('utf8').replace(/\r\n/g, '\n') : bytes);
+          hash.update('\0');
+        }
       }
     }
     await fingerprint(stage);
