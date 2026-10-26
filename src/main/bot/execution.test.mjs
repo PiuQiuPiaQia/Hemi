@@ -108,7 +108,9 @@ test('background shell does not block same-workspace file tools or commands, and
 test('explicit same-file writes still wait and a stopped waiter never executes after release',{timeout:30000},async t=>{
   const f=await fixture(t),owner=await f.create(),cancelled=await f.create(),next=await f.create();
   const target=path.join(f.first,'native.done').replaceAll('\\','/');
-  const lease=await sharedResourceLeases.acquire({host:'local',scope:'file:'+target,mode:'write',owner:{conversationId:owner},tool:'write'});
+  // Match the production gateway's case-insensitive Windows file identity.
+  const scope=process.platform==='win32'?target.toLowerCase():target;
+  const lease=await sharedResourceLeases.acquire({host:'local',scope:'file:'+scope,mode:'write',owner:{conversationId:owner},tool:'write'});
   t.after(()=>lease.release());
   await f.send(cancelled,'WRITE_SHARED_FILE');
   const waiting=await until(async()=>{const item=await f.detail(cancelled);return item.waitingResource&&item;});
