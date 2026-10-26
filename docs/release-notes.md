@@ -1,23 +1,19 @@
-本次更新改善多设备对话、模型配置与消息交互，仅提供 macOS（Apple 芯片）安装包。
+本次修复 Bot 中断、编辑重发与多设备同步，并加入云端组件自动更新。
 
-- 支持会话占用与明确接管，避免 PC 和手机同时修改同一对话；查看历史不会打断云端任务。
-- 优化发送后的即时反馈、断线恢复和队列显示，修复编辑回卷可能重复执行，以及键盘、长列表下的滚动问题。
-- 正式版和开发版连接同一个 Bot 时，以正式版的模型与路由为准，避免相互覆盖；失效模型显示明确提示。
-- 模型目录自动从供应商获取，支持手动补充型号；新增 GLM Coding Plan（BigModel）账号登录。
-- 模型和思考强度点选后立即更新显示，后台同步；改善消息间距与移动端复制、编辑按钮。
-- 普通命令不再占用整个工作区的协作锁，独立会话可并行执行；明确文件目标继续参与资源协调。
-- 上下文入口改为静态图标和实际用量明细，避免容量进度造成误解。
+- 修复停止尚未结束时立即编辑重发可能卡住、重复执行或显示旧回复的问题；迟到的停止指令不会影响新回复。
+- Bot 共用消息提交、回执和队列流程；断线或提交结果待核对时保留草稿，避免重复发送。
+- 在 PC 打开 Bot 时自动比对云端组件的版本号与内容指纹，有任务运行时等待空闲后更新；旧版 PC 不会自动降级较新的云端版本。
+- 设置中显示云端组件版本；自动更新失败时可直接重试。
 
-下载 `.dmg` 安装；已有 macOS 用户可在“设置 → 通用 → 关于与更新”检查更新。
+提供 macOS（Apple 芯片）`.dmg` 和 Windows x64 安装包。已有用户可在“设置 → 通用 → 关于与更新”检查更新。
 
 ---
 
-This update improves multi-device conversations, model configuration and message interaction. This release ships macOS Apple Silicon artifacts only.
+This patch fixes Bot interruption, edit-and-resend and multi-device synchronization, and adds automatic cloud component updates.
 
-- Coordinate conversation ownership and explicit takeover across desktop and mobile without interrupting cloud work when viewing history.
-- Improve immediate send feedback, reconnection, queue presentation, editing and scroll anchoring.
-- Keep the production model catalog authoritative when development and production connect to the same Bot.
-- Fetch model catalogs from providers and add GLM Coding Plan account sign-in.
-- Apply model/thinking selections immediately while syncing in the background; refine message spacing and mobile inline actions.
-- Allow ordinary commands in independent conversations to run concurrently while retaining explicit file coordination.
-- Show actual context usage through a static entry instead of a capacity progress ring.
+- Wait for the previous run to close before resending an edited message, prevent duplicate execution and stale replies, and keep delayed stop commands from cancelling a newer reply.
+- Share message submission, receipts and queue handling; preserve drafts during disconnection or uncertain delivery without automatically resending them.
+- Compare cloud component versions and content fingerprints when opening Bot on a PC. Wait for active work to finish before updating, and keep newer cloud releases when an older PC connects.
+- Show the cloud component version in settings and offer retry after an automatic update fails.
+
+Available for macOS Apple Silicon and Windows x64. Existing users can check for updates in Settings → General → About and Updates.

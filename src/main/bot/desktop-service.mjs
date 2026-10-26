@@ -12,6 +12,7 @@ import { createBotTransport } from './transport.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
 import { manualProviderModels } from './models.mjs';
 import { applyFlowChange } from '../../shared/conversation-flow.mjs';
+import {readComponentVersion, componentUpdateNeeded} from './component-version.mjs';
 
 const METHODS = new Set([
   'snapshot',
@@ -57,6 +58,7 @@ export function createBotDesktopService({
   onChanged = () => {},
   transport = createBotTransport({ runner, archivePath }),
   ensureArchive = async () => {},
+  autoComponentUpdates = true,
 }) {
   let storageError = '';
   function localJson(file, fallback) {
@@ -94,6 +96,7 @@ export function createBotDesktopService({
   const modelFailures = new Map();
   let syncStatus = localJson(syncFile, null),
     syncInFlight = false;
+  let componentStatus = null, componentWork = null, componentWatching = false, componentTimer = null, localComponent = null;
   if (syncStatus?.phase === 'sending')
     syncStatus = { ...syncStatus, phase: 'unknown' };
   let localDrafts = localJson(draftsFile, { instanceId: null, items: {} });
@@ -140,6 +143,7 @@ export function createBotDesktopService({
       online,
       error,
       busy,
+      componentStatus: componentStatus ? {...componentStatus} : null,
       lastConnectedAt,
       stoppedConfirmed,
       syncStatus: syncStatus ? structuredClone(syncStatus) : null,
@@ -160,6 +164,80 @@ export function createBotDesktopService({
       instanceId: binding.instanceId,
       requestId: params.requestId ?? 'op-' + randomUUID(),
     }, {clientId});
+  }
+  async function installComponent(info, expected) {
+    const identity = binding.instanceId;
+    if (info.bot?.instanceId !== identity) fail('Bot 身份不同，已停止维护。', 'conflict');
+    await direct('maintenance.begin');
+    try {
+      // Another PC may have completed the same update while this PC prepared it.
+      const current = await direct('handshake');
+      if (expected && !componentUpdateNeeded(expected, current.componentVersion)) return current;
+      const updated = await transport.install(binding.host, {...info, bot: current});
+      if (updated.instanceId !== identity || binding?.instanceId !== identity)
+        fail('维护后的实例身份不同，请保留数据并检查服务。', 'conflict');
+      if (expected && updated.componentVersion?.build !== expected.build)
+        fail('云端组件版本未能核验，请重新连接后重试。', 'needs-review');
+      binding.version = updated.version;
+      binding.componentVersion = updated.componentVersion ?? undefined;
+      atomicJson(connectionFile, binding);
+      return updated;
+    } finally {
+      if (binding?.instanceId === identity) await direct('maintenance.end').catch(() => {
+        online = false; error = '维护结果待核对，请重新连接。'; publish();
+        fail(error, 'needs-review');
+      });
+    }
+  }
+  async function ensureCurrentComponent({active = true} = {}) {
+    if (!autoComponentUpdates) return getState();
+    if (active && !componentWatching) localComponent = null;
+    componentWatching = active;
+    clearTimeout(componentTimer);
+    if (!active || closed) return getState();
+    if (componentWork) return componentWork;
+    componentWork = (async () => {
+      if (!binding || !online || busy) {
+        componentStatus = {phase: 'waiting', message: '连接恢复并空闲后自动更新云端组件'};
+        return;
+      }
+      const identity = binding.instanceId, host = binding.host;
+      componentStatus = {phase: 'checking'}; publish();
+      try {
+        if (!localComponent) {await ensureArchive(); localComponent = archivePath && readComponentVersion(archivePath + '.manifest.json');}
+        const local = localComponent;
+        if (!local) fail('本机缺少云端组件版本清单，请更新 Hemi 后重试。', 'missing');
+        const info = await transport.probe(host);
+        if (!componentWatching || binding?.instanceId !== identity || binding?.host !== host) return;
+        if (info.bot?.instanceId !== identity) fail('Bot 身份不同，已停止自动更新。', 'conflict');
+        binding.componentVersion = info.bot.componentVersion ?? undefined;
+        atomicJson(connectionFile, binding);
+        componentStatus = {phase: 'current', localVersion: local.version, remoteVersion: info.bot.componentVersion?.version};
+        if (!componentUpdateNeeded(local, info.bot.componentVersion)) return;
+        if (info.bot.activeJobs) {
+          componentStatus = {...componentStatus, phase: 'waiting', message: '任务结束后自动更新云端组件'};
+          return;
+        }
+        busy = 'component-update';
+        componentStatus = {...componentStatus, phase: 'updating'}; publish();
+        const updated = await installComponent(info, local);
+        componentStatus = {...componentStatus, phase: 'current', remoteVersion: updated.componentVersion?.version};
+        record('component-update', 'confirmed');
+        await refresh();
+      } catch (e) {
+        componentStatus = {...componentStatus, phase: e.code === 'busy' ? 'waiting' : 'failed', message: e.message};
+        if (e.code !== 'busy') record('component-update', 'failed', e.code ?? 'failed');
+      } finally {
+        if (busy === 'component-update') busy = '';
+      }
+    })().finally(() => {
+      componentWork = null; publish();
+      if (componentWatching && !closed && componentStatus?.phase === 'waiting') {
+        componentTimer = setTimeout(() => {void ensureCurrentComponent();}, 2000); componentTimer.unref?.();
+      }
+    });
+    await componentWork;
+    return getState();
   }
   let stream=null, streamCursor=null, streamScope='', streamRetryAt=0, streamFailures=0, refreshAgain=false, eventRefresh=null, streamReconnect=null;
   function changedCatalog() {
@@ -315,6 +393,20 @@ export function createBotDesktopService({
         atomicJson(draftsFile, localDrafts);
         if (activeId && !snapshot.sessions.some((s) => s.id === activeId))
           activeId = null;
+        // Draft receipts above can await SSH while realtime advances the flow.
+        // Recheck at the commit boundary so this refresh cannot restore an old
+        // generation after the new one has already been shown to the renderer.
+        if (!snapshot.bootId || snapshot.bootId === cache?.bootId) {
+          for (const [id, detail] of Object.entries(details)) {
+            const latest = cache?.details?.[id]?.flow;
+            if (latest && latest.revision > detail.flow.revision) {
+              details[id] = {...detail, flow: latest};
+              snapshot.sessions = snapshot.sessions.map(session => session.id === id
+                ? {...session, status: latest.phase === 'idle' ? null : 'running', turnCount: latest.timeline.length}
+                : session);
+            }
+          }
+        }
         cache = {
           ...snapshot,
           details,
@@ -672,6 +764,7 @@ export function createBotDesktopService({
       params.expectedInstanceId !== binding?.instanceId
     )
       fail('Bot 连接已更换，旧操作已取消。', 'conflict');
+    if (method === 'component.ensure-current') return ensureCurrentComponent(params);
     if (method === 'models.test' || method === 'models.list') {
       if (!online) fail('恢复连接后才能验证模型。', 'offline');
       // Draft credentials go straight to the Host; never persist them in local
@@ -751,27 +844,10 @@ export function createBotDesktopService({
     }
     if (method === 'component.update') {
       if (!online) fail('恢复连接后才能维护组件。', 'offline');
+      await ensureArchive();
       const info = await transport.probe(binding.host);
-      if (info.bot?.instanceId !== binding.instanceId)
-        fail('Bot 身份不同，已停止维护。', 'conflict');
-      await direct('maintenance.begin');
-      try {
-        await ensureArchive();
-        const updated = await transport.install(binding.host, info);
-        if (updated.instanceId !== binding.instanceId)
-          fail('维护后的实例身份不同，请保留数据并检查服务。', 'conflict');
-        binding.version = updated.version;
-        atomicJson(connectionFile, binding);
-        return await refresh();
-      } finally {
-        try {
-          await direct('maintenance.end');
-        } catch {
-          online = false;
-          error = '维护结果待核对，请重新连接。';
-          publish();
-        }
-      }
+      await installComponent(info);
+      return refresh();
     }
     if (method === 'candidate.start') {
       if (!candidate) fail('连接信息已过期。', 'conflict');
@@ -1165,6 +1241,7 @@ export function createBotDesktopService({
       return direct('file.download', { id, artifactId });
     },
     async close() {
+      componentWatching = false; clearTimeout(componentTimer);
       if (online && activeId) await direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
       closed = true;
       offProfiles?.();

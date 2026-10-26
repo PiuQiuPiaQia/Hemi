@@ -262,6 +262,65 @@ test('回卷：preempt 取消（不暂停队列）→ 关闭后裁剪＋generati
   assert.equal(controller.getSnapshot().phase, 'idle');
 });
 
+test('停止尚未收口时回卷：等旧代关闭才裁剪，替换只派发一次并离开空队列停止态', async () => {
+  const effects = makeEffects(), controller = makeController(effects);
+  const first = controller.command({type: 'send', input: {inputId: 'original', text: '原问题'}});
+  await settle(); effects.runtime.starts[0].resolve({}); await first;
+  const old = controller.getSnapshot().activeRunId;
+  await controller.command({type: 'stop', targetRunId: old});
+  const rewind = {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: '修改后'}};
+  assert.equal((await controller.command(rewind)).ok, true);
+  assert.equal((await controller.command(rewind)).ok, true, '重复同一身份不覆盖交接');
+  assert.equal(controller.getSnapshot().generation, 1);
+  assert.equal(controller.getSnapshot().activeRunId, old);
+  assert.equal(controller.getSnapshot().phase, 'stopping');
+  assert.equal(effects.runtime.starts.length, 1);
+  assert.equal(effects.runtime.stops.length, 1, '沿用已经开始的停止');
+  assert.equal((await controller.command({...rewind, input: {inputId: 'conflicting', text: '另一重发'}})).code, 'handoff-busy');
+  controller.applyFact({type: 'run-closed', runId: old, generation: 1, outcome: 'stopped', at: 2700});
+  await settle();
+  assert.equal(effects.runtime.starts.length, 2);
+  assert.equal(controller.getSnapshot().generation, 2);
+  assert.equal(controller.getSnapshot().queuePaused, false);
+  effects.runtime.starts[1].resolve({}); await settle();
+  const current = controller.getSnapshot().activeRunId;
+  assert.equal((await controller.command({type: 'stop', targetRunId: old})).code, 'run-changed');
+  assert.equal(controller.applyFact({type: 'part-appended', runId: old, generation: 1, part: {partId: 'late', kind: 'text', content: '旧回复'}}).applied, false);
+  controller.applyFact({type: 'run-closed', runId: current, generation: 2, outcome: 'completed', at: 2800});
+  await settle();
+  assert.equal(effects.runtime.starts.length, 2);
+  assert.equal(controller.getSnapshot().phase, 'idle');
+  assert.deepEqual(controller.getSnapshot().timeline.filter(item => item.kind === 'user').map(item => item.id), ['replacement']);
+});
+
+test('空闲停止态回卷解除空队列暂停；有已暂停的排队消息时保持暂停', async () => {
+  for (const queued of [false, true]) {
+    const effects = makeEffects(), controller = makeController(effects);
+    const {sent} = await runAndClose(controller, effects, {text: '原问题', outcome: 'stopped'});
+    await settle(); controller.applyFact({type: 'queue-paused'});
+    if (queued) controller.applyFact({type: 'input-accepted', input: {inputId: 'queued', text: '保留排队', editRevision: 0}});
+    const resend = controller.command({type: 'rewind', targetInputId: sent.inputId, input: {inputId: 'replacement', text: '重发'}});
+    await settle(); effects.runtime.starts.at(-1).resolve({}); await resend;
+    assert.equal(controller.getSnapshot().queuePaused, queued);
+    assert.deepEqual(controller.getSnapshot().pending.map(item => item.inputId), queued ? ['queued'] : []);
+  }
+});
+
+test('并发回卷与异步冻结交错：只有一个替换受理，迟到冻结不能裁掉新代次', async () => {
+  const effects = makeEffects(), controller = makeController(effects);
+  const {sent} = await runAndClose(controller, effects, {text: '原问题'}); await settle();
+  const frozen = deferred(); effects.runtime.freezeInput = () => frozen.promise;
+  const late = controller.command({type: 'rewind', targetInputId: sent.inputId, input: {inputId: 'late', text: '迟到'}});
+  effects.runtime.freezeInput = async () => ({});
+  const winning = controller.command({type: 'rewind', targetInputId: sent.inputId, input: {inputId: 'winning', text: '获受理'}});
+  await settle(); effects.runtime.starts.at(-1).resolve({}); await winning;
+  frozen.resolve({});
+  assert.equal((await late).ok, false);
+  assert.equal(controller.getSnapshot().generation, 2);
+  assert.equal(effects.runtime.starts.length, 2);
+  assert.deepEqual(controller.getSnapshot().timeline.filter(item => item.kind === 'user').map(item => item.id), ['winning']);
+});
+
 for (const outcome of ['completed', 'failed', 'stopped']) {
   test(`空闲回卷：替换运行 ${outcome} 后不重复执行同一输入或再次裁剪历史`, async () => {
     const effects = makeEffects();

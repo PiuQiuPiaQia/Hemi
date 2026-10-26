@@ -14,42 +14,62 @@ export function messageViewFromTranscript(item: TranscriptItem): MessageView {
   };
 }
 
-export function createConversationPresenter() {
+/** One optimistic projection for every host; the authoritative queue is never changed locally. */
+export function createConversationTranscriptPresenter() {
   const project = createFlowTimelineProjector();
   const observed = new Set<string>();
-  return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = [], delivery?: Pick<ConversationClientState, 'operations' | 'connection'>): MessageView[] => {
+  return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = [], delivery?: Pick<ConversationClientState, 'operations' | 'connection'>): TranscriptItem[] => {
     if (!snapshot) return [];
-    const messages = project(snapshot, archive).transcripts.map(messageViewFromTranscript);
+    let messages = project(snapshot, archive).transcripts;
     const known = new Set([...snapshot.timeline.filter(item => item.kind === 'user').map(item => item.id), ...snapshot.pending.map(input => input.inputId)]);
     const blocked = delivery?.operations.some(operation => operation.state === 'unknown');
     const operationIds = new Set(delivery?.operations.map(operation => operation.id));
     for (const id of observed) if (!operationIds.has(id)) observed.delete(id);
     for (const operation of delivery?.operations ?? []) {
-      if (operation.command.type !== 'send' || (operation.generation !== null && operation.generation !== snapshot.generation)) continue;
+      const rewind = operation.command.type === 'rewind';
+      if (!rewind && operation.command.type !== 'send') continue;
       const input = operation.command.input as Partial<FlowInputView> | undefined;
       if (!input?.inputId) continue;
+      const ownRewind = rewind && operation.generation !== null && snapshot.generation === operation.generation + 1
+        && Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!));
+      if (operation.generation !== null && operation.generation !== snapshot.generation && !ownRewind) continue;
       if (known.has(input.inputId)) {observed.add(operation.id); continue;}
       if (observed.has(operation.id)) continue;
+      if (rewind && operation.state === 'rejected') {
+        messages = messages.map(item => item.id === operation.command.targetInputId
+          ? {...item, editDraft: {revision: operation.id, text: input.text ?? ''}} : item);
+        continue;
+      }
       // Bridge the journal/receipt/snapshot gap without inventing a Host queue entry.
       // Uncertain or rejected deliveries keep their existing recovery UI and draft.
       if (operation.state !== 'accepted' && (delivery?.connection !== 'online' || blocked
         || !['waiting', 'sending'].includes(operation.state) || operation.result?.ok === false)) continue;
       if (operation.state === 'accepted' && operation.result?.revision !== undefined && snapshot.revision >= operation.result.revision) continue;
+      if (rewind && !ownRewind) {
+        const cut = messages.findIndex(item => item.author === 'user' && item.id === operation.command.targetInputId);
+        if (cut < 0) continue;
+        messages = messages.slice(0, cut);
+      }
       known.add(input.inputId);
-      const message: MessageView = {id: input.inputId, inputId: input.inputId, author: 'user', text: input.text ?? '',
-        revision: `${operation.id}:${operation.state}`, inputSource: input.inputSource ?? 'text',
-        attachments: input.attachmentViews, references: input.references, skills: input.skills, actions: {edit: false}};
+      const message: TranscriptItem = {id: input.inputId, author: 'user', text: input.text ?? '',
+        createdAt: operation.createdAt ?? 0, inputSource: input.inputSource ?? 'text', pendingDelivery: true,
+        attachments: input.attachmentViews, references: input.references, skills: input.skills};
       // A preparing run is published before its input is durably delivered. Its waiting
       // row already exists, so place that input before its own reply, not after it.
       const replyIndex = messages.findIndex(row => {
-        const inputIds = row.runId && snapshot.runs[row.runId]?.inputIds;
-        return row.author === 'assistant' && Array.isArray(inputIds) && inputIds.includes(input.inputId);
+        const inputIds = row.flow?.runId && snapshot.runs[row.flow.runId]?.inputIds;
+        return row.author === 'hemi' && Array.isArray(inputIds) && inputIds.includes(input.inputId);
       });
       if (replyIndex < 0) messages.push(message);
       else messages.splice(replyIndex, 0, message);
     }
     return messages;
   };
+}
+
+export function createConversationPresenter() {
+  const present = createConversationTranscriptPresenter();
+  return (...args: Parameters<typeof present>): MessageView[] => present(...args).map(messageViewFromTranscript);
 }
 
 /** Shared ordinary conversation actions. Hosts can supply task/workflow/preview-specific commands. */

@@ -12,13 +12,10 @@ import type {
   BotState,
 } from '@shared/bot';
 import type {
-  FlowCommandResult,
-  FlowSnapshotView,
   MessageAttachmentView,
   MessageReferenceView,
   SkillSelectionView,
   ThinkingLevel,
-  TurnQueueState,
   UsageRecord,
 } from '@shared/protocol';
 import { VoiceScreen } from '../voice/voice-screen';
@@ -32,9 +29,9 @@ import {
   ConversationEnvironmentIdContext,
   ConversationOnlineContext,
 } from '../voice/lib/conversation-bridge';
-import { createFlowTimelineProjector } from '../voice/lib/flow-timeline-view';
+import {createConversationTranscriptPresenter, projectConversationQueue, queueStoppedIdle, retryInput} from '@hemi/conversation-flow/core';
+import {useConversationFlow} from '../voice/lib/use-conversation-flow';
 import { botModelDirectory, createBotConversationBridge } from './bridge';
-import { botInputCurrent, botInputObserved, projectPendingBotInputs, type PendingBotInput } from './pending-input';
 import { useClipboardCopy } from '@/lib/use-clipboard-copy';
 import {
   BotButton,
@@ -81,8 +78,6 @@ export function BotPage({
     [detail, setDetail] = useState<BotDetail | null>(null),
     [error, setError] = useState(''),
     [panel, setPanel] = useState<string | null>(null),
-    [sending, setSending] = useState(false),
-    [submittingDraft, setSubmittingDraft] = useState<{id: string; revision: number} | null>(null),
     [editing, setEditing] = useState<string | null>(null),
     [uploadJobs, setUploadJobs] = useState<
       Record<
@@ -96,20 +91,14 @@ export function BotPage({
       inputId: string;
       revision: number;
       previous: BotDraft;
-    } | null>(null),
-    [unknownSend, setUnknownSend] = useState<PendingBotInput | null>(null),
-    [pendingInputs, setPendingInputs] = useState<PendingBotInput[]>([]),
-    [recoveredEdit, setRecoveredEdit] = useState<PendingBotInput | null>(null),
-    [failedSend, setFailedSend] = useState<PendingBotInput | null>(null);
+    } | null>(null);
   const {copy: copyRecovery, toastNode: recoveryToast} = useClipboardCopy();
-  const showConnectionWarning = useConnectionWarning(!state.online, state.binding?.instanceId ?? '');
   const stateRef = useRef(state),
     idRef = useRef(id),
     alive = useRef(true),
     navigation = useRef(0),
     drafts = useRef(new Map<string, BotDraft>()),
-    draftTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>()),
-    sendLock = useRef(false);
+    draftTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const controlWork = useRef<Promise<boolean> | null>(null);
   stateRef.current = state;
   idRef.current = id;
@@ -122,28 +111,39 @@ export function BotPage({
       ),
     [api, state.binding?.instanceId],
   );
-  const project = useMemo(() => createFlowTimelineProjector(), []);
+  const prepareCommand = useCallback((command: Record<string, unknown>) => {
+    const owner = stateRef.current.cache?.sessions.find(session => session.id === idRef.current)?.control;
+    return {...command, ...(owner ? {controlEpoch: owner.epoch} : {})};
+  }, []);
+  const conversation = useConversationFlow(id, {bridge, environmentId: `bot:${state.binding?.instanceId ?? 'unbound'}`, prepareCommand});
+  const showConnectionWarning = useConnectionWarning(!state.stoppedConfirmed && state.cache?.enabled !== false
+    && (!state.online || (id !== null && conversation.connection !== 'online')), `${state.binding?.instanceId ?? ''}:${id ?? ''}`);
+  const project = useMemo(() => createConversationTranscriptPresenter(), [conversation.client]);
+  const sending = conversation.operations.some(operation => ['send', 'rewind', 'finishEditInput'].includes(String(operation.command.type)) && ['waiting', 'sending'].includes(operation.state));
+  const unknownSend = conversation.operations.find(operation => operation.state === 'unknown');
+  const recovery = [...conversation.operations].reverse().find(operation => ['unknown', 'rejected'].includes(operation.state) && operation.command.input);
+  const recoveryText = (recovery?.command.input as {text?: string} | undefined)?.text ?? '';
+  const operationError = error || conversation.error;
   const currentDetail = state.cache?.details[id ?? ''] ?? detail;
   const current = currentDetail?.id === id ? currentDetail : null;
-  const flow = current?.flow ?? null;
+  const flow = conversation.snapshot ?? current?.flow ?? null;
   const control = state.cache?.sessions.find(session => session.id === id)?.control;
   const occupied = Boolean(control && control.ownerId !== state.clientId);
   const queued = state.cache?.sessions.find(session => session.id === id)?.status === 'queued';
   const transcripts = useMemo(
     () => {
       if (!flow) return [];
-      const rows = projectPendingBotInputs(flow, project(flow).transcripts, pendingInputs);
-      return rows.filter(item => !(queued && item.author === 'hemi' && item.flow?.runId === flow.activeRunId && !item.text && !item.parts?.length))
-        .map(item => recoveredEdit?.conversationId === id && (item.flow?.inputId ?? item.id) === recoveredEdit.targetInputId
-          ? {...item, editDraft: {revision: recoveredEdit.input.inputId, text: recoveredEdit.input.text}} : item);
+      const rows = project(flow, [], conversation);
+      return rows.filter(item => !(queued && item.author === 'hemi' && item.flow?.runId === flow.activeRunId && !item.text && !item.parts?.length));
     },
-    [flow, project, queued, pendingInputs, recoveredEdit, id],
+    [flow, project, queued, conversation.operations, conversation.connection],
   );
   const draft = id
     ? (drafts.current.get(id) ?? current?.draft ?? emptyDraft())
     : emptyDraft();
   void draftVersion;
-  const hidingSubmittedDraft = submittingDraft?.id === id && submittingDraft.revision === draft.revision;
+  const draftToken = `bot-draft:${id}:${draft.revision}`;
+  const hidingSubmittedDraft = conversation.operations.some(operation => operation.draftToken === draftToken && ['waiting', 'sending'].includes(operation.state));
   const composerDraft = hidingSubmittedDraft ? {...emptyDraft(), revision: draft.revision} : draft;
   const attachments = current?.attachments ?? [],
     selectedAttachments = attachments.filter((a) =>
@@ -153,7 +153,7 @@ export function BotPage({
   const uploading = uploadJob?.phase === 'uploading';
   const attachmentError = uploadJob?.error ?? '';
   const blocked =
-    !state.online || !state.cache?.enabled || !!unknownSend || !!state.busy || occupied;
+    !state.online || (id !== null && conversation.connection !== 'online') || !state.cache?.enabled || !!unknownSend || !!state.busy || occupied;
   const applyState = useCallback((next: BotState) => {
     if (!alive.current) return;
     if (stateRef.current.binding?.instanceId !== next.binding?.instanceId) {
@@ -165,10 +165,6 @@ export function BotPage({
       setDetail(null);
       setEditing(null);
       setQueueEditing(null);
-      setUnknownSend(null);
-      setPendingInputs([]);
-      setRecoveredEdit(null);
-      setFailedSend(null);
     }
     const normalized = next.cache
       ? {
@@ -191,14 +187,6 @@ export function BotPage({
         }
       : next;
     stateRef.current = normalized;
-    setPendingInputs(previous => {
-      const next = previous.filter(input => {
-        const nextFlow = normalized.cache?.details[input.conversationId]?.flow;
-        return input.instanceId === normalized.binding?.instanceId
-          && (!nextFlow || (botInputCurrent(nextFlow, input) && !botInputObserved(nextFlow, input)));
-      });
-      return next.length === previous.length ? previous : next;
-    });
     setState(normalized);
     setLoaded(true);
   }, []);
@@ -249,6 +237,12 @@ export function BotPage({
     [api],
   );
   useEffect(() => {
+    const identity = state.binding?.instanceId;
+    if (!identity) return;
+    void call('component.ensure-current', {expectedInstanceId: identity}).catch(e => setError(message(e)));
+    return () => {void call('component.ensure-current', {expectedInstanceId: identity, active: false}).catch(() => {});};
+  }, [state.binding?.instanceId, call]);
+  useEffect(() => {
     if (!id || !state.online) return;
     const identity = state.binding?.instanceId;
     void call<BotDetail>('session.open', { id })
@@ -270,15 +264,12 @@ export function BotPage({
     setError('');
     try {
       if (queueEditing) {
-        await call('flow.command', {
-          id: queueEditing.id,
-          command: {
+        await command({
             type: 'finishEditInput',
             inputId: queueEditing.inputId,
             expectedEditRevision: queueEditing.revision,
             cancel: true,
-          },
-        });
+        }, queueEditing.id);
         changeDraftFor(queueEditing.id, queueEditing.previous);
         setQueueEditing(null);
       }
@@ -363,143 +354,42 @@ export function BotPage({
   function changeDraft(patch: Partial<BotDraft>) {
     if (idRef.current) changeDraftFor(idRef.current, patch);
   }
-  async function command(
-    command: Record<string, unknown>,
-    target = idRef.current,
-    submission?: PendingBotInput,
-  ) {
+  async function command(command: Record<string, unknown>, target = idRef.current) {
     if (!target) return null;
-    const result = await call<FlowCommandResult>('flow.command', {
-      id: target,
-      command,
-      generation: submission?.generation ?? stateRef.current.cache?.details[target]?.flow.generation,
-      ...(submission?.controlEpoch ? {controlEpoch: submission.controlEpoch} : {}),
-      ...(submission ? {requestId: submission.requestId} : command.type === 'send'
-        ? {
-            requestId:
-              'send-' + String((command.input as { inputId: string }).inputId),
-          }
-        : {}),
-    });
-    if (!result.ok)
-      throw Object.assign(new Error(result.message ?? '云端状态已变化，请按当前状态重试。'), {code: result.code});
+    if (target !== conversation.client.scope.conversationId) throw new Error('会话已切换，请在当前会话重试。');
+    const result = await conversation.sendCommand(command);
+    if (!result.ok) throw Object.assign(new Error(result.message ?? '操作未完成，请核对当前会话状态。'), {code: result.code});
     return result;
   }
-  function makeSubmission(kind: PendingBotInput['kind'], text: string, targetInputId?: string): PendingBotInput {
-    const inputId = 'input-' + crypto.randomUUID();
-    const original = targetInputId && flow?.timeline.find(item => item.kind === 'user' && item.id === targetInputId);
-    const attachmentIds = original && original.kind === 'user' ? original.attachmentIds ?? [] : draft.attachmentIds;
-    return {conversationId: id!, instanceId: state.binding!.instanceId, generation: flow!.generation,
-      requestId: `${kind}-${inputId}`, kind, targetInputId, draftRevision: kind === 'send' ? draft.revision : undefined,
-      controlEpoch: control?.ownerId === state.clientId ? control?.epoch : undefined,
-      createdAt: Date.now(), input: {inputId, text, attachmentIds,
-        attachmentViews: attachments.filter(item => attachmentIds.includes(item.attachmentId)),
-        references: original && original.kind === 'user' ? original.references ?? [] : draft.references,
-        skills: original && original.kind === 'user' ? original.skills ?? [] : draft.skills}};
-  }
-  function submissionIsCurrent(input: PendingBotInput) {
-    return alive.current && stateRef.current.binding?.instanceId === input.instanceId;
-  }
-  function clearSubmittedDraft(input: PendingBotInput) {
-    if (input.kind === 'send' && input.draftRevision !== undefined
-      && (drafts.current.get(input.conversationId)?.revision ?? input.draftRevision) === input.draftRevision)
-      changeDraftFor(input.conversationId, {text: '', attachmentIds: [], references: [], skills: []});
-  }
-  function failedSubmission(input: PendingBotInput, error: unknown) {
-    if (!submissionIsCurrent(input)) return;
-    setPendingInputs(previous => previous.filter(item => item.input.inputId !== input.input.inputId));
-    const latest = stateRef.current.cache?.details[input.conversationId]?.flow;
-    if (latest && botInputObserved(latest, input)) {clearSubmittedDraft(input); return;}
-    setError(message(error));
-    if (['offline', 'needs-review', 'unknown'].includes((error as {code?: string}).code ?? '')) {
-      setUnknownSend(input);
-      return;
-    }
-    if (input.kind === 'rewind') {
-      setRecoveredEdit(input);
-      if (idRef.current === input.conversationId && latest?.timeline.some(item => item.kind === 'user' && item.id === input.targetInputId))
-        setEditing(input.targetInputId!);
-    } else setFailedSend(input);
-  }
+  // Bot stores drafts on its Host; the shared client owns submission and receipts.
+  useEffect(() => {
+    if (id && conversation.operations.some(operation => operation.state === 'accepted' && operation.draftToken === draftToken))
+      changeDraftFor(id, {text: '', attachmentIds: [], references: [], skills: []});
+  }, [id, draftToken, conversation.operations]);
+  const rejectedEdit = [...conversation.operations].reverse().find(operation => operation.state === 'rejected' && operation.command.type === 'rewind');
+  useEffect(() => {
+    const target = rejectedEdit?.command.targetInputId;
+    if (typeof target === 'string' && flow?.timeline.some(item => item.kind === 'user' && item.id === target)) setEditing(target);
+  }, [rejectedEdit?.id]);
   async function send(text = draft.text) {
-    if (!id || !flow || blocked || sendLock.current || uploading) return;
-    sendLock.current = true;
-    setSending(true);
+    if (!id || !flow || blocked || uploading) return;
     setError('');
-    const target = id,
-      version = draft.revision;
-    const submission = queueEditing ? null : makeSubmission('send', text);
-    if (submission) {
-      setSubmittingDraft({id: target, revision: version});
-      setPendingInputs(previous => [...previous, submission]);
-    }
     try {
       if (queueEditing) {
-        await command(
-          {
-            type: 'finishEditInput',
-            inputId: queueEditing.inputId,
-            expectedEditRevision: queueEditing.revision,
-            patch: {
-              text,
-              attachmentIds: draft.attachmentIds,
-              references: draft.references,
-              skills: draft.skills,
-            },
-          },
-          target,
-        );
-        changeDraftFor(target, queueEditing.previous);
+        await command({type: 'finishEditInput', inputId: queueEditing.inputId, expectedEditRevision: queueEditing.revision,
+          patch: {text, attachmentIds: draft.attachmentIds, references: draft.references, skills: draft.skills}});
+        changeDraftFor(id, queueEditing.previous);
         setQueueEditing(null);
-        bumpDraft((v) => v + 1);
         return;
       }
-      await command(
-        {
-          type: 'send',
-          input: submission!.input,
-        },
-        target,
-        submission!,
-      );
-      if (submissionIsCurrent(submission!)) {clearSubmittedDraft(submission!); setFailedSend(null);}
-    } catch (e) {
-      if (submission) failedSubmission(submission, e);
-      else setError(message(e));
-    } finally {
-      sendLock.current = false;
-      if (alive.current) { setSending(false); setSubmittingDraft(null); }
-    }
+      const client = conversation.client;
+      if (client.draft.getSnapshot().token !== draftToken) client.draft.restore({token: draftToken, text,
+        attachments: attachments.filter(item => draft.attachmentIds.includes(item.attachmentId)), references: draft.references, skills: draft.skills});
+      await client.sendDraft();
+    } catch (e) {setError(message(e));}
   }
   async function reconcile() {
-    if (!unknownSend) return;
-    try {
-      await call('connection.reconnect');
-      const snapshot = await call<FlowSnapshotView>('flow.snapshot', {
-        id: unknownSend.conversationId,
-      });
-      if (!submissionIsCurrent(unknownSend)) return;
-      const found = botInputObserved(snapshot, unknownSend);
-      if (found) {
-        clearSubmittedDraft(unknownSend);
-        setUnknownSend(null);
-        setError('');
-      } else {
-        const receipt = await call<{ status: string; result?: FlowCommandResult }>('operation.get', {
-          operationId: unknownSend.requestId,
-        });
-        if (!submissionIsCurrent(unknownSend)) return;
-        if (receipt.status === 'done' && receipt.result?.ok) {
-          clearSubmittedDraft(unknownSend); setUnknownSend(null); setError('');
-        } else if (receipt.status === 'missing' || receipt.status === 'interrupted' || (receipt.status === 'done' && receipt.result?.ok === false)) {
-          const input = unknownSend;
-          setUnknownSend(null);
-          failedSubmission(input, Object.assign(new Error(receipt.result?.message ?? '云端确认未受理这次消息，内容已保留，可以重新发送。'), {code: 'rejected'}));
-        } else setError('云端仍在核对受理结果，草稿已保留。');
-      }
-    } catch (e) {
-      setError(message(e));
-    }
+    await conversation.client.refresh();
   }
   async function update(patch: Record<string, unknown>) {
     if (!id || !state.online) return;
@@ -648,27 +538,21 @@ export function BotPage({
     }
   }
   async function editResend(messageId: string, text: string) {
-    if (!id || !flow || blocked || sendLock.current) return;
-    const submission = makeSubmission('rewind', text, messageId);
-    sendLock.current = true;
-    setSending(true);
+    if (!id || !flow || blocked || sending) return;
+    const original = flow.timeline.find(item => item.kind === 'user' && item.id === messageId);
+    if (!original || original.kind !== 'user') return;
     setEditing(null);
-    setRecoveredEdit(null);
     setError('');
-    setPendingInputs(previous => [...previous, submission]);
     try {
-      await command({
-        type: 'rewind',
-        targetInputId: messageId,
-        input: {...submission.input, inputSource: 'text'},
-      }, submission.conversationId, submission);
-    } catch (e) {
-      failedSubmission(submission, e);
-    } finally {sendLock.current = false; if (submissionIsCurrent(submission)) setSending(false);}
+      await command({type: 'rewind', targetInputId: messageId, input: {text, inputSource: original.inputSource,
+        attachmentIds: original.attachmentIds, attachmentViews: attachments.filter(item => original.attachmentIds.includes(item.attachmentId)),
+        references: original.references, skills: original.skills}});
+    } catch (e) {setError(message(e));}
   }
   async function retry() {
-    const last = [...transcripts].reverse().find((t) => t.author === 'user');
-    if (last) await editResend(last.flow?.inputId ?? last.id, last.text);
+    const input = retryInput(transcripts, flow);
+    const last = [...transcripts].reverse().find(item => item.author === 'user');
+    if (input && last) await editResend(last.flow?.inputId ?? last.id, input.text);
   }
   async function acquireControl(takeover = false) {
     if (!id || !state.online) return false;
@@ -681,24 +565,7 @@ export function BotPage({
     } catch (error) {setError(message(error)); return false;}})().finally(() => {controlWork.current = null;});
     return controlWork.current;
   }
-  const queue: TurnQueueState = {
-    paused: flow?.queuePaused ?? false,
-    items: (flow?.pending ?? [])
-      .filter((i) => ['pending', 'editing', 'needs-review'].includes(i.state))
-      .map((i) => ({
-        queueItemId: i.inputId,
-        conversationId: id ?? '',
-        text: i.text,
-        revision: (i.editRevision ?? 0) + 1,
-        dispatchState: i.state === 'editing' ? 'editing' : 'pending',
-        error: i.state === 'needs-review' ? '投递结果待核对' : '',
-        attachmentIds: i.attachmentIds ?? [],
-        references: i.references ?? [],
-        skills: i.skills ?? [],
-        inputSource: 'text',
-        createdAt: i.createdAt ?? 0,
-      })),
-  };
+  const queue = projectConversationQueue(flow, conversation.operations, conversation.connection);
   const usage: UsageRecord[] = (current?.usage ?? []).map((c) => ({
     source: 'chat',
     role: 'main',
@@ -748,6 +615,12 @@ export function BotPage({
   );
   const banner = (
     <>
+      {state.componentStatus && state.componentStatus.phase !== 'current' ? <StatusNotice
+        title={state.componentStatus.phase === 'updating' ? `正在更新云端组件至 v${state.componentStatus.localVersion}`
+          : state.componentStatus.phase === 'checking' ? '正在检查云端组件版本…'
+          : state.componentStatus.phase === 'failed' ? '云端组件自动更新失败' : '云端组件等待更新'}
+        detail={state.componentStatus.message}
+        actions={state.componentStatus.phase === 'failed' ? <BotButton onClick={() => void call('component.ensure-current').catch(e => setError(message(e)))}>重试更新</BotButton> : null}/> : null}
       {queued && state.online ? <StatusNotice icon={<Clock3 size={18} aria-hidden="true"/>} title={waitingResource ? '等待资源' : '排队中'} detail={waitingResource ? activeTask ? `「${activeTask.title}」正在使用同一资源，相关操作结束后会自动继续。` : '同一资源正在使用中，相关操作结束后会自动继续。' : activeTask ? `「${activeTask.title}」${activeTask.waitingPermission ? '正在等待确认' : '正在执行'}，结束后会自动开始。` : '消息已受理，轮到后会自动开始。'} actions={activeTask ? <BotButton onClick={() => void open(activeTask.id)}>查看当前任务</BotButton> : null}/> : null}
       {state.syncStatus?.automatic && state.syncStatus.phase === 'sending' ? <StatusNotice>正在配置云端模型…</StatusNotice> : null}
       {state.modelConfigError ? <StatusNotice>{state.modelConfigError}</StatusNotice> : null}
@@ -835,9 +708,9 @@ export function BotPage({
       )}
       {occupied ? <StatusNotice title="会话已被占用" detail="另一台设备正在使用此会话。抢占后，你可以继续编辑和发送。"
         actions={<><BotButton primary disabled={!state.online || sending} onClick={() => void acquireControl(true)}>抢占会话</BotButton>
-          {recoveredEdit?.conversationId === id ? <BotButton onClick={() => void copyRecovery(recoveredEdit.input.text, '已复制保留的消息')}>复制保留的内容</BotButton> : null}</>}/> : null}
-      {error && !unknownSend && !(occupied && error.includes('会话已被')) ? <StatusNotice role="alert"><span>{error}</span>
-        {(recoveredEdit ?? failedSend)?.conversationId === id ? <BotButton onClick={() => void copyRecovery((recoveredEdit ?? failedSend)!.input.text, '已复制保留的消息')}>复制保留的内容</BotButton> : null}
+          {recoveryText ? <BotButton onClick={() => void copyRecovery(recoveryText, '已复制保留的消息')}>复制保留的内容</BotButton> : null}</>}/> : null}
+      {operationError && !unknownSend && !(occupied && operationError.includes('会话已被')) ? <StatusNotice role="alert"><span>{operationError}</span>
+        {recoveryText ? <BotButton onClick={() => void copyRecovery(recoveryText, '已复制保留的消息')}>复制保留的内容</BotButton> : null}
       </StatusNotice> : null}
       {uploadJob && (
         <div className="h-bot-upload" role="status">
@@ -939,6 +812,7 @@ export function BotPage({
               streamingReply=""
               interimText=""
               transcripts={transcripts}
+              timelineGeneration={flow?.generation ?? 0}
               taskState={null}
               taskSnaps={{}}
               onTaskAction={() =>
@@ -952,7 +826,7 @@ export function BotPage({
               onAttachContext={() => void upload({})}
               onRefreshContext={() => {}}
               onRemoveContext={() => {}}
-              errorMessage={error}
+              errorMessage={operationError}
               onToggleCall={() => {}}
               onRetryTurn={() => void retry()}
               retryTurnBlocked={
@@ -968,7 +842,7 @@ export function BotPage({
               }
               editingMessageId={editing}
               onStartEditMessage={(messageId) => {
-                if (!blocked && !sendLock.current) void acquireControl().then(ok => {if (ok) setEditing(messageId);});
+                if (!blocked && !sending) void acquireControl().then(ok => {if (ok) setEditing(messageId);});
               }}
               onCancelEditMessage={() => setEditing(null)}
               onEditResendMessage={(messageId, text) =>
@@ -1036,11 +910,7 @@ export function BotPage({
                 changeDraft({ skills })
               }
               queueState={queue}
-              queueStoppedIdle={
-                !!flow?.queuePaused &&
-                !flow?.pending.length &&
-                flow?.phase === 'idle'
-              }
+              queueStoppedIdle={Boolean(queueStoppedIdle(flow))}
               onContinueStoppedTask={() => void send('继续任务')}
               onWithdrawQueued={(inputId) =>
                 void command({ type: 'withdrawInput', inputId }).catch((e) =>
@@ -1075,7 +945,7 @@ export function BotPage({
               usageRecords={usage}
               usageRunning={running}
               workspaceSendBlocked={blocked || uploading || sending}
-              workspaceSendBlockedHint={sending || occupied ? '' : uploading ? '附件上传完成后即可发送' : unknownSend ? '正在确认上一条消息的提交结果' : !state.online ? showConnectionWarning ? '正在恢复 Bot 连接，草稿会保留' : '' : 'Bot 暂时无法接收消息，请检查运行状态'}
+              workspaceSendBlockedHint={sending || occupied ? '' : uploading ? '附件上传完成后即可发送' : unknownSend ? '正在确认上一条消息的提交结果' : showConnectionWarning ? '正在恢复 Bot 连接，草稿会保留' : ''}
               onOpenAccessSettings={() => setPanel('scope')}
               flowDeliverables={
                 flow

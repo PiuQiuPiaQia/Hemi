@@ -3,7 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import {COMPONENT_MANIFEST} from '../src/main/bot/component-version.mjs';
 import { fileURLToPath } from 'node:url';
 const exec = promisify(execFile);
 export async function buildBotRuntime({
@@ -83,6 +84,17 @@ export async function buildBotRuntime({
         filter: (source) => !path.basename(source).startsWith('._'),
       },
     );
+    const hash = createHash('sha256');
+    async function fingerprint(dir, relative = '') {
+      for (const entry of (await fs.readdir(dir, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+        const name = path.posix.join(relative, entry.name), file = path.join(dir, entry.name);
+        if (entry.isDirectory()) await fingerprint(file, name);
+        else {hash.update(name + '\0'); hash.update(await fs.readFile(file)); hash.update('\0');}
+      }
+    }
+    await fingerprint(stage);
+    const manifest = JSON.stringify({version: app.version, build: hash.digest('hex')}, null, 2) + '\n';
+    await fs.writeFile(path.join(stage, COMPONENT_MANIFEST), manifest);
     await fs.mkdir(path.dirname(output), { recursive: true });
     await exec(
       'tar',
@@ -93,9 +105,14 @@ export async function buildBotRuntime({
       },
     );
     await fs.rename(temporaryOutput, output);
+    const sidecar = output + '.manifest.json';
+    await fs.writeFile(temporaryOutput + '.manifest', JSON.stringify({...JSON.parse(manifest),
+      archiveSha256: createHash('sha256').update(await fs.readFile(output)).digest('hex')}, null, 2) + '\n');
+    await fs.rename(temporaryOutput + '.manifest', sidecar);
     return output;
   } finally {
     await fs.rm(temporaryOutput, { force: true });
+    await fs.rm(temporaryOutput + '.manifest', {force: true});
     await fs.rm(stage, { recursive: true, force: true });
   }
 }

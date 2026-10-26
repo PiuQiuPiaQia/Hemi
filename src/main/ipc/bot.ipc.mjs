@@ -30,6 +30,7 @@ export function registerBotIpc() {
     runner: { ...runner, rememberPassword: remote.rememberPassword },
     profiles: getProfiles(),
     archivePath,
+    autoComponentUpdates: process.env.HEMI_BOT_AUTO_UPDATE !== '0',
     ensureArchive: async () => {
       if (app.isPackaged) {
         await fs.access(archivePath);

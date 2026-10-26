@@ -372,7 +372,9 @@ function ConversationFlowBody({
             showRelation={entry.showRelation}
             taskTitleOf={(id) => taskSnaps[id]?.taskText}
             editing={editingId === item.id}
-            busy={Boolean(state?.busy) || busy}
+            // Model activity can be preempted by an edit. Only a pending UI
+            // action locks the editor; retry keeps its separate model-busy gate.
+            busy={busy}
             readOnly={state?.readOnly}
             canEdit={editAllowed && runtime.actionable}
             onStartEdit={(id) => {

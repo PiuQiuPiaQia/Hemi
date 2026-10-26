@@ -112,6 +112,7 @@ export function createConversationController({
       pendingNext = null;
       if (next.cutAfterInputId) {
         commit({ type: 'generation-bumped', cutAfterInputId: next.cutAfterInputId, generation: snapshot.generation });
+        if (snapshot.queuePaused && !snapshot.pending.length) commit({ type: 'queue-resumed', generation: snapshot.generation });
       }
       await startRun({ input: next.input, source: 'user' });
       return;
@@ -355,10 +356,27 @@ export function createConversationController({
   }
 
   async function commandRewind(command) {
+    const accepted = () => {
+      if (pendingNext) return pendingNext.input.inputId === command.input?.inputId
+        ? {ok: true, disposition: 'rewinding', replacementInputId: pendingNext.input.inputId, runId: snapshot.activeRunId}
+        : {ok: false, code: 'handoff-busy'};
+      const run = command.input?.inputId && Object.values(snapshot.runs).find(run => run.inputIds?.includes(command.input.inputId));
+      return run ? {ok: true, disposition: 'already-accepted', inputId: command.input.inputId, runId: run.runId} : null;
+    };
+    const previous = accepted();
+    if (previous) return previous;
     if (!snapshot.timeline.some((entry) => entry.kind === 'user' && entry.id === command.targetInputId)) {
       return { ok: false, code: 'not-found' };
     }
+    const generation = snapshot.generation;
     const frozen = runtime.freezeInput ? await runtime.freezeInput(command.input ?? {}) : {};
+    if (snapshot.phase === 'idle') await awaitSubmissions();
+    // Freezing may await files/model configuration. A competing rewind can finish
+    // during that wait; never cut its newer timeline or overwrite its handoff.
+    const competing = accepted();
+    if (competing) return competing;
+    if (snapshot.generation !== generation || !snapshot.timeline.some(entry => entry.kind === 'user' && entry.id === command.targetInputId))
+      return {ok: false, code: 'conflict'};
     const replacement = {
       ...frozen,
       inputId: command.input?.inputId ?? makeId(`in-${++seq.input}`),
@@ -370,15 +388,15 @@ export function createConversationController({
       skills: command.input?.skills ?? null,
       createdAt: now(),
     };
-    if (snapshot.phase === 'running' || snapshot.phase === 'preparing') {
+    if (snapshot.phase !== 'idle') {
       // 只有等待旧运行关闭时才登记接续；空闲直启不能留给 postClose 再消费一次。
       pendingNext = { input: replacement, cutAfterInputId: command.targetInputId };
       const stopResult = await commandStop({ type: 'stop', reason: 'preempt', targetRunId: snapshot.activeRunId });
       if (!stopResult.ok) return stopResult;
       return { ok: true, disposition: 'rewinding', runId: stopResult.runId ?? null, replacementInputId: replacement.inputId };
     }
-    await awaitSubmissions();
     commit({ type: 'generation-bumped', cutAfterInputId: command.targetInputId, generation: snapshot.generation });
+    if (snapshot.queuePaused && !snapshot.pending.length) commit({ type: 'queue-resumed', generation: snapshot.generation });
     return startRun({ input: replacement, source: 'user' });
   }
 

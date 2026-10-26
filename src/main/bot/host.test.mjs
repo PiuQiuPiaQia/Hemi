@@ -421,6 +421,23 @@ test('rewind freezes current cloud model/directory while retaining original uplo
   assert.equal(completed.generation, 2);
 });
 
+test('a delayed stop keeps its original run target after a rewind changes generation', async t => {
+  const f = await fixture(t), {id} = await f.req('session.create');
+  await f.req('flow.command', {id, command: {type: 'send', input: {inputId: 'original-stop-target', text: 'original'}}});
+  await tick();
+  const original = await f.req('flow.snapshot', {id});
+  await f.req('flow.command', {id, generation: original.generation, command: {type: 'rewind', targetInputId: 'original-stop-target', input: {inputId: 'new-stop-target', text: 'new'}}});
+  await tick();
+  const current = await f.req('flow.snapshot', {id});
+  assert.equal(current.generation, original.generation + 1);
+  assert.notEqual(current.activeRunId, original.activeRunId);
+  const delayed = await f.req('flow.command', {id, generation: original.generation, command: {type: 'stop', targetRunId: original.activeRunId}});
+  assert.deepEqual(delayed, {ok: false, code: 'run-changed'});
+  assert.equal((await f.req('flow.snapshot', {id})).activeRunId, current.activeRunId);
+  f.waiting.get(id).resolve({}); await tick();
+  assert.equal((await f.req('flow.snapshot', {id})).runs[current.activeRunId].outcome, 'completed');
+});
+
 test('deleting a running session waits for cancellation and leaves other sessions and Host usable', async (t) => {
   const f = await fixture(t),
     a = await f.req('session.create'),

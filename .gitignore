@@ -51,10 +51,12 @@ next-env.d.ts
 /.zcode/
 # 视觉回归 skill 的工作目录（快照、对比图、配置）
 /.visual/
+/examples/conversation-flow/.visual/
 .verify-059/
 
 # Generated deployable Cloud Bot runtime
 /build/hemi-bot-runtime.tgz
+/build/hemi-bot-runtime.tgz.manifest.json
 # Built conversation SDK and standalone example
 /packages/conversation-flow/dist/
 /packages/ui/dist/

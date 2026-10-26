@@ -6,6 +6,7 @@ import { shq, sshFailureCopy } from '../remote/ssh-runner.mjs';
 import { BOT_PROTOCOL, fail, botRpcTimeout } from './storage.mjs';
 import { NODE_RUNTIME } from './node-runtime.mjs';
 import { INSTALL_FAILURE_MARKER } from './install-dependencies.mjs';
+import {readComponentVersion} from './component-version.mjs';
 const ROOT = '"$HOME/.local/share/hemi-bot"';
 const probeScript = String.raw`set -eu
 [ "$(uname -s)" = Linux ] || { echo '需要 Linux 服务器' >&2; exit 1; }
@@ -250,6 +251,9 @@ done
       const archive = await fs.readFile(archivePath),
         release = 'release-' + randomUUID(),
         digest = createHash('sha256').update(archive).digest('hex');
+      const expected = readComponentVersion(archivePath + '.manifest.json');
+      if (expected?.archiveSha256 && expected.archiveSha256 !== digest)
+        fail('本机组件包与版本清单不一致，请重新生成组件包后重试。', 'conflict');
       const artifact = `node-v${NODE_RUNTIME.version}-linux-${info.arch}`;
       const runtime = info.runtimeNeeded
         ? `mkdir -p "$r/runtimes"\nfile="$r/runtimes/${artifact}.tar.xz"\nurl=${shq(`https://nodejs.org/dist/v${NODE_RUNTIME.version}/${artifact}.tar.xz`)}\nif command -v curl >/dev/null; then curl --fail --location --retry 2 --max-time 150 "$url" -o "$file"; else wget -T 150 -O "$file" "$url"; fi\nprintf '%s  %s\\n' ${shq(NODE_RUNTIME[info.arch])} "$file" | sha256sum -c -\ntar -xJf "$file" -C "$r/runtimes"\nln -sfn "$r/runtimes/${artifact}" "$r/runtime"\nrm -f "$file"\n`
@@ -287,6 +291,7 @@ fi
           const bot = await rpc(host, 'handshake');
           if (
             bot.protocol !== BOT_PROTOCOL ||
+            (expected && bot.componentVersion?.build !== expected.build) ||
             (info.bot && bot.instanceId !== info.bot.instanceId)
           )
             fail('安装后的协议或实例身份不兼容。', 'unsupported');

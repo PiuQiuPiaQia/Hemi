@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUnderTest } from './compile.mjs';
-const { createConversation, createComposerDraft, createDraftPersistence, createFlowReplica, createConversationPresenter, projectConversationQueue } = await moduleUnderTest('../src/core.ts');
+const { createConversation, createComposerDraft, createDraftPersistence, createFlowReplica, createConversationPresenter, createConversationTranscriptPresenter, projectConversationQueue } = await moduleUnderTest('../src/core.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const scope = { environmentId: 'test-bot', conversationId: 'same' };
@@ -404,5 +404,70 @@ test('connection-aware queue preserves offline outbox and unknown delivery warni
   assert.equal(queue.items.length, 2);
   assert.equal(queue.items[0].error, '投递结果不明，待核对');
   assert.equal(queue.items[1].text, 'waiting behind the first message');
+  f.client.dispose();
+});
+
+test('rewind preview, rollback and cross-device generations use the shared transcript presenter', () => {
+  const present = createConversationTranscriptPresenter();
+  const user = (id, text) => ({kind: 'user', id, text, runId: id + '-run', inputSource: 'text', attachmentIds: [], deliveredAt: 1});
+  const original = snapshot({timeline: [user('prefix', '保留'), user('original', '旧问题'),
+    {kind: 'assistant', itemId: 'answer', runId: 'original-run', afterInputId: 'original', parts: [{partId: 'text', kind: 'text', content: '旧回答'}]}]});
+  const operation = {id: 'rewind-request', state: 'sending', generation: 1, createdAt: 2,
+    command: {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: '新问题', attachmentViews: [{attachmentId: 'file', name: 'a.txt', status: 'ready'}]}}};
+  const state = {operations: [operation], connection: 'online'};
+  const before = structuredClone(original);
+  const rows = present(original, [], state);
+  assert.deepEqual(rows.map(item => item.id), ['prefix', 'replacement']);
+  assert.equal(rows[1].pendingDelivery, true);
+  assert.equal(rows[1].attachments[0].attachmentId, 'file');
+  assert.deepEqual(original, before, 'preview never changes authoritative history');
+  const rejected = present(original, [], {...state, operations: [{...operation, state: 'rejected'}]});
+  assert.equal(rejected.find(item => item.id === 'original').editDraft.text, '新问题');
+  assert.ok(rejected.some(item => item.text === '旧回答'));
+  const own = snapshot({generation: 2, revision: 2, runs: {run: {runId: 'run', inputIds: ['replacement']}}});
+  assert.ok(present(own, [], state).some(item => item.id === 'replacement'));
+  const remote = snapshot({generation: 2, revision: 2, timeline: [user('remote', '另一台设备')], runs: {run: {runId: 'run', inputIds: ['remote']}}});
+  assert.deepEqual(present(remote, [], state).map(item => item.id), ['remote']);
+});
+
+test('submission freezes the host lease and stop target before asynchronous initialization', async () => {
+  let epoch = 'original-lease';
+  const f = fixture({transport: {prepareCommand: command => ({...command, controlEpoch: epoch})}});
+  await f.client.start();
+  f.set(snapshot({revision: 1, phase: 'running', activeRunId: 'original-run'}));
+  const stop = f.client.sendCommand({type: 'stop'});
+  epoch = 'new-lease';
+  f.set(snapshot({revision: 2, phase: 'running', activeRunId: 'new-run'}));
+  await stop;
+  assert.equal(f.commands[0].command.controlEpoch, 'original-lease');
+  assert.equal(f.commands[0].command.targetRunId, 'original-run');
+  f.client.dispose();
+});
+
+test('a delayed stop receipt does not block an edit from reaching the same Host', async () => {
+  const receipt = deferred();
+  const f = fixture({client: {requestTimeoutMs: 5000}, transport: {async command(request) {
+    f.commands.push(request);
+    return request.command.type === 'stop' ? receipt.promise : {ok: true};
+  }}});
+  await f.client.start();
+  f.set(snapshot({revision: 1, phase: 'running', activeRunId: 'old'}));
+  const stop = f.client.sendCommand({type: 'stop'}); await tick();
+  await f.client.sendCommand({type: 'rewind', targetInputId: 'old-input', input: {text: 'replacement'}});
+  assert.deepEqual(f.commands.map(request => request.command.type), ['stop', 'rewind']);
+  assert.equal(f.commands[0].command.targetRunId, 'old');
+  receipt.resolve({ok: true}); await stop; f.client.dispose();
+});
+
+test('an accepted draft token cannot be submitted again while its host draft awaits the receipt', async () => {
+  const f = fixture(); await f.client.start();
+  f.client.draft.restore({token: 'host-draft:1', text: 'send once'});
+  await f.client.sendDraft();
+  f.client.draft.restore({token: 'host-draft:1', text: 'send once'});
+  await f.client.sendDraft();
+  assert.equal(f.commands.length, 1);
+  f.client.draft.restore({token: 'host-draft:2', text: 'send once'});
+  await f.client.sendDraft();
+  assert.equal(f.commands.length, 2, 'a new draft identity may intentionally repeat the text');
   f.client.dispose();
 });

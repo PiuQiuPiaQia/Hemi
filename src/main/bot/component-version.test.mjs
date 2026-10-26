@@ -1,0 +1,44 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {buildBotRuntime} from '../../../scripts/build-bot-runtime.mjs';
+import {readComponentVersion, componentUpdateNeeded, COMPONENT_MANIFEST} from './component-version.mjs';
+import {createBotTransport} from './transport.mjs';
+
+const version = (value, build = 'a'.repeat(64)) => ({version: value, build});
+test('component comparison upgrades legacy/older builds and never downgrades a newer release', () => {
+  assert.equal(componentUpdateNeeded(version('0.2.15'), null), true);
+  assert.equal(componentUpdateNeeded(version('0.2.15'), version('0.2.15')), false);
+  assert.equal(componentUpdateNeeded(version('0.2.15'), version('0.2.15', 'b'.repeat(64))), true);
+  assert.equal(componentUpdateNeeded(version('0.2.16'), version('0.2.15')), true);
+  assert.equal(componentUpdateNeeded(version('0.2.15'), version('0.3.0')), false);
+});
+test('runtime manifest identifies packaged source content and verifies the exact archive', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-component-build-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  for (const folder of ['src/main', 'src/shared', 'third-party']) await fs.mkdir(path.join(root, folder), {recursive: true});
+  await fs.writeFile(path.join(root, 'src/main/example.mjs'), 'export const value = 1;');
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({version: '0.2.15', dependencies: {}}));
+  await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({packages: {}}));
+  for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) await fs.writeFile(path.join(root, file), 'test license');
+  const output = path.join(root, 'first.tgz');
+  await buildBotRuntime({root, output});
+  const first = readComponentVersion(output + '.manifest.json');
+  const embedded = JSON.parse(execFileSync('tar', ['-xOf', output, './' + COMPONENT_MANIFEST], {encoding: 'utf8'}));
+  assert.equal(first.build, embedded.build);
+  assert.equal(first.archiveSha256, createHash('sha256').update(await fs.readFile(output)).digest('hex'));
+  await buildBotRuntime({root, output: path.join(root, 'same.tgz')});
+  assert.equal(readComponentVersion(path.join(root, 'same.tgz.manifest.json')).build, first.build);
+  await fs.writeFile(path.join(root, 'src/main/example.mjs'), 'export const value = 2;');
+  await buildBotRuntime({root, output});
+  assert.notEqual(readComponentVersion(output + '.manifest.json').build, first.build);
+  let remoteCalls = 0;
+  const transport = createBotTransport({archivePath: output, runner: {async exec() {remoteCalls++;}}});
+  await fs.appendFile(output, 'changed after packaging');
+  await assert.rejects(() => transport.install('fixture', {existing: true, bot: {instanceId: 'same', activeJobs: 0}}), /版本清单不一致/);
+  assert.equal(remoteCalls, 0);
+});

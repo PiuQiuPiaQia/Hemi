@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { entriesFromTurns } from '../agent/main-agent.mjs';
 import { createConversationController } from '../services/conversation-controller.mjs';
+import {readComponentVersion} from './component-version.mjs';
 import { restoreFlowSnapshot } from '../services/flow-bootstrap.mjs';
 import { recoverConversationFlow } from '../services/conversation-recovery.mjs';
 import { hitsDenyPath } from '../agent/gate/pi-gate.mjs';
@@ -76,6 +77,7 @@ export async function createBotHost({
   validateModel = validateCloudModel,
   allowLoopbackModels = false,
   editLeaseMs = 60000,
+  componentVersion = readComponentVersion(),
   now = Date.now,
 } = {}) {
   privateDirectory(dataDir);
@@ -435,10 +437,17 @@ export async function createBotHost({
         if (p.status === 'pending') p.status = 'expired';
     }
     controllers.set(id, c);
+    let publishedGeneration = c.getSnapshot().generation;
     c.subscribe(change => {
       s.flow = c.getSnapshot();
       s.updatedAt = Date.now();
-      events.flow(id, change);
+      if (s.flow.generation !== publishedGeneration) {
+        publishedGeneration = s.flow.generation;
+        // A patch belongs to its resulting generation, so an older replica
+        // cannot apply a rewind patch. Publish its authoritative snapshot first.
+        events.publish({type: 'flow', id, change: {kind: 'snapshot', snapshot: s.flow,
+          conversationId: id, generation: s.flow.generation, revision: s.flow.revision}});
+      } else events.flow(id, change);
       laterSave();
     });
     return c;
@@ -947,6 +956,8 @@ export async function createBotHost({
           c = controller(p.id),
           cmd = clone(p.command ?? {});
         if (!COMMANDS.has(cmd.type)) fail('不支持的对话操作。', 'unsupported');
+        if (cmd.type === 'stop' && Object.hasOwn(cmd, 'targetRunId') && cmd.targetRunId !== c.getSnapshot().activeRunId)
+          return {ok: false, code: 'run-changed'};
         if (p.generation != null && p.generation !== c.getSnapshot().generation)
           return { ok: false, code: 'conflict', message: '会话已回卷，请刷新后核对操作。' };
         const item = c.getSnapshot().pending.find(input => input.inputId === cmd.inputId);
@@ -1100,6 +1111,7 @@ export async function createBotHost({
         activeJobs: jobs.size,
         protocol: BOT_PROTOCOL,
         version: BOT_VERSION,
+        componentVersion,
         platform: process.platform,
         arch: process.arch,
         node: process.version,

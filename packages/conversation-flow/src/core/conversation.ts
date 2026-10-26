@@ -10,9 +10,12 @@ export interface ConversationOperation {
   state: 'waiting' | 'sending' | 'unknown' | 'accepted' | 'rejected';
   draftRevision?: number;
   draftToken?: string;
+  createdAt?: number;
   result?: FlowCommandResult;
 }
 export interface ConversationTransport {
+  /** Capture host authority at the click boundary, before any asynchronous work. */
+  prepareCommand?(command: Record<string, unknown>): Record<string, unknown>;
   fetchSnapshot(scope: ConversationIdentity, context: { signal: AbortSignal }): Promise<FlowSnapshotView | null>;
   subscribe?(scope: ConversationIdentity, receive: (change: FlowChangeView) => void, disconnected?: () => void, connected?: () => void): () => void;
   command(request: { scope: ConversationIdentity; requestId: string; generation: number | null; command: Record<string, unknown> }, context: { signal: AbortSignal }): Promise<FlowCommandResult>;
@@ -125,7 +128,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (reconcile || disposed || suspended) return reconcile;
     reconcile = (async () => {
       for (const operation of state.operations.filter(item => item.state === 'unknown')) {
-        const input = operation.command.type === 'send' ? operation.command.input as { inputId?: string } | undefined : undefined;
+        const input = ['send', 'rewind'].includes(String(operation.command.type)) ? operation.command.input as { inputId?: string } | undefined : undefined;
         const snapshot = state.snapshot;
         const accepted = input?.inputId && snapshot && (snapshot.pending.some(item => item.inputId === input.inputId)
           || snapshot.timeline.some(item => item.kind === 'user' && item.id === input.inputId)
@@ -192,10 +195,14 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     draining = (async () => {
       await initialize();
       if (!journalReady) return;
+      // Cancellation has its frozen target and must not hold the input lane
+      // while its network receipt is delayed. It still uses the same journal.
+      for (const operation of state.operations.filter(item => item.state === 'waiting' && item.command.type === 'stop'))
+        void dispatch(operation);
       while (true) {
         if (disposed || suspended || state.connection !== 'online') break;
         if (state.operations.some(item => item.state === 'unknown')) break;
-        const operation = state.operations.find(item => item.state === 'waiting');
+        const operation = state.operations.find(item => item.state === 'waiting' && item.command.type !== 'stop');
         if (!operation) break;
         const result = await dispatch(operation);
         if (result.code === 'unknown' || result.code === 'storage-failed') break;
@@ -205,15 +212,8 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   }
   async function submit(command: Record<string, unknown>, draftRevision?: number, draftToken?: string): Promise<FlowCommandResult> {
     if (disposed) return { ok: false, code: 'cancelled' };
-    await initialize();
-    if (disposed) return { ok: false, code: 'cancelled' };
-    if (!journalReady) return { ok: false, code: 'storage-failed', message: state.error };
-    if (command.type !== 'send' && (suspended || state.connection !== 'online')) {
-      const message = '连接已断开，请恢复连接后重试此操作';
-      update({ error: message }); return { ok: false, code: 'offline', message };
-    }
-    const frozen = structuredClone(command);
-    const current=state.snapshot;
+    const frozen = structuredClone(transport.prepareCommand?.(command) ?? command);
+    const current = state.snapshot;
     if(frozen.type==='stop' && frozen.targetRunId===undefined)frozen.targetRunId=current?.activeRunId??null;
     if(['beginEditInput','finishEditInput','updateInput'].includes(String(frozen.type)) && frozen.expectedEditRevision===undefined)
       frozen.expectedEditRevision=current?.pending.find(item=>item.inputId===frozen.inputId)?.editRevision;
@@ -222,14 +222,22 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       const input = frozen.input as Record<string, unknown> | undefined;
       frozen.input = { ...input, inputId: input?.inputId ?? makeId() };
     }
-    const operation: ConversationOperation = { id: makeId(), command: frozen, generation: state.snapshot?.generation ?? null, state: 'waiting', draftRevision, draftToken };
+    await initialize();
+    if (disposed) return { ok: false, code: 'cancelled' };
+    if (!journalReady) return { ok: false, code: 'storage-failed', message: state.error };
+    if (command.type !== 'send' && (suspended || state.connection !== 'online')) {
+      const message = '连接已断开，请恢复连接后重试此操作';
+      update({ error: message }); return { ok: false, code: 'offline', message };
+    }
+    const operation: ConversationOperation = { id: makeId(), command: frozen, generation: current?.generation ?? null, state: 'waiting', draftRevision, draftToken, createdAt: Date.now() };
     update({ operations: [...state.operations.filter(item => !['accepted', 'rejected'].includes(item.state)).concat(state.operations.filter(item => ['accepted', 'rejected'].includes(item.state)).slice(-32)), operation], error: '' });
     try { await persistOperations(); }
     catch {
       const result = { ok: false, code: 'storage-failed', message: '记录未保存，消息尚未发送' };
       setOperation(operation.id, { result }); return result;
     }
-    await flushQueue();
+    if (frozen.type === 'stop') await dispatch(operation);
+    else await flushQueue();
     const live = state.operations.find(item => item.id === operation.id);
     if (live?.state === 'unknown') return { ok: false, code: 'unknown', message: '操作结果待核对，恢复连接后会查询状态' };
     return live?.result ?? { ok: true, disposition: 'local-queued' };
@@ -280,7 +288,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       if (draftSubmissions.has(current.revision)) return draftSubmissions.get(current.revision)!;
       if (!current.text.trim() && !current.attachments.length) return Promise.resolve({ ok: false, code: 'invalid', message: '请输入消息' });
       if (current.attachments.some(item => item.status !== 'ready')) return Promise.resolve({ ok: false, code: 'invalid', message: '请先完成附件上传' });
-      const existing = state.operations.find(item => (item.draftRevision === current.revision || (item.draftToken && item.draftToken === current.token)) && ['waiting', 'sending', 'unknown'].includes(item.state));
+      const existing = state.operations.find(item => (item.draftRevision === current.revision || (item.draftToken && item.draftToken === current.token)) && ['waiting', 'sending', 'unknown', 'accepted'].includes(item.state));
       if (existing) {
         if (inFlight.has(existing.id)) return inFlight.get(existing.id)!;
         if (existing.state === 'waiting' && state.connection === 'online') {

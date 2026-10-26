@@ -112,3 +112,45 @@ test('desktop reconnects the event stream promptly and does not let an older sna
   release();await pending;
   assert.ok(JSON.stringify(desktop.getState().cache.details[f.id].flow).includes('不能被旧快照覆盖'));
 });
+
+test('draft reconciliation cannot overwrite a rewind received while a refresh awaits the draft receipt', async t => {
+  const f = await fixture(t), profile = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-rewind-refresh-'));
+  await fs.mkdir(path.join(profile, 'bot'), {recursive: true});
+  await fs.writeFile(path.join(profile, 'bot/connection.json'), JSON.stringify({host: 'fixture', instanceId: f.instanceId}));
+  await f.command('pc', {type: 'send', input: {inputId: 'original', text: 'original'}});
+  await wait(() => f.live.has(f.id)); f.live.get(f.id).resolve({});
+  await wait(async () => (await f.request('pc', 'flow.snapshot', {id: f.id})).phase === 'idle');
+  let dropDraft = false, draftGate;
+  const transport = {
+    async rpc(_host, method, params, options) {
+      if (method === 'session.draft' && dropDraft) {dropDraft = false; throw new Error('lost draft receipt');}
+      const value = await f.host.request(method, params, {clientId: options.clientId});
+      if (method === 'session.draft' && draftGate) {draftGate.started.resolve(); await draftGate.release.promise;}
+      return value;
+    },
+    watch(_host, options, {signal, onEvent, clientId}) {
+      return new Promise(resolve => {
+        const release = f.host.watch(options, onEvent, undefined, {clientId});
+        signal.addEventListener('abort', () => {release(); resolve();}, {once: true});
+      });
+    },
+  };
+  const desktop = createBotDesktopService({userDataDir: profile, runner: {}, profiles: {list: async () => ({providers: []})}, transport});
+  t.after(async () => {draftGate?.release.resolve(); await desktop.close(); await fs.rm(profile, {recursive: true, force: true});});
+  await desktop.refresh();
+  await desktop.command('session.control', {id: f.id, action: 'takeover'});
+  dropDraft = true;
+  await assert.rejects(() => desktop.command('session.draft', {id: f.id, revision: 1, text: '保留草稿'}), /lost draft/);
+  draftGate = {started: Promise.withResolvers(), release: Promise.withResolvers()};
+  const refresh = desktop.refresh(); await draftGate.started.promise;
+  const owner = desktop.getState().clientId;
+  await f.request(owner, 'flow.command', {id: f.id, command: {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: 'edited'}}});
+  await wait(() => desktop.getState().cache.details[f.id].flow.generation === 2);
+  const streamedRevision = desktop.getState().cache.details[f.id].flow.revision;
+  draftGate.release.resolve(); await refresh;
+  const current = desktop.getState().cache.details[f.id];
+  assert.equal(current.flow.generation, 2);
+  assert.ok(current.flow.revision >= streamedRevision);
+  assert.equal(current.draft.text, '保留草稿');
+  assert.ok(current.flow.timeline.some(item => item.id === 'replacement'));
+});

@@ -1,8 +1,10 @@
 import type { BotBridge, BotState } from '@shared/bot';
+import {removeConversationOperations} from '../voice/lib/conversation-operation-storage.ts';
 import type {
   HemiVoiceBridge,
   ModelProfilesDirectory,
   ModelProviderView,
+  FlowCommandResult,
 } from '@shared/protocol';
 
 export function botModelDirectory(state: BotState): ModelProfilesDirectory {
@@ -54,8 +56,13 @@ export function createBotConversationBridge(
   local: HemiVoiceBridge,
 ): HemiVoiceBridge {
   const identity = getState().binding?.instanceId;
-  const command: BotBridge['command'] = (method, params = {}) =>
-    api.command(method, { ...params, expectedInstanceId: identity });
+  const command: BotBridge['command'] = async (method, params = {}) => {
+    const request = {...params, expectedInstanceId: identity};
+    if (!api.commandResult) return api.command(method, request);
+    const reply = await api.commandResult(method, request);
+    if (!reply.ok) throw Object.assign(new Error(reply.message), {code: reply.code});
+    return reply.result as never;
+  };
   const methods: Record<string, unknown> = {
     bot: api,
     platform: local.platform,
@@ -78,20 +85,35 @@ export function createBotConversationBridge(
       api.onChanged(() => callback()),
     renameConversation: (id: string, title: string) =>
       command('session.rename', { id, title }),
-    removeConversation: (id: string) => command('session.remove', { id }),
+    removeConversation: async (id: string) => {
+      const result = await command('session.remove', {id});
+      removeConversationOperations({environmentId: `bot:${identity}`, conversationId: id});
+      return result;
+    },
     reorderConversations: (ids: string[]) => command('session.order', { ids }),
     markConversationRead: async () => ({ ok: true, unreadAt: null }),
     flowGetSnapshot: (id: string) => command('flow.snapshot', { id }),
-    flowCommand: (id: string, flowCommand: Record<string, unknown>, operation?: {requestId: string; generation: number | null}) => {
+    flowCommand: async (id: string, flowCommand: Record<string, unknown>, operation?: {requestId: string; generation: number | null}) => {
       const snapshot=getState().cache?.details[id]?.flow;
-      const next={...flowCommand};
+      const {controlEpoch, ...next}=flowCommand;
       if(['beginEditInput','finishEditInput','updateInput'].includes(String(next.type)) && next.expectedEditRevision===undefined)next.expectedEditRevision=snapshot?.pending.find(item=>item.inputId===next.inputId)?.editRevision;
       if(next.type==='stop' && next.targetRunId===undefined)next.targetRunId=snapshot?.activeRunId;
-      return command('flow.command', { id, command: next, generation: operation?.generation ?? snapshot?.generation, ...(operation?{requestId:operation.requestId}:{}) });
+      try {
+        const result = await command<FlowCommandResult>('flow.command', {id, command: next,
+          generation: operation?.generation ?? snapshot?.generation, ...(controlEpoch ? {controlEpoch} : {}),
+          ...(operation ? {requestId: operation.requestId} : {})});
+        return next.type === 'stop' && result.code === 'run-changed' ? {ok: true, disposition: 'already-stopped'} : result;
+      } catch (error) {
+        const code = (error as {code?: string}).code;
+        if (!code) throw error;
+        return {ok: false, code, message: error instanceof Error ? error.message : String(error)};
+      }
     },
     flowLookupOperation: async (_id: string, requestId: string) => {
       const receipt=await command('operation.get',{operationId:requestId}) as {status:string;result?:{ok:boolean}};
-      return receipt.status==='done'?receipt.result??null:null;
+      if (receipt.status === 'done') return receipt.result ?? null;
+      return receipt.status === 'interrupted'
+        ? {ok: false, code: 'rejected', message: '云端上次提交已中断，内容已保留，可以重新发送。'} : null;
     },
     onFlowDisconnected: (receive: () => void) => api.onChanged(state=>{if(!state.online)receive();}),
     onFlowChanged: (callback: (value: unknown) => void) => {

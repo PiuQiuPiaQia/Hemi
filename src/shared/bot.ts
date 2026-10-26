@@ -77,6 +77,7 @@ export type BotBinding = {
   instanceId: string;
   protocol: number;
   version: string;
+  componentVersion?: {version: string; build: string};
   home: string;
   dataDir: string;
   boundAt: number;
@@ -128,6 +129,12 @@ export type BotState = {
   online: boolean;
   error: string;
   busy: string;
+  componentStatus?: {
+    phase: 'checking' | 'current' | 'waiting' | 'updating' | 'failed';
+    localVersion?: string;
+    remoteVersion?: string;
+    message?: string;
+  } | null;
   lastConnectedAt: number | null;
   stoppedConfirmed?: boolean;
   syncStatus?: BotSyncStatus | null;
@@ -208,6 +215,7 @@ export type BotMethod =
   | 'models.reconcile'
   | 'models.dismiss'
   | 'component.update'
+  | 'component.ensure-current'
   | 'diagnostics'
   | 'diagnostics.export';
 export type BotBridge = {

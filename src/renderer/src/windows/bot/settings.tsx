@@ -220,7 +220,9 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
               ? action('停止 Bot', () => setScreen('stop'), !state.online)
               : action('启动 Bot', () => void perform('service.start'))}
           </SettingsRow>
-          <SettingsRow title="组件版本" description={state.binding?.version ?? '暂无记录'}>
+          <SettingsRow title="组件版本" description={state.binding?.componentVersion
+            ? `v${state.binding.componentVersion.version} · ${state.binding.componentVersion.build.slice(0, 8)}`
+            : state.binding?.version ?? '暂无记录'}>
             {action('维护云端组件', () => setScreen('update'), !state.online)}
           </SettingsRow>
           <SettingsRow title="诊断信息" description="导出连接与运行信息，帮助排查问题。">

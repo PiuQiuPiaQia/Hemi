@@ -128,7 +128,8 @@
       "package.json",
       "!**/node_modules/**/*.map",
       "!**/node_modules/@earendil-works/pi-coding-agent/docs/**",
-      "build/hemi-bot-runtime.tgz"
+      "build/hemi-bot-runtime.tgz",
+      "build/hemi-bot-runtime.tgz.manifest.json"
     ],
     "extraResources": [
       {

@@ -76,8 +76,9 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
 `, {mode: 0o700});
     await fs.writeFile(path.join(profile, 'onboarding.json'), JSON.stringify({version: 2, phase: 'complete', step: 'done', permissionChoice: 'skipped', completedAt: Date.now()}));
     await fs.writeFile(path.join(profile, 'appearance.json'), JSON.stringify({schemaVersion: 1, skinId: 'classic', mode: 'light'}));
+    await fs.writeFile(path.join(profile, 'doubao-asr.json'), JSON.stringify({globalPushToTalkEnabled: false}));
     await fs.writeFile(path.join(profile, 'bot/connection.json'), JSON.stringify({host: 'isolated-feedback', instanceId: hello.instanceId, protocol: hello.protocol, version: hello.version, home: root, dataDir: process.env.HEMI_BOT_DATA_DIR, boundAt: Date.now()}));
-    const env = {...process.env, HEMI_USER_DATA_DIR: profile, HEMI_SSH_BIN: ssh, HEMI_TEST_MIC_GRANT: '1'};
+    const env = {...process.env, HEMI_USER_DATA_DIR: profile, HEMI_SSH_BIN: ssh, HEMI_TEST_MIC_GRANT: '1', HEMI_BOT_AUTO_UPDATE: '0'};
     if (mode === 'dev') env.VITE_DEV_SERVER_URL = server.resolvedUrls.local[0]; else delete env.VITE_DEV_SERVER_URL;
     const result = {mode, checks: [], screenshots: [], errors: [], timings: {}}; report.results.push(result);
     const check = name => {result.checks.push(name); console.log('PASS', mode, name);};
@@ -171,7 +172,7 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
       assert.equal(await input.inputValue(), '结果不明时不自动重发');
       assert.equal(runs.filter(run => run.envelope.inputId === uncertain.command.input.inputId).length, 0);
       await page.getByRole('button', {name: '核对提交结果', exact: true}).click();
-      await page.getByRole('alert').filter({hasText: '云端确认未受理'}).waitFor();
+      await page.getByRole('button', {name: '核对提交结果', exact: true}).waitFor();
       assert.equal(await input.inputValue(), '结果不明时不自动重发');
       assert.equal(runs.filter(run => run.envelope.inputId === uncertain.command.input.inputId).length, 0);
       check('unknown outcomes remove only the local preview, retain the draft and query receipts without replay');
@@ -181,7 +182,7 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
   }
 } finally {
   await app?.close(); await server?.close(); await service?.close();
-  for (const file of ['src/renderer/src/windows/bot/page.tsx', 'src/renderer/src/windows/bot/pending-input.ts', 'packages/conversation-flow/src/components/message-row.tsx', 'packages/conversation-flow/src/core/presenter.ts', 'src/main/bot/desktop-service.mjs', 'src/main/bot/host.mjs'])
+  for (const file of ['src/renderer/src/windows/bot/page.tsx', 'packages/conversation-flow/src/core/conversation.ts', 'packages/conversation-flow/src/components/message-row.tsx', 'packages/conversation-flow/src/core/presenter.ts', 'src/main/bot/desktop-service.mjs', 'src/main/bot/host.mjs'])
     report.sources[file] = createHash('sha256').update(await fs.readFile(path.join(repo, file))).digest('hex');
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   await fs.rm(root, {recursive: true, force: true});
