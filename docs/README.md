@@ -1,6 +1,7 @@
 # 文档导航与维护
 
 - [开发说明](development.zh-CN.md)：环境、构建与验证入口。
+- [按平台发布](technical/platform-releases.md)：Mac／Windows 独立发版、验收与现有更新地址的兼容方式。
 - `technical/`：当前架构、协议、实现和验证边界。
 - `requirements/`：仍有效的需求、验收约定及素材来源。
 - `design/`：仍有参考价值的交互稿，以及资源导出或验证依赖的设计源文件；原型检查不等于生产验收。

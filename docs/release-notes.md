@@ -7,7 +7,7 @@
 - 浏览器任务使用独立后台窗口和标签分组，显示虚拟鼠标，并在任务结束后回收页面；开发版与安装版可同时连接扩展。
 - 排队消息可取回输入框继续编辑，保留已有草稿和附件；改进发送回执核对、编辑重发与模型恢复提示的顺序，并为手机加入用量统计。
 
-提供 macOS（Apple 芯片）`.dmg` 和 Windows x64 安装包。已有用户可在“设置 → 通用 → 关于与更新”检查更新。
+此版本仅提供 macOS（Apple 芯片）`.dmg` 和 ZIP 更新包。macOS 与 Windows 按平台分别发版；已有用户可在“设置 → 通用 → 关于与更新”检查更新。
 
 ---
 
@@ -20,4 +20,4 @@ This update adds native shared memory, Windows Bot hosts and independent Bot mod
 - Run browser tasks in separate background windows with tab groups and a visible virtual cursor, then reclaim their pages when finished. Development and installed instances can connect to the extension simultaneously.
 - Return queued messages to the composer while preserving existing drafts and attachments. Improve delivery reconciliation, edit-and-resend and recovery notice ordering, and add mobile usage statistics.
 
-Available for macOS Apple Silicon and Windows x64. Existing users can check for updates in Settings → General → About and Updates.
+This release includes macOS Apple Silicon DMG and ZIP packages only. macOS and Windows are released separately. Existing users can check for updates in Settings → General → About and Updates.

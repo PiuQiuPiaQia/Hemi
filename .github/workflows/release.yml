@@ -21,23 +21,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  platform:
+    name: 选择单个平台
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.select.outputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 读取发版目标
+        id: select
+        shell: bash
+        run: |
+          SUBJECT=$(git log -1 --format=%s)
+          if [[ "$SUBJECT" == *"[win-only]"* ]]; then
+            echo "target=win" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=mac" >> "$GITHUB_OUTPUT"
+          fi
+
   release-mac:
     name: macOS arm64 · 安装包与更新清单
     runs-on: macos-15
-    outputs:
-      mac_only: ${{ steps.platforms.outputs.mac_only }}
+    needs: platform
+    if: needs.platform.outputs.target == 'mac'
     steps:
       - uses: actions/checkout@v4
-
-      - name: 本次发布平台
-        id: platforms
-        shell: bash
-        run: |
-          if [[ "$(git log -1 --format=%s)" == *"[mac-only]"* ]]; then
-            echo "mac_only=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "mac_only=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -82,7 +90,7 @@ jobs:
           node scripts/verify-distribution-licenses.mjs release/mac-arm64/Hemi.app release/licenses-macos.json
           cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
 
-      - name: 建 release 并上挂资产（单 publisher，创建后 win job 只往上挂）
+      - name: 建 macOS release 并上挂资产
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -94,6 +102,7 @@ jobs:
             --title "Hemi ${GITHUB_REF_NAME#v}" \
             --notes-file docs/release-notes.md \
             --draft
+          node scripts/relay-release-manifest.mjs "$GITHUB_REF_NAME" mac
 
       - name: 表观体积（exFAT/du 口径失真，产物体积按字节加总）
         run: |
@@ -101,28 +110,17 @@ jobs:
           echo "app apparent size: $BYTES bytes ($((BYTES / 1024 / 1024)) MB)"
 
       - name: 发布仅 macOS 版本
-        if: steps.platforms.outputs.mac_only == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
 
-  # 0.5.2 起 Windows nsis x64 同 tag 出包（与 mac 同版本）。needs mac：mac job
-  # 的 gh release create 已建好 release 对象，win 用 gh release upload 只往上挂
-  # 资产——全程单 publisher，无 electron-builder 双 publisher 竞争建 release 的
-  # 老毛病（同 tag 双对象／422 砸死进程）。
-  # win 应用内更新（2026-10-12 起）：nsis target 产出 latest.yml（win 的更新
-  # 清单）一并上挂；electron-updater 按平台读取，安装走 NSIS 静默更新。打包与
-  # 冒烟步骤与 win-probe workflow 同套（探针是它的手动触发版本）。
+  # Windows 自己创建并发布 release，不再等待 macOS 构建。
   release-win:
     name: Windows x64 · nsis 安装包
     runs-on: windows-latest
-    needs: release-mac
-    if: needs.release-mac.outputs.mac_only != 'true'
-    # 2026-10-20 双平台恢复（v0.9.0）：上轮 13 项 win 失败已全部适配（deny 分隔符
-    # 归一＋win 系统根表＋file:// 盘符还原＋六处 fixture 平台风味），另修 resolveStrict
-    # 未配置误报损坏（win 冒烟唯一挂项）与原子写 rename 的杀毒瞬时占用（EPERM 重试）；
-    # win-probe 全绿后撤门闩；只有显式 --mac-only 的发布才跳过 Windows。
+    needs: platform
+    if: needs.platform.outputs.target == 'win'
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -179,7 +177,7 @@ jobs:
           if (-not $proc.WaitForExit(300000)) { $proc.Kill($true); throw '冒烟 5 分钟未退出' }
           if ($proc.ExitCode -ne 0) { throw "打包体冒烟退出码 $($proc.ExitCode)" }
 
-      - name: 上挂安装包到 release
+      - name: 创建并发布 Windows release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -192,8 +190,12 @@ jobs:
           $assets += @(Get-ChildItem release -Filter '*.exe.blockmap')
           $assets += @(Get-ChildItem release -Filter 'latest.yml')
           $assets += @(Get-ChildItem release -Filter 'licenses-windows.json')
+          Copy-Item third-party/uiohook-napi-1.5.5-source.tar.gz release/
+          $assets += @(Get-ChildItem release -Filter 'uiohook-napi-1.5.5-source.tar.gz')
           if (-not $assets) { throw 'release/ 下没找到安装包' }
-          gh release upload $env:GITHUB_REF_NAME @($assets.FullName) --clobber
+          gh release create $env:GITHUB_REF_NAME @($assets.FullName) --title "Hemi $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file docs/release-notes.md --draft
           if ($LASTEXITCODE -ne 0) { throw '资产上传失败' }
+          node scripts/relay-release-manifest.mjs $env:GITHUB_REF_NAME win
+          if ($LASTEXITCODE -ne 0) { throw '保留 macOS 更新清单失败' }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw '发布失败' }

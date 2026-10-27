@@ -36,6 +36,7 @@ import { createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releasePlatform } from './lib/release-platform.mjs';
 
 // 仓库路径含中文卷名（闪迪SSD），URL.pathname 会百分号编码——必须 fileURLToPath。
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -45,16 +46,14 @@ const args = process.argv.slice(2);
 const fix = args.includes('--fix');
 const noSmoke = args.includes('--no-smoke');
 const fresh = args.includes('--fresh');
-// 2026-10-19 临时 mac-only（v0.8.0）：Windows 单测 13 项失败未适配，release-win
-// 被 if: false 跳过。win 资产核对降级为警告；修复发版后不再传本旗标。
-const macOnly = args.includes('--mac-only');
+const macOnly = releasePlatform(args) === 'mac';
 const explicitTag = args.find((arg) => /^v/.test(arg));
 const tag = explicitTag ?? `v${pkg.version}`;
 
 /** 必备产物（blockmap 缺失降级为警告——差量更新关闭时无功能影响）。 */
 const REQUIRED_ASSETS = ['.dmg', '-mac.zip', 'latest-mac.yml', '-setup.exe', 'latest.yml', 'uiohook-napi-1.5.5-source.tar.gz', 'licenses-macos.json', 'licenses-windows.json'];
 /** 完整 release 的判别特征：公开更新所需的清单必须存在。 */
-const MANIFEST = 'latest-mac.yml';
+const MANIFEST = macOnly ? 'latest-mac.yml' : 'latest.yml';
 /** win 的更新清单（2026-10-12 起 win 应用内更新上线，nsis target 产出）。 */
 const WIN_MANIFEST = 'latest.yml';
 /** 冒烟 userData 的配置件套：要么全拷要么都不拷（ASR Key 不带 onboarding.json
@@ -178,20 +177,21 @@ if (release.draft) fail('release 还是草稿');
 ok(`非草稿 · ${release.assets.length} 资产 · ${release.html_url}`);
 
 // ── 3. 资产与更新清单核验（latest-mac.yml + latest.yml） ─────────────────
-step('资产与更新清单核验（latest-mac.yml + latest.yml）');
+step(`资产与更新清单核验（${MANIFEST}）`);
 for (const suffix of REQUIRED_ASSETS) {
   if (macOnly && (suffix === '-setup.exe' || suffix === WIN_MANIFEST || suffix === 'licenses-windows.json')) continue;
+  if (!macOnly && ['.dmg', '-mac.zip', 'latest-mac.yml', 'licenses-macos.json'].includes(suffix)) continue;
   if (!release.assets.some((a) => a.name.endsWith(suffix))) fail(`缺 ${suffix} 产物`);
 }
 for (const blockmap of release.assets.filter((a) => a.name.endsWith('.blockmap'))) ok(`blockmap ${blockmap.name} 在场`);
 if (!release.assets.some((a) => a.name.endsWith('.blockmap'))) {
   warn('没有任何 blockmap（差量更新关闭时无功能影响，仅记录）');
 }
-// 0.5.2 起 Windows nsis 同 tag 出包（release-win job 晚于 mac 上挂资产）。
+// Only the selected platform's installer is required or downloaded.
 const winSetup = release.assets.find((a) => /-setup\.exe$/.test(a.name));
 if (!winSetup) {
   if (macOnly) {
-    warn('mac-only：没有 Windows 安装包（release-win 被临时跳过，见 release.yml）');
+    ok('仅 macOS 发布，无 Windows 安装包');
   } else {
     fail('没找到 Windows 安装包（release-win job 没跑完？）');
   }
@@ -228,14 +228,12 @@ function verifyManifest(manifestName) {
   return text;
 }
 
-const manifest = verifyManifest(MANIFEST);
-const winManifest = macOnly
-  ? (warn('mac-only：跳过 latest.yml 核验（release-win 被临时跳过）'), null)
-  : verifyManifest(WIN_MANIFEST);
+const manifest = macOnly ? verifyManifest(MANIFEST) : null;
+const winManifest = macOnly ? null : verifyManifest(WIN_MANIFEST);
 
 // ── 4. 产物体检 + 打包冒烟 ───────────────────────────────────────────────
 const IS_WIN = process.platform === 'win32';
-const zipAsset = release.assets.find((a) => a.name.endsWith('-mac.zip'));
+const zipAsset = macOnly ? release.assets.find((a) => a.name.endsWith('-mac.zip')) : null;
 // 产物缓存目录：mac 用 ~/Library/Caches，win 对齐 %LOCALAPPDATA%。
 const cacheDir = IS_WIN
   ? path.join(os.homedir(), 'AppData', 'Local', 'hemi-release-verify', tag)
@@ -246,7 +244,7 @@ const sourcePath = path.join(cacheDir, sourceAsset.name);
 downloadAsset(sourceAsset.id, sourcePath);
 if (!readFileSync(sourcePath).equals(readFileSync(path.join(repoRoot, 'third-party', sourceAsset.name)))) fail('Release 对应源码与已验证归档不一致');
 ok('Release 对应源码归档字节一致');
-for (const name of ['licenses-macos.json', ...(macOnly ? [] : ['licenses-windows.json'])]) {
+for (const name of [macOnly ? 'licenses-macos.json' : 'licenses-windows.json']) {
   const asset = release.assets.find((a) => a.name === name);
   const reportPath = path.join(cacheDir, name);
   downloadAsset(asset.id, reportPath);
@@ -254,8 +252,9 @@ for (const name of ['licenses-macos.json', ...(macOnly ? [] : ['licenses-windows
   if (report.appVersion !== tag.slice(1) || !Array.isArray(report.errors) || report.errors.length) fail(`${name} 验收失败`);
   ok(`${name} 无许可分发错误`);
 }
-const zipPath = path.join(cacheDir, zipAsset.name);
+const zipPath = macOnly ? path.join(cacheDir, zipAsset.name) : null;
 const appPath = path.join(cacheDir, 'Hemi.app');
+if (macOnly) {
 if (!fresh && existsSync(zipPath) && statSync(zipPath).size === zipAsset.size) {
   ok(`zip 已缓存 ${zipPath}（--fresh 重下）`);
 } else {
@@ -272,10 +271,9 @@ const zipSha = await sha512Base64(zipPath);
 const manifestSha = /^sha512:\s*(.+)$/m.exec(manifest)?.[1]?.trim();
 if (zipSha !== manifestSha) fail(`zip sha512 实测 ≠ manifest（${zipSha.slice(0, 12)}… vs ${manifestSha?.slice(0, 12)}…）`);
 ok('sha512 与 latest-mac.yml 一致');
+}
 
-if (macOnly) {
-  warn('mac-only：跳过 win 安装包 sha512 实测（release-win 被临时跳过）');
-} else {
+if (!macOnly) {
   step('win 安装包 sha512 实测（更新器同款校验链）');
   const exeEntry = manifestFileEntries(winManifest).find((e) => e.url === winSetup.name);
   if (!exeEntry?.sha512) fail(`${WIN_MANIFEST} 里没有 ${winSetup.name} 的 sha512`);
@@ -292,6 +290,9 @@ if (macOnly) {
     fail(`${winSetup.name} sha512 实测 ≠ ${WIN_MANIFEST}（${exeSha.slice(0, 12)}… vs ${exeEntry.sha512.slice(0, 12)}…）`);
   }
   ok(`sha512 与 ${WIN_MANIFEST} 一致`);
+  ok('Windows 包体自检与实际冒烟已由本次成功的 Windows CI 完成');
+  console.log(`\n✅ ${tag} Windows 验收全过。`);
+  process.exit(0);
 }
 
 step('产物体检');

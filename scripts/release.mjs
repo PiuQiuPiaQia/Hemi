@@ -8,7 +8,7 @@
  *   npm run release -- patch|minor|major   # 按语义递增
  *   npm run release -- 0.4.0               # 显式版本
  *   --skip-tests                           # 跳过全量单测（typecheck/build 仍跑）
- *   --mac-only                             # 本次仅发布 macOS，不影响以后双平台发布
+ *   默认仅发布当前平台；--mac-only / --win-only 可显式选择目标
  *
  * 退出码非 0 即未发版（不产生 commit/tag/push）。
  */
@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { releasePlatform } from './lib/release-platform.mjs';
 
 // 仓库路径含中文卷名（闪迪SSD），URL.pathname 会百分号编码——必须 fileURLToPath。
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -23,11 +24,11 @@ const pkgPath = `${repoRoot}package.json`;
 
 const args = process.argv.slice(2);
 const skipTests = args.includes('--skip-tests');
-const macOnly = args.includes('--mac-only');
+const platform = releasePlatform(args);
 const bump = args.find((arg) => !arg.startsWith('--'));
 
 if (!bump) {
-  console.error('用法：npm run release -- <patch|minor|major|显式版本> [--skip-tests] [--mac-only]');
+  console.error('用法：npm run release -- <patch|minor|major|显式版本> [--skip-tests] [--mac-only|--win-only]');
   process.exit(1);
 }
 
@@ -115,7 +116,7 @@ const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
 writeFileSync(`${repoRoot}${manifestPath}`, manifestBytes);
 writeFileSync(`${repoRoot}dist-renderer/licenses/renderer-components.json`, manifestBytes);
 run('git', ['add', 'package.json', 'package-lock.json', manifestPath]);
-run('git', ['commit', '-m', `release: ${tag}${macOnly ? ' [mac-only]' : ''}`]);
+run('git', ['commit', '-m', `release: ${tag} [${platform === 'mac' ? 'mac' : 'win'}-only]`]);
 // 必须附注标签：轻量标签在部分推送路径会被静默漏掉（v0.4.0 实测：tag 没上去、CI 没触发）。
 run('git', ['tag', '-a', tag, '-m', tag]);
 // 显式推当版 tag——旧写法 `--follow-tags` 会把本地所有未推的附注标签一起带上去：
@@ -124,7 +125,7 @@ run('git', ['tag', '-a', tag, '-m', tag]);
 run('git', ['push', '--atomic', 'origin', 'HEAD:refs/heads/main', `refs/tags/${tag}`]);
 
 console.log(`
-已发版 ${tag}，已推送。CI 正在构建：
+已发版 ${tag}（仅 ${platform === 'mac' ? 'macOS' : 'Windows'}），已推送。CI 正在构建：
   https://github.com/PiuQiuPiaQia/Hemi/actions/workflows/release.yml
 
 产物发布后按 AGENTS.md 打包节验收：
