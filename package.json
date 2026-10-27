@@ -1,7 +1,7 @@
 {
   "name": "hemi-desktop",
   "productName": "Hemi",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "license": "MIT",
   "private": true,
   "description": "Hemi 桌面语音行动助手。",
