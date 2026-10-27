@@ -1,23 +1,21 @@
-本次更新带来原生共享记忆、Windows Bot 支持和独立的 Bot 模型配置，并改进浏览器后台执行与多端对话体验。
+本次更新修复后台任务与重启恢复的状态一致性，并加入 Bot 主机能力设置、子任务对话和用量历史。
 
-- 桌面与 Bot 主会话直接使用原版 pi-memory，共享所属实例的长期记忆、日志和待办；支持原生遗忘与恢复，并可在桌面和手机查看原始文件。旧记忆文件保留，不自动迁移；当前不提供语义搜索，自动整理摘要的用量暂未计入对话统计。
-- 支持通过 SSH 连接 Windows x64 主机作为 Bot，包含部署、计划任务常驻、命名管道控制、组件升级回滚与断线恢复。
-- Bot 可独立登录订阅账号、导入 New API 或配置 API Key；从本机同步前先对比并选择模型差异，路由在 Bot 中独立配置。
-- 云端组件维护改为每 6 小时后台检查，有任务时等待空闲；状态与重试入口集中在 Bot 通用设置。
-- 浏览器任务使用独立后台窗口和标签分组，显示虚拟鼠标，并在任务结束后回收页面；开发版与安装版可同时连接扩展。
-- 排队消息可取回输入框继续编辑，保留已有草稿和附件；改进发送回执核对、编辑重发与模型恢复提示的顺序，并为手机加入用量统计。
+- 后台命令受理后保持运行状态，真实进程结束才收口；完成结果按命令身份送回原任务，支持增量输出与无新输出时长提示。
+- 重启后统一关闭已中断的主任务、子任务、工具和思考状态，保留排队输入并暂停队列，避免界面一直显示运行或自动重放。
+- Bot 增加浏览器、联网检索与技能库设置；Windows 主机提供独立桌面助手和窗口资料选择，使用 Bot 自己的配置与授权。
+- 子任务可查看独立的只读对话流、工具结果和最终状态。需要用户澄清时显示等待答复，答复后延续目标及其预算。
+- 新增跨会话“使用记录”：逐请求历史、筛选分页、每日热力图、缓存用量、首输出耗时和生成速度；未知用量保留为空，URL 与错误内容脱敏。
 
-此版本仅提供 macOS（Apple 芯片）`.dmg` 和 ZIP 更新包。macOS 与 Windows 按平台分别发版；已有用户可在“设置 → 通用 → 关于与更新”检查更新。
+此版本仅提供 macOS（Apple 芯片）DMG 和 ZIP 更新包。Windows 桌面安装包按平台另行发布；Bot 主机组件通过 Bot 设置独立更新。已有用户可在“设置 → 通用 → 关于与更新”检查更新。
 
 ---
 
-This update adds native shared memory, Windows Bot hosts and independent Bot model settings, and improves background browsing and conversations across devices.
+This update fixes background task and restart recovery state, and adds Bot host capability settings, subtask conversations and usage history.
 
-- Desktop and Bot main sessions load the original pi-memory extension, sharing memory, daily logs and scratchpads within each instance. Native forgetting and restoration are available, with file viewing on desktop and mobile. Legacy memory files are retained without automatic migration. Semantic search is not included, and automatic summary usage is not yet included in conversation totals.
-- Connect Windows x64 Bot hosts over SSH, including deployment, persistent scheduled tasks, authenticated named pipes, component rollback and reconnection.
-- Authorize subscription accounts, import New API configurations or add API keys directly for a Bot. Review and select desktop model differences before syncing; configure Bot routing independently.
-- Check cloud components quietly every six hours and wait for idle periods before updating. View status and retry in Bot general settings.
-- Run browser tasks in separate background windows with tab groups and a visible virtual cursor, then reclaim their pages when finished. Development and installed instances can connect to the extension simultaneously.
-- Return queued messages to the composer while preserving existing drafts and attachments. Improve delivery reconciliation, edit-and-resend and recovery notice ordering, and add mobile usage statistics.
+- Keep background commands running until their processes actually finish. Deliver terminal results to the original task by command identity, with incremental output and time since the last output.
+- Reconcile interrupted runs, subtasks, tools and thinking after restart. Preserve queued inputs and pause the queue without replaying work.
+- Configure Bot-owned browsing, web search and skills. Windows hosts use a separate desktop helper and can attach selected window context.
+- Inspect read-only subtask conversations, tool results and final status. Necessary clarification waits for the user and resumes within the existing goal budget.
+- Browse cross-conversation request history with filters, pagination, daily activity, cache usage, time to first output and generation speed. Unknown values remain empty; URLs and error text are redacted.
 
-This release includes macOS Apple Silicon DMG and ZIP packages only. macOS and Windows are released separately. Existing users can check for updates in Settings → General → About and Updates.
+This release includes macOS Apple Silicon DMG and ZIP packages only. Windows desktop packages are released separately; Bot host components update independently through Bot settings. Existing users can check for updates in Settings → General → About and Updates.
