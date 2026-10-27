@@ -41,6 +41,29 @@ function prepared() {
   return { snapshot, apply };
 }
 
+test('model recovery keeps its first-failure anchor through retries, continuation, patches and closure', () => {
+  const setup = prepared();
+  const initial = setup.apply({type: 'part-appended', runId: 'run-1', afterInputId: 'in-1', part: {partId: 'before', kind: 'text', content: 'Before'}}).snapshot;
+  const recovery = {id: 'recovery-1', phase: 'waiting', firstFailureAt: 20, updatedAt: 20};
+  const waiting = setup.apply({type: 'run-recovery', runId: 'run-1', afterInputId: 'in-1', recovery});
+  const anchor = {itemId: 'run-1:a:in-1', afterPartId: 'before'};
+  assert.deepEqual(waiting.snapshot.runs['run-1'].recovery.anchor, anchor);
+  assert.deepEqual(applyFlowChange(initial, {kind: 'patch', conversationId: initial.conversationId, generation: initial.generation,
+    baseRevision: initial.revision, revision: waiting.snapshot.revision, changes: [waiting.patch]}).snapshot, waiting.snapshot);
+  setup.apply({type: 'part-appended', runId: 'run-1', afterInputId: 'in-1', part: {partId: 'after', kind: 'text', content: 'After'}});
+  const recovered = setup.apply({type: 'run-recovery', runId: 'run-1', afterInputId: 'in-1', recovery: {...recovery, phase: 'recovered', updatedAt: 30}});
+  assert.deepEqual(recovered.snapshot.runs['run-1'].recovery.anchor, anchor);
+  const closed = setup.apply({type: 'run-closed', runId: 'run-1', at: 40, outcome: 'completed'});
+  assert.deepEqual(closed.snapshot.runs['run-1'].recovery.anchor, anchor);
+  assert.deepEqual(JSON.parse(JSON.stringify(closed.snapshot)).runs['run-1'].recovery.anchor, anchor);
+});
+
+test('a recovery before first output anchors to the current delivered input', () => {
+  const setup = prepared();
+  const result = setup.apply({type: 'run-recovery', runId: 'run-1', afterInputId: 'in-1', recovery: {id: 'first', phase: 'waiting'}});
+  assert.deepEqual(result.snapshot.runs['run-1'].recovery.anchor, {itemId: 'run-1:a:in-1', afterPartId: null});
+});
+
 test('快照初值：schemaVersion/四态空闲/空集合', () => {
   const snapshot = createFlowSnapshot({ conversationId: 'c0' });
   assert.equal(snapshot.schemaVersion, FLOW_SCHEMA_VERSION);

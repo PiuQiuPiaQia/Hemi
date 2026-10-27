@@ -373,11 +373,6 @@ export async function readStoredConfig({ decryptSecrets = false } = {}) {
         typeof stored.executorProxyEnabled === 'boolean'
           ? stored.executorProxyEnabled
           : false,
-      // 032：任务收尾记忆摘要开关（pi-memory 退出摘要；默认开）。
-      memoryExitSummaryEnabled:
-        typeof stored.memoryExitSummaryEnabled === 'boolean'
-          ? stored.memoryExitSummaryEnabled
-          : true,
       jevBaseUrl:
         typeof stored.jevBaseUrl === 'string' && stored.jevBaseUrl.trim()
           ? stored.jevBaseUrl.trim()
@@ -425,7 +420,6 @@ export async function readStoredConfig({ decryptSecrets = false } = {}) {
       globalPushToTalkEnabled: true,
       globalPushToTalkKey: process.platform === 'darwin' ? 'option' : '',
       executorProxyEnabled: false,
-      memoryExitSummaryEnabled: true,
       jevBaseUrl: DEFAULT_JEV_BASE_URL,
       jevModel: DEFAULT_JEV_MODEL,
       jevApiKey: inMemoryJevApiKey,
@@ -534,11 +528,6 @@ export async function saveStoredConfig(nextConfig) {
       typeof nextConfig.executorProxyEnabled === 'boolean'
         ? nextConfig.executorProxyEnabled
         : previous.executorProxyEnabled,
-    // 032：任务收尾记忆摘要开关（见 memory.ipc）。
-    memoryExitSummaryEnabled:
-      typeof nextConfig.memoryExitSummaryEnabled === 'boolean'
-        ? nextConfig.memoryExitSummaryEnabled
-        : previous.memoryExitSummaryEnabled,
     jevBaseUrl:
       typeof nextConfig.jevBaseUrl === 'string' && nextConfig.jevBaseUrl.trim()
         ? nextConfig.jevBaseUrl.trim()
@@ -578,6 +567,5 @@ export async function saveStoredConfig(nextConfig) {
     browserControlEnabled: stored.browserControlEnabled,
     webSearchEnabled: stored.webSearchEnabled,
     executorProxyEnabled: stored.executorProxyEnabled,
-    memoryExitSummaryEnabled: stored.memoryExitSummaryEnabled,
   };
 }

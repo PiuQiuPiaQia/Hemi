@@ -2,7 +2,7 @@
 //
 // 职责（014 D-1/D-2/D-3）：
 //  1. 主动外连 Pi 进程里的本地桥（ws://127.0.0.1:9467-9470，带重连退避）；
-//  2. 执行桥命令：在「任务专用后台窗口」（focused:false / active:false）里
+//  2. 执行桥命令：在「任务专用后台窗口」（focused:false）里
 //     打开网页、按 CSS 选择器点击、键入、提取正文、截图；
 //  3. 归属记账：只操作自己建的任务窗口，用户标签页不可见不可碰；
 //  4. 清理：桥断开（Pi 进程结束）＝任务结束，关闭任务窗口；新 hello 时先
@@ -16,7 +16,7 @@
 // 主世界脚本不可见不可写，网页替换 window 变量不再能劫持执行目标；页面侧
 // 逻辑源在 page-logic.js（Node 单测与生产同源），经 importScripts 载入。
 
-importScripts('page-logic.js', 'page-operations.js');
+importScripts('page-logic.js', 'page-operations.js', 'page-cursor.js');
 const PAGE_LOGIC = globalThis.HEMI_PAGE_LOGIC;
 
 // 约定（021 用户裁决）：扩展文件每次改动必须升 manifest.json 的 version——
@@ -28,39 +28,36 @@ const BRIDGE_PORTS = [9467, 9468, 9469, 9470];
 const READY_TIMEOUT_MS = 20000;
 const READY_POLL_MS = 250;
 const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 10000;
+// 新启动的 Dev/安装版桥要在工具的短握手等待内接入，不能退避到十秒后。
+const RECONNECT_MAX_MS = 1000;
 const HEARTBEAT_MS = 25000;
 
-let ws = null;
-let wsReady = false;
-let reconnectTimer = null;
 let heartbeatTimer = null;
-let portIndex = 0;
-let attempts = 0;
+const bridges = new Map(BRIDGE_PORTS.map(port => [port, {
+  port, socket: null, ready: false, timer: null, attempts: 0, cleanup: Promise.resolve(),
+}]));
+let startupCleanup = null;
 
-/** 任务窗口记账（SW 可能被回收，存 session storage）：
- *  windowId 持久复用（用户裁决 2026-09-20：不每次新开窗口），taskTabIds 是
- *  当前任务的标签页集合，任务结束即清；marker 标签页（hemi-task.html）不在
- *  集合里，是窗口的常驻身份牌。 */
 /** 任务窗口记账（023 R-15 按任务记账）：taskId -> { windowId, tabId, taskTabIds }。
- *  并行任务各自一个窗口，命令信封带 taskId，互不串台。SW 可能被回收，存
- *  session storage；windowId 持久复用（2026-09-20 裁决），taskTabIds 是该任务
- *  的标签页集合，任务结束即清；marker 标签页（hemi-task.html）不在集合里，
- *  是窗口的常驻身份牌。 */
+ *  并行任务各自一个窗口及标签组；任务结束连同占位页一起关闭。
+ *  session storage 用于 SW 重启后回收遗留窗口和网页弹出的标签页。 */
 const agents = new Map();
 const DEFAULT_TASK = 'default';
 const attachedTabs = new Set();
 
 function blankAgent() {
-  return { windowId: null, tabId: null, taskTabIds: [] };
+  return { windowId: null, tabId: null, taskTabIds: [], groupId: null };
 }
 
 /** 命令归属解析：桥的 cmd 信封带 taskId；无 taskId（异常/旧桥）落 default。 */
-function getTask(taskId) {
-  const key = String(taskId || DEFAULT_TASK);
+function getTask(taskId, bridge = null) {
+  const originalId = String(taskId || DEFAULT_TASK);
+  const key = bridge ? `${bridge.port}/${originalId}` : originalId;
   if (!agents.has(key)) agents.set(key, blankAgent());
   const rec = agents.get(key);
   rec.__taskId = key; // serialized 按任务分桶用（不落盘的运行时标记）
+  rec.taskId = originalId;
+  if (bridge) rec.bridgePort = bridge.port;
   return rec;
 }
 
@@ -97,16 +94,18 @@ function serialized(task, fn) {
 
 // ---------- 小工具 ----------
 
-function sendToBridge(payload) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+function sendToBridge(payload, bridge = null) {
+  for (const target of bridge ? [bridge] : bridges.values()) {
+    if (target.socket?.readyState === WebSocket.OPEN) target.socket.send(JSON.stringify(payload));
+  }
 }
 
-function reply(id, data) {
-  sendToBridge({ type: 'result', id, ok: true, data });
+function reply(id, data, bridge) {
+  sendToBridge({ type: 'result', id, ok: true, data }, bridge);
 }
 
-function replyError(id, error) {
-  sendToBridge({ type: 'result', id, ok: false, error: String((error && error.message) || error) });
+function replyError(id, error, bridge) {
+  sendToBridge({ type: 'result', id, ok: false, error: String((error && error.message) || error) }, bridge);
 }
 
 function delay(ms) {
@@ -116,62 +115,68 @@ function delay(ms) {
 async function saveAgents() {
   const plain = {};
   for (const [id, rec] of agents) {
-    const { __taskId, ...rest } = rec;
+    const { __taskId, __ending, ...rest } = rec;
     plain[id] = rest;
   }
   await chrome.storage.session.set({ hemiAgents: plain });
 }
 
-/** 空闲任务窗口池（0.3.1）：任务结束窗口还池、新任务优先领用、全忙才开新窗。
- *  修复「每任务净增一个窗口、越开越多」（2026-09-24 用户实录：连发多个任务
- *  后 Hemi 任务窗口线性堆积）。并行任务仍各占一窗互不串台；池有上限，富余
- *  窗口在还池时自愈关闭（顺带清掉历史堆积）。 */
-const FREE_WINDOW_CAP = 2;
+// 只读取旧版空闲池，升级后清理；不再保留空闲窗口。
 let freeWindows = [];
+const groupQueues = new Map();
+let orphanCleanup = Promise.resolve();
 
-async function persistFreeWindows() {
-  await chrome.storage.session.set({ hemiFreeWindows: freeWindows });
-}
-
-/** 窗口还池；超上限的富余直接关掉。窗口已没了就当它从未存在。 */
-async function releaseWindowToPool(windowId) {
+async function closeWindow(windowId) {
   if (!Number.isInteger(windowId)) return;
-  try {
-    await chrome.windows.get(windowId);
-  } catch {
-    return;
+  try { await chrome.windows.get(windowId); } catch { return; }
+  try { await chrome.windows.remove(windowId); }
+  catch (error) {
+    try { await chrome.windows.get(windowId); } catch { return; }
+    throw error; // 活窗口关闭失败时保留记账，供下次回收重试。
   }
-  freeWindows.push(windowId);
-  while (freeWindows.length > FREE_WINDOW_CAP) {
-    const extra = freeWindows.shift();
-    try {
-      await chrome.windows.remove(extra);
-    } catch {
-      /* 已没了 */
-    }
-  }
-  await persistFreeWindows();
 }
 
-/** 从池里领一个活窗口：校验存在、marker 身份牌丢了就补一块；领不到返回 null。 */
-async function claimPooledWindow() {
-  while (freeWindows.length) {
-    const wid = freeWindows.shift();
-    try {
-      await chrome.windows.get(wid);
-      const tabs = await chrome.tabs.query({ windowId: wid });
-      const hasMarker = tabs.some((t) => (t.url || '').startsWith(chrome.runtime.getURL('')));
-      if (!hasMarker) {
-        await chrome.tabs.create({ windowId: wid, url: chrome.runtime.getURL('hemi-task.html') });
-      }
-      await persistFreeWindows();
-      return wid;
-    } catch {
-      /* 窗口已被关，试下一个 */
-    }
-  }
-  await persistFreeWindows();
-  return null;
+function isMarker(tab) {
+  return (tab.pendingUrl || tab.url || '') === chrome.runtime.getURL('hemi-task.html');
+}
+
+function shortTaskTitle(value) {
+  return [...String(value || '').replace(/\s+/g, ' ').trim()].slice(0, 24).join('');
+}
+
+/** 只分组本任务窗口内的内容页；串行处理 onCreated 与 navigate 的重复通知。 */
+function groupTaskTabs(task) {
+  const key = task.__taskId;
+  const run = (groupQueues.get(key) ?? Promise.resolve()).then(async () => {
+    if (!task.windowId || task.__ending) return;
+    const tabs = (await chrome.tabs.query({ windowId: task.windowId })).filter(tab => !isMarker(tab));
+    if (!tabs.length) return;
+    const tabIds = tabs.map(tab => tab.id);
+    task.taskTabIds = [...new Set([...task.taskTabIds, ...tabIds])];
+    // 分组被用户解散/关空后自动重建；不移动其它窗口的标签。
+    const existing = tabs.find(tab => tab.groupId === task.groupId && tab.groupId >= 0);
+    task.groupId = await chrome.tabs.group({
+      tabIds, ...(existing ? { groupId: task.groupId } : { createProperties: { windowId: task.windowId } }),
+    });
+    const colors = ['green', 'blue', 'purple', 'cyan', 'orange', 'pink'];
+    const hash = [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0);
+    const current = tabs.find(tab => tab.id === task.tabId) || tabs[0];
+    let site = '';
+    try { site = new URL(current.url || current.pendingUrl).hostname; } catch { /* 页面可能尚未提交导航。 */ }
+    const label = task.title || shortTaskTitle(current.title) || site || '网页任务';
+    await chrome.tabGroups.update(task.groupId, {
+      title: `Hemi · ${label}`.slice(0, 48), color: colors[hash % colors.length], collapsed: false,
+    });
+    await saveAgents();
+  });
+  groupQueues.set(key, run.catch(() => {}));
+  return run;
+}
+
+async function closeEmptyTaskWindow(task) {
+  if (!task.windowId || task.__ending) return;
+  const tabs = await chrome.tabs.query({ windowId: task.windowId });
+  if (tabs.every(isMarker)) await closeWindow(task.windowId);
 }
 
 async function loadAgents() {
@@ -179,7 +184,7 @@ async function loadAgents() {
     const stored = await chrome.storage.session.get('hemiAgents');
     if (stored && stored.hemiAgents) {
       for (const [id, rec] of Object.entries(stored.hemiAgents)) {
-        agents.set(id, { taskTabIds: [], ...rec });
+        agents.set(id, { ...blankAgent(), ...rec, __taskId: id });
       }
     }
   } catch {
@@ -195,8 +200,7 @@ async function loadAgents() {
   }
 }
 
-/** 任务窗口复用入口（按任务）：活着就用；没了先领空闲池里的，池也空才新建。
- *  窗口身份牌＝marker 标签页。 */
+/** 同一任务复用窗口；上一任务结束后，下次按需新建。 */
 async function ensureWindow(task, defaults = {}) {
   if (task.windowId) {
     try {
@@ -205,16 +209,8 @@ async function ensureWindow(task, defaults = {}) {
     } catch {
       task.windowId = null;
       task.tabId = null;
-      task.taskTabIds = [];
+      task.groupId = null;
     }
-  }
-  const pooled = await claimPooledWindow();
-  if (pooled != null) {
-    task.windowId = pooled;
-    task.tabId = null;
-    task.taskTabIds = [];
-    await saveAgents();
-    return;
   }
   const win = await chrome.windows.create({
     url: chrome.runtime.getURL('hemi-task.html'),
@@ -226,34 +222,24 @@ async function ensureWindow(task, defaults = {}) {
   });
   task.windowId = win.id;
   task.tabId = null;
-  task.taskTabIds = [];
+  task.groupId = null;
   await saveAgents();
 }
 
-/** 清某个任务的标签页，保留窗口与身份牌（R-10：窗口常驻、页面不残留）；
- *  023 R-15 起只清该任务的，其他任务的窗口不受影响。 */
+/** 整窗关闭以捕获网页自行打开、未登记的标签；跨窗弹出页按 ID 单独回收。 */
 async function cleanupTaskTabs(task) {
-  const ids = task.taskTabIds ?? [];
-  task.tabId = null;
-  task.taskTabIds = [];
-  await saveAgents();
+  const ids = [...(task.taskTabIds ?? [])];
+  await closeWindow(task.windowId);
   for (const tabId of ids) {
-    try {
-      await chrome.tabs.remove(tabId);
-    } catch {
-      /* 已没了 */
+    try { await chrome.tabs.get(tabId); } catch { continue; }
+    try { await chrome.tabs.remove(tabId); }
+    catch (error) {
+      try { await chrome.tabs.get(tabId); } catch { continue; }
+      throw error;
     }
   }
-  // 活动标签回到身份牌。
-  if (task.windowId) {
-    try {
-      const tabs = await chrome.tabs.query({ windowId: task.windowId });
-      const marker = tabs.find((tab) => (tab.url || '').startsWith(chrome.runtime.getURL('')));
-      if (marker) await chrome.tabs.update(marker.id, { active: true });
-    } catch {
-      /* 窗口可能已被手关 */
-    }
-  }
+  task.windowId = null; task.tabId = null; task.taskTabIds = []; task.groupId = null;
+  await saveAgents();
 }
 
 // ---------- 调试器（CDP）封装 ----------
@@ -277,7 +263,63 @@ async function attach(tabId) {
 
 async function cdp(tabId, method, params = {}) {
   await attach(tabId);
-  return chrome.debugger.sendCommand(debugTarget(tabId), method, params);
+  if ((method === 'Input.dispatchMouseEvent' && params.type !== 'mouseReleased') || method === 'Input.insertText') {
+    // 视觉反馈失败不改变真实动作回执；隔离世界 + closed shadow 不进入正文和引用表。
+    try {
+      const contextId = await ensureWorld(tabId);
+      if (method === 'Input.dispatchMouseEvent') {
+        // 保留页面 click 处理器；只接管尚未被取消的 _blank 默认导航。
+        // Chrome 对真实点击的新标签会激活整个应用，必须改由 tabs.create(active:false) 打开。
+        await evaluateIn(tabId, contextId, `() => {
+          if (window.__hemiBackgroundLinks) return;
+          window.__hemiBackgroundLinks = [];
+          window.addEventListener('click', event => {
+            if (!event.isTrusted || event.defaultPrevented || event.button !== 0) return;
+            const anchor = event.composedPath().find(node => node?.tagName === 'A');
+            if (!anchor || anchor.target.toLowerCase() !== '_blank' || anchor.hasAttribute('download')) return;
+            if (!/^https?:$/.test(new URL(anchor.href).protocol)) return;
+            event.preventDefault();
+            window.__hemiBackgroundLinks.push(anchor.href);
+          });
+        }`, []);
+      }
+      await updateCursor(tabId, method === 'Input.insertText' ? { action: 'type' } : { x: params.x, y: params.y, action: params.type === 'mousePressed' ? 'click' : 'move' });
+    } catch { /* 导航/受限页面上允许没有视觉反馈。 */ }
+  }
+  const result = await chrome.debugger.sendCommand(debugTarget(tabId), method, params);
+  if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') {
+    // 不能吞掉真实打开失败：点击回执必须反映新页是否成功创建。
+    const contextId = worlds.get(tabId);
+    if (contextId) {
+      let urls = [];
+      try { urls = await evaluateIn(tabId, contextId, '() => window.__hemiBackgroundLinks?.splice(0) || []', []); }
+      catch { /* 点击可能已导航，旧上下文与待开页列表一起销毁。 */ }
+      const task = [...agents.values()].find(task => task.taskTabIds.includes(tabId));
+      if (task && !task.__ending) {
+        for (const url of urls) {
+          const tab = await chrome.tabs.create({ windowId: task.windowId, url, active: false, openerTabId: tabId });
+          task.taskTabIds = [...new Set([...task.taskTabIds, tab.id])];
+        }
+        if (urls.length) await groupTaskTabs(task);
+      }
+    }
+  }
+  return result;
+}
+
+async function updateCursor(tabId, feedback = {}) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    // 只选择任务窗口内正在操作的页，不调用 windows.update/focus，浏览器仍留在后台。
+    if (!tab.active) await chrome.tabs.update(tabId, { active: true });
+    const contextId = await ensureWorld(tabId);
+    const state = await evaluateIn(tabId, contextId, String(globalThis.HEMI_SHOW_CURSOR), [feedback]);
+    if (!state?.visible) throw new Error('指针未显示');
+    return state;
+  } catch (error) {
+    sendToBridge({ type: 'log', text: `虚拟鼠标显示失败：${String(error.message).slice(0, 160)}` });
+    return null;
+  }
 }
 
 function detachAll() {
@@ -301,15 +343,30 @@ chrome.debugger.onDetach.addListener((source) => {
   }
 });
 
+chrome.tabs.onCreated.addListener((tab) => {
+  if (isMarker(tab)) return;
+  for (const task of agents.values()) {
+    if (task.windowId !== tab.windowId && !task.taskTabIds.includes(tab.openerTabId)) continue;
+    task.taskTabIds = [...new Set([...task.taskTabIds, tab.id])];
+    void saveAgents();
+    if (task.windowId === tab.windowId) {
+      void groupTaskTabs(task).catch(() => {}); // 页面可能立即关闭；导航路径会再次确认分组。
+    }
+    break;
+  }
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
   worlds.delete(tabId);
   netInflight.delete(tabId);
-  // 任务当前标签页被用户手动关闭：该任务记账清空，后续命令报「没有页面」。
   for (const rec of agents.values()) {
-    if (rec.tabId === tabId) {
-      rec.tabId = null;
+    if (rec.taskTabIds.includes(tabId)) {
+      rec.taskTabIds = rec.taskTabIds.filter(id => id !== tabId);
+      if (rec.tabId === tabId) rec.tabId = null;
       void saveAgents();
+      // 手动关掉最后一个内容页后，身份牌也没有继续占窗的必要。
+      void closeEmptyTaskWindow(rec).catch(() => {});
       break;
     }
   }
@@ -321,9 +378,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
-  for (const [id, rec] of agents) {
+  for (const rec of agents.values()) {
     if (rec.windowId === windowId) {
-      agents.set(id, blankAgent());
+      rec.windowId = null; rec.tabId = null; rec.groupId = null;
       void saveAgents();
       break;
     }
@@ -332,7 +389,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 const { opExtract, opClick, opType, opSnapshot, opRefAct } = globalThis.HEMI_CREATE_PAGE_OPERATIONS({
   requireActiveTab, evaluate, evaluateIn, cdp, delay, ensureWorld,
-  pageLogic: PAGE_LOGIC, serialized,
+  pageLogic: PAGE_LOGIC, serialized, showCursor: updateCursor,
 });
 
 // ---------- 页面操作原语 ----------
@@ -432,17 +489,21 @@ async function ensureWorld(tabId) {
 async function opNavigate(params, task) {
   let url = String(params.url || '');
   if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http/https 网址');
+  const title = shortTaskTitle(params.taskTitle);
+  if (title) task.title = title;
   await ensureWindow(task, params.defaults || {});
   if (params.newTab || !task.tabId) {
-    const tab = await chrome.tabs.create({ windowId: task.windowId, url, active: false });
+    const tab = await chrome.tabs.create({ windowId: task.windowId, url, active: true });
     task.tabId = tab.id;
-    task.taskTabIds = [...(task.taskTabIds ?? []), tab.id];
+    task.taskTabIds = [...new Set([...(task.taskTabIds ?? []), tab.id])];
     await saveAgents();
   } else {
     await chrome.tabs.update(task.tabId, { url });
   }
   await waitReady(task.tabId);
   const tab = await chrome.tabs.get(task.tabId);
+  await groupTaskTabs(task);
+  await updateCursor(task.tabId, { action: 'navigate' });
   return {
     title: tab.title || '',
     url: tab.url || url,
@@ -466,24 +527,10 @@ async function opList(params, task) {
 
 async function opScreenshot(params, task) {
   const tabId = requireActiveTab(task);
-  // 最小化/被完全遮挡的窗口不渲染帧，captureScreenshot 会一直等不到画面。
-  // 恢复成可见但不聚焦（focused:false 不抢前台，014 D-2 语义内）。
-  if (task.windowId) {
-    try {
-      const win = await chrome.windows.get(task.windowId);
-      if (win.state === 'minimized') {
-        await chrome.windows.update(task.windowId, { focused: false, state: 'normal' });
-        await delay(250);
-      }
-    } catch {
-      /* 窗口没了就按原路径走，超时兜底 */
-    }
-  }
-  // fromSurface:false = 从渲染器取帧：任务窗口在后台/被遮挡时浏览器合成器
-  // 不出帧，表面截图会饿死（020 真机实录：15s 超时连发）。渲染器直取不依赖
-  // 窗口可见性。014 截图语义不变：仍是任务标签页的画面。
+  // 从目标页面的合成表面截图，不切换活动标签、不恢复最小化窗口。
+  // 新版 Chrome 已拒绝 fromSurface:false（Only screenshots from surface are allowed）。
   const shot = await cdp(tabId, 'Page.captureScreenshot', {
-    format: 'jpeg', quality: 80, fromSurface: false,
+    format: 'jpeg', quality: 80, fromSurface: true,
   });
   let width = null;
   let height = null;
@@ -551,50 +598,50 @@ function detachTask(task) {
 }
 
 async function opSessionEnd(params, task) {
-  // 0.3.1：清掉本任务标签页与调试器目标后，窗口还回空闲池（下一个任务领用），
-  // 并删除该任务的记账——修复每任务净增一个窗口的堆积。R-15：不波及其他任务。
-  detachTask(task);
-  await cleanupTaskTabs(task);
-  const windowId = task.windowId;
-  if (agents.has(task.__taskId)) {
+  task.__ending = true;
+  try {
+    await groupQueues.get(task.__taskId);
+    detachTask(task);
+    await cleanupTaskTabs(task);
     agents.delete(task.__taskId);
+    groupQueues.delete(task.__taskId);
+    opQueues.delete(task.__taskId);
     await saveAgents();
+  } finally {
+    task.__ending = false;
   }
-  await releaseWindowToPool(windowId);
   return {};
 }
 
-/** 桥断开/重连时的残留清理：清【所有】任务的标签页，窗口统一还池
- *  （0.3.1：池有上限，历史堆积在还池时自愈关闭）。 */
+/** 断连/重启清理所有任务，并迁移旧版本的空闲窗口池。 */
 async function cleanupAllOrphans() {
   await loadAgents();
   detachAll();
-  const released = [...agents.values()].map((rec) => rec.windowId).filter(Boolean);
-  agents.clear();
-  await saveAgents();
-  for (const rec of released) {
-    await cleanupTaskTabsById(rec);
+  for (const task of [...agents.values()]) await opSessionEnd({}, task);
+  for (const wid of [...freeWindows]) {
+    await closeWindow(wid);
+    freeWindows = freeWindows.filter(id => id !== wid);
+    await chrome.storage.session.set({ hemiFreeWindows: freeWindows });
   }
-  for (const wid of released) {
-    await releaseWindowToPool(wid);
+  // storage.session 在扩展更新后可能为空；只凭身份牌认领完全空闲的窗口。
+  const markers = await chrome.tabs.query({ url: chrome.runtime.getURL('hemi-task.html') });
+  for (const marker of markers) {
+    const tabs = await chrome.tabs.query({ windowId: marker.windowId }).catch(() => []);
+    if (tabs.length && tabs.every(isMarker)) await closeWindow(marker.windowId);
   }
 }
 
-/** 按 windowId 清残留标签（记账已删时 cleanupTaskTabs 拿不到 task 对象）。 */
-async function cleanupTaskTabsById(windowId) {
-  if (!Number.isInteger(windowId)) return;
-  try {
-    const tabs = await chrome.tabs.query({ windowId });
-    for (const tab of tabs) {
-      if ((tab.url || '').startsWith(chrome.runtime.getURL(''))) continue; // marker 留着
-      try {
-        await chrome.tabs.remove(tab.id);
-      } catch {
-        /* 已没了 */
-      }
-    }
-  } catch {
-    /* 窗口已没了 */
+function queueOrphanCleanup() {
+  orphanCleanup = orphanCleanup.catch(() => {}).then(cleanupAllOrphans);
+  void orphanCleanup.catch(error => {
+    sendToBridge({ type: 'log', text: `浏览器遗留页面回收失败：${error.message}` });
+  });
+  return orphanCleanup;
+}
+
+async function cleanupBridgeTasks(port) {
+  for (const task of [...agents.values()]) {
+    if (task.bridgePort === port) await opSessionEnd({}, task);
   }
 }
 
@@ -615,18 +662,21 @@ const OPS = {
   'ext.version': () => ({ version: EXT_VERSION, snapshotProtocol: 2 }),
 };
 
-async function handleCommand(message) {
+async function handleCommand(message, bridge) {
+  try { await orphanCleanup; await bridge?.cleanup; }
+  catch (error) { replyError(message.id, error, bridge); return; }
   const handler = OPS[message.op];
   if (!handler) {
-    replyError(message.id, `未知操作：${message.op}`);
+    replyError(message.id, `未知操作：${message.op}`, bridge);
     return;
   }
   // 023 R-15：cmd 信封带 taskId，命令只作用于该任务自己的窗口（按任务记账）。
-  const task = getTask(message.taskId);
+  const task = getTask(message.taskId, bridge);
+  task.label = String(message.taskLabel || '').slice(0, 40);
   try {
-    reply(message.id, await handler(message.params || {}, task));
+    reply(message.id, await handler(message.params || {}, task), bridge);
   } catch (error) {
-    replyError(message.id, error);
+    replyError(message.id, error, bridge);
   }
 }
 
@@ -639,30 +689,29 @@ function stopHeartbeat() {
   }
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  const waitMs = Math.min(RECONNECT_BASE_MS * 2 ** Math.min(attempts, 4), RECONNECT_MAX_MS);
-  attempts += 1;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connect();
+function scheduleReconnect(bridge) {
+  if (bridge.timer) return;
+  const waitMs = Math.min(RECONNECT_BASE_MS * 2 ** Math.min(bridge.attempts, 4), RECONNECT_MAX_MS);
+  bridge.attempts += 1;
+  bridge.timer = setTimeout(() => {
+    bridge.timer = null;
+    connect(bridge);
   }, waitMs);
 }
 
-function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  const port = BRIDGE_PORTS[portIndex % BRIDGE_PORTS.length];
-  portIndex += 1;
+function connect(bridge) {
+  if (bridge.socket && (bridge.socket.readyState === WebSocket.OPEN || bridge.socket.readyState === WebSocket.CONNECTING)) return;
+  const { port } = bridge;
   let socket;
   try {
     socket = new WebSocket(`ws://127.0.0.1:${port}`);
   } catch {
-    scheduleReconnect();
+    scheduleReconnect(bridge);
     return;
   }
-  ws = socket;
+  bridge.socket = socket;
   socket.addEventListener('open', () => {
-    attempts = 0;
+    bridge.attempts = 0;
     socket.send(JSON.stringify({ type: 'hello', version: 1, ext: 'chrome-extension', extVersion: EXT_VERSION, multiTask: true }));
   });
   socket.addEventListener('message', (event) => {
@@ -673,28 +722,31 @@ function connect() {
       return;
     }
     if (message.type === 'hello-ok') {
-      wsReady = true;
-      void cleanupAllOrphans().then(() => {
-        sendToBridge({ type: 'log', text: '桥已就绪，任务窗口待命' });
-      });
-      stopHeartbeat();
-      heartbeatTimer = setInterval(() => sendToBridge({ type: 'ping' }), HEARTBEAT_MS);
+      bridge.ready = true;
+      // 同一扩展同时服务安装版与 Dev。仅首次握手清 SW 重启的孤儿，
+      // 后续桥接入不能关闭另一个实例的正在执行的页面。
+      startupCleanup ??= queueOrphanCleanup();
+      void startupCleanup.then(() => bridge.cleanup).then(() => {
+        sendToBridge({ type: 'log', text: '桥已就绪，任务窗口待命' }, bridge);
+      }).catch(() => {});
+      if (!heartbeatTimer) heartbeatTimer = setInterval(() => {
+        for (const target of bridges.values()) if (target.ready) sendToBridge({ type: 'ping' }, target);
+      }, HEARTBEAT_MS);
     } else if (message.type === 'cmd') {
-      void handleCommand(message);
+      void handleCommand(message, bridge);
     } else if (message.type === 'pong') {
       /* 心跳应答，无需处理 */
     }
   });
   socket.addEventListener('close', () => {
-    if (ws !== socket) return;
-    ws = null;
-    wsReady = false;
-    stopHeartbeat();
-    // 桥断开＝应用退出或桥重启：清所有任务的标签页；窗口常驻复用（R-10 用户迭代）。
-    void (async () => {
-      await cleanupAllOrphans();
-    })();
-    scheduleReconnect();
+    if (bridge.socket !== socket) return;
+    bridge.socket = null;
+    bridge.ready = false;
+    if (![...bridges.values()].some(target => target.ready)) stopHeartbeat();
+    // 仅回收断开实例的任务；并行实例及其页面继续工作。
+    bridge.cleanup = bridge.cleanup.catch(() => {}).then(() => orphanCleanup.catch(() => {})).then(() => cleanupBridgeTasks(port));
+    void bridge.cleanup.catch(error => sendToBridge({ type: 'log', text: `任务页面回收失败：${error.message}` }));
+    scheduleReconnect(bridge);
   });
   socket.addEventListener('error', () => {
     // close 会跟在 error 后面，统一在 close 里重连。
@@ -712,7 +764,7 @@ try {
 }
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== CONNECT_ALARM) return;
-  if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
+  for (const bridge of bridges.values()) connect(bridge);
 });
 
-void loadAgents().then(connect);
+void loadAgents().then(() => { for (const bridge of bridges.values()) connect(bridge); });

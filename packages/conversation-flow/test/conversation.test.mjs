@@ -90,6 +90,68 @@ test('lost receipt is not replayed; authoritative input identity reconciles it o
   f.client.dispose();
 });
 
+test('live acceptance clears an unknown send while an older receipt lookup is still waiting', async () => {
+  const lookup = deferred(); let lookups = 0, sent;
+  const f = fixture({client: {requestTimeoutMs: 5000}, transport: {
+    async command(request) {sent = request; throw Error('Lost reply');},
+    async lookupOperation() {lookups++; return lookup.promise;},
+  }});
+  try {
+    await f.client.start(); f.client.draft.setText('already received'); await f.client.sendDraft();
+    while (!lookups) await tick();
+    f.client.draft.setText('preserve newer draft');
+    f.set(snapshot({revision: 1, phase: 'preparing', activeRunId: 'accepted-run',
+      runs: {'accepted-run': {runId: 'accepted-run', inputIds: [sent.command.input.inputId]}}}));
+    await tick();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted');
+    assert.equal(projectConversationQueue(f.client.getSnapshot().snapshot, f.client.getSnapshot().operations, 'online').items.length, 0);
+    lookup.resolve({ok: false, code: 'conflict'}); await tick(); await tick();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted', 'late lookup cannot roll back accepted input');
+    assert.equal(f.client.draft.getSnapshot().text, 'preserve newer draft');
+  } finally {lookup.resolve(null); f.client.dispose();}
+});
+
+test('a lost command response after a live accepted input is successful without entering unknown', async () => {
+  const response = deferred(); let sent, calls = 0;
+  const f = fixture({client: {requestTimeoutMs: 5000}, transport: {command(request) {sent = request; calls++; return response.promise;}}});
+  try {
+    await f.client.start(); f.client.draft.setText('received before response'); const submit = f.client.sendDraft();
+    while (!sent) await tick();
+    f.set(snapshot({revision: 1, runs: {run: {runId: 'run', inputIds: [sent.command.input.inputId]}}}));
+    response.resolve(Promise.reject(Error('Connection closed after acceptance')));
+    assert.equal((await submit).ok, true);
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted');
+    assert.equal(calls, 1);
+  } finally {response.resolve({ok: true}); f.client.dispose();}
+});
+
+test('unknown submissions automatically query receipts without replaying commands', async () => {
+  let calls = 0, lookups = 0;
+  const f = fixture({transport: {
+    async command() {calls++; throw Error('Lost reply');},
+    async lookupOperation() {return ++lookups === 1 ? null : {ok: true};},
+  }});
+  try {
+    await f.client.start(); f.client.draft.setText('query instead of resend'); await f.client.sendDraft();
+    const deadline = Date.now() + 2500;
+    while (f.client.getSnapshot().operations[0].state === 'unknown' && Date.now() < deadline)
+      await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted');
+    assert.equal(f.client.draft.getSnapshot().text, '');
+    assert.equal(calls, 1); assert.ok(lookups >= 2);
+  } finally {f.client.dispose();}
+});
+
+test('a closed target run confirms an uncertain stop without waiting for a receipt', async () => {
+  const f = fixture({transport: {async command() {throw Error('Lost stop reply');}}});
+  f.set(snapshot({phase: 'running', activeRunId: 'run', runs: {run: {runId: 'run'}}}));
+  try {
+    await f.client.start(); await f.client.sendCommand({type: 'stop', targetRunId: 'run'});
+    f.set(snapshot({revision: 1, runs: {run: {runId: 'run', outcome: 'stopped'}}})); await tick();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted');
+  } finally {f.client.dispose();}
+});
+
 test('restarting a client converts sending into unknown and queries its durable receipt without replay', async () => {
   let calls = 0, lookups = 0;
   const f = fixture();
@@ -101,6 +163,49 @@ test('restarting a client converts sending into unknown and queries its durable 
   await restored.start(); await restored.refresh();
   assert.equal(calls, 0); assert.ok(lookups >= 1); assert.equal(restored.getSnapshot().operations[0].state, 'accepted');
   restored.dispose(); f.client.dispose();
+});
+
+test('a restored uncertain send from before a rewind releases its gate without replaying or clearing the current draft', async () => {
+  const f = fixture({transport: {async lookupOperation() {return null;}}});
+  const old = {id: 'legacy-send', state: 'unknown', generation: 1,
+    command: {type: 'send', input: {inputId: 'not-in-history', text: 'old submission'}}};
+  await f.operations.save(scope, [old]); f.set(snapshot({generation: 2, revision: 20}));
+  f.client.draft.setText('current draft');
+  try {
+    await f.client.start(); await tick();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'rejected');
+    assert.equal(f.client.getSnapshot().operations[0].result.code, 'superseded');
+    assert.equal(f.client.getSnapshot().error, '');
+    assert.equal(f.client.draft.getSnapshot().text, 'current draft');
+    assert.equal(f.commands.length, 0);
+    await f.client.sendDraft();
+    assert.equal(f.commands.length, 1);
+    assert.equal(f.commands[0].generation, 2);
+    assert.equal(f.commands[0].command.input.text, 'current draft');
+  } finally {f.client.dispose();}
+});
+
+test('a missing receipt in the current generation never authorizes clearing or replaying an uncertain send', async () => {
+  const f = fixture({transport: {async lookupOperation() {return null;}}});
+  await f.operations.save(scope, [{id: 'current-send', state: 'unknown', generation: 1,
+    command: {type: 'send', input: {inputId: 'not-in-history', text: 'still uncertain'}}}]);
+  try {
+    await f.client.start(); await f.client.refresh();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'unknown');
+    assert.equal(f.commands.length, 0);
+  } finally {f.client.dispose();}
+});
+
+test('retained input evidence confirms a pre-rewind send before considering it superseded', async () => {
+  const f = fixture();
+  await f.operations.save(scope, [{id: 'old-accepted', state: 'unknown', generation: 1,
+    command: {type: 'send', input: {inputId: 'retained-input', text: 'already accepted'}}}]);
+  f.set(snapshot({generation: 2, revision: 20, runs: {old: {runId: 'old', generation: 1, inputIds: ['retained-input'], outcome: 'completed'}}}));
+  try {
+    await f.client.start(); await tick();
+    assert.equal(f.client.getSnapshot().operations[0].state, 'accepted');
+    assert.equal(f.commands.length, 0);
+  } finally {f.client.dispose();}
 });
 
 test('unknown outcomes block later local operations until the first receipt is reconciled', async () => {
@@ -148,6 +253,43 @@ test('draft hydration races preserve new typing and scope switches discard old a
   old.resolve({revision: 100, text: 'old conversation'}); await a;
   assert.equal(draft.getSnapshot().text, 'typed while loading');
   await persistence.flush(); assert.equal(saved.at(-1).identity.conversationId, 'new'); assert.ok(saved.at(-1).value.revision > 100);
+  await persistence.dispose();
+});
+
+test('withdrawn queue content becomes a normal draft and preserves unsent text and metadata', async () => {
+  const draft = createComposerDraft();
+  draft.restore({text: '未发送草稿', attachments: [{attachmentId: 'current'}], references: [{key: 'current'}], skills: [{source: 'library', skillId: 'current'}]});
+  const oldRevision = draft.getSnapshot().revision;
+  draft.restoreQueuedInput({text: '取回的消息', attachments: [{attachmentId: 'queued'}], references: [{key: 'queued'}], skills: [{source: 'project', skillId: 'queued'}]});
+  const current = draft.getSnapshot();
+  assert.equal(current.text, '取回的消息\n\n未发送草稿');
+  for (const [key, id] of [['attachments', 'attachmentId'], ['references', 'key'], ['skills', 'skillId']]) assert.deepEqual(current[key].map(item => item[id]), ['queued','current']);
+  assert.equal(draft.accept(oldRevision), false);
+  assert.equal(draft.getPersistentSnapshot().text, current.text);
+  const saves = [];
+  const persistence = createDraftPersistence({draft, environmentId: 'local', storage: {async load() {return null;}, async save(identity, value) {saves.push({identity,value}); return {ok: true};}}});
+  await persistence.activate('source', 'preserve');
+  await persistence.restoreQueuedInput('other', {text: '延迟取回', attachments: [], references: [], skills: []});
+  assert.equal(draft.getSnapshot().text, current.text);
+  assert.equal(saves.at(-1).identity.conversationId, 'other');
+  await persistence.activate('other');
+  assert.equal(draft.getSnapshot().text, '延迟取回');
+  await persistence.dispose();
+});
+
+test('delayed queue withdrawal stays in its original conversation when storage cannot be read', async () => {
+  const draft = createComposerDraft(); let failRead = false;
+  const persistence = createDraftPersistence({draft, environmentId: 'local', storage: {
+    async load() {if (failRead) throw Error('offline'); return null;}, async save() {return {ok: true};},
+  }});
+  await persistence.activate('source'); draft.setText('原会话草稿');
+  await persistence.activate('other'); draft.setText('当前会话草稿');
+  failRead = true;
+  await persistence.restoreQueuedInput('source', {text: '取回消息', attachments: [], references: [], skills: []});
+  assert.equal(draft.getSnapshot().text, '当前会话草稿');
+  failRead = false;
+  await persistence.activate('source');
+  assert.equal(draft.getSnapshot().text, '取回消息\n\n原会话草稿');
   await persistence.dispose();
 });
 
@@ -362,7 +504,8 @@ test('Host queue takes over optimistic messages and unknown delivery restores re
   assert.deepEqual(messages(), []);
   assert.equal(f.client.draft.getSnapshot().text, 'keep recoverable');
   const state = f.client.getSnapshot();
-  assert.equal(projectConversationQueue(state.snapshot, state.operations, state.connection).items[0].error, '投递结果不明，待核对');
+  assert.equal(state.operations[0].state, 'unknown');
+  assert.equal(projectConversationQueue(state.snapshot, state.operations, state.connection).items.length, 0);
   f.client.dispose();
 });
 
@@ -390,7 +533,13 @@ test('offline and rejected sends stay drafts; outgoing attachments keep their id
   f.client.dispose();
 });
 
-test('connection-aware queue preserves offline outbox and unknown delivery warnings', async () => {
+test('Host review items explain the uncertainty without claiming automatic confirmation', () => {
+  const queue = projectConversationQueue(snapshot({pending: [{inputId: 'uncertain-host-input', text: 'preserved', state: 'needs-review'}]}));
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].error, '无法确认是否已处理，请先查看回复');
+});
+
+test('connection-aware queue preserves offline outbox without duplicating uncertain submissions', async () => {
   const f = fixture({transport: {async command() {throw Error('Lost receipt');}}});
   await f.client.start(); f.lifecycle('offline');
   f.client.draft.setText('do not lose this message'); await f.client.sendDraft();
@@ -401,9 +550,8 @@ test('connection-aware queue preserves offline outbox and unknown delivery warni
   state = f.client.getSnapshot();
   assert.equal(state.operations[0].state, 'unknown');
   const queue = projectConversationQueue(state.snapshot, state.operations, state.connection);
-  assert.equal(queue.items.length, 2);
-  assert.equal(queue.items[0].error, '投递结果不明，待核对');
-  assert.equal(queue.items[1].text, 'waiting behind the first message');
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].text, 'waiting behind the first message');
   f.client.dispose();
 });
 
@@ -424,6 +572,9 @@ test('rewind preview, rollback and cross-device generations use the shared trans
   const rejected = present(original, [], {...state, operations: [{...operation, state: 'rejected'}]});
   assert.equal(rejected.find(item => item.id === 'original').editDraft.text, '新问题');
   assert.ok(rejected.some(item => item.text === '旧回答'));
+  const cut = snapshot({generation: 2, revision: 1, timeline: [user('prefix', '保留')],
+    runs: {'original-run': {runId: 'original-run', generation: 1, inputIds: ['original'], outcome: 'stopped'}}});
+  assert.deepEqual(present(cut, [], state).map(item => item.id), ['prefix', 'replacement'], 'replacement stays visible between the cut and new run');
   const own = snapshot({generation: 2, revision: 2, runs: {run: {runId: 'run', inputIds: ['replacement']}}});
   assert.ok(present(own, [], state).some(item => item.id === 'replacement'));
   const remote = snapshot({generation: 2, revision: 2, timeline: [user('remote', '另一台设备')], runs: {run: {runId: 'run', inputIds: ['remote']}}});

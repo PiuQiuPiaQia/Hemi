@@ -62,6 +62,8 @@ export function Session({client, host}: {client: ConversationClient; host: Conve
 
 操作先保存到待发送记录，再交给通信适配器；重启时 sending 转为 unknown。unknown 通过稳定 inputId 的权威快照或 lookupOperation 回执核对，不自动重发；未确认前后续待发送操作暂停。明确的 waiting 操作可撤回，持久化撤回失败时恢复原项并反馈失败；`flushQueue()` 只向上游提交，真实执行顺序、权限及任务调度由服务端确认。离线仅允许发送输入进入本机待发送队列；停止、编辑等操作要求在线，不静默延后执行。保存失败的草稿在同一宿主中按会话保留内存副本，切换回来仍可找回。
 
+队列的“编辑”使用 `withdrawInput`（`restoreToDraft: true`）取出消息，再通过 `restoreQueuedInput()` 放入普通草稿，保留附件、引用、技能及已有未发送内容。用户主动发送才创建新的输入身份；忙碌时排到队尾，空闲时正常发送。取回不会保留原队列位置，也没有单独的保存或取消编辑状态。
+
 client 导入和构造不发请求。手动使用时调用 `start()`、订阅 `getSnapshot()` 并在结束时 `dispose()`；React 场景由 hook 管理 retain，无须重复 start。`sendDraft()`、`sendCommand()`、`refresh()`、`flushDraft()` 是普通调用入口。`createConversationActionHandler` 提供编辑、重试及停止的默认映射，任务／工作流／预览等宿主业务可通过 fallback 注入。
 
 详细边界与验收见 [会话核心实施说明](../../docs/technical/conversation-flow-sdk-session-core.md)。

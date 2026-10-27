@@ -17,6 +17,7 @@ import type {
   SkillSelectionView,
   ThinkingLevel,
   UsageRecord,
+  OAuthLoginState,
 } from '@shared/protocol';
 import { VoiceScreen } from '../voice/voice-screen';
 import { NavRail } from '../voice/nav-rail';
@@ -86,12 +87,9 @@ export function BotPage({
       >
     >({}),
     [draftVersion, bumpDraft] = useState(0),
-    [queueEditing, setQueueEditing] = useState<{
-      id: string;
-      inputId: string;
-      revision: number;
-      previous: BotDraft;
-    } | null>(null);
+    [composerFocusToken, setComposerFocusToken] = useState(0);
+  const queueTakingRef = useRef(false);
+  const [queueTaking, setQueueTaking] = useState(false);
   const {copy: copyRecovery, toastNode: recoveryToast} = useClipboardCopy();
   const stateRef = useRef(state),
     idRef = useRef(id),
@@ -99,6 +97,8 @@ export function BotPage({
     navigation = useRef(0),
     drafts = useRef(new Map<string, BotDraft>()),
     draftTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const openSettingsRef = useRef(onOpenSettings);
+  openSettingsRef.current = onOpenSettings;
   const controlWork = useRef<Promise<boolean> | null>(null);
   stateRef.current = state;
   idRef.current = id;
@@ -154,6 +154,7 @@ export function BotPage({
   const attachmentError = uploadJob?.error ?? '';
   const blocked =
     !state.online || (id !== null && conversation.connection !== 'online') || !state.cache?.enabled || !!unknownSend || !!state.busy || occupied;
+  const needsModel = state.online && state.cache?.models.length === 0;
   const applyState = useCallback((next: BotState) => {
     if (!alive.current) return;
     if (stateRef.current.binding?.instanceId !== next.binding?.instanceId) {
@@ -164,7 +165,6 @@ export function BotPage({
       setId(null);
       setDetail(null);
       setEditing(null);
-      setQueueEditing(null);
     }
     const normalized = next.cache
       ? {
@@ -237,11 +237,13 @@ export function BotPage({
     [api],
   );
   useEffect(() => {
-    const identity = state.binding?.instanceId;
-    if (!identity) return;
-    void call('component.ensure-current', {expectedInstanceId: identity}).catch(e => setError(message(e)));
-    return () => {void call('component.ensure-current', {expectedInstanceId: identity, active: false}).catch(() => {});};
-  }, [state.binding?.instanceId, call]);
+    if (!state.binding || !state.online) return;
+    let disposed = false;
+    void call<OAuthLoginState | null>('oauth.state').then(login => {
+      if (!disposed && login?.phase === 'login') openSettingsRef.current(true, 'bot');
+    }).catch(() => {});
+    return () => { disposed = true; };
+  }, [call, state.binding?.instanceId, state.online]);
   useEffect(() => {
     if (!id || !state.online) return;
     const identity = state.binding?.instanceId;
@@ -263,19 +265,11 @@ export function BotPage({
       instance = stateRef.current.binding?.instanceId;
     setError('');
     try {
-      if (queueEditing) {
-        await command({
-            type: 'finishEditInput',
-            inputId: queueEditing.inputId,
-            expectedEditRevision: queueEditing.revision,
-            cancel: true,
-        }, queueEditing.id);
-        changeDraftFor(queueEditing.id, queueEditing.previous);
-        setQueueEditing(null);
-      }
-      const data = stateRef.current.online
+      // Show the saved conversation immediately; the id/online effect above
+      // refreshes it without holding the whole page behind an SSH round trip.
+      const data = stateRef.current.cache?.details[id] ?? (stateRef.current.online
         ? await call<BotDetail>('session.open', { id })
-        : stateRef.current.cache?.details[id];
+        : undefined);
       if (!data) throw new Error('这条会话尚无本机缓存，恢复连接后可打开。');
       if (
         alive.current &&
@@ -305,12 +299,13 @@ export function BotPage({
       state.cache?.sessions.find((s) => s.id === state.cache?.selectedId) ??
       state.cache?.sessions[0];
     if (first) void open(first.id);
-    else if (state.online) void create();
+    else if (state.online && state.cache?.models.length) void create();
   }, [
     loaded,
     state.binding?.instanceId,
     state.online,
     state.cache?.sessions.length,
+    state.cache?.models.length,
     state.busy,
     state.cache?.enabled,
     id,
@@ -372,16 +367,9 @@ export function BotPage({
     if (typeof target === 'string' && flow?.timeline.some(item => item.kind === 'user' && item.id === target)) setEditing(target);
   }, [rejectedEdit?.id]);
   async function send(text = draft.text) {
-    if (!id || !flow || blocked || uploading) return;
+    if (!id || !flow || blocked || uploading || queueTakingRef.current) return;
     setError('');
     try {
-      if (queueEditing) {
-        await command({type: 'finishEditInput', inputId: queueEditing.inputId, expectedEditRevision: queueEditing.revision,
-          patch: {text, attachmentIds: draft.attachmentIds, references: draft.references, skills: draft.skills}});
-        changeDraftFor(id, queueEditing.previous);
-        setQueueEditing(null);
-        return;
-      }
       const client = conversation.client;
       if (client.draft.getSnapshot().token !== draftToken) client.draft.restore({token: draftToken, text,
         attachments: attachments.filter(item => draft.attachmentIds.includes(item.attachmentId)), references: draft.references, skills: draft.skills});
@@ -497,45 +485,34 @@ export function BotPage({
     }));
   }
   async function editQueue(inputId: string) {
-    if (!id || blocked || queueEditing) return;
+    if (!id || blocked || uploading || sending || queueTakingRef.current) return;
+    const source = flow?.pending.find(input => input.inputId === inputId);
+    if (!source) return;
+    queueTakingRef.current = true;
+    setQueueTaking(true);
+    const target = id;
     try {
-      const result = await command({ type: 'beginEditInput', inputId });
-      const input = result?.input;
-      if (!input) return;
-      setQueueEditing({
-        id,
-        inputId,
-        revision: input.editRevision,
-        previous: structuredClone(draft),
+      let removed = source;
+      try {
+        const result = await command({ type: 'withdrawInput', inputId, restoreToDraft: true, expectedEditRevision: source.editRevision });
+        if (!result?.ok) return;
+        // Older Hosts acknowledge withdrawal without echoing the removed input.
+        removed = result.input ?? source;
+      } catch (error) {
+        if (!(error instanceof Error) || (error as Error & {code?: string}).code !== 'unknown') throw error;
+        // The existing unknown-operation notice blocks resending until reconciliation.
+      }
+      const input = removed.editDraft ?? removed;
+      const currentDraft = drafts.current.get(target) ?? stateRef.current.cache?.details[target]?.draft ?? emptyDraft();
+      changeDraftFor(target, {
+        text: [input.text, currentDraft.text].filter(text => text.trim()).join('\n\n'),
+        attachmentIds: [...new Set([...(input.attachmentIds ?? []), ...currentDraft.attachmentIds])],
+        references: [...new Map([...(input.references ?? []), ...currentDraft.references].map(ref => [ref.key, ref])).values()],
+        skills: [...new Map([...(input.skills ?? []), ...currentDraft.skills].map(skill => [`${skill.source}:${skill.skillId}`, skill])).values()],
       });
-      changeDraft({
-        text: input.text,
-        attachmentIds: input.attachmentIds ?? [],
-        references: input.references ?? [],
-        skills: input.skills ?? [],
-      });
-    } catch (e) {
-      setError(message(e));
-    }
-  }
-  async function cancelQueueEdit() {
-    if (!queueEditing) return;
-    try {
-      await command(
-        {
-          type: 'finishEditInput',
-          inputId: queueEditing.inputId,
-          expectedEditRevision: queueEditing.revision,
-          cancel: true,
-        },
-        queueEditing.id,
-      );
-      changeDraftFor(queueEditing.id, queueEditing.previous);
-      setQueueEditing(null);
-      bumpDraft((v) => v + 1);
-    } catch (e) {
-      setError(message(e));
-    }
+      if (idRef.current === target) setComposerFocusToken(value => value + 1);
+    } catch (e) {setError(message(e));}
+    finally {queueTakingRef.current = false; setQueueTaking(false);}
   }
   async function editResend(messageId: string, text: string) {
     if (!id || !flow || blocked || sending) return;
@@ -571,6 +548,8 @@ export function BotPage({
     role: 'main',
     modelKey: c.modelKey,
     modelName: c.modelName,
+    providerName: c.providerName || state.cache?.models.find(model => model.key === c.modelKey)?.name,
+    requestedModel: c.modelName,
     at: c.at,
     input: c.usageDetail?.input ?? 0,
     output: c.usageDetail?.output ?? 0,
@@ -585,7 +564,7 @@ export function BotPage({
   const permissions = Object.values(current?.permissions ?? {}).filter(
     (p) => p.status === 'pending',
   );
-  const modelsSaved = !state.syncStatus?.automatic && state.syncStatus?.phase === 'confirmed' &&
+  const modelsSaved = state.syncStatus?.phase === 'confirmed' &&
     !!state.syncStatus.results?.length && state.syncStatus.results.every(result => result.ok);
   const actions = (
     <div className="h-bot-top-actions">
@@ -615,26 +594,17 @@ export function BotPage({
   );
   const banner = (
     <>
-      {state.componentStatus && state.componentStatus.phase !== 'current' ? <StatusNotice
-        title={state.componentStatus.phase === 'updating' ? `正在更新云端组件至 v${state.componentStatus.localVersion}`
-          : state.componentStatus.phase === 'checking' ? '正在检查云端组件版本…'
-          : state.componentStatus.phase === 'failed' ? '云端组件自动更新失败' : '云端组件等待更新'}
-        detail={state.componentStatus.message}
-        actions={state.componentStatus.phase === 'failed' ? <BotButton onClick={() => void call('component.ensure-current').catch(e => setError(message(e)))}>重试更新</BotButton> : null}/> : null}
       {queued && state.online ? <StatusNotice icon={<Clock3 size={18} aria-hidden="true"/>} title={waitingResource ? '等待资源' : '排队中'} detail={waitingResource ? activeTask ? `「${activeTask.title}」正在使用同一资源，相关操作结束后会自动继续。` : '同一资源正在使用中，相关操作结束后会自动继续。' : activeTask ? `「${activeTask.title}」${activeTask.waitingPermission ? '正在等待确认' : '正在执行'}，结束后会自动开始。` : '消息已受理，轮到后会自动开始。'} actions={activeTask ? <BotButton onClick={() => void open(activeTask.id)}>查看当前任务</BotButton> : null}/> : null}
-      {state.syncStatus?.automatic && state.syncStatus.phase === 'sending' ? <StatusNotice>正在配置云端模型…</StatusNotice> : null}
-      {state.modelConfigError ? <StatusNotice>{state.modelConfigError}</StatusNotice> : null}
       {state.syncStatus && state.syncStatus.phase !== 'sending' && !modelsSaved &&
-        (!state.modelConfigError || state.syncStatus.phase === 'unknown') &&
         (state.syncStatus.phase !== 'confirmed' || state.syncStatus.results?.some(result => !result.ok)) && (
         <StatusNotice>
           <span>
             {state.syncStatus.phase === 'unknown'
               ? '模型配置结果待确认。'
               : state.syncStatus.phase === 'interrupted'
-                ? '云端模型配置曾被中断，重新选用时会自动重试。'
+                ? '云端模型配置曾被中断，请在 Bot 设置中重新同步。'
                 : state.syncStatus.phase === 'not-received'
-                  ? '云端尚未完成模型配置，重新选用时会自动重试。'
+                  ? '云端尚未完成模型配置，请在 Bot 设置中重新同步。'
                   : state.syncStatus.results?.some((r) => !r.ok)
                     ? '部分模型未通过云端验证，原配置保留。'
                     : '模型配置结果待确认。'}
@@ -776,7 +746,7 @@ export function BotPage({
           {recoveryToast}
           {state.binding && current ? (
             <VoiceScreen
-              key={state.binding.instanceId}
+              key={`conversation:${state.binding.instanceId}`}
               topBarActions={actions}
               composerBanner={banner}
               workspaceControl={
@@ -854,7 +824,7 @@ export function BotPage({
               textModelReady={!!current?.modelKey}
               voiceModelReady={false}
               onOpenSettings={() => onOpenSettings()}
-              onOpenModelSettings={() => onOpenSettings(true, state.cache?.models.find(model => model.key === current?.modelKey)?.source === 'cloud' ? 'bot' : 'local')}
+              onOpenModelSettings={() => onOpenSettings(true, 'bot')}
               onNewConversation={() => void create()}
               onOpenConversation={(next) => void open(next)}
               onConversationRemoved={(removed) => {
@@ -917,7 +887,7 @@ export function BotPage({
                   setError(message(e)),
                 )
               }
-              onEditQueued={(inputId) => void editQueue(inputId)}
+              onEditQueued={editQueue}
               onPromoteQueued={(inputId) =>
                 void command({ type: 'promoteInput', inputId }).catch((e) =>
                   setError(message(e)),
@@ -936,15 +906,13 @@ export function BotPage({
                   setError(message(e)),
                 )
               }
-              queueEditing={!!queueEditing}
-              queueEditSaving={sending && !!queueEditing}
-              onCancelQueueEdit={() => void cancelQueueEdit()}
+              composerFocusToken={composerFocusToken}
               modelProfiles={botModelDirectory(state)}
               currentProfileId={current?.modelKey ?? null}
               onSelectModelProfile={(modelKey) => void update({ modelKey })}
               usageRecords={usage}
               usageRunning={running}
-              workspaceSendBlocked={blocked || uploading || sending}
+              workspaceSendBlocked={blocked || uploading || sending || queueTaking}
               workspaceSendBlockedHint={sending || occupied ? '' : uploading ? '附件上传完成后即可发送' : unknownSend ? '正在确认上一条消息的提交结果' : showConnectionWarning ? '正在恢复 Bot 连接，草稿会保留' : ''}
               onOpenAccessSettings={() => setPanel('scope')}
               flowDeliverables={
@@ -967,10 +935,10 @@ export function BotPage({
                 <NavRail page="bot" />
                 <section className="h-bot-onboarding">
                   {state.binding ? (
-                    <StateView kind={state.stoppedConfirmed||state.cache?.enabled===false?'empty':state.online||!showConnectionWarning?'loading':'error'} className="h-bot-welcome" role="status" illustration={<Server size={26} aria-hidden="true"/>} titleAs="h1" title={state.stoppedConfirmed||state.cache?.enabled===false?'Bot 已停止':state.online?'正在读取云端会话…':showConnectionWarning?'Bot 连接已断开':'正在连接 Bot…'} description={state.binding.host} descriptionClassName="h-bot-welcome-host">
+                    <StateView kind={needsModel||state.stoppedConfirmed||state.cache?.enabled===false?'empty':state.online||!showConnectionWarning?'loading':'error'} className="h-bot-welcome" role="status" illustration={<Server size={26} aria-hidden="true"/>} titleAs="h1" title={needsModel?'先为 Bot 配置模型':state.stoppedConfirmed||state.cache?.enabled===false?'Bot 已停止':state.online?'正在读取云端会话…':showConnectionWarning?'Bot 连接已断开':'正在连接 Bot…'} description={needsModel?'登录订阅账号，或添加 API Key 模型后开始对话。':state.binding.host} descriptionClassName="h-bot-welcome-host">
                       <div className="h-bot-welcome-actions">
-                        <BotButton
-                          primary={state.stoppedConfirmed || state.cache?.enabled === false}
+                        {(state.stoppedConfirmed || state.cache?.enabled === false) && <BotButton
+                          primary
                           disabled={!!state.busy}
                           onClick={() =>
                             void call('service.start').catch((e) =>
@@ -979,9 +947,9 @@ export function BotPage({
                           }
                         >
                           启动 Bot
-                        </BotButton>
-                        <BotButton disabled={!!state.busy} onClick={() => onOpenSettings()}>
-                          Bot 设置
+                        </BotButton>}
+                        <BotButton primary={needsModel} disabled={!!state.busy} onClick={() => onOpenSettings(needsModel, 'bot')}>
+                          {needsModel ? '配置模型与账号' : 'Bot 设置'}
                         </BotButton>
                         {!state.online && (showConnectionWarning || state.cache?.enabled === false) && (
                           <BotButton
@@ -1002,7 +970,7 @@ export function BotPage({
                     <BotSetup
                       api={api}
                       state={state}
-                      onDone={() => setId(null)}
+                      onDone={() => { setId(null); if (!stateRef.current.cache?.models.length) onOpenSettings(true, 'bot'); }}
                     />
                   ) : (
                     <LoadingState description="正在读取 Bot 连接…"/>
@@ -1050,7 +1018,7 @@ export function BotPage({
           )}
           {panel === 'pairing' && (
             <BotPairing
-              key={state.binding?.instanceId}
+              key={`pairing:${state.binding?.instanceId}`}
               state={state}
               call={call}
               onClose={() => setPanel(null)}

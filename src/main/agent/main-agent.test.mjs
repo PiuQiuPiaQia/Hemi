@@ -70,7 +70,7 @@ const textOf = (body) => JSON.stringify(body.messages);
 const stripCache = (value) => JSON.parse(JSON.stringify(value, (key, item) => key === 'cache_control' ? undefined : item));
 const tinyPng = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGP4ryDwHxkzkC4AAKLAIuEUh8J9AAAAAElFTkSuQmCC' };
 
-async function withAgent(responder, toolDeps, fn, { tools = null, orchestrator = false, api = 'anthropic-messages', readMemoryView = null, sessionOptions = {} } = {}) {
+async function withAgent(responder, toolDeps, fn, { tools = null, orchestrator = false, api = 'anthropic-messages', sessionOptions = {} } = {}) {
   const mock = await startMock(responder);
   const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'h56-main-cwd-')));
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'h56-main-agent-'));
@@ -78,7 +78,6 @@ async function withAgent(responder, toolDeps, fn, { tools = null, orchestrator =
     conversationId: 'conv-test',
     appendSystem: buildAgentAppendSystem({ routingSection: '［子 agent · 按需派活］', orchestrator }),
     toolDeps,
-    readMemoryView,
     sessionOptions: {
       cwd, agentDir, accessWorkspaceDir: cwd,
       ...(tools ? { tools } : {}),
@@ -107,6 +106,24 @@ const baseDeps = (overrides = {}) => ({
   conversationRead: async () => ({ text: '', nextOffset: null }),
   ...overrides,
 });
+
+for (const api of ['openai-completions', 'anthropic-messages']) {
+  test(`${api}：后台失败随工具批次进入下一次请求，保留退出状态与完整工具顺序`,
+    { timeout: 10000, skip: process.platform === 'win32' && 'POSIX shell fixture' }, async () => {
+      await withAgent((_body, index) => index === 1
+        ? { toolCalls: [{ name: 'bash', args: { command: 'sleep 0.1; printf BACKGROUND_API_FAILURE >&2; exit 7', run_in_background: true } }] }
+        : index === 2 ? { toolCalls: [{ name: 'bash', args: { command: 'sleep 0.3; printf INDEPENDENT_DONE' } }] }
+          : { text: 'DONE' }, baseDeps(), async ({ agent, mock }) => {
+        const result = await agent.runTurn({ userText: 'Check background failure while working' });
+        assert.equal(result.modelError, null); assert.equal(result.lastText, 'DONE');
+        assert.equal(mock.requests.length, 3);
+        const actual = textOf(mock.requests[2]);
+        assert.match(actual, /后台命令完成 · 宿主观察/); assert.match(actual, /exit=7/);
+        const entries = (await agent.exportEntries()).entries;
+        assert.equal(entries.filter(entry => entry.customType === 'hemi_background_command_result').length, 1);
+      }, { api, tools: ['bash'] });
+    });
+}
 
 test('真实 Pi SDK 把准备卡更新作为主 agent 工具调用，不创建另一会话', async () => {
   let updates = 0;
@@ -172,8 +189,7 @@ for (const api of ['openai-completions', 'anthropic-messages']) {
 }
 
 for (const api of ['openai-completions', 'anthropic-messages']) {
-  test(`${api}：记忆开启时，工具／续聊／事件／重建保留上下文与原图；编辑按旧身份回卷`, async () => {
-    const readMemoryView = async () => ({ ok: true, data: { text: 'STABLE_MEMORY_VIEW', omittedCount: 0 } });
+  test(`${api}：工具／续聊／事件／重建保留上下文与原图；编辑按旧身份回卷`, async () => {
     await withAgent((_body, n) => n === 1
       ? { toolCalls: [{ name: 'task', args: { agent: 'explorer', description: '查证', prompt: 'READ_ONLY_PROBE' } }] }
       : { text: `ANSWER_${n}` }, baseDeps(), async ({ agent, mock, cwd, agentDir }) => {
@@ -190,7 +206,6 @@ for (const api of ['openai-completions', 'anthropic-messages']) {
       stablePrefix(mock.requests[0], mock.requests[1], 'FIRST_USER');
       const firstUser = stripCache(mock.requests[0].messages[userIndex(mock.requests[0], 'FIRST_USER')]);
       assert.ok(firstUser.content.some(block => ['image', 'image_url'].includes(block.type)), '首请求包含真实图片块');
-      assert.match(JSON.stringify(mock.requests[0]), /STABLE_MEMORY_VIEW/, '记忆投影实际进入请求');
       await agent.runTurn({ userText: 'SECOND_USER', inputId: 'in-second', contextText: 'FROZEN_CTX_SECOND' });
       stablePrefix(mock.requests[1], mock.requests[2], 'FIRST_USER');
       const archiveFile = path.join(cwd, 'saved-agent.json');
@@ -199,7 +214,7 @@ for (const api of ['openai-completions', 'anthropic-messages']) {
       const makeRestored = (saved) => createMainAgent({
         conversationId: 'conv-test',
         appendSystem: buildAgentAppendSystem({ routingSection: '［子 agent · 按需派活］' }),
-        toolDeps: baseDeps(), readMemoryView, entries: [saved.header, ...saved.entries],
+        toolDeps: baseDeps(), entries: [saved.header, ...saved.entries],
         sessionOptions: { cwd, agentDir, accessWorkspaceDir: cwd, model: { baseUrl: mock.base, api, apiKey: 'k', supportsVision: true, model: api === 'anthropic-messages' ? 'claude-opus-5-5' : 'gpt-6.1-sol' } },
       });
       let restored = makeRestored(JSON.parse(fs.readFileSync(archiveFile, 'utf8')));
@@ -230,7 +245,7 @@ for (const api of ['openai-completions', 'anthropic-messages']) {
           assert.ok(edited.messages[current - 1].content.some(b => b.cache_control), '第4断点仍标在旧回合的回答上');
         }
       } finally { restored.dispose(); }
-    }, { api, readMemoryView });
+    }, { api });
   });
 }
 
@@ -318,7 +333,7 @@ test('entriesFromTurns：跳过错误条/撤回条/任务卡，合成消息带�
 });
 
 test('显式工具白名单严格裁剪；工具声明是实际执行能力的依据', async () => {
-  const deps = baseDeps({ memoryWrite: async () => ({ ok: true }), runtimeDiagnostics: () => ({ ok: true }) });
+  const deps = baseDeps({ runtimeDiagnostics: () => ({ ok: true }) });
   await withAgent(() => ({ text: 'OK' }), deps, async ({ agent, mock }) => {
     await agent.runTurn({ userText: '打开 liblib.tv' });
     // SDK 自带的 __pi_* 内部占位不计（两种模式都有）。

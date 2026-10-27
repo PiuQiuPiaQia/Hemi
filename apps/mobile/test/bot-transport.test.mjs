@@ -89,3 +89,40 @@ test('missing receipt is read-only and permanent Host rejection is a rejected op
   assert.equal(client.getSnapshot().operations.at(-1).state, 'rejected');
   assert.equal(client.draft.getSnapshot().text, '服务已停时发送');
 });
+
+test('interrupted Host receipt is definitive and read-only', async () => {
+  const calls = [], scope = {environmentId: 'bot:instance', conversationId: 'conversation'};
+  const transport = createBotConversationTransport({async request(method) {calls.push(method); return {status: 'interrupted'};}}, 'instance', 'conversation');
+  assert.deepEqual(await transport.lookupOperation(scope, 'interrupted-request', context()),
+    {ok: false, code: 'rejected', message: '上次发送已中断，原文已保留，可以重新发送。'});
+  assert.deepEqual(calls, ['operation.get']);
+});
+
+test('an actual Host rewind fences a missing legacy send; restoring the SDK unblocks the current draft without replay', async t => {
+  const f = await fixture(t);
+  await f.request('flow.command', {id: f.scope.conversationId, generation: 1,
+    command: {type: 'send', input: {inputId: 'original', text: 'before edit'}}});
+  await f.request('flow.command', {id: f.scope.conversationId, generation: 1,
+    command: {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: 'after edit'}}});
+  const deadline = Date.now() + 3000;
+  let current;
+  do {current = await f.transport.fetchSnapshot(f.scope, context()); if (current.generation === 2) break; await new Promise(resolve => setTimeout(resolve, 10));} while (Date.now() < deadline);
+  assert.equal(current.generation, 2);
+  const fenced = await f.transport.command({scope: f.scope, generation: 1, requestId: 'prove-old-generation-fence',
+    command: {type: 'send', input: {inputId: 'never-dispatched', text: 'old generation'}}}, context());
+  assert.equal(fenced.ok, false);
+  assert.equal(await f.transport.lookupOperation(f.scope, 'legacy-missing-receipt', context()), null);
+  let journal = [{id: 'legacy-missing-receipt', state: 'unknown', generation: 1,
+    command: {type: 'send', input: {inputId: 'legacy-input', text: 'uncertain old input'}}}];
+  const client = createConversation({scope: f.scope, transport: f.transport, pollIntervalMs: 0,
+    storage: {operations: {async load() {return journal;}, async save(_scope, value) {journal = structuredClone(value);}}}});
+  t.after(() => client.dispose());
+  client.draft.setText('new draft');
+  const calls = f.calls.filter(call => call.method === 'flow.command').length;
+  await client.start(); await client.refresh();
+  assert.equal(client.getSnapshot().operations[0].result.code, 'superseded');
+  assert.equal(client.getSnapshot().error, '');
+  assert.equal(client.draft.getSnapshot().text, 'new draft');
+  assert.equal(f.calls.filter(call => call.method === 'flow.command').length, calls);
+  assert.ok(!f.executions.some(run => ['legacy-input', 'never-dispatched'].includes(run.envelope.inputId)));
+});

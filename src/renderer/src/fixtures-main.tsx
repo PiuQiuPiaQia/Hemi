@@ -6,7 +6,6 @@ import type {
   ApplicationChoice,
   ConversationSummary,
   ConversationStatus,
-  MemoryEntryView,
   TaskArtifact,
   TaskDelivery,
   TaskStateSnapshot,
@@ -30,10 +29,6 @@ import { RemoteFolderDialog } from '@/windows/voice/remote-folder-dialog';
 import { SettingsScreen } from '@/windows/voice/settings-screen';
 import { setModelProfilesFixtureState } from '@/windows/voice/model-profiles-section';
 import { setProviderImportFixtureState } from '@/windows/voice/newapi-import-section';
-import { setMemorySectionPreset } from '@/windows/voice/memory-section';
-import type { MemorySectionPreset } from '@/windows/voice/memory-section';
-import { MemoryNotices } from '@/windows/voice/memory-notice';
-import type { MemoryNoticeItem } from '@/windows/voice/memory-notice';
 import { SetupScreen } from '@/windows/voice/setup-screen';
 import { ConversationContextMenu } from '@/windows/voice/conversation-context-menu';
 import { FloatingCaption } from '@/windows/caption/floating-caption';
@@ -1304,14 +1299,8 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
     globalPushToTalkReady: true,
     globalPushToTalkListening: true,
   }),
-  // 034 v3：设置页常驻挂载记忆区块（MemorySection 不随 tab 切换卸载），
-  // 所有 settings 场景挂载即读 getMemoryStatus——缺方法会 TypeError 炸
-  // console（settings-model 曾因此过不了零错误门）；悬浮球开关桩同补。
-  getMemoryStatus: async () => ({ exitSummaryEnabled: true, memoryDir: '~/Library/Application Support/hemi/memory' }),
-  setMemoryExitSummary: async (next: { enabled?: boolean } | unknown) => ({
-    exitSummaryEnabled: (next as { enabled?: boolean })?.enabled ?? true,
-    memoryDir: '~/Library/Application Support/hemi/memory',
-  }),
+  inspectAgentEnvironment: async () => ({ owner: '此桌面', memoryDir: '/fixture/pi-memory', files: [], summaryUsageIncluded: false }),
+  readAgentRuntimeFile: async () => ({ path: 'MEMORY.md', text: '', modifiedAt: 0 }),
   setFloatingOrbEnabled: async (next: unknown) => ({ floatingOrbEnabled: next === true }),
   // 031 模型组目录：settings-model 场景静态渲染需要（缺方法会把错误文案画进
   // 截图）；目录形状与 settings-model-profiles 场景的 fixture 同源，动作回执
@@ -2018,166 +2007,13 @@ const designParityTask: TaskStateSnapshot = {
   ],
 } as unknown as TaskStateSnapshot;
 
-/**
- * 037 记忆页 fixtures：分域条目桩（内存里真改，dev 下可交互）＋截图预设。
- * 视觉基准 requirements/040-visual-system/designs/2026-10-03-memory（Hemi 项目 3 条、全局约定 2 条＋3 条待整理）。
- * Electron 里 contextBridge 的 hemiVoice 只读、已存在——跳过桩直接用真桥。
- */
-function installMemoryFixture(options: { preset?: MemorySectionPreset; failScope?: string } = {}) {
-  setMemorySectionPreset(options.preset ?? null);
-  if (window.hemiVoice) return;
-  const at = (hours: number, minutes: number, daysAgo = 0) => {
-    const date = new Date();
-    date.setDate(date.getDate() - daysAgo);
-    date.setHours(hours, minutes, 0, 0);
-    return date.getTime();
-  };
-  type Scope = MemoryEntryView['scope'];
-  const scopeOfKey = (key: string): Scope =>
-    key.startsWith('global/')
-      ? { kind: 'global', target: key.slice(7) as 'user' | 'facts' }
-      : { kind: 'workspace', workspaceId: key.slice(10) };
-  const keyOf = (scope: Scope) => (scope.kind === 'global' ? `global/${scope.target}` : `workspace/${scope.workspaceId}`);
-  let seq = 0;
-  const entry = (key: string, title: string, body: string, kind: string, updatedAt: number, sourceRefs: string[] = []): MemoryEntryView => {
-    seq += 1;
-    return { id: `mem-fx${seq}`, version: 1, kind, title, body, sourceRefs, relatedEntryIds: [], createdAt: updatedAt, updatedAt, scope: scopeOfKey(key) };
-  };
-  const db: Record<string, MemoryEntryView[]> = {
-    'global/user': [
-      entry('global/user', '称呼我小周', '', 'profile', at(9, 12, 6)),
-      entry('global/user', '喜欢简短的回答', '先给结论，细节按需展开。', 'profile', at(16, 40, 2)),
-      entry('global/user', '默认用中文交流', '技术名词保留英文。', 'profile', at(10, 5, 9)),
-    ],
-    'global/facts': [
-      entry('global/facts', '验收以真机为准', '截图与日志只作辅助证据。', 'fact', at(15, 30, 5)),
-      entry('global/facts', '文件不直接删除，移到废纸篓', '', 'feedback', at(11, 8, 3)),
-    ],
-    'workspace/ws-hemi': [
-      entry('workspace/ws-hemi', '周报使用英文', '这个项目的周报正文和标题都用英文写，专有名词保留原文。', 'fact', at(14, 2), ['10月3日对话「这个项目的周报都用英文」']),
-      entry('workspace/ws-hemi', '排查快捷键前先检查辅助功能权限', '系统更新后辅助功能权限可能被重置，先去「隐私与安全性」确认 Hemi 仍被勾选。', 'experience', at(11, 40), ['task:排查快捷键无响应']),
-      entry('workspace/ws-hemi', '构建并发数用 4', '打包时并发开到 8 会把内存吃满导致签名步骤超时，4 最稳。', 'experience', new Date(new Date().getFullYear(), 8, 28, 10, 0).getTime()),
-    ],
-    'workspace/default': [
-      entry('workspace/default', '下载的发票按月份归档', '', 'fact', at(18, 20, 1)),
-    ],
-  };
-  let revision = 3;
-  const ok = (data: unknown) => ({ ok: true, data, operationId: `op-fixture-${Date.now()}` });
-  const listeners = new Set<(event: unknown) => void>();
-  const stub = {
-    listMemoryEntries: async ({ scope, query = '', cursor = 0, limit = 50 }: { scope: Scope; query?: string; cursor?: number; limit?: number }) => {
-      const key = keyOf(scope);
-      if (options.failScope === key) return { ok: false, code: 'io_error', message: '记忆文件被别的程序占用' };
-      const all = db[key] ?? [];
-      const needle = query.trim().toLowerCase();
-      const matched = needle ? all.filter((e) => `${e.title}\n${e.body}`.toLowerCase().includes(needle)) : all;
-      const page = matched.slice(cursor, cursor + limit);
-      return {
-        ok: true,
-        data: {
-          scope, revision, epoch: 1,
-          loose: { kind: key === 'global/user' ? 'profile' : 'unsorted', count: key === 'global/facts' ? 3 : 0, issues: [] },
-          entries: page, total: matched.length, nextCursor: cursor + limit < matched.length ? cursor + limit : null,
-        },
-      };
-    },
-    mutateMemoryEntry: async (input: { scope: Scope; action: 'add' | 'replace'; entryId?: string; title?: string; body?: string; kind?: string }) => {
-      const key = keyOf(input.scope);
-      const list = (db[key] ??= []);
-      revision += 1;
-      if (input.action === 'add') {
-        const added = entry(key, input.title ?? '', input.body ?? '', input.kind ?? 'fact', Date.now());
-        list.unshift(added);
-        return ok({ entry: added });
-      }
-      const index = list.findIndex((e) => e.id === input.entryId);
-      if (index < 0) return { ok: false, code: 'not_found', message: '这条记忆已不存在' };
-      list[index] = { ...list[index], title: input.title ?? list[index].title, body: input.body ?? list[index].body, version: list[index].version + 1, updatedAt: Date.now() };
-      return ok({ entry: list[index] });
-    },
-    moveMemoryEntry: async ({ fromScope, entryId, toScope }: { fromScope: Scope; entryId: string; toScope: Scope }) => {
-      const from = db[keyOf(fromScope)] ?? [];
-      const index = from.findIndex((e) => e.id === entryId);
-      if (index < 0) return { ok: false, code: 'not_found', message: '这条记忆已不存在' };
-      const [moved] = from.splice(index, 1);
-      const next = { ...moved, scope: toScope };
-      (db[keyOf(toScope)] ??= []).unshift(next);
-      revision += 1;
-      return ok({ entry: next });
-    },
-    forgetMemoryEntry: async ({ scope, entryId }: { scope: Scope; entryId: string }) => {
-      const list = db[keyOf(scope)] ?? [];
-      const index = list.findIndex((e) => e.id === entryId);
-      if (index >= 0) list.splice(index, 1);
-      revision += 1;
-      return ok({ removedEntryId: entryId, removedRecordIds: [] });
-    },
-    clearMemoryScope: async ({ scope }: { scope: Scope }) => {
-      db[keyOf(scope)] = [];
-      revision += 1;
-      return ok({ cleared: true });
-    },
-    undoMemoryMutation: async () => ok({ undone: 'restored' }),
-    onMemoryChanged: (cb: (event: unknown) => void) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    getMemoryState: async () => ({
-      documents: {
-        user: { text: '<!-- hemi:entry id=mem-fx1 v=1 kind=profile -->\n称呼我小周\n<!-- /hemi:entry -->\n', issue: null },
-        memory: { text: '<!-- hemi:entry id=mem-fx4 v=1 kind=fact -->\n验收以真机为准\n截图与日志只作辅助证据。\n<!-- /hemi:entry -->\n\n项目 Hemi 的构建脚本在 scripts/ 下\n用户的打印机是 HP M227\n周会改到周二上午\n', issue: null },
-      },
-      limits: { user: 2000, memory: 4000 },
-    }),
-    saveMemoryDocument: async () => ({ ok: true }),
-    openMemoryDirectory: async () => ({ ok: true }),
-    getWorkspaceState: async () => ({
-      default: { id: 'default', type: 'default', name: '默认空间', dir: '~', status: 'ok' },
-      projects: [
-        { id: 'ws-hemi', type: 'project', name: 'Hemi 项目', dir: '~/Projects/Hemi', status: 'ok' },
-        { id: 'ws-atlas', type: 'project', name: 'Atlas', dir: '/Volumes/Projects/Atlas', status: 'ok' },
-        { id: 'ws-kiwi', type: 'project', name: 'Kiwi 官网', dir: '~/Projects/kiwi-site', status: 'ok' },
-        { id: 'ws-site', type: 'project', name: '旧官网', dir: '~/Projects/site', status: 'missing' },
-      ],
-    }),
-    getMemoryStatus: async () => ({ exitSummaryEnabled: true, memoryDir: '~/Library/Application Support/hemi/memory' }),
-    setMemoryExitSummary: async (next: { enabled: boolean }) => ({
-      exitSummaryEnabled: next.enabled,
-      memoryDir: '~/Library/Application Support/hemi/memory',
-    }),
-  };
-  Object.defineProperty(window, 'hemiVoice', { value: { ...stubBridgeMethods, ...stub }, configurable: true });
-}
-
-function memoryScene(options: { preset?: MemorySectionPreset; failScope?: string } = {}) {
-  installMemoryFixture(options);
+function memoryScene() {
+  if (!window.hemiVoice) Object.defineProperty(window, 'hemiVoice', { configurable: true, value: {
+    ...stubBridgeMethods,
+    inspectAgentEnvironment: async () => ({ owner: '此桌面', memoryDir: '/fixture/pi-memory', files: [{ path: 'MEMORY.md', size: 64, modifiedAt: Date.now() }], summaryUsageIncluded: false }),
+    readAgentRuntimeFile: async () => ({ path: 'MEMORY.md', text: '默认用中文交流。\n\n#preference 回答先给结论，细节按需展开。', modifiedAt: Date.now() }),
+  } });
   return <SettingsScreen {...settingsProps} initialPage="memory" />;
-}
-
-const MEMORY_WS = { tab: 'workspace', workspaceId: 'ws-hemi' } as const;
-
-/** 037 对话内记忆提示场景：两轮对话 + 提示条（状态各一）。 */
-function memoryChatScene(items: Array<Omit<MemoryNoticeItem, 'id'>>, lines: Array<[string, 'user' | 'hemi']>) {
-  const noop = () => {};
-  return (
-    <VoiceScreen
-      {...screenProps({
-        sessionState: 'idle',
-        callActive: false,
-        transcripts: transcripts(lines),
-        memoryNotice: (
-          <MemoryNotices
-            items={items.map((item, index) => ({ ...item, id: `fx-mn-${index}` }))}
-            onView={noop}
-            onUndo={noop}
-            onRestore={noop}
-            onToggleDetail={noop}
-          />
-        ),
-      })}
-    />
-  );
 }
 
 /** 043：ApplicationChoice 桩——rowId 选择、appRef+catalogRevision 引用（宿主桩）。 */
@@ -2314,6 +2150,8 @@ function auditSessionScene(processOpen: boolean) {
 }
 
 function SortableQueueFixture({ full = false, paused = false }: { full?: boolean; paused?: boolean }) {
+    const [draft, setDraft] = useState('');
+    const [focusToken, setFocusToken] = useState(0);
     const [queue, setQueue] = useState<TurnQueueState>({ paused, items: [
       { queueItemId: 'sort-b', conversationId: 'conv-fixture', text: '先查一下天津明天的天气', revision: 1, dispatchState: 'pending', error: '', createdAt: now, attachmentIds: [], references: [] },
       { queueItemId: 'sort-c', conversationId: 'conv-fixture', text: '再看看高铁票，按出发时间整理', revision: 1, dispatchState: 'pending', error: '', createdAt: now, attachmentIds: [], references: [] },
@@ -2322,13 +2160,26 @@ function SortableQueueFixture({ full = false, paused = false }: { full?: boolean
     ] });
     return <VoiceScreen {...screenProps({
       sessionState: 'idle', callActive: false, turnPhase: 'thinking', textModelBusy: true, queueState: queue,
+      textDraft: draft, onTextDraftChange: setDraft, composerFocusToken: focusToken,
+      onTextSend: () => {
+        if (!draft.trim()) return;
+        setQueue(current => ({ ...current, items: [...current.items, { queueItemId: crypto.randomUUID(), conversationId: 'conv-fixture', text: draft,
+          revision: 1, dispatchState: 'pending', error: '', createdAt: now, attachmentIds: [], references: [] }] }));
+        setDraft('');
+      },
       onReorderQueued: (id, overId) => setQueue((current) => {
         const items = [...current.items]; const from = items.findIndex((item) => item.queueItemId === id); const to = items.findIndex((item) => item.queueItemId === overId);
         if (from >= 0 && to >= 0) items.splice(to, 0, items.splice(from, 1)[0]);
         return { ...current, items };
       }),
       onPromoteQueued: (id) => setQueue((current) => ({ ...current, items: current.items.map((item) => item.queueItemId === id ? { ...item, dispatchState: 'promoting' } : item) })),
-      onEditQueued: (id) => setQueue((current) => ({ ...current, items: current.items.map((item) => item.queueItemId === id ? { ...item, dispatchState: 'editing' } : item) })),
+      onEditQueued: (id) => {
+        const item = queue.items.find(item => item.queueItemId === id);
+        if (!item) return;
+        setQueue(current => ({ ...current, items: current.items.filter(item => item.queueItemId !== id) }));
+        setDraft(current => [item.text, current].filter(Boolean).join('\n\n'));
+        setFocusToken(value => value + 1);
+      },
       onWithdrawQueued: (id) => setQueue((current) => ({ ...current, items: current.items.filter((item) => item.queueItemId !== id) })),
     })} />;
   }
@@ -4441,79 +4292,7 @@ const scenes: Record<string, () => React.ReactElement> = {
       />
     );
   },
-  // 037 记忆页：桩与预设见 installMemoryFixture；视觉基准 designs/2026-10-03-memory。
-  'settings-memory': () => memoryScene({ preset: { ...MEMORY_WS, expanded: ['周报使用英文'] } }),
-  'settings-memory-edit': () =>
-    memoryScene({
-      preset: {
-        ...MEMORY_WS,
-        external: true,
-        editor: {
-          title: '构建并发数用 4',
-          draftBody: '打包时并发开到 8 会把内存吃满导致签名步骤超时，4 最稳。CI 上也用 4。',
-          conflict: { title: '构建并发数用 6', body: '换到 M4 Pro 后并发 6 也稳定，签名不再超时。' },
-        },
-      },
-    }),
-  'settings-memory-add': () => memoryScene({ preset: { ...MEMORY_WS, editor: { add: true, draftTitle: '发版前先跑 typecheck' } } }),
-  'settings-memory-menu': () => memoryScene({ preset: { ...MEMORY_WS, menu: { entry: '构建并发数用 4' } } }),
-  'settings-memory-page-menu': () => memoryScene({ preset: { ...MEMORY_WS, menu: 'page' } }),
-  'settings-memory-ws': () => memoryScene({ preset: { ...MEMORY_WS, menu: 'ws' } }),
-  'settings-memory-user': () => memoryScene({ preset: { tab: 'user' } }),
-  'settings-memory-loose': () => memoryScene({ preset: { tab: 'facts' } }),
-  'settings-memory-search': () => memoryScene({ preset: { ...MEMORY_WS, query: '并发' } }),
-  'settings-memory-empty': () => memoryScene({ preset: { tab: 'workspace', workspaceId: 'ws-atlas' } }),
-  'settings-memory-error': () =>
-    memoryScene({ preset: { tab: 'workspace', workspaceId: 'ws-kiwi' }, failScope: 'workspace/ws-kiwi' }),
-  'settings-memory-clear': () => memoryScene({ preset: { ...MEMORY_WS, dialog: 'clear' } }),
-  'settings-memory-delete': () => memoryScene({ preset: { ...MEMORY_WS, dialog: { delete: '构建并发数用 4' } } }),
-  'settings-memory-move': () => memoryScene({ preset: { ...MEMORY_WS, dialog: { move: '周报使用英文', to: 'global/facts' } } }),
-  'settings-memory-leave': () =>
-    memoryScene({
-      preset: {
-        ...MEMORY_WS,
-        editor: { title: '周报使用英文', draftBody: '这个项目的周报正文和标题都用英文写，专有名词保留原文；会议纪要仍用中文。' },
-        dialog: 'leave',
-      },
-    }),
-  'settings-memory-toast': () =>
-    memoryScene({ preset: { ...MEMORY_WS, toast: { text: '已删除「构建并发数用 4」', undo: true } } }),
-  'settings-memory-raw': () => memoryScene({ preset: { tab: 'facts', raw: true } }),
-  'settings-memory-switch-error': () => memoryScene({ preset: { ...MEMORY_WS, switchError: '没能保存，请重试' } }),
-  // 037 对话内的记忆提示：记住 / 任务经验 / 撤销后 / 冲突 / 失败。
-  'chat-memory-record': () =>
-    memoryChatScene(
-      [
-        { state: 'ok', verb: '记住了', title: '周报使用英文', scopeKey: 'workspace/ws-hemi', scopeLabel: 'Hemi 项目', operationId: 'op-1' },
-        { state: 'ok', verb: '记下一条任务经验', title: '排查快捷键前先检查辅助功能权限', scopeKey: 'workspace/ws-hemi', scopeLabel: 'Hemi 项目', operationId: 'op-2' },
-      ],
-      [
-        ['这个项目的周报都用英文写吧。', 'user'],
-        ['好的，之后 Hemi 项目的周报正文和标题都用英文，专有名词保留原文。', 'hemi'],
-      ],
-    ),
-  'chat-memory-forget': () =>
-    memoryChatScene(
-      [
-        { state: 'forgot', title: '构建并发数用 4', scopeKey: 'workspace/ws-hemi', scopeLabel: 'Hemi 项目', operationId: 'op-3' },
-      ],
-      [
-        ['把「构建并发数用 4」这条忘掉吧，现在用 6 了。', 'user'],
-        ['已经忘掉了。以后打包时我会按你当时说的来。', 'hemi'],
-      ],
-    ),
-  'chat-memory-states': () =>
-    memoryChatScene(
-      [
-        { state: 'undone', title: '周报使用英文', scopeKey: 'workspace/ws-hemi', scopeLabel: 'Hemi 项目', operationId: null, snapshot: { title: '周报使用英文', body: '', kind: 'fact', sourceRefs: [] } },
-        { state: 'conflict', title: '构建并发数用 4', scopeKey: 'workspace/ws-hemi', scopeLabel: 'Hemi 项目', operationId: null },
-        { state: 'err', title: '默认用中文交流', scopeKey: 'global/user', scopeLabel: '关于你', operationId: null, reason: '记忆文件被占用' },
-      ],
-      [
-        ['以后都默认用中文交流。', 'user'],
-        ['好的。', 'hemi'],
-      ],
-    ),
+  'settings-memory': () => memoryScene(),
   // 037 模型页 v2：正在使用 / 供应商摘要（surfaces 稿 settings-model）。
   'settings-model': () => {
     stubModelV2(null);
@@ -5429,7 +5208,10 @@ const scenes: Record<string, () => React.ReactElement> = {
       { source: 'task', role: 'fixer', modelKey: 'zai/glm-5.3-flash', modelName: '智谱', input: 504_000, output: 274_000, cacheRead: 24_696_000, cacheWrite: 0, genMs: 1_889_655, at: 4, calls: 570 },
       { source: 'task', role: 'designer', modelKey: 'anthropic/claude-opus-5-5', modelName: 'Anthropic', input: 138_740, output: 2_500, cacheRead: 852_260, cacheWrite: 0, genMs: 27_778, at: 5, calls: 13 },
     ];
-    const sample = variant === 'design' ? designRecords : variant === 'unknown'
+    const sample = variant === 'provider-names' ? [
+      { source: 'chat', role: 'main', modelKey: 'p-fixture/m-dedfefd5-1234', modelName: 'gpt-6.1-sol', providerName: '测试供应商', requestedModel: 'gpt-6.1-sol', input: 47_600, output: 2_400, cacheRead: 122_400, cacheWrite: 0, genMs: 218_182, at: 1, calls: 23 },
+      { source: 'task', role: 'explorer', modelKey: 'p-old/m-9a7e60cd-5678', modelName: 'gpt-6-luna', input: 6_630, output: 743, cacheRead: 1_170, cacheWrite: 0, genMs: 25_621, at: 2, calls: 4 },
+    ] satisfies UsageRecord[] : variant === 'design' ? designRecords : variant === 'unknown'
       ? [{ ...records[3], calls: 31, missing: 31 }]
       : variant === 'many'
         ? Array.from({ length: 24 }, (_, index) => ({ ...records[index % 3], role: (['main', 'explorer', 'oracle', 'fixer', 'designer', 'auxiliary'] as const)[index % 6], modelKey: `test/provider-long-model-name-with-context-${index}`, requestedModel: `provider-long-model-name-with-context-${index}`, at: index }))

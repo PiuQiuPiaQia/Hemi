@@ -494,12 +494,18 @@ export function createConversationController({
         case 'withdrawInput': {
           const original=snapshot.pending.find(input=>input.inputId===command.inputId);
           if(!original)return {ok:false,code:'not-found'};
+          if(command.restoreToDraft) {
+            if(original.workflow)return {ok:false,code:'workflow-frozen'};
+            if(!['pending','editing'].includes(original.state)||original.promoteAt!=null)return {ok:false,code:'locked'};
+            if(command.expectedEditRevision!=null&&command.expectedEditRevision!==original.editRevision)return {ok:false,code:'stale-input'};
+          }
           if(withdrawing.has(original.inputId)||(original.state==='submitting'&&!command.force))return {ok:false,code:'locked'};
           withdrawing.add(original.inputId);
           try {
             if(original.workflow)await runtime.withdraw?.({input:original});
             const result=commit({type:'input-withdrawn',inputId:original.inputId,force:command.force===true,generation:snapshot.generation});
-            return result.applied?{ok:true,disposition:'withdrawn',inputId:original.inputId,revision:snapshot.revision}:{ok:false,code:result.dropped};
+            return result.applied?{ok:true,disposition:'withdrawn',inputId:original.inputId,revision:snapshot.revision,
+              ...(command.restoreToDraft?{input:structuredClone(original)}:{})}:{ok:false,code:result.dropped};
           } catch(error){return {ok:false,code:'storage-failed',message:error.message};}
           finally {withdrawing.delete(original.inputId);maybeDrain();}
         }

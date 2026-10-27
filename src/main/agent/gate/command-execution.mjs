@@ -3,6 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
+import path from 'node:path';
 import { comSpecPath, cmdExecArgs } from '../../platform/win-compat.mjs';
 
 const exec = promisify(execFile);
@@ -65,10 +66,13 @@ export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, en
     };
     const onAbort = () => { aborted = true; terminate(); };
     try {
-      const gatedCommand = onSpawn && windows ? `set "__hemi_command_start=" & set /p __hemi_command_start= >nul & if not defined __hemi_command_start exit /b 125 & ${command}` : command;
-      const args = windows ? cmdExecArgs(gatedCommand) : onSpawn ? ['-c', 'IFS= read -r __hemi_command_start || exit 125; exec 3<&0; ( IFS= read -r __hemi_parent_life <&3; kill -KILL -- "-$$" ) <&3 & /bin/bash -c "$1" </dev/null 3<&-; __hemi_status=$?; exit "$__hemi_status"', `hemi-command:${ownerToken ?? randomUUID()}`, command] : ['-c', command];
-      child = spawn(windows ? comSpecPath(env) : '/bin/bash', args, {
-        cwd, env, detached: !windows, windowsHide: true, stdio: [onSpawn ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+      // cmd.exe parses its command text itself, rather than using CRT argv
+      // quoting. Match Node's shell mode: quote the whole /c payload and pass
+      // it verbatim, preserving quotes inside node -e / PowerShell commands.
+      const windowsGuard = windows && onSpawn;
+      const args = windowsGuard ? [path.join(import.meta.dirname,'windows-command-entry.mjs'),Buffer.from(command).toString('base64'),JSON.stringify(env.ELECTRON_RUN_AS_NODE??null)] : windows ? cmdExecArgs('"' + command + '"') : onSpawn ? ['-c', 'IFS= read -r __hemi_command_start || exit 125; exec 3<&0; ( IFS= read -r __hemi_parent_life <&3; kill -KILL -- "-$$" ) <&3 & /bin/bash -c "$1" </dev/null 3<&-; __hemi_status=$?; exit "$__hemi_status"', `hemi-command:${ownerToken ?? randomUUID()}`, command] : ['-c', command];
+      child = spawn(windowsGuard ? process.execPath : windows ? comSpecPath(env) : '/bin/bash', args, {
+        cwd, env: windowsGuard ? {...env,ELECTRON_RUN_AS_NODE:'1'} : env, detached: !windows, windowsHide: true, windowsVerbatimArguments: windows && !windowsGuard, stdio: [onSpawn ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
       resolve({ code: null, signal: null, stdout, stderr: error.message, spawnError: error.code ?? error.message, timedOut, aborted, cleanupConfirmed: true, truncated, status: 'start-failed' });
@@ -81,8 +85,7 @@ export async function runCommand({ command, cwd, timeoutMs = 120_000, signal, en
         try {
           await onSpawn(child.pid);
           if (signal?.aborted || timedOut) {child.stdin.destroy();terminate();}
-          else if (windows) child.stdin.end('start\n');
-          else child.stdin.write('start\n'); // 管道保持打开；宿主崩溃时 EOF 让同组守卫立即清理。
+          else child.stdin.write('start\n'); // 管道保持打开；宿主崩溃时 EOF 让守卫清理进程树。
         } catch (error) {spawnError = error;stderr += `命令未启动：${error.message}`;child.stdin.destroy();terminate();}
         })();
       });

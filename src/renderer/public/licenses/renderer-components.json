@@ -1,6 +1,6 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "0896faa999671769164434b863723a1c149f0879b13b319552144af669e2d707",
+  "lockfileSha256": "dd8a2571635a7eb65499210ab2cad9324934e1cc38814decfce86b1f60446d6a",
   "components": [
     {
       "name": "@aiden0z/pptx-renderer",
@@ -2319,7 +2319,6 @@
         "node_modules/lucide-react/dist/esm/icons/arrow-down-to-line.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-down.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-left.mjs",
-        "node_modules/lucide-react/dist/esm/icons/arrow-right.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-up.mjs",
         "node_modules/lucide-react/dist/esm/icons/at-sign.mjs",
         "node_modules/lucide-react/dist/esm/icons/audio-lines.mjs",
@@ -2361,7 +2360,7 @@
         "node_modules/lucide-react/dist/esm/icons/hand.mjs",
         "node_modules/lucide-react/dist/esm/icons/house.mjs",
         "node_modules/lucide-react/dist/esm/icons/image.mjs",
-        "node_modules/lucide-react/dist/esm/icons/inbox.mjs",
+        "node_modules/lucide-react/dist/esm/icons/info.mjs",
         "node_modules/lucide-react/dist/esm/icons/layers.mjs",
         "node_modules/lucide-react/dist/esm/icons/link-2.mjs",
         "node_modules/lucide-react/dist/esm/icons/link.mjs",
@@ -2414,7 +2413,6 @@
         "node_modules/lucide-react/dist/esm/icons/trash-2.mjs",
         "node_modules/lucide-react/dist/esm/icons/triangle-alert.mjs",
         "node_modules/lucide-react/dist/esm/icons/type.mjs",
-        "node_modules/lucide-react/dist/esm/icons/undo-2.mjs",
         "node_modules/lucide-react/dist/esm/icons/user-check.mjs",
         "node_modules/lucide-react/dist/esm/icons/video.mjs",
         "node_modules/lucide-react/dist/esm/icons/wifi-off.mjs",

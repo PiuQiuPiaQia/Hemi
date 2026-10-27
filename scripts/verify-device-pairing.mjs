@@ -27,6 +27,7 @@ try {
   host=spawn(process.execPath,['--input-type=module','-e',boot],{cwd:repo,env:{...process.env,HEMI_BOT_DATA_DIR:data,HEMI_USER_DATA_DIR:path.join(root,'host-profile')},stdio:['ignore','ignore','pipe']});host.stderr.on('data',v=>{hostErrors+=v;});
   await wait(async()=>{if(host.exitCode!==null)throw new Error(hostErrors);return fs.access(socket).then(()=>true,()=>false);},'real Host socket');
   const hello=await rpc({method:'handshake'},{socket});
+  await rpc({method:'pairing.configure',params:{instanceId:hello.instanceId,endpoint}},{socket});
   await wait(async()=>((await rpc({method:'snapshot',params:{instanceId:hello.instanceId}},{socket})).sessions??[]).some(s=>s.title==='跨端真实会话'),'seed actual session');
   const wrapper=path.join(root,'ssh');
   const dropApproval=path.join(root,'drop-approval'),legacyStatus=path.join(root,'legacy-status');
@@ -58,11 +59,6 @@ try {
     await dialog.getByRole('button',{name:'维护云端组件',exact:true}).waitFor();
     await fs.rm(legacyStatus);
     check('structured IPC retains unsupported error codes; old desktop explains restart and old Bot exposes real component update action');
-    if(mode==='dev'){
-      await dialog.getByRole('textbox',{name:'手机可访问的 Bot 地址',exact:true}).fill(endpoint);
-      await dialog.getByRole('button',{name:'启用设备连接',exact:true}).click();
-    }
-    await dialog.getByRole('button',{name:'生成配对二维码',exact:true}).click();
     const image=dialog.getByRole('img',{name:'Hemi 一次性设备配对码',exact:true});await image.waitFor();
     const work=path.join(root,'native-'+mode);await fs.mkdir(work);
     const png=path.join(work,'qr.png'),src=await image.getAttribute('src');await fs.writeFile(png,Buffer.from(src.split(',')[1],'base64'));
@@ -108,7 +104,7 @@ try {
     check('revoke confirmation and actual native reconnect denial; compact device list 375/768/1440');
     await dialog.getByRole('button',{name:'完成',exact:true}).click();await dialog.waitFor({state:'hidden'});
     await page.getByRole('button',{name:'连接新设备',exact:true}).click();
-    await dialog.getByRole('button',{name:'生成配对二维码',exact:true}).click();await image.waitFor();
+    await image.waitFor();
     await page.evaluate(()=>window.hemiVoice.bot.command('connection.disconnect'));
     await image.waitFor({state:'hidden'});
     await dialog.getByRole('button',{name:'隐藏配对页',exact:true}).click();await dialog.waitFor({state:'hidden'});

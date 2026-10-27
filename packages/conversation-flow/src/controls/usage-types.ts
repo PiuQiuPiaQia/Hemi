@@ -7,6 +7,8 @@ export type UsageRecord = {
     source: 'chat' | 'fallback' | 'summary' | 'title' | 'task';
     modelKey: string;
     modelName: string;
+    /** 供应商展示名；旧记录可能只在 modelName 中保存供应商或型号。 */
+    providerName?: string;
     requestedModel?: string;
     input: number;
     output: number;

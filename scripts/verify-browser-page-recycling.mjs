@@ -12,8 +12,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-browser-recycling-'));
 const userData = path.join(root, 'userData');
 const evidence = path.resolve(process.env.HEMI_BROWSER_RECYCLING_EVIDENCE ?? path.join('.visual/workflow/vision', `014-page-recycling-${Date.now()}`));
 fs.mkdirSync(userData, { recursive: true }); fs.mkdirSync(evidence, { recursive: true });
-// 已完成引导是配置资源，与既有自驱动入口一致；不复制任何模型 Key。
-fs.copyFileSync(path.join(os.homedir(), 'Library/Application Support/hemi-dev/onboarding.json'), path.join(userData, 'onboarding.json'));
+// 独立引导配置；不读取已安装应用的个人数据。
+fs.writeFileSync(path.join(userData, 'onboarding.json'), JSON.stringify({ version: 2, phase: 'complete', step: 'done', permissionChoice: 'skipped', completedAt: Date.now() }));
 const requests = [], checks = {}, heldResponses = new Map();
 const textOf = message => typeof message.content === 'string' ? message.content
   : (message.content ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n');
@@ -109,7 +109,10 @@ async function chromeStart(){
 }
 async function screenshot(name){await evalJs('window.hemiVoice.showMainWindow()');await call('Page.bringToFront');const shot=await call('Page.captureScreenshot',{format:'png',fromSurface:false});fs.writeFileSync(path.join(evidence,name+'.png'),Buffer.from(shot.data,'base64'))}
 try{
- await start();await chromeStart();
+ await start();
+ // 走生产凭据保存入口，不能用 Electron safeStorage 冒充 Hemi 当前的 secretStorage 格式。
+ const configured=await evalJs(`window.hemiVoice.saveModelProfile(${JSON.stringify({id:'audit',name:'本机回卷验证',api:'openai-completions',baseUrl,apiKey:'local-dummy-key',makeDefault:true,models:[{id:'main',model:'hemi-audit',thinkingLevel:'off'}]})})`);
+ assert.ok(configured.ok);await call('Page.reload');await ready();await chromeStart();
  await submit('RECYCLE_A');assert.equal((await tabs('RECYCLE_A')).length,2);checks.twoRealPagesOpenedAndRead=true;
  await newChat();await submit('RECYCLE_B');assert.equal((await tabs('RECYCLE_B')).length,2);
  heldResponses.get('RECYCLE_A')();await zero('RECYCLE_A');assert.equal((await tabs('RECYCLE_B')).length,2);checks.otherConversationStillWorking=true;
@@ -124,10 +127,10 @@ try{
  const state=JSON.parse(fs.readFileSync(path.join(userData,'browser-bridge-state.json')));
  assert.equal(state.tasks,0);assert.equal(state.state,'ready');checks.bridgeRemainsReadyWithNoOwnedTasks=true;
  const remaining=await targets();assert.ok(remaining.some(t=>t.url===origin+'/control'));
- const markers=remaining.filter(t=>t.type==='page'&&t.url.includes('hemi-task.html'));assert.ok(markers.length<=2);checks.poolBoundedAndControlSurvives=true;
+ const markers=remaining.filter(t=>t.type==='page'&&t.url.includes('hemi-task.html'));assert.equal(markers.length,0);checks.noPlaceholderWindowsAndControlSurvives=true;
  await screenshot('after-recycling');
  fs.writeFileSync(path.join(evidence,'requests.json'),JSON.stringify(requests,null,2));
  const summary={ok:true,checks,rendererUrl:currentUrl,bridgePort,chromePort,requests:requests.length,userData,remainingPages:remaining.filter(t=>t.type==='page').map(t=>t.url),boundary:'Real product renderer/IPC/controller/SDK/bridge/Chrome extension/Chrome pages. Local provider and local target pages; isolated browser and userData. Only bridge port in copied extension is configured for isolation.'};
  fs.writeFileSync(path.join(evidence,'summary.json'),JSON.stringify(summary,null,2));console.log('HEMI_BROWSER_PAGE_RECYCLING='+JSON.stringify(summary));
-}catch(error){fs.writeFileSync(path.join(evidence,'requests.json'),JSON.stringify(requests,null,2));console.error(error);console.error('证据 '+evidence+' 隔离数据 '+root);process.exitCode=1}
+}catch(error){fs.writeFileSync(path.join(evidence,'requests.json'),JSON.stringify(requests,null,2));if(evalJs){const state=await evalJs('({url:location.href,text:document.body.innerText})').catch(()=>null);fs.writeFileSync(path.join(evidence,'failure-state.json'),JSON.stringify(state,null,2));await screenshot('failure').catch(()=>{});}console.error(error);console.error('证据 '+evidence+' 隔离数据 '+root);process.exitCode=1}
 finally{await stop();if(chromeChild&&chromeChild.exitCode===null){const ended=once(chromeChild,'exit');chromeChild.kill('SIGTERM');const timer=setTimeout(()=>chromeChild.kill('SIGKILL'),5000);await ended;clearTimeout(timer)}server.closeAllConnections();await new Promise(r=>server.close(r))}

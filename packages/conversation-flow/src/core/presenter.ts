@@ -18,6 +18,7 @@ export function messageViewFromTranscript(item: TranscriptItem): MessageView {
 export function createConversationTranscriptPresenter() {
   const project = createFlowTimelineProjector();
   const observed = new Set<string>();
+  const rewindPreviews = new Set<string>();
   return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = [], delivery?: Pick<ConversationClientState, 'operations' | 'connection'>): TranscriptItem[] => {
     if (!snapshot) return [];
     let messages = project(snapshot, archive).transcripts;
@@ -25,13 +26,18 @@ export function createConversationTranscriptPresenter() {
     const blocked = delivery?.operations.some(operation => operation.state === 'unknown');
     const operationIds = new Set(delivery?.operations.map(operation => operation.id));
     for (const id of observed) if (!operationIds.has(id)) observed.delete(id);
+    for (const id of rewindPreviews) if (!operationIds.has(id)) rewindPreviews.delete(id);
     for (const operation of delivery?.operations ?? []) {
       const rewind = operation.command.type === 'rewind';
       if (!rewind && operation.command.type !== 'send') continue;
       const input = operation.command.input as Partial<FlowInputView> | undefined;
       if (!input?.inputId) continue;
+      // Cutting history and starting its replacement are separate Host facts.
+      // Keep the existing preview between them until a new run identifies its input.
+      const awaitingReplacement = rewindPreviews.has(operation.id) && operation.state === 'sending' && snapshot.phase === 'idle'
+        && !Object.values(snapshot.runs).some(run => (run.generation ?? snapshot.generation) === snapshot.generation);
       const ownRewind = rewind && operation.generation !== null && snapshot.generation === operation.generation + 1
-        && Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!));
+        && (awaitingReplacement || Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!)));
       if (operation.generation !== null && operation.generation !== snapshot.generation && !ownRewind) continue;
       if (known.has(input.inputId)) {observed.add(operation.id); continue;}
       if (observed.has(operation.id)) continue;
@@ -48,6 +54,7 @@ export function createConversationTranscriptPresenter() {
       if (rewind && !ownRewind) {
         const cut = messages.findIndex(item => item.author === 'user' && item.id === operation.command.targetInputId);
         if (cut < 0) continue;
+        rewindPreviews.add(operation.id);
         messages = messages.slice(0, cut);
       }
       known.add(input.inputId);

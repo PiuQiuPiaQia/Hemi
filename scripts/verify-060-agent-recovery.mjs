@@ -37,7 +37,7 @@ try {
   runtime = createAgentRuntime({
     loadArchiveAgent: () => archived, loadArchiveTurns: () => [],
     saveArchiveAgent: (_id, payload) => { archived = payload; return true; },
-    getSkillService: () => null, getMemoryService: () => null, getWorkspaceService: () => null,
+    getSkillService: () => null, getWorkspaceService: () => null,
     onEventTurn: () => {}, onTaskState: () => {},
   });
   await getProfiles().saveProvider({id:'mock',name:'recovery',baseUrl:`http://127.0.0.1:${server.address().port}`,apiKey:'test',models:[{id:'main',model:'claude-opus-5-5',api:'anthropic-messages',supportsVision:true}]});

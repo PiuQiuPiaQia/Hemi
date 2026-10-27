@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useSyncExternalStore, type ReactElement, type ReactNode } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { X } from 'lucide-react';
+import { useUiEnvironment } from './environment.js';
 const narrowQuery = '(max-width: 600px)';
 const isNarrow = () => window.matchMedia(narrowQuery).matches;
 const subscribeNarrow = (notify: () => void) => {
@@ -26,6 +27,7 @@ export function InfoPopover({ open, onOpenChange, trigger, title, description, h
     initialFocus?: React.ComponentProps<typeof Popover.Popup>['initialFocus'];
     children: ReactNode;
 }) {
+    const { portal } = useUiEnvironment();
     const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
     const titleId = useId();
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -61,8 +63,8 @@ export function InfoPopover({ open, onOpenChange, trigger, title, description, h
             if (!suppressFocusOpen.current && event.currentTarget.matches(':focus-visible'))
                 onOpenChange(true);
         } : undefined} onBlur={openOnHover ? () => { suppressFocusOpen.current = false; } : undefined}/>
-      <Popover.Portal className="compact-shell" style={{ display: 'contents' }}>
-        {/* Portal 容器保持稳定；不能在 ref 就绪后从 body 搬到 shell，打断退出生命周期。 */}
+      {portal !== null ? <Popover.Portal container={portal} className="compact-shell" style={{ display: 'contents' }}>
+        {/* 显式 null 表示宿主 portal 尚未就绪；就绪前不挂载，避免搬移打断浮层生命周期。 */}
         {!openOnHover ? <Popover.Backdrop className="h37-info-scrim"/> : null}
         <Popover.Positioner className={`h37-info-positioner${openOnHover ? ' h37-info-hover-positioner' : ''}`} side={side} align={align ?? (openOnHover ? 'center' : 'start')} sideOffset={8} collisionPadding={12} positionMethod="fixed">
           <Popover.Popup ref={popupRef} className={`h37-info-popover${openOnHover ? ' h37-info-hover' : ''} ${className}`} aria-labelledby={titleId} initialFocus={initialFocus ?? (openOnHover ? false : undefined)} finalFocus={openOnHover ? false : undefined}>
@@ -79,6 +81,6 @@ export function InfoPopover({ open, onOpenChange, trigger, title, description, h
             <div className="h37-info-body">{children}</div>
           </Popover.Popup>
         </Popover.Positioner>
-      </Popover.Portal>
+      </Popover.Portal> : null}
     </Popover.Root>);
 }

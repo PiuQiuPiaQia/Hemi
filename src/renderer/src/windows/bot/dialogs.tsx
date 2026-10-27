@@ -13,6 +13,10 @@ import type {
 } from '@shared/bot';
 import type { ModelProfilesDirectory, ModelProviderSaveInput } from '@shared/protocol';
 import { AddProviderView, type ManualProviderServices, type ProviderSetupController } from '../voice/model-profiles-section';
+import { ModelConnectionMethods } from '../voice/model-connection-methods';
+import type { ModelCategory } from '@shared/model-categories.mjs';
+import { NewApiImportView, type ImportLock } from '../voice/newapi-import-section';
+import { BotOAuthAccounts } from './oauth-accounts';
 
 export function BotDialog({
   title,
@@ -98,6 +102,8 @@ export function BotModelSetup({
   onDone,
   onCancel,
   onBusyChange,
+  initialMethod = 'subscription',
+  onSyncLocal,
 }: {
   api: BotBridge;
   state: BotState;
@@ -106,8 +112,10 @@ export function BotModelSetup({
   onDone: () => void;
   onCancel: () => void;
   onBusyChange: (busy: boolean) => void;
+  initialMethod?: ModelCategory;
+  onSyncLocal?: () => void;
 }) {
-  const [tab, setTab] = useState<'manual' | 'local'>(candidateId ? 'local' : 'manual');
+  const [tab, setTab] = useState<ModelCategory>(initialMethod);
   const [models, setModels] = useState<BotModelCandidate[]>([]),
 
     [saving, setSaving] = useState(false),
@@ -116,6 +124,7 @@ export function BotModelSetup({
   const locked = busy || saving;
   const tabsId = useId();
   const operation = useRef('models-' + crypto.randomUUID());
+  const importLock = useRef<ImportLock>({ locked: false, reason: '' });
   const reportBusy = useCallback((value: boolean) => { setSaving(value); onBusyChange(value); }, [onBusyChange]);
   useEffect(() => {
     if (tab !== 'local' || loaded) return;
@@ -146,7 +155,7 @@ export function BotModelSetup({
         const result = await api.initialize({ candidateId, ...(provider ? { provider } : {}), requestId: operation.current });
         return { providerId: result.cache?.models.at(-1)?.providerId ?? 'bot', modelKeys: result.cache?.models.map(model => model.key) ?? [] };
       }
-      if (!provider) throw new Error('请在对话输入区直接选择本机模型。');
+      if (!provider) throw new Error('请在 Bot 设置中同步本机配置。');
       const result = await api.command<{
         results: Array<{ key: string; ok: boolean; message?: string }>;
         providerId?: string;
@@ -169,6 +178,13 @@ export function BotModelSetup({
       reportBusy(false);
     }
   }
+  async function useAccount() {
+    if (!candidateId) return;
+    reportBusy(true); setError('');
+    try { await api.initialize({ candidateId, accountSetup: true, requestId: operation.current }); onDone(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Bot 初始化未完成，请重试。'); }
+    finally { reportBusy(false); }
+  }
   const directory: ModelProfilesDirectory = { version: 2, defaultModelId: null, providers: Array.from(new Map((state.cache?.models ?? []).map(model => [model.providerId, {
     id: model.providerId, name: model.name, baseUrl: model.baseUrl, api: 'openai-completions' as const,
     hasApiKey: true, keyStoredSecurely: true, updatedAt: 0, models: [],
@@ -180,24 +196,26 @@ export function BotModelSetup({
   };
   return (
     <div className="h-bot-model-setup">
-      {candidateId ? <div className="h37-seg" role="tablist" aria-label="选择模型来源">
-        {(['local', 'manual'] as const).map((value, index, values) => <button type="button" role="tab" key={value}
-          id={`${tabsId}-${value}-tab`} aria-controls={`${tabsId}-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1}
-          disabled={locked} onClick={() => { setTab(value); setError(''); }} onKeyDown={event => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            event.preventDefault();
-            const next = event.key === 'Home' ? 'local' : event.key === 'End' ? 'manual' : values[(index + 1) % values.length];
-            setTab(next); document.getElementById(`${tabsId}-${next}-tab`)?.focus();
-          }}>{value === 'manual' ? '云端专用配置' : '本机模型'}</button>)}
+      <ModelConnectionMethods bot value={tab} disabled={locked} onChange={value => {
+        if (importLock.current.locked) { setError(importLock.current.reason); return; }
+        setTab(value); setError('');
+      }} />
+      <p className="h-bot-small">{tab === 'local' ? '同步本机模型，自动路由在 Bot 中单独配置。订阅账号需为 Bot 单独授权。' : candidateId && (tab === 'subscription' || tab === 'newapi') ? '先完成 Bot 部署，再登录账号或站点，无需预先填写 API Key。' : '此配置独立保存在 Bot，由服务器验证连接。'}</p>
+      {candidateId ? <div hidden={tab !== 'subscription' && tab !== 'newapi'}>
+        <p className="h-bot-small">{tab === 'newapi' ? '部署完成后，在 Bot 的 New API 分类中添加站点，登录后选择分组和型号。' : '支持 ChatGPT、Claude、GitHub Copilot 和 GLM Coding Plan。实际可用模型与额度由账号权限决定。'}</p>
+        {error ? <p role="alert" className="h-bot-error">{error}</p> : null}
+        <div className="h37m-add-foot"><BotButton disabled={locked} onClick={onCancel}>取消</BotButton><BotButton primary disabled={locked} onClick={() => void useAccount()}>{saving ? '正在部署…' : tab === 'newapi' ? '部署后配置 New API' : '部署并登录账号'}</BotButton></div>
       </div> : null}
-      <p className="h-bot-small">{tab === 'local' ? '初始化时自动配置本机可用模型、主模型、角色模型与备用模型；后续本机变更自动更新。' : '此配置独立保存在 Bot，由服务器验证连接。'}</p>
-      <div role={candidateId ? 'tabpanel' : undefined} id={`${tabsId}-manual`} aria-labelledby={candidateId ? `${tabsId}-manual-tab` : undefined} hidden={tab !== 'manual'}>
+      {!candidateId && tab === 'subscription' ? <BotOAuthAccounts state={state} disabled={locked} onConnected={onDone} onBusyChange={reportBusy} /> : null}
+      {!candidateId && tab === 'newapi' && state.binding ? <NewApiImportView destination={{ kind: 'bot', instanceId: state.binding.instanceId }} onExit={onCancel} onImported={onDone} lockRef={importLock} onBusyChange={reportBusy} /> : null}
+      <div id={`${tabsId}-api`} hidden={tab !== 'api'}>
         <fieldset className="h-bot-model-form" disabled={locked}>
           <AddProviderView ctl={ctl} initial={null} embedded services={services} onAdded={onDone} onBusyChange={reportBusy}
             submitLabel={candidateId ? () => '初始化并开始使用' : undefined} />
         </fieldset>
       </div>
-      <div role="tabpanel" id={`${tabsId}-local`} aria-labelledby={`${tabsId}-local-tab`} hidden={tab !== 'local'}>
+      <div id={`${tabsId}-local`} hidden={tab !== 'local'}>
+      {!candidateId ? <div className="h37m-add-foot"><BotButton disabled={locked} onClick={onCancel}>取消</BotButton><BotButton primary disabled={locked} onClick={onSyncLocal}>查看本机配置差异</BotButton></div> : <>
       {!loaded && !error ? <p role="status">正在读取本机模型…</p> : null}
       {loaded && !models.length ? <p>暂无本机模型，请先在本机设置中添加，或使用云端专用配置。</p> : null}
       <div className="h-bot-models" role="list" aria-label="自动配置的本机模型">{models.map(model => <div role="listitem" className="h-bot-auto-model" key={model.key}><Monitor size={15} aria-hidden="true" /><span><strong>{model.name}</strong><small>{model.provider} · 本机</small></span><em>{model.reason || '自动配置'}</em></div>)}</div>
@@ -213,6 +231,7 @@ export function BotModelSetup({
           {saving ? '正在配置…' : '初始化并开始使用'}
         </BotButton>
       </div>
+      </>}
       </div>
     </div>
   );
@@ -290,7 +309,7 @@ export function BotSetup({
       <div className="h-bot-welcome">
         <Server size={26} />
         <h1>让 Hemi 在云端持续工作</h1>
-        <p>连接 Linux 云服务器。Bot 在服务器常驻，关闭本机后也能继续工作。</p>
+        <p>通过 SSH 连接 Linux 或 Windows 电脑。Bot 在远端常驻，关闭本机后也能继续工作。</p>
         <BotButton primary onClick={() => setOpen(true)}>
           创建连接
         </BotButton>
@@ -303,7 +322,7 @@ export function BotSetup({
           onClose={() => setOpen(false)}
           footer={
             <>
-              {busy && step === 'configure' && (
+              {busy && step === 'configure' && state.busy !== 'candidate.start' && (
                 <BotButton
                   onClick={() =>
                     void api
@@ -351,7 +370,7 @@ export function BotSetup({
                   value={host}
                   disabled={busy}
                   onChange={(e) => setHost(e.target.value)}
-                  placeholder="ubuntu@服务器地址或 SSH Host"
+                  placeholder="user@主机地址或 SSH Host"
                 />
               </label>
               <label className="h-bot-field">
@@ -377,6 +396,7 @@ export function BotSetup({
             <>
               <p role="alert">{candidate.info.serviceError}</p>
               <BotButton
+                disabled={busy}
                 onClick={() =>
                   void api
                     .command('candidate.start')
@@ -384,7 +404,7 @@ export function BotSetup({
                     .catch((e) => setError(e.message))
                 }
               >
-                启动已安装服务并重新检测
+                {busy ? '正在自动启动…' : '重试自动启动'}
               </BotButton>
             </>
           ) : candidate?.info.bot?.configured ? (
@@ -399,6 +419,8 @@ export function BotSetup({
               {(
                 {
                   probe: '正在连接并检查服务器环境…',
+                  'start-service': '正在自动启动已有 Bot…',
+                  'candidate.start': '正在自动启动已有 Bot…',
                   deploy: '正在部署云端运行环境与 Host…',
                   models: '正在从云端验证所选模型…',
                   'verify-residency': '正在验证 SSH 断开后的常驻状态…',

@@ -291,24 +291,8 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   attachContext: (kind) => ipcRenderer.invoke('context:attach', { kind }),
   refreshContext: (id) => ipcRenderer.invoke('context:refresh', { id }),
   removeContext: (id) => ipcRenderer.invoke('context:remove', { id }),
-  getMemoryState: () => ipcRenderer.invoke('memory:get-state'),
-  saveMemoryDocument: (payload) => ipcRenderer.invoke('memory:save-document', payload),
-  openMemoryDirectory: () => ipcRenderer.invoke('memory:open-directory'),
-  // 032：记忆运行状态与收尾摘要开关。
-  getMemoryStatus: () => ipcRenderer.invoke('memory:get-status'),
-  setMemoryExitSummary: (next) => ipcRenderer.invoke('memory:set-exit-summary', next),
-  // 037：分域条目管理（设置页记忆区使用；结果含 ok/code，失败如实带回）。
-  listMemoryEntries: (payload) => ipcRenderer.invoke('memory:list-entries', payload),
-  mutateMemoryEntry: (payload) => ipcRenderer.invoke('memory:mutate-entry', payload),
-  moveMemoryEntry: (payload) => ipcRenderer.invoke('memory:move-entry', payload),
-  forgetMemoryEntry: (payload) => ipcRenderer.invoke('memory:forget-entry', payload),
-  clearMemoryScope: (payload) => ipcRenderer.invoke('memory:clear-scope', payload),
-  undoMemoryMutation: (payload) => ipcRenderer.invoke('memory:undo', payload),
-  onMemoryChanged: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on('memory:changed', listener);
-    return () => ipcRenderer.removeListener('memory:changed', listener);
-  },
+  inspectAgentEnvironment: () => ipcRenderer.invoke('agent-environment:inspect'),
+  readAgentRuntimeFile: (payload) => ipcRenderer.invoke('agent-environment:read-file', payload),
   onContextState: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('context:state', listener);

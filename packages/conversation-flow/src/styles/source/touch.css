@@ -1,4 +1,13 @@
 .input-dock{flex-shrink:0;padding:var(--s2) var(--s3);background:var(--m-white)}
+.h48-usage[data-layout='touch']{display:flex;flex-shrink:0;justify-content:center;height:auto;min-width:0;padding:0 var(--s3)}
+.h48-usage[data-layout='touch'] .h48-usage-entry{position:static;transform:none;display:flex;align-items:center;justify-content:center;gap:var(--s1);height:var(--s5);line-height:var(--s5);max-width:100%;padding:0 var(--s1);border-radius:var(--r-control);color:var(--m-muted);font-size:var(--text-small);font-variant-numeric:tabular-nums;white-space:nowrap}
+.h48-usage[data-layout='touch'] .h48-usage-entry[aria-expanded='true']{background:var(--m-surface);color:var(--m-ink)}
+.h37-info-popover.h48-usage-touch-panel .h37-info-heading{flex-direction:column;gap:var(--s1)}
+.h48-usage-touch-panel .h48-usage-switch button{min-width:var(--s11);height:var(--s11)}
+.h48-usage-touch-panel .h37-info-close{width:var(--s11);height:var(--s11)}
+[data-hemi-conversation-flow] .h37-info-popover.h48-usage-touch-panel{max-height:calc(var(--app-height,100dvh) - var(--keyboard-inset,0px) - var(--s6))}
+@media(max-width:600px){[data-hemi-conversation-flow] .h37-info-popover.h48-usage-touch-panel{width:100%;max-width:100%}[data-hemi-conversation-flow] .h37-info-positioner:has(>.h48-usage-touch-panel){bottom:var(--keyboard-inset,0px)!important}}
+@media(max-width:375px){.h48-usage[data-layout='touch'] .h48-usage-volume{display:none}}
 .composer-surface{border:1px solid var(--m-line-strong);border-radius:var(--r-composer);background:var(--m-surface);overflow:hidden}
 .composer-editing{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);padding:var(--s1) var(--s2) var(--s1) var(--s3);font-size:var(--text-small);color:var(--m-green);background:var(--m-green-soft)}
 .composer-editing .text-button{min-height:var(--s10);flex-shrink:0}

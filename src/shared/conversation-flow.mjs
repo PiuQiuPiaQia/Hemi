@@ -325,7 +325,13 @@ export function applyFlowFact(snapshot, fact) {
       if (snapshot.activeRunId !== fact.runId || !runAccepts(snapshot, fact.runId) || snapshot.phase === 'stopping') return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
       const recovery = fact.recovery;
       if (!recovery?.id || !['waiting','connecting','offline','recovered','expired','stopped'].includes(recovery.phase)) return { snapshot, patch: null, applied: false };
-      const run = { ...snapshot.runs[fact.runId], recovery };
+      const previous = snapshot.runs[fact.runId].recovery;
+      const item = assistantItemFor(snapshot, fact.runId, fact.afterInputId);
+      const anchor = previous?.id === recovery.id && previous.anchor ? previous.anchor : {
+        itemId: item?.itemId ?? `${fact.runId}:a:${fact.afterInputId ?? 'root'}`,
+        afterPartId: item?.parts.at(-1)?.partId ?? null,
+      };
+      const run = { ...snapshot.runs[fact.runId], recovery: { ...recovery, anchor } };
       const next = { ...snapshot, revision: snapshot.revision + 1, runs: { ...snapshot.runs, [fact.runId]: run } };
       return { snapshot: next, patch: { kind: 'runs', runs: next.runs }, applied: true };
     }

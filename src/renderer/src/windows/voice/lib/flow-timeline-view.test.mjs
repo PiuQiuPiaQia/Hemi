@@ -14,6 +14,74 @@ const snapshot = (timeline, tasks = {}) => ({
 // 旧损坏材料须先经过生产恢复归一化；renderer 不再承担整表历史兜底。
 const recoveredView = (flow, turns) => projectFlowTimeline(normalizeFlowHistory(flow, turns).snapshot, turns);
 
+const modelRecovery = (extra = {}) => ({id: 'recovery', phase: 'recovered', firstFailureAt: 20, updatedAt: 30,
+  deadlineAt: 1800020, attempt: 1, nextRetryAt: null, ...extra});
+
+test('recovery stays between pre-failure output and continued output, including cached projection and reload', () => {
+  const project = createFlowTimelineProjector();
+  const before = {partId: 'before', kind: 'text', content: 'Before'};
+  const item = {itemId: 'a', kind: 'assistant', runId: 'r', parts: [before]};
+  const recovery = modelRecovery({phase: 'waiting', anchor: {itemId: 'a', afterPartId: 'before'}});
+  const waiting = {...snapshot([item]), activeRunId: 'r', runs: {r: {startedAt: 1, recovery}}};
+  const row = project(waiting).transcripts.find(row => row.recovery);
+  assert.equal(project(waiting).transcripts[0].streaming, false);
+  const continued = {...waiting, timeline: [{...item, parts: [before, {partId: 'after', kind: 'text', content: 'After'}]}],
+    runs: {r: {startedAt: 1, recovery: {...recovery, phase: 'recovered'}}}};
+  const rows = project(continued).transcripts;
+  assert.deepEqual(rows.map(row => row.recovery ? 'Recovery' : row.text), ['Before', 'Recovery', 'After']);
+  assert.equal(rows[1].id, row.id);
+  assert.equal(rows[2].streaming, true, 'resumed output keeps its live cursor');
+  assert.deepEqual(projectFlowTimeline(JSON.parse(JSON.stringify(continued))).transcripts, rows);
+  assert.equal(project(continued).transcripts[1], rows[1], 'unchanged anchored recovery retains its cached row');
+});
+
+test('old recovery without an anchor uses the next timestamped part instead of the end of the response', () => {
+  const item = {itemId: 'a', kind: 'assistant', runId: 'r', parts: [
+    {partId: 'before', kind: 'text', content: 'Before'},
+    {partId: 'thought', kind: 'thinking', content: 'Continue', startedAt: 40, endedAt: 45},
+    {partId: 'after', kind: 'text', content: 'After'},
+  ]};
+  const rows = projectFlowTimeline({...snapshot([item]), runs: {r: {startedAt: 1, closedAt: 50, recovery: modelRecovery()}}}).transcripts;
+  assert.deepEqual(rows.map(row => row.recovery ? 'Recovery' : row.text), ['Before', 'Recovery', 'After']);
+  assert.equal(rows[2].parts[0].type, 'thinking');
+  assert.equal(item.parts.length, 3, 'opening old history does not mutate stored parts');
+});
+
+test('pre-output recovery keeps a stable row when the first response arrives and later input does not move it', () => {
+  const recovery = modelRecovery({anchor: {itemId: 'a', afterPartId: null}});
+  const base = {...snapshot([]), activeRunId: 'r', runs: {r: {startedAt: 1, inputIds: ['u'], recovery}}};
+  const first = projectFlowTimeline(base).transcripts[0];
+  const timeline = [{itemId: 'a', kind: 'assistant', runId: 'r', parts: [{partId: 'p', kind: 'text', content: 'First'}]},
+    {itemId: 'next', kind: 'assistant', runId: 'r', parts: [{partId: 'q', kind: 'text', content: 'Next'}]}];
+  const rows = projectFlowTimeline({...base, timeline}).transcripts;
+  assert.equal(rows[0].id, first.id);
+  assert.deepEqual(rows.map(row => row.recovery ? 'Recovery' : row.text), ['Recovery', 'First', 'Next']);
+  assert.equal(rows.filter(row => row.recovery).length, 1);
+});
+
+test('terminal recovery retains full error details once at its anchored position', () => {
+  const recovery = modelRecovery({phase: 'failed', anchor: {itemId: 'a', afterPartId: null}});
+  const item = {itemId: 'a', kind: 'assistant', runId: 'r', parts: [
+    {partId: 'error', kind: 'notice', level: 'error', text: 'Provider failure details'},
+  ]};
+  const rows = projectFlowTimeline({...snapshot([item]), runs: {r: {startedAt: 1, closedAt: 50, recovery}}}).transcripts;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'error');
+  assert.equal(rows[0].text, 'Provider failure details');
+  assert.equal(rows[0].recovery.phase, 'failed');
+});
+
+test('deliverable cards recovered from the registry cannot push recovery behind later output', () => {
+  const recovery = modelRecovery({anchor: {itemId: 'a', afterPartId: 'before'}});
+  const item = {itemId: 'a', kind: 'assistant', runId: 'r', parts: [{partId: 'before', kind: 'text', content: 'Before'}]};
+  const rows = projectFlowTimeline({...snapshot([item]), runs: {r: {startedAt: 1, closedAt: 50, recovery}}, artifacts: {
+    file: {artifactId: 'file', kind: 'file', path: '/tmp/recovery-order.txt', name: 'result.txt', producerRunId: 'r'},
+  }}).transcripts;
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].recovery.id, recovery.id);
+  assert.ok(rows[2].flow.partIds.includes('registry:r:file'));
+});
+
 test('后台/资源等待收起回应光标但仍保留活目标，恢复生成时重新显示', () => {
   const project = createFlowTimelineProjector();
   const timeline = [{ itemId: 'a', kind: 'assistant', runId: 'r', parts: [{ partId: 'p', kind: 'text', content: '等待结果。' }] }];

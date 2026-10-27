@@ -172,6 +172,8 @@ export function createBrowserBridgeService({
         log?.info?.(`[browser] Chrome 扩展已接入${extVersion ? `（v${extVersion}）` : '（未上报版本＝旧扩展，请在 chrome://extensions 重新加载）'}${extMultiTask ? '，多任务并发可用' : '，仅单任务（并行将报忙，请更新扩展）'}`);
       } else if (message?.type === 'ping') {
         hub.sendText(JSON.stringify({ type: 'pong' }));
+      } else if (message?.type === 'log') {
+        log?.debug?.(`[browser] ${String(message.text ?? '').replace(/[\r\n]/g, ' ').slice(0, 240)}`);
       } else if (message?.type === 'result' && pending.has(message.id)) {
         const entry = pending.get(message.id);
         pending.delete(message.id);

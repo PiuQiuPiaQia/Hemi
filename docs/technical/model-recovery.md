@@ -53,3 +53,25 @@ VITE_DEV_SERVER_URL=http://127.0.0.1:5186 node scripts/verify-turn-error-retry.m
 证据：`.visual/workflow/vision/model-recovery/{dev,built}/report.json` 与同目录截图；原手动重试证据位于 `.visual/workflow/vision/turn-error-retry/`。测试浏览器/应用与临时服务均在结束后关闭。只使用合成文本、附件和密钥，没有读取安装版应用数据或请求外部模型。
 
 剩余边界：30 分钟使用协调器虚拟时间及主进程时钟跳变验证，未实际等待 30 分钟；实际网络验证使用本地服务，未穷举远端供应商、物理断网/休眠设备。外部工具结果不明继续沿用现有宿主等待/核对逻辑，本功能不增加自动重放或替代人工核对。安装版和既有云端 Bot 需更新到包含此代码的版本后才生效。
+
+## 2026-10-26：恢复记录的展示位置
+
+原投影把 `run.recovery` 附在整轮回复的最后一段，因此恢复后继续输出时，“恢复记录”会跟着移动到末尾。现在首次 `run-recovery` 事实保存 `anchor: {itemId, afterPartId}`；后续重试、恢复、运行收口和快照持久化保留同一位置。共享投影在该位置生成稳定身份的独立恢复行，后续文字、工具和交付卡片继续按原流顺序展示。恢复期间不显示生成光标，恢复后的新输出正常显示光标；终态错误的完整详情仍只保留一份。
+
+旧档没有锚点时，在首个 `startedAt >= firstFailureAt` 的输出段之前展示记录；没有可用段时间戳时保留原尾部兜底，无法精确补回当时未保存的位置。对用户提供的会话存档做了只读投影核对：恢复行位于恢复后的第一段思考之前，所有原有 flow part 身份及顺序保留，没有改写安装版存档。
+
+验证基线：`4af7ccbe70f9ffcd13854a8868ca034825e6e76d` 加本次未提交改动；保留工作区并行的 Bot 配置与会话发送改动。环境：macOS 26.5.1 arm64、Node v22.22.3、Electron 44.0.0。执行：
+
+```sh
+npm run build --workspace @hemi/conversation-flow
+node --test --test-reporter=dot src/shared/conversation-flow.test.mjs src/renderer/src/windows/voice/lib/flow-timeline-view.test.mjs src/main/services/flow-parts-projection.test.mjs src/main/services/model-recovery-flow.test.mjs
+npm run typecheck
+npm run build:renderer
+node scripts/verify-recovery-order.mjs
+node scripts/verify-model-recovery.mjs
+# 另以临时 Vite 服务的实际地址设置 VITE_DEV_SERVER_URL，执行 verify-model-recovery.mjs。
+```
+
+56 项相关测试通过。新的 `verify-recovery-order.mjs` 自动启动开发和构建两种真实 Electron renderer，各使用全新临时 `HEMI_USER_DATA_DIR` 和合成本地 HTTP provider，验证工具执行后的真实 503、同请求重试、继续生成、renderer 重载、收口落盘、请求不重复，以及 1440/768/375 三种宽度；结束关闭应用和服务并删除临时 profile。既有恢复脚本在两种 renderer 继续通过立即重试、停止取消真实 HTTP、401、到期和键盘详情检查。未运行完整测试套件，未发版或更新既有云端组件。
+
+证据：`.visual/workflow/vision/recovery-order/report.json`、同目录六张截图和 `.visual/workflow/vision-report-recovery-order.md`。本次没有新增样式、动画、依赖或原生组件；产品仅支持 light 模式，因此跳过 dark mode。实际网络仍使用本地合成服务，未请求外部供应商。

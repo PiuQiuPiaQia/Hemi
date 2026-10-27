@@ -17,7 +17,7 @@ import { AboutUpdateSection } from '@/windows/voice/about-update-section';
 import { BrowserDecisionSection } from '@/windows/voice/browser-decision-model-section';
 import { BrowserSection } from '@/windows/voice/browser-section';
 import { FloatingOrbSection } from '@/windows/voice/floating-orb-section';
-import { confirmMemoryLeave, MemorySection } from '@/windows/voice/memory-section';
+import { MemorySection } from '@/windows/voice/memory-section';
 import { ModelProfilesSection } from '@/windows/voice/model-profiles-section';
 import { NavRail } from '@/windows/voice/nav-rail';
 import { AccessSection } from '@/windows/voice/access-section';
@@ -133,7 +133,7 @@ export function SettingsScreen({
   const [environment, setEnvironment] = useState(initialEnvironment);
   const [page, setPage] = useState<SettingsPage>(() => {
     const next = resolveInitialPage(initialPage, initialModelTab);
-    return initialEnvironment === 'bot' && next !== 'models' ? 'general' : next;
+    return initialEnvironment === 'bot' && next !== 'models' && next !== 'memory' ? 'general' : next;
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 深层定位：切页后滚动到锚点并短暂强调（browser-decision 同时展开 Jev 组）。
@@ -169,36 +169,29 @@ export function SettingsScreen({
     return () => window.removeEventListener('keydown', onKey);
   }, [drawerOpen]);
 
-  // 037 记忆稿「离开拦截」：离开记忆页、关闭设置前，有未保存修改先弹三选一（对话框走 portal，任何分页都可见）。
-  const leaveThen = (go: () => void) => {
-    void confirmMemoryLeave().then((ok) => {
-      if (ok) go();
-    });
-  };
   const goTo = (next: SettingsPage, section?: string) => {
     const perform = () => {
       setPage(next);
       if (section) setPendingSection(section);
     };
-    if (page === 'memory' && next !== 'memory') leaveThen(perform);
-    else perform();
+    perform();
   };
-  const close = () => leaveThen(onClose);
+  const close = onClose;
   const openLog = () => {
     void window.hemiVoice?.revealLogFile();
   };
   const changeEnvironment = (next: SettingsEnvironment) => {
     if (next === environment) return;
-    leaveThen(() => {
+    {
       setEnvironment(next);
-      if (page !== 'general' && page !== 'models') setPage('general');
+      if (page !== 'general' && page !== 'models' && page !== 'memory') setPage('general');
       setModelView('overview');
       setPendingSection(null);
       setDrawerOpen(false);
-    });
+    }
   };
   const pages = environment === 'bot'
-    ? PAGES.filter((item) => item.key === 'general' || item.key === 'models')
+    ? PAGES.filter((item) => item.key === 'general' || item.key === 'models' || item.key === 'memory')
     : PAGES;
 
   const navItems = (onPick: (key: SettingsPage) => void) =>
@@ -264,7 +257,7 @@ export function SettingsScreen({
         <NavRail
           page="settings"
           onShowHome={close}
-          onShowSkills={() => leaveThen(onOpenSkills ?? onClose)}
+          onShowSkills={onOpenSkills ?? onClose}
           onOpenSettings={() => {}}
         />
         <section className="h24-workspace h37-settings-workspace">
@@ -297,16 +290,12 @@ export function SettingsScreen({
                 </span>
               </label>
               {environment === 'bot' ? (
-                <BotSettings page={page === 'models' ? 'models' : 'general'} onOpenLocalModels={() => {setEnvironment('local'); setPage('models');}} />
+                <BotSettings page={page === 'models' || page === 'memory' ? page : 'general'} />
               ) : <>
-              {/* 记忆 tab 常驻挂载：切走再切回，未保存草稿不丢（交互说明 v3）。
-                  037：标题文案对齐分域语义；区块内不重复渲染页标题。
-                  display:none → 可见会重放 h37-enter 动画，与其余分页的换 key 进场一致。 */}
               <div hidden={page !== 'memory'} className="h37-enter">
                 <div className="h37-page-head">
                   <div>
                     <h2>记忆</h2>
-                    <p>Hemi 记下的约定和经验。新任务只会用到「关于你」「全局约定」和它所在工作区的记忆。</p>
                   </div>
                 </div>
                 <MemorySection />

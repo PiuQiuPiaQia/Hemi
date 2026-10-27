@@ -1,6 +1,5 @@
 import {BotPage} from '../bot/page';
 import {ApplicationNavigationContext, type ApplicationPage} from './lib/conversation-bridge';
-import {confirmMemoryLeave} from './memory-section';
 import {confirmWorkflowLeave} from "./workflow-leave-guard";
 import {setAppearanceScene} from '@/appearance/scene';
 import type { ChatTurnReceipt, ConversationDeliverableView, ConversationTurnState, SkillSelectionView } from '@shared/protocol';
@@ -82,7 +81,6 @@ import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
 import {createDraftPersistence, projectConversationQueue, queueStoppedIdle as isQueueStoppedIdle} from '@hemi/conversation-flow/core';
 import { createFlowTimelineProjector } from '@/windows/voice/lib/flow-timeline-view';
 import { RemotePasswordDialog } from '@/windows/voice/remote-password-dialog';
-import { MemoryNotices, memoryScopeLabel, useMemoryNotices } from '@/windows/voice/memory-notice';
 
 /** 一次播报（回合回应或设置页试听）的跟踪句柄。 */
 type ActiveSpeak = {
@@ -357,10 +355,8 @@ export default function Home() {
   const [retryingConversation, setRetryingConversation] = useState<string | null>(null);
   /** 024：文字草稿（收起/设置往返保留；新建/切换/删除当前会话清空；不跨重启）。 */
   const [composerDraft] = useState(createComposerDraft);
-  const [queueEdit, setQueueEdit] = useState<{ conversationId: string; inputId: string; revision: number } | null>(null);
-  const queueEditRef = useRef<typeof queueEdit>(null);
-  const queueEditActionRef = useRef(false);
-  const [queueEditSaving, setQueueEditSaving] = useState(false);
+  const queueTakingRef = useRef(false);
+  const [queueTaking, setQueueTaking] = useState(false);
   const draftState = useSyncExternalStore(composerDraft.subscribe, composerDraft.getSnapshot);
   const { text: draft, attachments: draftAttachments, references: draftReferences, skills: draftSkills } = draftState;
   const { setText: setDraft, setAttachments: setDraftAttachments, setReferences: setDraftReferences, setSkills: setDraftSkills } = composerDraft;
@@ -370,7 +366,7 @@ export default function Home() {
   // 「默认带一段内容」的僵尸草稿（实录：10-05 的未发送购机咨询跟了一天），
   // v1「未发送内容跨新建保留」口径退役；槽只在冷启动无会话时恢复（见启动段），
   // 未发送内容不因重启丢。输入防抖落盘；切换和卸载从草稿模型同步取快照冲刷，
-  // 不依赖 React effect 更新后的 ref，队列编辑层也遵循同一卸载生命周期。
+  // 不依赖 React effect 更新后的 ref；从队列取回的消息也按普通草稿保存。
   const DRAFT_NEW_KEY = 'draft-new';
   const draftLoadRef = useRef<Promise<void>>(Promise.resolve());
   const draftPersistenceRef = useRef<ReturnType<typeof createDraftPersistence> | null>(null);
@@ -393,14 +389,6 @@ export default function Home() {
   const clearDraftFor = useCallback((key: string) => {
     draftLoadRef.current = draftPersistenceRef.current?.activate(key, 'clear') ?? Promise.resolve();
   }, []);
-  const leaveQueueEdit = useCallback((cancel = true) => {
-    const editing = queueEditRef.current;
-    if (!editing) return;
-    queueEditRef.current = null;
-    setQueueEdit(null);
-    composerDraft.endQueueEdit();
-    if (cancel) void window.hemiVoice?.flowCommand(editing.conversationId, { type: 'finishEditInput', inputId: editing.inputId, expectedEditRevision: editing.revision, cancel: true });
-  }, [composerDraft]);
   /** 026 R-10：「继续讨论」带回的任务级追问对象（输入区 chip；发送/移除清除）。 */
   const [discussContext, setDiscussContext] = useState<{ taskId: string; title: string } | null>(null);
   /** 026 R-10：聚焦输入框的信号（递增触发 TextComposer focus）。 */
@@ -877,21 +865,6 @@ export default function Home() {
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState | null>(null);
   /** 同步镜像：发送守卫在回调里要立刻读到当前视图（不等渲染帧）。 */
   const workspaceStateRef = useRef<WorkspaceState | null>(null);
-  // 016→037：对话内记忆提示（R-14，可见不播报）——「记住了：…」/「已忘记：…」+ 查看 / 撤销，
-  // 由 MemoryChangedEvent 驱动；新回合开始或切会话时清掉。
-  const memoryNotices = useMemoryNotices({
-    scopeLabelOf: (scopeKey) => memoryScopeLabel(scopeKey, workspaceStateRef.current),
-    onOpenMemoryPage: async () => {
-      if(!await confirmWorkflowLeave())return;
-      setSettingsTarget({ page: 'memory' });
-      setSettingsOpen(true);
-    },
-    currentConversationId: () => conversationIdRef.current,
-  });
-  const clearMemoryNotices = memoryNotices.clear;
-  useEffect(() => {
-    clearMemoryNotices();
-  }, [conversationId, clearMemoryNotices]);
   /**
    * 当前会话绑定的工作区身份：'default' / 'ws-…'；null＝旧会话（033 前建档，
    * 任务继续按家目录语义执行）。ref 权威，state 是侧栏/上下文栏的镜像。
@@ -1084,7 +1057,6 @@ export default function Home() {
    * 任务卡按 taskSnap 重建冻结快照，LLM 上下文从 turns 重建（D-7 续聊不断档）。
    */
   const applyConversationSession = useCallback((session: ConversationSession) => {
-    leaveQueueEdit();
     const raw = Array.isArray(session.turns) ? session.turns : [];
     conversationIdRef.current = session.id;
     // 048：切到目标会话就重取它的用量账本（任务执行部分主进程现场汇总）。
@@ -1154,7 +1126,7 @@ export default function Home() {
     void window.hemiVoice?.getConversationTurn?.(session.id).then((snapshot) => {
       if (epoch === viewEpochRef.current && conversationIdRef.current === session.id) adoptConversationTurn(snapshot);
     }).catch(() => {});
-  }, [adoptConversationTurn, applyConversationProfile, applyConversationWorkspace, flushDraft, loadDraftFor, rememberLastConversationModel, leaveQueueEdit]);
+  }, [adoptConversationTurn, applyConversationProfile, applyConversationWorkspace, flushDraft, loadDraftFor, rememberLastConversationModel]);
 
   // 057 S3-2d：周期性全量 turns 保存退役——用户轮（宿主 input-delivered 落档）、
   // 回复轮（persistReply）、任务轮（task.ipc 快照广播落档）都已是宿主事实；渲染层
@@ -1228,70 +1200,31 @@ export default function Home() {
 
   const handleEditQueued = useCallback(async (inputId: string) => {
     const cid = conversationIdRef.current;
-    if (!cid || queueEditRef.current || queueEditActionRef.current) return;
-    queueEditActionRef.current = true;
+    const persistence = draftPersistenceRef.current;
+    const source = flowSnapshotRef.current?.pending.find(input => input.inputId === inputId);
+    if (!cid || !persistence || !source || queueTakingRef.current) return;
+    queueTakingRef.current = true;
+    setQueueTaking(true);
     try {
       await draftLoadRef.current;
       if (conversationIdRef.current !== cid) return;
-      const result = await window.hemiVoice?.flowCommand(cid, { type: 'beginEditInput', inputId });
-      if (!result?.ok || !result.input) throw new Error('这条消息已经开始发送，或暂时无法编辑。');
-      const input = result.input;
-      if (conversationIdRef.current !== cid) {
-        void window.hemiVoice?.flowCommand(cid, { type: 'finishEditInput', inputId, cancel: true });
-        return;
-      }
+      const result = await window.hemiVoice?.flowCommand(cid, { type: 'withdrawInput', inputId, restoreToDraft: true, expectedEditRevision: source.editRevision });
+      if (!result?.ok) throw new Error('这条消息已经开始发送，或暂时无法取回。');
+      const input = result.input ?? source;
       const saved = input.editDraft ?? input;
-      const refs = (saved.references ?? []).map((ref: MessageReferenceView, index: number) => ({ ...ref, key: ref.key ?? `retained-${index}`, name: ref.name ?? '保留的引用', subtitle: ref.subtitle ?? '' }));
-      const skillTags = (saved.skills ?? []).map((skill: SkillSelectionView) => ({ ...skill, token: skill.token || skill.name }));
-      composerDraft.beginQueueEdit({ text: saved.text, attachments: saved.attachmentViews ?? [], references: refs, skills: skillTags }, input.editDraftRevision ?? 0);
-      const editing = { conversationId: cid, inputId, revision: input.editRevision };
-      queueEditRef.current = editing;
-      setQueueEdit(editing);
-      setComposerFocusToken((value) => value + 1);
+      const references = (saved.references ?? []).map((ref: MessageReferenceView, index: number) => ({ ...ref, key: ref.key ?? `retained-${index}`, name: ref.name ?? '保留的引用', subtitle: ref.subtitle ?? '' }));
+      const skills = (saved.skills ?? []).map((skill: SkillSelectionView) => ({ ...skill, token: skill.token || skill.name }));
+      const restored = persistence.restoreQueuedInput(cid, { text: saved.text, attachments: saved.attachmentViews ?? [], references, skills });
+      if (conversationIdRef.current === cid) setComposerFocusToken((value) => value + 1);
+      await restored;
     } catch (error) { flashAttachError(error instanceof Error ? error.message : String(error)); }
-    finally { queueEditActionRef.current = false; }
-  }, [composerDraft, flashAttachError]);
-
-  const flushQueueEditDraft = useCallback(() => {
-    const editing = queueEditRef.current;
-    if (!editing) return;
-    const current = composerDraft.getSnapshot();
-    void window.hemiVoice?.flowCommand(editing.conversationId, {
-      type: 'saveInputEditDraft', inputId: editing.inputId, draftRevision: current.revision,
-      patch: { text: current.text, attachmentIds: current.attachments.map((item) => item.attachmentId), attachmentViews: current.attachments, references: current.references, skills: current.skills },
-    }).then((result) => {
-      if (!result.ok && queueEditRef.current === editing) flashAttachError('编辑草稿暂未保存，请重试保存修改。');
-    }).catch(() => {});
-  }, [composerDraft, flashAttachError]);
+    finally { queueTakingRef.current = false; setQueueTaking(false); }
+  }, [flashAttachError]);
 
   useEffect(() => {
-    if (!queueEdit || queueEditSaving) return;
-    const timer = window.setTimeout(flushQueueEditDraft, 300);
-    return () => window.clearTimeout(timer);
-  }, [draftState, queueEdit, queueEditSaving, flushQueueEditDraft]);
-
-  useEffect(() => {
-    const flushBeforeUnload = () => { flushDraft(); flushQueueEditDraft(); };
-    window.addEventListener('beforeunload', flushBeforeUnload);
-    return () => window.removeEventListener('beforeunload', flushBeforeUnload);
-  }, [flushDraft, flushQueueEditDraft]);
-
-  const saveQueueEdit = useCallback(async () => {
-    const editing = queueEditRef.current;
-    if (!editing || queueEditActionRef.current) return;
-    queueEditActionRef.current = true;
-    setQueueEditSaving(true);
-    const current = composerDraft.getSnapshot();
-    try {
-      const result = await window.hemiVoice?.flowCommand(editing.conversationId, {
-        type: 'finishEditInput', inputId: editing.inputId, expectedEditRevision: editing.revision,
-        patch: { text: current.text, attachmentIds: current.attachments.map((item) => item.attachmentId), attachmentViews: current.attachments, references: current.references, skills: current.skills },
-      });
-      if (!result?.ok) throw new Error(result?.message ?? '修改没有保存，请重试。');
-      if (queueEditRef.current === editing) leaveQueueEdit(false);
-    } catch (error) { flashAttachError(error instanceof Error ? error.message : String(error)); }
-    finally { queueEditActionRef.current = false; setQueueEditSaving(false); }
-  }, [composerDraft, leaveQueueEdit, flashAttachError]);
+    window.addEventListener('beforeunload', flushDraft);
+    return () => window.removeEventListener('beforeunload', flushDraft);
+  }, [flushDraft]);
 
   /** 056 修订：撤回排队条目——排队消息不在对话流里，队列行消失（queue:state
    *  广播）即反馈，对话流无需改动。 */
@@ -1882,7 +1815,6 @@ export default function Home() {
       if (epoch !== viewEpochRef.current || id !== conversationIdRef.current) return;
       if (!receipt.ok) throw new Error(receipt.message);
       opts.onAccepted?.(receipt);
-      clearMemoryNotices();
       setTurnError('');
       logChain(`受理 ${receipt.inputId} · ${receipt.disposition}`);
       // 受理后由订阅推进状态；补取失败也不能再报告“未受理”，诱导用户重复发送。
@@ -1898,7 +1830,7 @@ export default function Home() {
       setTurnError(messageFromError(error, '本轮没有受理，请重试。'));
       flashAttachError(messageFromError(error, '本轮没有受理，请重试。'));
     }
-  }, [adoptConversationTurn, clearMemoryNotices, flashAttachError]);
+  }, [adoptConversationTurn, flashAttachError]);
 
   /** 用户新说完一轮：有新定稿才提交，上下文取最近若干回合。 */
   const submitTurn = useCallback(() => {
@@ -1984,9 +1916,8 @@ export default function Home() {
    * 通话保持（不关麦克风）；停在 replying/error 的旧状态由 runTurn 统一收口。
    */
   const handleSubmitText = useCallback(() => {
-    if (!window.hemiVoice) return;
+    if (!window.hemiVoice || queueTakingRef.current) return;
     const text = draft.trim();
-    if (queueEditRef.current) { void saveQueueEdit(); return; }
     // 028：仅附件无文字也可发送（AC-03）；两者都空才拦。
     if (!text && !draftAttachments.length) return;
     // 未就绪附件不能被误认为已发送（R-03）。
@@ -2041,7 +1972,7 @@ export default function Home() {
     void runTurn(messages, 'text', attachmentIds, {
       onAccepted: () => { if (composerDraft.accept(version)) setDiscussContext(null); },
     }).finally(() => submittingDraftsRef.current.delete(version));
-  }, [draft, draftAttachments, draftReferences, draftSkills, runTurn, stopTtsPlayback, composerDraft, saveQueueEdit]);
+  }, [draft, draftAttachments, draftReferences, draftSkills, runTurn, stopTtsPlayback, composerDraft]);
 
   // —— 024 消息编辑（纯逻辑在 lib/message-edit.ts）——
   // 2026-10-10 语义改版（仿 zcode 回卷）：「重新发送」＝保存新文本＋把这条
@@ -2749,13 +2680,12 @@ export default function Home() {
     setTurnPhase('idle');
     setTurnError('');
     setArchivePayload({ conversationId: null, turns: [] });
-    leaveQueueEdit();
     // 024：清场即清草稿（新建/删除当前会话共用此路径）；回卷剪除键随会话作废。
     setDraft('');
 
     cutKeysRef.current.clear();
     setFrozenTasks({});
-  }, [detachTurn, stopTtsPlayback, leaveQueueEdit]);
+  }, [detachTurn, stopTtsPlayback]);
 
   /**
    * 2026-10-07 用户裁决：每个新会话的思考档都从「自动」起步。041 的全局档
@@ -3667,7 +3597,6 @@ export default function Home() {
     navigationPendingRef.current = true;
     const wasBot = botOpenRef.current;
     try {
-      if (settingsOpen && !await confirmMemoryLeave()) return;
       if (!await confirmWorkflowLeave()) return;
       if (next === 'bot') {
         botOpenRef.current = true;
@@ -3804,15 +3733,6 @@ export default function Home() {
         onToggleCallMute={handleToggleCallMute}
         onExpandDock={handleExpandDock}
         onCollapseDock={handleCollapseDock}
-        memoryNotice={
-          <MemoryNotices
-            items={memoryNotices.items}
-            onView={memoryNotices.view}
-            onUndo={(item) => void memoryNotices.undo(item)}
-            onRestore={(item) => void memoryNotices.restore(item)}
-            onToggleDetail={memoryNotices.toggleDetail}
-          />
-        }
         turnError={turnError}
         streamingReply={streamingReply}
         streamingThinking={streamingThinking}
@@ -3908,9 +3828,6 @@ export default function Home() {
           if (conversationId) void window.hemiVoice?.resumeTurnQueue(conversationId);
         }}
         onEditQueued={handleEditQueued}
-        queueEditing={Boolean(queueEdit)}
-        queueEditSaving={queueEditSaving}
-        onCancelQueueEdit={() => { if (!queueEditActionRef.current) leaveQueueEdit(); }}
         modelProfiles={modelProfiles}
         currentProfileId={conversationProfileId}
         onSelectModelProfile={handleSelectModelProfile}
@@ -3934,7 +3851,7 @@ export default function Home() {
                 ? { kind: 'view', view: { id: 'default', type: 'default', name: '默认空间', dir: '', status: 'ok' } }
                 : { kind: 'view', view: { id: conversationWorkspaceId, type: 'project', name: '（已移除的项目）', dir: '', status: 'missing', message: '项目不在列表里（可能已被移除），请重新选择' } }
         }
-        workspaceSendBlocked={['waiting','offline','connecting'].includes(flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.recovery?.phase ?? '') || workspaceMissing}
+        workspaceSendBlocked={queueTaking || ['waiting','offline','connecting'].includes(flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.recovery?.phase ?? '') || workspaceMissing}
         onWorkspaceSelect={handleWorkspaceSelect}
         onWorkspaceClear={handleWorkspaceClear}
         onWorkspacePickFolder={() => void handleWorkspacePickFolder()}

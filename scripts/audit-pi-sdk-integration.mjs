@@ -282,7 +282,7 @@ app.whenReady().then(async () => {
     runtime = createAgentRuntime({
       loadArchiveAgent: (id) => archives.get(id), loadArchiveTurns: () => [],
       saveArchiveAgent: (id, payload) => { archives.set(id, payload); return true; },
-      getSkillService: () => null, getMemoryService: () => null, getWorkspaceService: () => null,
+      getSkillService: () => null, getWorkspaceService: () => null,
       onEventTurn: () => {}, onTaskState: () => {},
     });
     const context = {

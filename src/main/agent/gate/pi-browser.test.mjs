@@ -118,11 +118,13 @@ test('工具面：navigate/extract/click/type/tabs/screenshot 经桥往返', asy
   const bridge = service.createClient({ taskId: 't-under-test' });
   const registered = {};
   hemiBrowser({ registerTool: (t) => { registered[t.name] = t; } }, { config: { enabled: true }, bridge });
+  const sent = [];
   await bridge.start();
   try {
     // 工具在桥未启动时调用会自行启动；但 waitReady 需要扩展在 8s 内 hello。
     const dialed = dialExtension(port, {
       onCommand: (cmd) => {
+        sent.push(cmd);
         if (cmd.op === 'session.navigate') {
           return { ok: true, data: { title: '示例页', url: cmd.params.url, session: { windowId: 7, tabId: 8 } } };
         }
@@ -137,8 +139,9 @@ test('工具面：navigate/extract/click/type/tabs/screenshot 经桥往返', asy
       },
     });
     // 扩展接入与工具调用并发：桥由首次工具调用启动。
-    const nav = await registered.browser_navigate.execute('t1', { url: 'https://example.com' }, null);
+    const nav = await registered.browser_navigate.execute('t1', { url: 'https://example.com', taskTitle: '  对比三款轻薄本  ' }, null);
     assert.match(nav.content[0].text, /已打开：示例页/);
+    assert.equal(sent[0].params.taskTitle, '对比三款轻薄本');
     assert.deepEqual(bridge.session, { windowId: 7, tabId: 8 });
 
     const extract = await registered.browser_extract.execute('t2', {}, null);

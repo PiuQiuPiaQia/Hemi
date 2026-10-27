@@ -272,8 +272,12 @@ process.on('unhandledRejection', (error) => {
   if (isSmokeTest) app.exit(1);
 });
 
-app.on('before-quit', () => {
-  void getBotService()?.close();
+let quitCleanup = null;
+let quitReady = false;
+app.on('before-quit', event => {
+  if (quitReady) return;
+  event.preventDefault();
+  if (quitCleanup) return;
   state.isQuitting = true;
   logSessionEnd();
   eventLoopMonitor?.stop();
@@ -284,8 +288,11 @@ app.on('before-quit', () => {
   // 036：cua-driver 进程内运行时收尾（shutdown + 原生句柄释放）。
   void disposeCuaDriver();
   finishFloatingDrag(false);
-  abortActiveTextModelTurn();
-  disposeTaskManager();
+  quitCleanup = Promise.allSettled([abortActiveTextModelTurn(), getBotService()?.close()]).finally(() => {
+    disposeTaskManager();
+    quitReady = true;
+    app.quit();
+  });
   closeActiveTtsPlayback();
   void stopDuplexHost();
   void stopActiveAsrSession();

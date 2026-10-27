@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runCommand, createCommandScope, commandToolResult } from './command-execution.mjs';
+import { withExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 
 const posix = { skip: process.platform === 'win32' ? 'POSIX 进程组用例；Windows taskkill 需 Windows 真机验证' : false };
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,4 +88,25 @@ test('064 命令在进程身份持久化前不执行，登记失败或等待中�
     await cancelStarted;controller.abort();releaseCancel();assert.equal((await cancelled).status,'cancelled');
     assert.equal(await readFile(marker,'utf8').catch(()=>null),null);
   } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('后台结果按根目标和子任务隔离；非阻塞消费与收口等待共享一次性结果', posix, async () => {
+  const commands = createCommandScope();
+  const first = { conversationId: 'c', rootRunId: 'r', generation: 0, taskId: 'first' };
+  const second = { ...first, taskId: 'second' };
+  try {
+    await withExecutionScope({ owner: first }, null, () => commands.run({ command: 'sleep 0.1; printf FIRST; exit 7', runInBackground: true }));
+    await withExecutionScope({ owner: second }, null, () => commands.run({ command: 'sleep 0.3; printf SECOND', runInBackground: true }));
+    assert.deepEqual(commands.takeCompleted(second), [], '仍在运行的任务不等待也不消费');
+    assert.deepEqual(commands.takeCompleted({ ...first, rootRunId: 'other' }), []);
+    assert.deepEqual(commands.takeCompleted({ ...first, generation: 1 }), []);
+    const [result] = await commands.waitForCompletion(first);
+    assert.equal(result.code, 7); assert.match(result.text, /FIRST/);
+    assert.deepEqual(commands.takeCompleted(first), []);
+    assert.equal(commands.hasBackground(first), false);
+    assert.equal(commands.hasBackground(second), true);
+    const [remaining] = await commands.waitForCompletion(second);
+    assert.match(remaining.text, /SECOND/);
+    assert.deepEqual(await commands.waitForCompletion(second), []);
+  } finally { await commands.abort(); }
 });

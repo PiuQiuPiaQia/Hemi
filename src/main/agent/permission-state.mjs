@@ -43,7 +43,7 @@ export async function cleanupLegacyExecutorInstall({ userDataDir, log }) {
 /**
  * 014：把 Chrome 扩展导出到用户指定的位置（2026-09-20 裁决——导出去哪由用户
  * 在系统目录选择窗里定，不替用户决定）。在 targetRoot 下建 folderName 子目录、
- * 覆盖式复制源目录里的文件；过滤 ._* AppleDouble 垃圾（exFAT 盘会生成，
+ * 递归覆盖复制源目录里的文件与子目录；过滤 ._* AppleDouble 垃圾（exFAT 盘会生成，
  * Chrome 加载未打包扩展时是杂质）。返回实际导出目录。
  */
 export function exportBrowserExtensionFiles({
@@ -57,21 +57,31 @@ export function exportBrowserExtensionFiles({
   unlink = unlinkSync,
 }) {
   const exportDir = path.join(targetRoot, folderName);
-  mkdir(exportDir, { recursive: true });
-  for (const entry of readdir(sourceDir)) {
-    if (entry.startsWith('.')) continue;
-    const source = path.join(sourceDir, entry);
-    if (!stat(source).isFile()) continue;
-    copy(source, path.join(exportDir, entry));
+  const relative = path.relative(path.resolve(sourceDir), path.resolve(exportDir));
+  if (relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))) {
+    throw new Error('请在扩展源码目录之外选择导出位置');
   }
-  for (const entry of readdir(exportDir)) {
-    if (entry.startsWith('.')) {
-      try {
-        unlink(path.join(exportDir, entry));
-      } catch {
-        /* 清不掉不影响使用 */
+
+  function copyDirectory(sourceDir, targetDir) {
+    mkdir(targetDir, { recursive: true });
+    for (const entry of readdir(sourceDir)) {
+      if (entry.startsWith('.')) continue;
+      const source = path.join(sourceDir, entry);
+      const target = path.join(targetDir, entry);
+      const info = stat(source);
+      if (info.isDirectory()) copyDirectory(source, target);
+      else if (info.isFile()) copy(source, target);
+    }
+    for (const entry of readdir(targetDir)) {
+      if (entry.startsWith('.')) {
+        try {
+          unlink(path.join(targetDir, entry));
+        } catch {
+          /* 清不掉不影响使用 */
+        }
       }
     }
   }
+  copyDirectory(sourceDir, exportDir);
   return exportDir;
 }

@@ -1,4 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { MoreHorizontal } from 'lucide-react';
+import { Menu, MenuItem } from '@/components/menu';
+import type { AgentEnvironmentSnapshot } from '@shared/protocol';
+import { MemorySection } from '../voice/memory-section';
 import type { BotMethod, BotState } from '@shared/bot';
 import { BotButton, BotDialog } from './dialogs';
 import { BotModelsSettings } from './models-settings';
@@ -9,7 +13,7 @@ import './styles.css';
 type Dialog = 'pairing' | 'address' | 'stop' | 'remove' | 'forget' | 'update';
 
 /** Settings use the desktop Bot bridge directly; local configuration APIs are never substituted. */
-export function BotSettings({page = 'general', onOpenLocalModels}: {page?: 'general' | 'models'; onOpenLocalModels?: () => void}) {
+export function BotSettings({page = 'general'}: {page?: 'general' | 'models' | 'memory'}) {
   const api = window.hemiVoice?.bot;
   const [state, setState] = useState<BotState | null>(null);
   const [error, setError] = useState('');
@@ -75,21 +79,31 @@ export function BotSettings({page = 'general', onOpenLocalModels}: {page?: 'gene
         </section>
       </div>
     );
-  if (page === 'models') return <BotModelsSettings key={state.binding.instanceId} state={state} onOpenLocalModels={onOpenLocalModels ?? (() => {})} />;
+  if (page === 'models') return <BotModelsSettings key={state.binding.instanceId} state={state} />;
+  if (page === 'memory') return <BotMemorySettings key={state.binding.instanceId} instanceId={state.binding.instanceId} />;
   return <ConnectedBotSettings key={state.binding.instanceId} state={state} />;
+}
+
+function BotMemorySettings({ instanceId }: { instanceId: string }) {
+  const api = window.hemiVoice.bot;
+  const inspect = useCallback(() => api.command<AgentEnvironmentSnapshot>('agent-environment.inspect', { expectedInstanceId: instanceId }), [api, instanceId]);
+  const readFile = useCallback((path: string) => api.command<{ path: string; text: string }>('agent-environment.read-file', { path, expectedInstanceId: instanceId }), [api, instanceId]);
+  return <><div className="h37-page-head"><div><h2>记忆</h2></div></div><MemorySection inspect={inspect} readFile={readFile} /></>;
 }
 
 function SettingsRow({
   title,
   description,
   children,
+  className = '',
 }: {
   title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="h37-row h37-bot-settings-row">
+    <div className={`h37-row h37-bot-settings-row ${className}`}>
       <span className="h37-row-text">
         <b>{title}</b>
         {description ? <span>{description}</span> : null}
@@ -106,6 +120,8 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [componentMenuOpen, setComponentMenuOpen] = useState(false);
+  const componentMenuRef = useRef<HTMLButtonElement>(null);
   const busy = pending || !!state.busy;
   const instanceId = state.binding!.instanceId;
   const call = async <T = unknown,>(method: BotMethod, params?: Record<string, unknown>) => {
@@ -123,6 +139,7 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
     try {
       const result = await call<{ cancelled?: boolean }>(method, params);
       setScreen(null);
+      if (method === 'component.ensure-current') return;
       if (!result?.cancelled) setNotice(method === 'diagnostics.export' ? '诊断已导出' : '已完成');
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作未能确认，请重新连接核对。');
@@ -146,6 +163,13 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
     setScreen('address');
   };
   const status = state.stoppedConfirmed ? '已确认停止' : state.online ? '运行中' : '状态待核对';
+  const component = state.componentStatus;
+  const checkingComponent = component?.phase === 'checking' || component?.phase === 'updating';
+  const componentMessage = component?.phase === 'checking' ? '正在后台检查更新…'
+    : component?.phase === 'updating' ? `正在后台更新${component.localVersion ? `至 v${component.localVersion}` : ''}…`
+    : component?.phase === 'failed' ? `自动更新未完成：${component.message || '请稍后重试。'}`
+    : component?.phase === 'waiting' ? component.message || '将在空闲时自动更新。'
+    : component?.phase === 'current' ? '已是最新版本。' : '空闲时自动更新。';
   const title = screen
     ? {
         pairing: '连接新设备',
@@ -220,10 +244,28 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
               ? action('停止 Bot', () => setScreen('stop'), !state.online)
               : action('启动 Bot', () => void perform('service.start'))}
           </SettingsRow>
-          <SettingsRow title="组件版本" description={state.binding?.componentVersion
-            ? `v${state.binding.componentVersion.version} · ${state.binding.componentVersion.build.slice(0, 8)}`
-            : state.binding?.version ?? '暂无记录'}>
-            {action('维护云端组件', () => setScreen('update'), !state.online)}
+          <SettingsRow className="h-bot-component-row" title="云端组件" description={<>
+            {state.binding?.componentVersion
+              ? `v${state.binding.componentVersion.version} · ${state.binding.componentVersion.build.slice(0, 8)}`
+              : state.binding?.version ?? '暂无记录'}
+            <br />
+            每 6 小时自动检查一次。{componentMessage}
+            {component?.checkedAt ? <><br />上次检查：{new Date(component.checkedAt).toLocaleString()}。</> : null}
+          </>}>
+            {action(component?.phase === 'failed' ? '重试更新' : '检查更新', () => void perform('component.ensure-current'), !state.online || checkingComponent)}
+            <button
+              ref={componentMenuRef}
+              type="button"
+              className="h37-btn h37-btn-ghost h37-btn-icon h37-btn-sm"
+              aria-label="云端组件更多操作"
+              title="云端组件更多操作"
+              aria-haspopup="menu"
+              aria-expanded={componentMenuOpen}
+              disabled={busy || !state.online || checkingComponent}
+              onClick={() => setComponentMenuOpen(!componentMenuOpen)}
+            >
+              <MoreHorizontal aria-hidden="true" />
+            </button>
           </SettingsRow>
           <SettingsRow title="诊断信息" description="导出连接与运行信息，帮助排查问题。">
             {action('导出诊断', () => void perform('diagnostics.export'))}
@@ -243,6 +285,22 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
           </SettingsRow>
         </div>
       </section>
+      <Menu
+        open={componentMenuOpen}
+        onClose={() => setComponentMenuOpen(false)}
+        anchorRef={componentMenuRef}
+        placement="anchor-down"
+      >
+        <MenuItem
+          label="重新部署云端组件…"
+          disabled={busy || !state.online || checkingComponent}
+          onClick={() => {
+            setComponentMenuOpen(false);
+            setError('');
+            setScreen('update');
+          }}
+        />
+      </Menu>
       {notice ? (
         <p className="h37-section-foot" role="status">
           {notice}

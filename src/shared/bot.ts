@@ -5,9 +5,14 @@ import type {
   SkillSelectionView,
   ModelProviderSaveInput,
   RoleModelSlot,
+  OAuthProvider,
 } from './protocol';
 import type {BotDeviceAccess} from './bot-pairing';
 export type BotModel = {
+  keyStoredSecurely?: boolean;
+  configuration?: 'newapi';
+  oauthProvider?: OAuthProvider;
+  oauthConnected?: boolean;
   key: string;
   providerId: string;
   name: string;
@@ -62,6 +67,7 @@ export type BotDetail = BotSession & {
   usage: Array<{
     modelKey: string;
     modelName: string;
+    providerName?: string;
     at: number;
     usageDetail: {
       input: number;
@@ -74,6 +80,7 @@ export type BotDetail = BotSession & {
 };
 export type BotBinding = {
   host: string;
+  platform?: 'linux' | 'win32';
   instanceId: string;
   protocol: number;
   version: string;
@@ -83,6 +90,8 @@ export type BotBinding = {
   boundAt: number;
 };
 export type BotCache = {
+  capabilities?: { nativeMemory?: number; botOAuth?: number };
+  oauthAccounts?: Array<{ provider: OAuthProvider; connected: boolean }>;
   deviceAccess?: BotDeviceAccess;
   selectedId?: string | null;
   instanceId: string;
@@ -93,11 +102,13 @@ export type BotCache = {
   lastConversationModelKey?: string | null;
   recentDirs: string[];
   models: BotModel[];
+  modelConfigRevision?: string;
   roleModels?: Partial<Record<RoleModelSlot, string | null>>;
   sessions: BotSession[];
   details: Record<string, BotDetail>;
 };
 export type BotProbe = {
+  platform?: 'linux' | 'win32';
   home: string;
   root: string;
   node: string;
@@ -120,7 +131,6 @@ export type BotSyncStatus = {
   keys: string[];
   phase: 'sending' | 'unknown' | 'confirmed' | 'not-received' | 'interrupted';
   at: number;
-  automatic?: boolean;
   results?: Array<{ key: string; ok: boolean; message?: string }>;
 };
 export type BotState = {
@@ -131,6 +141,7 @@ export type BotState = {
   busy: string;
   componentStatus?: {
     phase: 'checking' | 'current' | 'waiting' | 'updating' | 'failed';
+    checkedAt?: number;
     localVersion?: string;
     remoteVersion?: string;
     message?: string;
@@ -138,14 +149,12 @@ export type BotState = {
   lastConnectedAt: number | null;
   stoppedConfirmed?: boolean;
   syncStatus?: BotSyncStatus | null;
-  localModels?: BotModelCandidate[];
-  localRoleModels?: Partial<Record<RoleModelSlot, string | null>>;
-  modelConfigError?: string;
   cache: BotCache | null;
   candidate: { id: string; host: string; info: BotProbe } | null;
 };
 export type BotModelCandidate = {
   key: string;
+  oauthProvider?: OAuthProvider;
   providerId?: string;
   baseUrl?: string;
   api?: string;
@@ -166,7 +175,28 @@ export type BotDirectory = {
   folders: Array<{ name: string; path: string }>;
   truncated?: boolean;
 };
+export type BotModelSyncChange = {
+  id: string;
+  kind: 'model' | 'account';
+  action: 'add' | 'update' | 'remove';
+  modelKey?: string;
+  oauthProvider?: OAuthProvider;
+  title: string;
+  before: string;
+  after: string;
+  details: string[];
+  canSync: boolean;
+  reason: string;
+};
+export type BotModelSyncPreview = { id: string; changes: BotModelSyncChange[] };
 export type BotMethod =
+  | 'oauth.start'
+  | 'oauth.state'
+  | 'oauth.answer'
+  | 'oauth.cancel'
+  | 'oauth.logout'
+  | 'agent-environment.inspect'
+  | 'agent-environment.read-file'
   | 'pairing.status'
   | 'pairing.operation'
   | 'pairing.configure'
@@ -197,9 +227,14 @@ export type BotMethod =
   | 'references'
   | 'skills'
   | 'models.sync'
+  | 'models.diff'
+  | 'models.save'
+  | 'models.routing'
   | 'models.add'
   | 'models.test'
   | 'models.list'
+  | 'models.roles'
+  | 'models.remove'
   | 'connection.reconnect'
   | 'connection.disconnect'
   | 'connection.remove'
@@ -227,9 +262,9 @@ export type BotBridge = {
   }) => Promise<BotState>;
   initialize: (p: {
     candidateId: string;
-    modelKeys?: string[];
     provider?: ModelProviderSaveInput;
     existing?: boolean;
+    accountSetup?: boolean;
     requestId?: string;
   }) => Promise<BotState>;
   models: () => Promise<BotModelCandidate[]>;

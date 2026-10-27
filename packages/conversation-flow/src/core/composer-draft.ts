@@ -32,6 +32,21 @@ export function createComposerDraft() {
       contentRevision += 1;
       for (const listener of listeners) listener();
     },
+    /** A withdrawn queue entry becomes an ordinary draft; retain any unsent content. */
+    restoreQueuedInput(input: Omit<ComposerDraftSnapshot, 'revision' | 'token'>) {
+      const unique = <T,>(items: T[], key: (item: T) => string) => [...new Map(items.map(item => [key(item), item])).values()];
+      previous = null;
+      value = {
+        revision: value.revision + 1, token: token(),
+        text: [input.text, value.text].filter(text => text.trim()).join('\n\n'),
+        attachments: unique([...input.attachments, ...value.attachments], item => item.attachmentId),
+        references: unique([...input.references, ...value.references], item => item.key),
+        skills: unique([...input.skills, ...value.skills], item => `${item.source}:${item.skillId}`),
+      };
+      textRevision += 1;
+      contentRevision += 1;
+      for (const listener of listeners) listener();
+    },
     beginQueueEdit(input: Omit<ComposerDraftSnapshot, 'revision'>, minRevision = 0) {
       if (previous) return false;
       previous = value;

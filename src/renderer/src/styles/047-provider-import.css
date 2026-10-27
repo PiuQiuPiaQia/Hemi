@@ -11,6 +11,13 @@
   gap: var(--sp-8);
 }
 
+.h47n-methods[data-bot='true'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 600px) {
+  .h47n-methods[data-bot='true'] { grid-template-columns: minmax(0, 1fr); }
+}
+
 .h47n-method {
   display: flex;
   align-items: center;

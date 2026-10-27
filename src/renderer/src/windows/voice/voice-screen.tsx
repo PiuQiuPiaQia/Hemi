@@ -126,7 +126,6 @@ type VoiceScreenProps = {
   /** 024：收起 Dock（顶栏「通话中」按钮在展开态点击时收起）。 */
   onCollapseDock?: () => void;
   /** 016：自动记录成功的轻提示（空串＝不显示）。037：可传记忆提示组件（MemoryNotices）。 */
-  memoryNotice?: import('react').ReactNode;
   /** 模型失败的提示；独立通路，不伪装成 Hemi 的话。 */
   turnError: string;
   /** 流式打字机：在途回合已收到的增量文本（空 = 没有在流式）。 */
@@ -281,9 +280,6 @@ type VoiceScreenProps = {
   /** 「继续任务」按钮（停止后无新任务）：真续跑，补一条「继续」回合。 */
   onContinueStoppedTask?: () => void;
   onEditQueued?: (queueItemId: string) => void;
-  queueEditing?: boolean;
-  queueEditSaving?: boolean;
-  onCancelQueueEdit?: () => void;
   /** 060 R-21：让该条优先（停止当前任务，确认后优先派发）。 */
   onPromoteQueued?: (queueItemId: string) => void;
   onReorderQueued?: (inputId: string, overInputId: string, expectedInputIds: string[]) => Promise<void> | void;
@@ -339,7 +335,6 @@ export function VoiceScreen({
   onToggleCallMute,
   onExpandDock,
   onCollapseDock,
-  memoryNotice,
   turnError,
   streamingReply,
   streamingThinking = null,
@@ -428,9 +423,6 @@ export function VoiceScreen({
   onResumeQueue,
   onContinueStoppedTask,
   onEditQueued,
-  queueEditing = false,
-  queueEditSaving = false,
-  onCancelQueueEdit,
   onPromoteQueued,
   onReorderQueued,
   modelProfiles = null,
@@ -978,15 +970,6 @@ export function VoiceScreen({
               }}
             />
 
-            {/* 037：记忆提示（「记住了：…」/「已忘记：…」+ 查看 / 撤销），每条自带 role=status。 */}
-            {typeof memoryNotice === 'string' && memoryNotice ? (
-              <p className="h24-memory-notice" data-legacy="true" role="status">
-                {memoryNotice}
-              </p>
-            ) : memoryNotice ? (
-              <div className="h24-memory-notice">{memoryNotice}</div>
-            ) : null}
-
             {isError ? (
               <div className="h24-turn-error">
                 <TurnErrorNotice message={errorCopy} speech={sessionState === 'error'} />
@@ -1065,9 +1048,6 @@ export function VoiceScreen({
                 value={textDraft}
                 onChange={onTextDraftChange}
                 onSend={onTextSend}
-                queueEditing={queueEditing}
-                queueEditSaving={queueEditSaving}
-                onCancelQueueEdit={onCancelQueueEdit}
                 busy={textModelBusy}
                 waiting={Boolean(runActivity?.phase.startsWith('waiting-'))}
                 pendingSpeech={textPendingSpeech}

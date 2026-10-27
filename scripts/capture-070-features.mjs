@@ -90,8 +90,8 @@ app.whenReady().then(async () => {
       const toolDone = messages.slice(start).some(m => m.role === 'tool');
       const wantsMemory = JSON.stringify(messages.slice(start)).includes('演示偏好');
       const calls = wantsMemory && !toolDone && body.tools?.some(t => t.function?.name === 'memory_write')
-        ? ['回答先给结论\n解释之前先给清晰、简短的结论。', '待办使用简短清单\n整理待办时，每项只保留一件明确的事。'].map((text, index) => ({ index, id: 'demo-memory-' + index, type: 'function', function: { name: 'memory_write', arguments: JSON.stringify({ target: 'user', action: 'add', reason: 'stable_fact', text }) } })) : [];
-      const delta = calls.length ? { role: 'assistant', tool_calls: calls } : { role: 'assistant', content: wantsMemory ? '已将这两项偏好记入「关于你」，之后会按这个习惯协作。' : '好的，我会先给结论，并用简短清单整理待办。' };
+        ? ['回答先给结论\n解释之前先给清晰、简短的结论。', '待办使用简短清单\n整理待办时，每项只保留一件明确的事。'].map((text, index) => ({ index, id: 'demo-memory-' + index, type: 'function', function: { name: 'memory_write', arguments: JSON.stringify({ target: 'long_term', content: text }) } })) : [];
+      const delta = calls.length ? { role: 'assistant', tool_calls: calls } : { role: 'assistant', content: wantsMemory ? '已将这两项偏好记入此桌面的共享记忆，之后会按这个习惯协作。' : '好的，我会先给结论，并用简短清单整理待办。' };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       for (const [part, reason] of [[delta, null], [{}, calls.length ? 'tool_calls' : 'stop']]) res.write('data: ' + JSON.stringify({ id: 'demo-070', object: 'chat.completion.chunk', created: 1, model: body.model ?? 'demo-quality', choices: [{ index: 0, delta: part, finish_reason: reason }] }) + '\n\n');
       res.end('data: [DONE]\n\n');
@@ -148,9 +148,9 @@ app.whenReady().then(async () => {
     await wait('!!document.querySelector("textarea[aria-label=输入消息]")', '对话输入');
     await input('textarea[aria-label=输入消息]', '演示偏好：我习惯回答先给结论，再解释；整理待办时使用简短清单。');
     await click('发送');
-    await wait('document.body.innerText.includes("记入「关于你」")', '主 agent 真实写入记忆', 45000);
+    await wait('document.body.innerText.includes("记入此桌面的共享记忆")', '主 agent 真实写入记忆', 45000);
     await click('设置'); await wait('!!document.querySelector(".settings-nav")', '设置页'); await page('记忆');
-    await wait('document.body.innerText.includes("回答先给结论")&&document.body.innerText.includes("待办使用简短清单")', '真实记忆条目可见');
+    await wait('document.body.innerText.includes("回答先给结论")&&document.body.innerText.includes("待办使用简短清单")', '原生记忆文件可见');
     await shot('feature-memory', { x: 468, y: 62, width: 780, height: 480 });
     evidence.rendererSha256 = createHash('sha256').update(await readFile('dist-renderer/index.html')).digest('hex');
     evidence.newApiDemo = { origin: site.origin, creates: site.state.createCalls, logins: site.state.loginCalls };

@@ -1,4 +1,4 @@
-import type { BotBridge, BotState } from '@shared/bot';
+import type { BotBridge, BotMethod, BotState } from '@shared/bot';
 import {removeConversationOperations} from '../voice/lib/conversation-operation-storage.ts';
 import type {
   HemiVoiceBridge,
@@ -7,27 +7,25 @@ import type {
   FlowCommandResult,
 } from '@shared/protocol';
 
+export async function callBot<T>(api: BotBridge, method: BotMethod, params: Record<string, unknown> = {}): Promise<T> {
+  if (!api.commandResult) return api.command<T>(method, params);
+  const reply = await api.commandResult<T>(method, params);
+  if (!reply.ok) throw Object.assign(new Error(reply.message), { code: reply.code });
+  return reply.result;
+}
+
 export function botModelDirectory(state: BotState): ModelProfilesDirectory {
   const providers = new Map<string, ModelProviderView>();
-  const localKeys = new Set(state.localModels?.map(model => model.key));
-  const models = [
-    ...(state.localModels ?? []).map(model => ({
-      key: model.key, providerId: model.providerId ?? model.key.split('/')[0],
-      name: model.provider, model: model.name, baseUrl: model.baseUrl ?? '',
-      api: model.api ?? 'openai-completions', supportsVision: model.supportsVision ?? false,
-      source: 'local' as const,
-      thinkingLevel: model.thinkingLevel ?? 'default', unavailableReason: model.reason || undefined,
-    })),
-    ...(state.cache?.models ?? []).filter(model => !localKeys.has(model.key)),
-  ];
-  for (const model of models) {
+  for (const model of state.cache?.models ?? []) {
     let p = providers.get(model.providerId);
     if (!p) {
       p = {
         source: model.source ?? 'local',
         id: model.providerId, name: model.name, baseUrl: model.baseUrl,
-        api: model.api as ModelProviderView['api'], hasApiKey: true,
-        keyStoredSecurely: true, updatedAt: 0, models: [],
+        api: model.api as ModelProviderView['api'], hasApiKey: model.oauthConnected !== false,
+        ...(model.oauthProvider ? { oauthProvider: model.oauthProvider } : {}),
+        ...(model.configuration ? { configuration: model.configuration } : {}),
+        keyStoredSecurely: model.keyStoredSecurely === true, updatedAt: 0, models: [],
       };
       providers.set(p.id, p);
     }
@@ -35,7 +33,6 @@ export function botModelDirectory(state: BotState): ModelProfilesDirectory {
       id: model.key.slice(model.key.indexOf('/') + 1), modelKey: model.key,
       model: model.model, thinkingLevel: model.thinkingLevel ?? 'default',
       supportsVision: model.supportsVision, visionModel: '',
-      unavailableReason: 'unavailableReason' in model ? model.unavailableReason : undefined,
     });
   }
   return {
@@ -43,7 +40,7 @@ export function botModelDirectory(state: BotState): ModelProfilesDirectory {
     defaultModelId: state.cache?.defaultModel ?? null,
     lastConversationModelKey: state.cache?.lastConversationModelKey ?? null,
     providers: [...providers.values()],
-    roleModels: state.localRoleModels ?? state.cache?.roleModels ?? {},
+    roleModels: state.cache?.roleModels ?? {},
     envOverride: false,
     corrupt: false,
   };

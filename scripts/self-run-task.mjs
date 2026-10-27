@@ -85,21 +85,8 @@ async function finish(code, summary) {
   finished = true;
   console.log(`\n=== selfrun result: ${summary} ===`);
   try { disposeTaskManager(); } catch {}
-  try { (await import('../src/main/ipc/llm.ipc.mjs')).abortActiveTextModelTurn(); } catch {}
+  try { await (await import('../src/main/ipc/llm.ipc.mjs')).abortActiveTextModelTurn(); } catch {}
   void shutdownBrowserBridgeService().catch(() => {});
-  // 037 Phase E：终态经验提炼是 memory 服务的异步队列（≤10s/作业）——
-  // 等它跑空再退出，否则作业随进程被杀，harness 验不到落盘。
-  try {
-    const { getMemoryService } = await import('../src/main/ipc/memory.ipc.mjs');
-    const memory = getMemoryService();
-    for (let i = 0; i < 60; i += 1) {
-      const stats = memory?.extractionStats;
-      if (!stats || (!stats.running && stats.pending === 0)) break;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    const stats = memory?.extractionStats;
-    if (stats?.lastResult) console.log(`[selfrun] 提炼结果：${JSON.stringify(stats.lastResult)}`);
-  } catch {}
   setTimeout(() => app.exit(code), 500);
 }
 

@@ -3,17 +3,15 @@ import path from 'node:path';
 import https from 'node:https';
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
 import {createHash, randomBytes, randomInt, randomUUID, timingSafeEqual, X509Certificate} from 'node:crypto';
 import {calculateJwkThumbprint, decodeProtectedHeader, importJWK, jwtVerify} from 'jose';
 import {atomicJson, readJson, privateDirectory, fail, errorView} from './storage.mjs';
+import {createDeviceCertificate} from './device-certificate.mjs';
 
-const exec = promisify(execFile);
 const hash = value => createHash('sha256').update(value).digest('base64url');
 const equal = (left, right) => typeof left === 'string' && typeof right === 'string' && left.length === right.length && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) && !['__proto__','constructor','prototype'].includes(value);
-const RPC = new Set(['snapshot','session.open','session.control','session.create','session.update','session.rename','session.remove','session.order','session.draft','flow.snapshot','flow.command','operation.get','permission.decide','directory.list','attachment.read','attachment.document','file.read','file.resolve','references','skills']);
+const RPC = new Set(['snapshot','session.open','session.control','session.create','session.update','session.rename','session.remove','session.order','session.draft','flow.snapshot','flow.command','operation.get','permission.decide','directory.list','attachment.read','attachment.document','file.read','file.resolve','references','skills','agent-environment.inspect','agent-environment.read-file']);
 RPC.add('resource.stat');RPC.add('resource.chunk');
 for(const operation of ['begin','chunk','status','complete','cancel'])RPC.add('attachment.upload.'+operation);
 
@@ -79,17 +77,18 @@ export async function createDeviceGateway({dataDir, instanceId, request, watch, 
         if(hasDevices && (renew || oldCert && hash(oldCert.raw)!==state.config?.fingerprint))fail('设备证书已过期或变化，请先撤销现有设备再重新启用。','conflict');
         await stop();
         if (endpoint !== state.config?.endpoint || renew) {
-          const tempKey = keyFile+'.tmp', tempCert = certFile+'.tmp', tempConfig = path.join(dir,'tls-openssl.cnf.tmp');
+          const tempKey = keyFile+'.tmp', tempCert = certFile+'.tmp';
           try {
-            // OpenSSL 1.1.1 appends -addext to system x509_extensions instead of
-            // replacing them. A default CA:TRUE would duplicate CA:FALSE and
-            // produce an invalid certificate. Own the request configuration.
-            await fs.writeFile(tempConfig,'[req]\ndistinguished_name=dn\n[dn]\n',{mode:0o600});
-            try {await exec('openssl',['req','-config',tempConfig,'-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:prime256v1','-nodes','-sha256','-days','365','-subj','/CN=Hemi Bot','-addext','extendedKeyUsage=serverAuth','-addext','keyUsage=critical,digitalSignature','-addext','basicConstraints=critical,CA:FALSE','-addext',`subjectAltName=${net.isIP(host) ? 'IP' : 'DNS'}:${host}`,'-keyout',tempKey,'-out',tempCert],{timeout:15000});}
-            catch(error) {fail(error.code==='ENOENT' ? '设备连接需要 OpenSSL，请先在服务器安装 openssl。' : '无法生成设备证书，请检查 OpenSSL 版本和目录写入权限。','unsupported');}
+            try {
+              const identity = await createDeviceCertificate(host, {now: now()});
+              await Promise.all([
+                fs.writeFile(tempKey, identity.key, {mode:0o600}),
+                fs.writeFile(tempCert, identity.cert, {mode:0o600}),
+              ]);
+            } catch {fail('无法生成设备证书，请检查 Bot 数据目录的写入权限。','unsupported');}
             await fs.chmod(tempKey,0o600); await fs.chmod(tempCert,0o600);
             await fs.rename(tempKey,keyFile); await fs.rename(tempCert,certFile);
-          } finally {await fs.rm(tempKey,{force:true}); await fs.rm(tempCert,{force:true}); await fs.rm(tempConfig,{force:true});}
+          } finally {await fs.rm(tempKey,{force:true}); await fs.rm(tempCert,{force:true});}
         }
         const cert = new X509Certificate(await fs.readFile(certFile));
         if (Date.parse(cert.validTo) <= now()) fail('设备连接证书已过期，请撤销设备后重新配置。','conflict');

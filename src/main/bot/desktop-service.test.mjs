@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 import { createBotHost } from './host.mjs';
 import { createBotDesktopService } from './desktop-service.mjs';
 async function fixture(t) {
@@ -24,10 +25,13 @@ async function fixture(t) {
     dataDir: path.join(root, 'cloud/data'),
     defaultDir: path.join(root, 'cloud/workspace'),
     validateModel: async () => {},
+    executorFactory: () => ({async run() {return {};}, async stop() {}, async close() {}}),
   });
   const hello = await host.request('handshake');
   let network = true,
     dropReply = null;
+  let networkCode = 'offline';
+  const rpcMethods = [];
   let snapshotGate = null;
   const transport = {
     probe: async () => ({
@@ -36,9 +40,10 @@ async function fixture(t) {
       bot: { ...hello, configured: true },
     }),
     rpc: async (_target, method, p) => {
+      rpcMethods.push(method);
       if (!network)
         throw Object.assign(new Error('test disconnected'), {
-          code: 'offline',
+          code: networkCode,
         });
       // Windows exercises the actual desktop service and Host state. The remote
       // Linux /bin/sh initialization probe is the only substituted OS boundary.
@@ -108,8 +113,11 @@ async function fixture(t) {
     dropReply: (method) => {
       dropReply = method;
     },
-    setNetwork: (value) => {
+    rpcMethods,
+    transport,
+    setNetwork: (value, code = 'offline') => {
       network = value;
+      networkCode = code;
     },
     holdNextSnapshot() {
       let started, release;
@@ -125,6 +133,67 @@ async function fixture(t) {
     },
   };
 }
+test('transient connection failures keep retrying after four attempts and clear the stale error on recovery', async t => {
+  t.mock.timers.enable({apis: ['Date', 'setInterval'], now: Date.now()});
+  const f = await fixture(t);
+  f.setNetwork(false);
+  for (let i = 0; i < 5; i++) await f.client.refresh();
+  assert.equal(f.client.getState().online, false);
+  f.setNetwork(true);
+  const before = f.rpcMethods.length;
+  t.mock.timers.tick(61000);
+  assert.ok(f.rpcMethods.length > before, 'background timer must retry without a user wake-up');
+  await f.client.refresh(); // Join the refresh already started by the timer.
+  assert.equal(f.client.getState().online, true);
+  assert.equal(f.client.getState().error, '');
+  assert.equal((await f.host.request('handshake')).bootId, f.hello.bootId);
+  assert.ok(!f.rpcMethods.includes('service.start'));
+});
+
+test('device sharing reuses the actual configured gateway address and certificate when restarted without an address', async t => {
+  const f = await fixture(t);
+  const port = net.createServer();
+  await new Promise(resolve => port.listen(0, '127.0.0.1', resolve));
+  const endpoint = `https://127.0.0.1:${port.address().port}`;
+  await new Promise(resolve => port.close(resolve));
+  const first = await f.client.command('pairing.configure', {endpoint});
+  assert.equal(first.enabled, true);
+  assert.equal((await f.client.command('pairing.configure')).fingerprint, first.fingerprint);
+  await f.client.command('pairing.disable');
+  const restored = await f.client.command('pairing.configure');
+  assert.equal(restored.enabled, true);
+  assert.equal(restored.endpoint, endpoint);
+  assert.equal(restored.fingerprint, first.fingerprint);
+  const invitation = await f.client.command('pairing.create');
+  assert.equal(JSON.parse(invitation.qr).endpoint, endpoint);
+});
+
+test('credential failures wait for an explicit retry; page refresh respects deliberate disconnect and stop', async t => {
+  t.mock.timers.enable({apis: ['Date', 'setInterval'], now: Date.now()});
+  const f = await fixture(t);
+  f.setNetwork(false, 'permission');
+  await f.client.refresh();
+  f.setNetwork(true);
+  let before = f.rpcMethods.length;
+  t.mock.timers.tick(61000);
+  assert.equal(f.rpcMethods.length, before, 'do not repeatedly attempt rejected credentials');
+  await f.client.command('connection.reconnect');
+  assert.equal(f.client.getState().online, true);
+  await f.client.command('connection.disconnect');
+  before = f.rpcMethods.length;
+  t.mock.timers.tick(61000);
+  await f.client.refresh();
+  assert.equal(f.rpcMethods.length, before);
+  assert.equal(f.client.getState().online, false);
+  await f.client.command('connection.reconnect');
+  await f.client.command('service.stop');
+  before = f.rpcMethods.length;
+  t.mock.timers.tick(61000);
+  await f.client.refresh();
+  assert.equal(f.rpcMethods.length, before);
+  assert.equal(f.client.getState().stoppedConfirmed, true);
+  assert.equal((await f.host.request('handshake')).enabled, false);
+});
 test('manual sync uses local credentials only in main/Host, model status is stable and no key reaches renderer', async (t) => {
   const f = await fixture(t);
   const models = await f.client.modelCandidates();
@@ -138,8 +207,8 @@ test('manual sync uses local credentials only in main/Host, model status is stab
 
 test('a delayed toast acknowledgement cannot dismiss a newer model result', async t => {
   const f = await fixture(t);
-  await f.client.command('models.sync', { keys: ['p/m'], requestId: 'toast-first' });
-  await f.client.command('models.sync', { keys: ['p/m'], requestId: 'toast-second' });
+  await f.client.command('models.routing', { roleModels: { main: 'p/m' }, expectedModelRevision: f.client.getState().cache.modelConfigRevision, requestId: 'toast-first' });
+  await f.client.command('models.routing', { roleModels: { main: 'p/m' }, expectedModelRevision: f.client.getState().cache.modelConfigRevision, requestId: 'toast-second' });
   await f.client.command('models.dismiss', { requestId: 'toast-first' });
   assert.equal(f.client.getState().syncStatus.requestId, 'toast-second');
   await f.client.command('models.dismiss', { requestId: 'toast-second' });
@@ -309,13 +378,76 @@ test('deleting the active session does not poison polling or reconnect', async (
   assert.equal(f.client.getState().online, true);
   await f.client.command('connection.reconnect');
 });
+
+test('session receipts update create/model/delete immediately while an older poll is blocked', async t => {
+  const f = await fixture(t);
+  const gate = f.holdNextSnapshot(), polling = f.client.refresh();
+  await gate.started;
+  t.after(() => gate.release());
+  const before = f.rpcMethods.length;
+  const created = await f.client.command('session.create');
+  assert.deepEqual(f.rpcMethods.slice(before), ['session.create']);
+  assert.equal(f.client.getState().cache.details[created.id].modelKey, 'p/m');
+  assert.equal(f.client.getState().cache.selectedId, created.id);
+  await f.client.command('session.open', {id: created.id});
+  assert.deepEqual(f.rpcMethods.slice(before), ['session.create'], 'cached open needs no remote process');
+  await f.host.request('model.sync', {instanceId: f.hello.instanceId, requestId: 'second-model', models: [f.config, {...f.config, modelKey: 'p/other', model: 'other'}]});
+  await f.client.command('session.update', {id: created.id, modelKey: 'p/other'});
+  assert.equal(f.client.getState().cache.details[created.id].modelKey, 'p/other');
+  assert.equal(f.client.getState().cache.lastConversationModelKey, 'p/other');
+  const other = await f.client.command('session.create');
+  await f.client.command('session.remove', {id: created.id});
+  assert.equal(f.client.getState().cache.details[created.id], undefined);
+  gate.release(); await polling;
+  assert.deepEqual(f.client.getState().cache.sessions.map(item => item.id), [other.id], 'old poll cannot undo acknowledged mutations');
+  await f.client.refresh();
+  assert.equal(f.client.getState().cache.details[other.id].modelKey, 'p/other');
+});
+
+test('a failed delete preserves selection, and legacy Hosts retain authoritative refresh', async t => {
+  const f = await fixture(t), created = await f.client.command('session.create');
+  const rpc = f.transport.rpc;
+  f.transport.rpc = async (host, method, params) => {
+    if (method === 'session.remove') throw Object.assign(new Error('删除失败'), {code: 'permission'});
+    const result = await rpc(host, method, params);
+    if (method === 'session.update') delete result.snapshot;
+    return result;
+  };
+  await assert.rejects(f.client.command('session.remove', {id: created.id}), {code: 'permission'});
+  assert.equal(f.client.getState().cache.selectedId, created.id);
+  const before = f.rpcMethods.length;
+  await f.client.command('session.update', {id: created.id, thinking: 'high'});
+  assert.ok(f.rpcMethods.slice(before).includes('snapshot'));
+  assert.equal(f.client.getState().cache.details[created.id].thinking, 'high');
+});
+
+test('a late session receipt cannot update cache after an explicit disconnect', async t => {
+  const f = await fixture(t), created = await f.client.command('session.create');
+  const rpc = f.transport.rpc, started = Promise.withResolvers(), gate = Promise.withResolvers();
+  f.transport.rpc = async (...args) => {
+    const result = await rpc(...args);
+    if (args[1] === 'session.update') {started.resolve(); await gate.promise;}
+    return result;
+  };
+  const update = f.client.command('session.update', {id: created.id, thinking: 'high'});
+  await started.promise;
+  await f.client.command('connection.disconnect');
+  gate.resolve();
+  await assert.rejects(update, {code: 'conflict'});
+  assert.equal(f.client.getState().online, false);
+  assert.equal(f.client.getState().cache.details[created.id].thinking, 'default');
+  await f.client.command('connection.reconnect');
+  assert.equal(f.client.getState().cache.details[created.id].thinking, 'high');
+});
 test('lost model sync receipt remains visible across restart and reconciles without resending keys', async (t) => {
   const f = await fixture(t);
-  f.dropReply('model.sync');
+  f.config.name = 'Updated local config';
+  const preview = await f.client.command('models.diff');
+  f.dropReply('model.configure');
   await assert.rejects(
     () =>
       f.client.command('models.sync', {
-        keys: ['p/m'],
+        previewId: preview.id, selected: ['model:p/m'],
         requestId: 'lost-model-sync',
       }),
     /lost receipt/,

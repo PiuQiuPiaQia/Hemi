@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow, dialog } from 'electron';
+import { app, ipcMain, BrowserWindow, dialog, shell } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createBotDesktopService } from '../bot/desktop-service.mjs';
@@ -25,12 +25,11 @@ export function registerBotIpc() {
   });
   service = createBotDesktopService({
     userDataDir: app.getPath('userData'),
-    // A development checkout may inspect the production Bot, but must not replace its model catalog.
-    primaryUserDataDir: !app.isPackaged && !process.env.HEMI_USER_DATA_DIR ? path.join(app.getPath('appData'), 'hemi') : null,
     runner: { ...runner, rememberPassword: remote.rememberPassword },
     profiles: getProfiles(),
     archivePath,
     autoComponentUpdates: process.env.HEMI_BOT_AUTO_UPDATE !== '0',
+    openExternal: url => shell.openExternal(url),
     ensureArchive: async () => {
       if (app.isPackaged) {
         await fs.access(archivePath);
@@ -176,6 +175,9 @@ export function registerBotIpc() {
     const next = p.environment === 'bot' ? 'bot' : 'local';
     state.conversationEnvironment = next;
     if (next === 'bot') {
+      // Returning to Bot refreshes its connection immediately; it never starts
+      // an explicitly stopped Bot or overrides an intentional disconnect.
+      void service.refresh();
       closeActiveTtsPlayback();
       await stopAsrForBot();
       await stopDuplexHost();

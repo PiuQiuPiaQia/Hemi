@@ -52,6 +52,18 @@ test('isValidSshTarget：接受别名/user@host/[IPv6]，拒绝选项注入与�
   assert.equal(isValidSshTarget(''), false);
 });
 
+test('resolveHostname uses actual OpenSSH HostName for aliases and IPv6 without leaking user or SSH port', {skip: process.platform !== 'darwin'}, async () => {
+  const config = path.join(tmpBase, 'pairing-ssh-config');
+  writeFileSync(config, 'Host pairing-alias\n  HostName 203.0.113.42\n  User fixture\n  Port 2222\nHost pairing-v6\n  HostName 2001:db8::42\n', {mode: 0o600});
+  const binary = path.join(tmpBase, 'pairing-ssh');
+  writeFileSync(binary, `#!/bin/sh\nexec /usr/bin/ssh -F ${shq(config)} "$@"\n`, {mode: 0o700});
+  const runner = createSshRunner({controlDir, sshBin: binary});
+  assert.equal(await runner.resolveHostname('pairing-alias'), '203.0.113.42');
+  assert.equal(await runner.resolveHostname('user@pairing-v6'), '2001:db8::42');
+  assert.equal(await runner.resolveHostname('user@[2001:db8::43]'), '[2001:db8::43]');
+  await assert.rejects(runner.resolveHostname('-oProxyCommand=evil'), /SSH 地址无效/);
+});
+
 const NOT_POSIX = process.platform === 'win32' ? '假 ssh 是 sh 脚本、命令落本机 POSIX 沙箱：win 起不来（043 Windows 批次范围外）' : false;
 
 test('exec：命令在远端（沙箱）执行，stdout 二进制安全', { skip: NOT_POSIX }, async () => {

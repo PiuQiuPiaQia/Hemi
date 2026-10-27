@@ -119,9 +119,10 @@ app.whenReady().then(async()=>{
   await screenshot('queued');
   await click('button[aria-label="编辑这条"]');await wait(()=>exec(`document.querySelector('textarea[aria-label="输入消息"]').value.includes('ROOT_QUEUED')`),'队列编辑进入主输入框');
   await exec(`(()=>{const input=document.querySelector('textarea[aria-label="输入消息"]');input.focus();input.select();})()`);
-  await state.mainWindow.webContents.insertText('ROOT_QUEUED 编辑后仍按原顺序处理。');
-  check('队列编辑替换全文',await exec(`document.querySelector('textarea[aria-label="输入消息"]').value==='ROOT_QUEUED 编辑后仍按原顺序处理。'`));
-  await click('button[aria-label="保存修改"]');check('队列保存后恢复原草稿',await exec(`document.querySelector('textarea[aria-label="输入消息"]').value==='原草稿_064'`));
+  await state.mainWindow.webContents.insertText('ROOT_QUEUED 编辑后由用户重新发送。');
+  check('队列编辑替换全文',await exec(`document.querySelector('textarea[aria-label="输入消息"]').value==='ROOT_QUEUED 编辑后由用户重新发送。'`));
+  check('编辑时原队列消息已撤下',!(await flow(cid)).pending.some(input=>input.inputId===queued.inputId));
+  await click('.text-composer-send[data-action="send"]');await wait(()=>exec(`document.querySelector('textarea[aria-label="输入消息"]').value===''`),'用户重新发送后清空草稿');
   const completed=await wait(async()=>{const f=await flow(cid);return f.phase==='idle'&&f.pending.length===0&&Object.values(f.runs).length>=3?f:null;},'队列按序完成',60000);
   check('重复请求仅一次实际副作用',await readFile(counterFile,'utf8')==='run\n');
   check('子任务真实产物内容',await readFile(taskFile,'utf8')==='HEMI_064_PRODUCT_OK');

@@ -9,6 +9,8 @@ export type ModelRecoveryView = {
   nextRetryAt: number | null;
   notBefore?: number;
   summary?: string;
+  /** Host-captured position at the first failure; subsequent output cannot move it. */
+  anchor?: {itemId: string; afterPartId: string | null};
   history?: Array<{ at: number; phase: string; attempt: number; summary?: string }>;
 };
 /** Display-only contracts extracted from Hemi; no runtime or service imports. */

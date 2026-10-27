@@ -2,7 +2,7 @@
 name: explorer
 title: 侦察
 mode: verify
-tools: [context_read, task_read, read, ls, grep, glob, ui_list, ui_tree, screen_view, browser_navigate, browser_extract, browser_tabs, browser_screenshot, web_search, web_extract, memory_read, memory_search]
+tools: [context_read, task_read, read, ls, grep, glob, ui_list, ui_tree, screen_view, browser_navigate, browser_extract, browser_tabs, browser_screenshot, web_search, web_extract]
 description: 只读侦察（本地文件＋网页查询），返回压缩后的地图
 routing: |
   @explorer —— 只读侦察：本地文件、界面与网页查询，给出相关位置、事实与来源。

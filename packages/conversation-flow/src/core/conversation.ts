@@ -60,6 +60,8 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   let snapshotWrites = Promise.resolve();
   let draining: Promise<void> | null = null;
   let reconcile: Promise<void> | null = null;
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconcileAttempts = 0;
   let poll: ReturnType<typeof setInterval> | null = null;
   const listeners = new Set<() => void>();
   const controllers = new Set<AbortController>();
@@ -115,7 +117,11 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   const confirm = async (operation: ConversationOperation, result: FlowCommandResult) => {
     if (disposed) return;
     setOperation(operation.id, { state: result.ok ? 'accepted' : 'rejected', result });
-    if (!result.ok) update({ error: result.message ?? `操作未完成（${result.code ?? 'failed'}）` });
+    if (!state.operations.some(item => item.state === 'unknown')) {
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      reconcileTimer = null; reconcileAttempts = 0;
+    }
+    if (!result.ok && result.code !== 'superseded') update({ error: result.message ?? `操作未完成（${result.code ?? 'failed'}）` });
     if (result.ok && (operation.generation === null || operation.generation === state.snapshot?.generation)) {
       const current = draft.getSnapshot();
       if (operation.draftToken && operation.draftToken === current.token) draft.accept(current.revision, operation.draftToken);
@@ -124,23 +130,54 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     try { await persistOperations(); } catch { /* Already transmitted; preserve the receipt in memory. */ }
   };
   const validReceipt = (value: unknown): value is FlowCommandResult => Boolean(value && typeof (value as FlowCommandResult).ok === 'boolean');
-  async function reconcileUnknown() {
-    if (reconcile || disposed || suspended) return reconcile;
+  function observedResult(operation: ConversationOperation): FlowCommandResult | null {
+    const snapshot = state.snapshot;
+    const input = ['send', 'rewind'].includes(String(operation.command.type)) ? operation.command.input as {inputId?: string} | undefined : undefined;
+    if (input?.inputId && snapshot && (snapshot.pending.some(item => item.inputId === input.inputId)
+      || snapshot.timeline.some(item => item.kind === 'user' && item.id === input.inputId)
+      || Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!))))
+      return {ok: true, disposition: 'already-accepted', inputId: input.inputId};
+    const target = operation.command.targetRunId;
+    if (operation.command.type === 'stop' && typeof target === 'string' && snapshot?.activeRunId !== target
+      && ['completed', 'failed', 'stopped', 'interrupted'].includes(String(snapshot?.runs[target]?.outcome)))
+      return {ok: true, disposition: 'already-stopped'};
+    // Sends cannot cross the Host's rewind fence. An older uncertain send can
+    // release its local gate without replaying it or claiming it was accepted.
+    if (operation.command.type === 'send' && operation.generation !== null && snapshot && operation.generation < snapshot.generation)
+      return {ok: false, code: 'superseded', message: '对话已被编辑，旧消息不会再自动发送。'};
+    return null;
+  }
+  function reconcileUnknown(): Promise<unknown> {
+    if (disposed || suspended) return Promise.resolve();
+    // Live facts settle submissions even while an older receipt query waits.
+    // Its eventual reply must not undo authoritative acceptance.
+    const observed = state.operations.filter(item => item.state === 'unknown').flatMap(operation => {
+      const result = observedResult(operation);
+      return result ? [confirm(operation, result)] : [];
+    });
+    const settled = Promise.all(observed);
+    if (observed.length) void settled.then(flushQueue);
+    if (reconcile) return observed.length ? settled : reconcile;
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    reconcileTimer = null;
     reconcile = (async () => {
+      await settled;
       for (const operation of state.operations.filter(item => item.state === 'unknown')) {
-        const input = ['send', 'rewind'].includes(String(operation.command.type)) ? operation.command.input as { inputId?: string } | undefined : undefined;
-        const snapshot = state.snapshot;
-        const accepted = input?.inputId && snapshot && (snapshot.pending.some(item => item.inputId === input.inputId)
-          || snapshot.timeline.some(item => item.kind === 'user' && item.id === input.inputId)
-          || Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!)));
-        if (accepted) { await confirm(operation, { ok: true, disposition: 'already-accepted', inputId: input!.inputId }); continue; }
         if (!transport.lookupOperation) continue;
         try {
           const receipt = await request(signal => transport.lookupOperation!(identity, operation.id, { signal }));
-          if (validReceipt(receipt)) await confirm(operation, receipt);
+          if (state.operations.find(item => item.id === operation.id)?.state !== 'unknown') continue;
+          const result = observedResult(operation) ?? receipt;
+          if (validReceipt(result)) await confirm(operation, result);
         } catch { /* Keep unknown; a query failure is not permission to replay. */ }
       }
-    })().finally(() => { reconcile = null; });
+    })().finally(() => {
+      reconcile = null;
+      if (!disposed && !suspended && state.connection === 'online' && state.operations.some(item => item.state === 'unknown')) {
+        reconcileTimer = setTimeout(() => {reconcileTimer = null; void reconcileUnknown().then(flushQueue);}, Math.min(10000, 1000 * 2 ** Math.min(reconcileAttempts++, 4)));
+        (reconcileTimer as unknown as {unref?: () => void}).unref?.();
+      }
+    });
     return reconcile;
   }
   const replica = createFlowReplica({
@@ -181,10 +218,12 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
         void replica.refresh();
         return result;
       } catch {
+        const observed = observedResult(operation);
+        if (observed) {await confirm(operation, observed); return observed;}
         setOperation(operation.id, { state: 'unknown', result: undefined });
         try { await persistOperations(); } catch { /* Journal already says sending. */ }
         void replica.refresh().then(reconcileUnknown);
-        return { ok: false, code: 'unknown', message: '操作结果待核对，恢复连接后会查询状态' };
+        return { ok: false, code: 'unknown', message: '正在确认是否发送成功，请勿重复发送' };
       }
     })().finally(() => { inFlight.delete(operation.id); });
     inFlight.set(operation.id, pending);
@@ -239,7 +278,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (frozen.type === 'stop') await dispatch(operation);
     else await flushQueue();
     const live = state.operations.find(item => item.id === operation.id);
-    if (live?.state === 'unknown') return { ok: false, code: 'unknown', message: '操作结果待核对，恢复连接后会查询状态' };
+    if (live?.state === 'unknown') return { ok: false, code: 'unknown', message: '正在确认是否发送成功，请勿重复发送' };
     return live?.result ?? { ok: true, disposition: 'local-queued' };
   }
   const start = async () => {
@@ -272,6 +311,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     void persistence?.dispose(); disposed = true;
     replica.dispose(); subscriptions.splice(0).forEach(unsubscribe => unsubscribe());
     if (poll) clearInterval(poll); poll = null;
+    if (reconcileTimer) clearTimeout(reconcileTimer); reconcileTimer = null;
     controllers.forEach(controller => controller.abort()); listeners.clear();
   };
   return {
@@ -281,6 +321,9 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     retain() { retains += 1; void start(); let released = false; return () => { if (released) return; released = true; retains -= 1; queueMicrotask(() => { if (!retains) dispose(); }); }; },
     refresh: async () => { suspended = false; await initialize(); await replica.resume(); await reconcileUnknown(); await flushQueue(); },
     flushQueue, flushDraft: () => persistence?.flush() ?? Promise.resolve(),
+    restoreQueuedInput(input: Parameters<typeof draft.restoreQueuedInput>[0]) {
+      return persistence ? persistence.restoreQueuedInput(identity.conversationId, input) : Promise.resolve(draft.restoreQueuedInput(input));
+    },
     resolveDraftConflict: (choice: 'keep-local' | 'reload') => persistence?.activate(identity.conversationId, choice === 'keep-local' ? 'preserve' : 'restore') ?? Promise.resolve(),
     sendCommand: (command: Record<string, unknown>) => submit(command),
     sendDraft() {

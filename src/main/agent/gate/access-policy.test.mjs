@@ -161,8 +161,8 @@ test('056 只读边界（run＋boundary readonly）同样拒写记忆与登记�
   const q = { ...baseQ, resolvePath: (raw) => ({ raw, real: raw }) };
   const b = (tool) => judgeAccess({ tool, input: {}, boundary: 'readonly', q });
   assert.equal(b('memory_write').reasonCode, 'BOUNDARY_READONLY');
-  assert.equal(b('memory_forget').reasonCode, 'UNSUPPORTED_CHANNEL');
-  assert.equal(b('scratchpad').reasonCode, 'UNSUPPORTED_CHANNEL');
+  assert.equal(b('memory_forget').reasonCode, 'BOUNDARY_READONLY');
+  assert.equal(b('scratchpad').reasonCode, 'BOUNDARY_READONLY');
   assert.equal(b('register_delivery').reasonCode, 'BOUNDARY_READONLY');
   assert.equal(b('memory_read').verdict, VERDICT.allow);
   assert.equal(judgeAccess({ tool: 'memory_write', input: {}, q }).verdict, VERDICT.allow, '缺省边界照常');

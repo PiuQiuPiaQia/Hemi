@@ -10,7 +10,7 @@ import { createTaskFactPublisher } from '../services/task-fact-publisher.mjs';
 import { createPermissionService } from '../services/permission-service.mjs';
 
 const TOOLS = ['context_read', 'task_read', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'bash', 'register_delivery'];
-const CLOUD_SYSTEM = '你是 Hemi，运行在用户的 Linux 云服务器上。所有文件和命令都在这台服务器执行。用用户的语言完成已授权的工作。没有本机桌面、麦克风、录屏、语音或浏览器能力；不能宣称已操作用户电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。';
+const CLOUD_SYSTEM = `你是 Hemi，运行在用户的 ${process.platform === 'win32' ? 'Windows' : 'Linux'} 远端主机上。所有文件和命令都在这台主机执行。${process.platform === 'win32' ? 'bash 工具在此执行 Windows cmd.exe 命令，不是 POSIX bash；需要 PowerShell 时显式调用 powershell.exe -NoProfile -NonInteractive -Command。路径使用 Windows 绝对路径。' : ''}用用户的语言完成已授权的工作。没有本机桌面、麦克风、录屏、语音或浏览器能力；不能宣称已操作用户电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。`;
 
 export async function validateCloudModel(config) {
   const temporary = await mkdtemp(
@@ -72,10 +72,10 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
     void pending.catch(() => {});owner.deliveries.push(pending);
   };
   const runtime = createAgentRuntime({
-    userDataDir: dataDir, getProfiles: profilesFor,
+    userDataDir: dataDir, getProfiles: profilesFor, nativeMemory: true,
     resolveCapabilities: async () => ({visionOn: false, browserOn: false, features: {vision: false, browser: false, web: false}}),
     getAccessService: () => access,
-    sessionOptions: {tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
+    sessionOptions: {tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
     appendSystem: [CLOUD_SYSTEM], permissionTimeoutMs: 0,
     loadArchiveAgent(id) {
       const owner = active.get(id);if (!owner) return null;
@@ -104,7 +104,7 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
         const owner = active.get(conversationId);if (!owner) return;
         const candidates = [modelPlan.primary, ...modelPlan.allowedFallbacks];
         const config = candidates.find(candidate => candidate.modelKey === call.modelKey) ?? modelPlan.primary;
-        recordUsage(conversationId, {...call, role, modelKey: config.modelKey, modelName: config.model, at: Date.now()});
+        recordUsage(conversationId, {...call, role, modelKey: config.modelKey, modelName: config.model, providerName: config.name ?? '', at: Date.now()});
       });
     },
   });

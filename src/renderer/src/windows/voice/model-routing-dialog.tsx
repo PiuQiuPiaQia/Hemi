@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-import type { ModelProfilesDirectory, RoleModelSlot, RoleModelsView } from '@/shared/types';
+import type { HemiVoiceBridge, ModelProfilesDirectory, RoleModelSlot, RoleModelsView } from '@/shared/types';
 import { Pick } from '@/windows/voice/model-profiles-section';
 
 /**
@@ -27,7 +27,8 @@ const UNSET = '__unset__';
 /** fixtures：预置视图、目录与失败态（截图取证用；生产不传）。 */
 export type ModelRoutingFixture = { view: RoleModelsView; directory: ModelProfilesDirectory; error?: { slot: RoleModelSlot; message: string } };
 
-export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () => void; fixture?: ModelRoutingFixture | null }) {
+export function ModelRoutingDialog({ onClose, fixture = null, api }: { onClose: () => void; fixture?: ModelRoutingFixture | null; api?: HemiVoiceBridge }) {
+  const bridge = api ?? window.hemiVoice;
   const fixturePreset = fixture;
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -35,20 +36,39 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
   const [directory, setDirectory] = useState<ModelProfilesDirectory | null>(() => fixturePreset?.directory ?? null);
   const [saving, setSaving] = useState<RoleModelSlot | null>(null);
   const [error, setError] = useState<{ slot: RoleModelSlot; message: string } | null>(() => fixturePreset?.error ?? null);
+  const [loading, setLoading] = useState(!fixturePreset);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [readAttempt, setReadAttempt] = useState(0);
+  const savePending = useRef(false);
   const lastPatch = useRef<{ slot: RoleModelSlot; value: string | null } | null>(null);
 
   useEffect(() => {
     if (fixturePreset?.view) return;
     let alive = true;
-    void Promise.all([window.hemiVoice?.getRoleModels?.(), window.hemiVoice?.listModelProfiles?.()])
+    let timer: ReturnType<typeof setTimeout>;
+    setLoading(true);
+    setLoadError(null);
+    void Promise.race([
+      Promise.all([bridge.getRoleModels(), bridge.listModelProfiles()]),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('读取模型路由超时，请检查连接后重新读取。')), 20000);
+      }),
+    ])
       .then(([nextView, nextDirectory]) => {
         if (!alive) return;
-        if (nextView) setView(nextView);
-        if (nextDirectory) setDirectory(nextDirectory);
+        if (!nextView?.slots || !nextDirectory?.providers) throw new Error('未能读取完整的模型路由，请重新读取。');
+        setView(nextView);
+        setDirectory(nextDirectory);
       })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
+      .catch(failure => {
+        if (alive) setLoadError(failure instanceof Error ? failure.message : '未能读取模型路由，请重新读取。');
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        if (alive) setLoading(false);
+      });
+    return () => { alive = false; clearTimeout(timer); };
+  }, [bridge, fixturePreset, readAttempt]);
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -57,19 +77,22 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
   }, []);
 
   const setSlot = useCallback(async (slot: RoleModelSlot, value: string | null) => {
-    lastPatch.current = { slot, value };
+    if (savePending.current || loading || loadError || !view || !directory) return;
+    savePending.current = true;
     setSaving(slot);
     try {
-      const result = await window.hemiVoice.saveRoleModel({ [slot]: value });
+      const result = await bridge.saveRoleModel({ [slot]: value });
       if (!result?.ok) throw new Error('主进程没有确认模型路由');
       setView({ roles: result.roles, slots: result.slots, ready: result.ready });
       setError((prev) => (prev?.slot === slot ? null : prev));
     } catch (failure) {
+      lastPatch.current = { slot, value };
       setError({ slot, message: failure instanceof Error ? failure.message : String(failure) });
     } finally {
+      savePending.current = false;
       setSaving(null);
     }
-  }, []);
+  }, [bridge, directory, loadError, loading, view]);
 
   const modelLabel = (modelKey: string | null) => {
     if (!modelKey) return null;
@@ -102,7 +125,7 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
               value={manual ?? UNSET}
               display={chosen ? chosen.model : unsetText}
               sub={chosen?.provider}
-              disabled={saving === slot || !directory}
+              disabled={saving !== null || loading || !!loadError || !view || !directory}
               onChange={(next) => void setSlot(slot, next === UNSET ? null : next)}
             >
               <option value={UNSET}>{unsetText}</option>
@@ -124,6 +147,7 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
             <button
               type="button"
               className="h37-btn h37-btn-secondary"
+              disabled={saving !== null || loading || !!loadError}
               onClick={() => lastPatch.current && void setSlot(lastPatch.current.slot, lastPatch.current.value)}
             >
               重试
@@ -161,7 +185,11 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
             <X aria-hidden="true" />
           </button>
         </div>
-        <div className="h64-route-content">
+        <div className="h64-route-content" aria-busy={loading || saving !== null}>
+        {loadError ? <div className="h37m-auto-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" className="h37-btn h37-btn-secondary" onClick={() => setReadAttempt(value => value + 1)}>重新读取</button>
+        </div> : null}
         {directory && !directory.providers.length ? (
           <p className="h56-route-empty">还没有可选的模型：先在 设置 → 模型 添加供应商。</p>
         ) : (
@@ -182,7 +210,7 @@ export function ModelRoutingDialog({ onClose, fixture = null }: { onClose: () =>
         </div>
         <div className="h37-dialog-foot">
           <span className="h37-start h56-route-status" role="status">
-            {saving ? '正在保存…' : view && !view.ready ? '配好主 agent 才能用自动路由' : ''}
+            {saving ? '正在保存…' : loading ? '正在读取模型路由…' : !loadError && view && !view.ready ? '配好主 agent 才能用自动路由' : ''}
           </span>
           <button type="button" className="h37-btn h37-btn-primary" data-primary="true" onClick={onClose}>
             完成

@@ -259,7 +259,8 @@ try {
     await page.getByRole('button', { name: '断开连接', exact: true }).click();
     await page.getByRole('button', { name: '重新连接', exact: true }).waitFor();
     assert.equal((await state()).online, false);
-    assert.equal(await page.getByRole('button', { name: '维护云端组件', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '检查更新', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '云端组件更多操作', exact: true }).isDisabled(), true);
     await shot('settings-offline');
     await page.getByRole('button', { name: '重新连接', exact: true }).click();
     await page.getByRole('button', { name: '断开连接', exact: true }).waitFor();

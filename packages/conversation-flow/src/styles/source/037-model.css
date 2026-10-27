@@ -9,6 +9,18 @@
   min-width: 0;
 }
 
+.h37-section-head:has(> .h37m-provider-actions) {
+  flex-wrap: wrap;
+}
+
+.h37m-provider-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+
 /* P2：模型名、端点等展示文字用正文字体＋等宽数字（等宽字体夹在中文里显得像终端）；
    只有需要逐字核对的输入框（Key、端点、型号 ID）保留等宽。 */
 .h37m-mono {

@@ -215,10 +215,9 @@ test('主 agent 稳定系统段：原则在前、空段跳过、逐回合变化�
   assert.ok(base[0].includes('你是 Hemi'));
   const full = buildAgentAppendSystem({
     routingSection: '［子 agent · 按需派活］',
-    memoryToolGuidelines: '使用 memory_write 工具',
     workspaceBlock: '［工作区］Hemi',
   });
-  assert.deepEqual(full.slice(1), ['［子 agent · 按需派活］', '使用 memory_write 工具', '［工作区］Hemi']);
+  assert.deepEqual(full.slice(1), ['［子 agent · 按需派活］', '［工作区］Hemi']);
   for (const volatile of ['今天是', 'requestId', '［最近任务', '本回合绑定项目', '未绑定项目']) {
     assert.ok(!full.join('\n').includes(volatile), `system 不得含逐回合变化的块：${volatile}`);
   }

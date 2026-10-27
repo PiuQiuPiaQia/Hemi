@@ -61,6 +61,7 @@ export function NewApiImportView({
   lockRef,
   fixtureState,
   onBusyChange,
+  destination,
 }: {
   /** 回供应商列表（未创建 Key 时＝离开；已创建时按钮隐藏，只能完成/取消）。 */
   onExit: () => void;
@@ -72,6 +73,7 @@ export function NewApiImportView({
   fixtureState?: ProviderImportState | null;
   /** 首启等外层导航不能在创建令牌/保存过程中离开。 */
   onBusyChange?: (busy: boolean) => void;
+  destination?: { kind: 'bot'; instanceId: string };
 }) {
   const bridge = window.hemiVoice;
   const [initialFixtureOp] = useState<ProviderImportState | null>(() => fixtureState ?? importFixtureState ?? null);
@@ -123,19 +125,20 @@ export function NewApiImportView({
 
   useEffect(() => {
     if (initialFixtureOp) return;
-    void bridge?.listPendingProviderImports?.().then((result) => setPending(result?.pending ?? [])).catch(() => undefined);
+    const belongs = (state: { destination?: { kind: 'bot'; instanceId: string } }) => state.destination?.instanceId === destination?.instanceId;
+    void bridge?.listPendingProviderImports?.().then((result) => setPending((result?.pending ?? []).filter(belongs))).catch(() => undefined);
     void bridge?.getProviderImportState?.().then((result) => {
       const state = result?.state;
       // 已结束的操作不收养（成功/已取消/待清理没有可继续的动作，再显示就是旧数据，
       // 还会锁死方式切换——重新开始即可；未完成的才接回来续办）。
-      if (!state || ['success', 'cancelled', 'cleanup-pending'].includes(state.phase)) return;
+      if (!state || !belongs(state) || ['success', 'cancelled', 'cleanup-pending'].includes(state.phase)) return;
       adoptState(state);
     }).catch(() => undefined);
     const unsubscribe = bridge?.onProviderImportState?.((state) => {
-      setOp(state);
+      if (belongs(state)) setOp(state);
     });
     return () => unsubscribe?.();
-  }, [bridge, initialFixtureOp, adoptState]);
+  }, [bridge, initialFixtureOp, adoptState, destination?.instanceId]);
 
   // 占位 div 的 DIP bounds → 主进程裁剪应用（scroll 捕获设置页内部滚动）。
   const reportViewport = useCallback(
@@ -159,11 +162,12 @@ export function NewApiImportView({
       const rect = el.getBoundingClientRect();
       // 原生 View 不受 DOM 滚动容器裁剪；单列时滚到下方操作区，必须裁到
       // 内容区内，完全滚出后隐藏，否则站点会盖住顶栏和模型选择控件。
-      const scrollRect = el.closest('.h37-scroll, .onboarding-shell')?.getBoundingClientRect();
+      const scrollRect = el.closest('.h37-scroll, .onboarding-shell, .h-bot-dialog-body')?.getBoundingClientRect();
+      const dialogRect = el.closest('.h-bot-dialog')?.getBoundingClientRect();
       const left = Math.max(0, rect.left, scrollRect?.left ?? 0);
-      const top = Math.max(0, rect.top, scrollRect?.top ?? 0);
+      const top = Math.max(0, rect.top, scrollRect?.top ?? 0, dialogRect?.top ?? 0);
       const right = Math.min(window.innerWidth, rect.right, scrollRect?.right ?? window.innerWidth);
-      const bottom = Math.min(window.innerHeight, rect.bottom, scrollRect?.bottom ?? window.innerHeight);
+      const bottom = Math.min(window.innerHeight, rect.bottom, scrollRect?.bottom ?? window.innerHeight, dialogRect?.bottom ?? window.innerHeight);
       const inView = right > left && bottom > top;
       layoutGen.current += 1;
       void bridge?.setProviderImportViewport?.({
@@ -219,7 +223,7 @@ export function NewApiImportView({
   }, []);
 
   const start = () => run(async () => {
-    const result = await bridge?.startProviderImport?.({ siteUrl: `${urlScheme}://${urlDraft.trim().replace(/^\/+/, '')}` });
+    const result = await bridge?.startProviderImport?.({ siteUrl: `${urlScheme}://${urlDraft.trim().replace(/^\/+/, '')}`, ...(destination ? { destination } : {}) });
     if (result?.state) setOp(result.state);
   });
 

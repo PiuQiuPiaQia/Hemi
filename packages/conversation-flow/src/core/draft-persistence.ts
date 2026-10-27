@@ -1,4 +1,4 @@
-import type { ComposerDraft, ComposerDraftSnapshot } from './composer-draft.js';
+import { createComposerDraft, type ComposerDraft, type ComposerDraftSnapshot } from './composer-draft.js';
 
 export interface ConversationIdentity { environmentId: string; conversationId: string }
 export type StoredConversationDraft = Partial<Omit<ComposerDraftSnapshot, 'revision'>> & { revision: number; text: string };
@@ -24,6 +24,7 @@ export function createDraftPersistence({ draft, storage, environmentId, debounce
   let loading: Promise<void> = Promise.resolve();
   let writes: Promise<void> = Promise.resolve();
   const unsaved = new Map<string, { value: ComposerDraftSnapshot; blocked: boolean }>();
+  const saved = new Map<string, StoredConversationDraft>();
   const clearTimer = () => { if (timer) clearTimeout(timer); timer = null; };
   const error = (message: string) => { if (!disposed) onError?.(message); };
   const preserveFailure = (identity: ConversationIdentity, captured: ComposerDraftSnapshot) => {
@@ -56,6 +57,7 @@ export function createDraftPersistence({ draft, storage, environmentId, debounce
           preserveFailure(identity, captured);
           error('草稿保存冲突，请选择保留本机内容或重新载入'); return;
         }
+        saved.set(identity.conversationId, captured);
         if (unsaved.get(identity.conversationId)?.value.token === captured.token) unsaved.delete(identity.conversationId);
       } catch {
         preserveFailure(identity, captured);
@@ -71,6 +73,43 @@ export function createDraftPersistence({ draft, storage, environmentId, debounce
   });
   return {
     flush,
+    /** A delayed withdrawal must restore into its original conversation, even after navigation. */
+    async restoreQueuedInput(conversationId: string, input: Omit<ComposerDraftSnapshot, 'revision' | 'token'>) {
+      if (scope?.conversationId === conversationId && !disposed) {
+        draft.restoreQueuedInput(input);
+        return flush();
+      }
+      const identity = { environmentId, conversationId };
+      await writes;
+      let stored: StoredConversationDraft | null;
+      try { stored = await storage.load(identity); }
+      catch {
+        const detached = createComposerDraft();
+        detached.restore(unsaved.get(conversationId)?.value ?? saved.get(conversationId) ?? {});
+        detached.restoreQueuedInput(input);
+        unsaved.set(conversationId, { value: detached.getSnapshot(), blocked: true });
+        preserveFailure(identity, detached.getSnapshot());
+        error('取回的消息暂未保存，请返回原会话重试');
+        return;
+      }
+      if (scope?.conversationId === conversationId && !disposed) {
+        draft.restoreQueuedInput(input);
+        return flush();
+      }
+      const detached = createComposerDraft();
+      detached.restore(unsaved.get(conversationId)?.value ?? stored ?? {});
+      detached.restoreQueuedInput(input);
+      const captured = detached.getSnapshot();
+      unsaved.set(conversationId, { value: captured, blocked: false });
+      version = Math.max(version, stored?.revision ?? 0);
+      writes = writes.then(async () => {
+        const result = await storage.save(identity, { ...captured, revision: ++version,
+          ...(persistAttachments ? {} : { attachments: undefined }) });
+        version = Math.max(version, result.revision ?? 0);
+        if (!result.ok || result.stale) { preserveFailure(identity, captured); error('取回的消息暂未保存，请返回原会话重试'); }
+      }).catch(() => { preserveFailure(identity, captured); error('取回的消息暂未保存，请返回原会话重试'); });
+      return writes;
+    },
     activate(conversationId: string, mode: 'restore' | 'clear' | 'preserve' = 'restore', { discardPrevious = false }: { discardPrevious?: boolean } = {}) {
       if (discardPrevious) { clearTimer(); dirty = false; if (scope) unsaved.delete(scope.conversationId); }
       else void flush();
@@ -97,6 +136,7 @@ export function createDraftPersistence({ draft, storage, environmentId, debounce
             return value !== undefined && (!Array.isArray(value) || value.some(item => !item || typeof item !== 'object'));
           }))) throw new Error('Invalid draft');
         status.ok = true;
+        if (stored) saved.set(conversationId, stored);
         version = Math.max(version, stored?.revision ?? 0);
         if (disposed || mine !== token) return;
         if (mode === 'restore' && !local && draft.getContentRevision() === expected) {

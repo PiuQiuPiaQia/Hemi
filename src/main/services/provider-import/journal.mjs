@@ -107,6 +107,7 @@ export function createImportJournal({
         out.push({
           operationId,
           readable: true,
+          ...(p.destination ? { destination: p.destination } : {}),
           phase: p.phase ?? 'unknown',
           siteOrigin: p.siteOrigin ?? null,
           accountLabel: p.accountLabel ?? null,

@@ -32,9 +32,9 @@ Grant desktop access per app, for a task or on an ongoing basis, and revoke it a
 
 ## Automatic memory
 
-Remember lasting preferences and project conventions as you work. Manage personal, global, and workspace memory separately, with controls to view, edit, delete, and undo changes.
+Each desktop and Bot has one shared memory library powered directly by pi-memory. All conversations and projects in that instance share long-term memory, daily logs, and a scratchpad. Manage memory through the original tools in conversation and browse its files in Settings.
 
-[![Hemi memory entries and scope controls](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
+[![Hemi shared memory files](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
 
 ## Run from source
 

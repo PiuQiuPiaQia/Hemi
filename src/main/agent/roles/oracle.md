@@ -2,7 +2,7 @@
 name: oracle
 title: 顾问
 mode: verify
-tools: [context_read, task_read, read, ls, grep, glob, ui_list, ui_tree, screen_view, memory_read, memory_search]
+tools: [context_read, task_read, read, ls, grep, glob, ui_list, ui_tree, screen_view]
 description: 独立分析：检验重要假设、比较方案、解释矛盾证据与停滞、评审计划或产出
 routing: |
   @oracle —— 独立分析，帮助检验假设、比较方案和评审产出；交回建议、关键依据、待检验假设与下一步。可只读核对本地文件与界面，不改文件、不运行命令、不上网。

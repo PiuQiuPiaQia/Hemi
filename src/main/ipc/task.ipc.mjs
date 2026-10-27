@@ -14,7 +14,6 @@ import { fmtMs } from '../lib/perf.mjs';
 import { syncExecutorProxy } from '../lib/shell-proxy.mjs';
 import { setDriverTimingSink } from '../agent/gate/cua-client.mjs';
 import { chatTurn } from '../services/text-model.mjs';
-import { getMemoryService } from './memory.ipc.mjs';
 import { state } from '../state.mjs';
 import { registerHistoryIpc } from './history.ipc.mjs';
 import { getAgentRuntime, setAgentRuntimeDeps } from './llm.ipc.mjs';
@@ -148,32 +147,6 @@ export function registerTaskIpc() {
     return hits.length === 1 ? hits[0].taskId : null;
   }
 
-  // 037 Phase D：终态经验提炼——模型调用与开关读取由宿主提供，队列/校验在 memory 服务。
-  const scheduleExtraction = (snapshot) => {
-    const memory = getMemoryService();
-    if (!memory?.scheduleTaskExtraction) return { ok: false, queued: false };
-    const frozenConfig = snapshot.modelConfig ?? null;
-    return memory.scheduleTaskExtraction(snapshot, {
-      runModel: async ({ messages, signal }) => {
-        const config = frozenConfig ?? (await resolveTextModelConfig());
-        const final = await getAgentRuntime().auxiliaryCall({ config, conversationId: snapshot.conversationId ?? 'memory-maintenance', sourceRootRunId: snapshot.rootRunId ?? null, purpose: 'memory-extraction',
-          baseUrl: config.baseUrl,
-          apiKey: config.apiKey,
-          model: config.model,
-          api: config.api,
-          messages,
-          tools: undefined,
-          thinkingLevel: config.thinkingLevel,
-          thinkingFormat: config.thinkingFormat,
-          signal,
-          maxPreStreamRetries: 0,
-        });
-        return final.content;
-      },
-      isExitSummaryEnabled: async () => (await readStoredConfig()).memoryExitSummaryEnabled !== false,
-    });
-  };
-
   // 056：运行时依赖注入（档案、快照广播、用量、提炼、@ 引用读取）后取子 agent 管理器。
   setAgentRuntimeDeps({
     history: historyStore,
@@ -181,7 +154,6 @@ export function registerTaskIpc() {
     onModelUsage: (task) => {
       if (task?.conversationId) broadcastUsageChanged(task.conversationId);
     },
-    scheduleExtraction,
     readArtifact: (taskId, artifactId) => readArtifactReference(taskId, artifactId),
   });
   manager = getAgentRuntime().subagents;

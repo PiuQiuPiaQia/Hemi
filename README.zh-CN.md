@@ -32,9 +32,9 @@ Hemi 是一款 macOS 桌面 AI 助手，用语音或文字交代任务，让 AI 
 
 ## 自动记忆
 
-在交流中记住长期偏好和项目约定，按个人、全局、工作区分别管理。支持查看、编辑、删除和撤销。
+每个桌面和 Bot 各有一个由原版 pi-memory 运行的共享记忆库。同一实例的所有会话与项目共享长期记忆、每日日志和待办。在对话中记住、遗忘或恢复内容，在设置中查看原生文件。
 
-[![Hemi 记忆条目与范围管理](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
+[![Hemi 共享记忆文件](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
 
 ## 从源码运行
 

@@ -53,8 +53,8 @@ export function TurnQueueTray({ state, onWithdraw, onEdit, onResume, onPromote, 
   }
   return <div className="h24-queue-tray" aria-label="待发送消息">
     <button type="button" className="h24-queue-head" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
-      {collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
-      <span>待发送消息（{state.items.length}）</span>{state.paused ? <small>已暂停</small> : null}
+      <span>待发送</span><span className="h24-queue-count">{state.items.length}</span>{state.paused ? <small>已暂停</small> : null}
+      {collapsed ? <ChevronDown className="h24-queue-chevron size-3.5" /> : <ChevronUp className="h24-queue-chevron size-3.5" />}
     </button>
     {collapsed ? null : <div className="h24-queue-body">
       {state.paused ? <div className="h24-queue-paused" role="status"><span>队列已暂停</span><button type="button" className="h24-queue-resume" onClick={onResume}>继续发送</button></div> : null}
@@ -85,8 +85,8 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.queueItemId, disabled: { draggable: !sortable || locked, droppable: !movable(item) },
   });
-  const act = async (action: NonNullable<QueueActions['onPromote']>) => {
-    if (locked) return;
+  const act = async (action: NonNullable<QueueActions['onPromote']>, editing = false) => {
+    if (locked && !(editing && item.dispatchState === 'editing' && !acting && !sorting && !item.error)) return;
     setActing(true);
     try { await action(item.queueItemId); } finally { setActing(false); }
   };
@@ -96,7 +96,7 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
     style={{ transform: CSS.Transform.toString(transform), transition }}>
     <button ref={setActivatorNodeRef} type="button" className="h24-queue-tool h24-queue-drag" {...attributes} {...listeners}
       aria-label={'拖拽排序，第 ' + order + ' 条'} title="拖拽排序；也可按空格和上下方向键" disabled={!sortable || locked}>
-      <GripVertical className="size-3.5" />
+      {sortable ? <GripVertical className="size-3.5" /> : <span className="h24-queue-order">{order}</span>}
     </button>
     <div className="h24-queue-content">
       {/* 063：技能/行内引用标签与正式消息同一语义（队列摘要里也按标签回显）。 */}
@@ -120,9 +120,9 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
         data-waiting={waiting ? 'true' : undefined} onClick={() => onPromote && void act(onPromote)}>
         {waiting ? <Clock3 className="size-3" /> : <Play className="size-3" />}<span>{item.dispatchState === 'sending' ? '正在发送' : waiting ? '等待交接' : '直接运行'}</span>
       </button>
-      <button type="button" className="h24-queue-tool" aria-label="编辑这条" title={item.readOnly?"本次参数已冻结，撤回后可从工作流重新准备":"回到输入框编辑"} disabled={!onEdit || item.readOnly || Boolean(item.operationId) || acting || sorting || waiting || Boolean(item.error)} onClick={() => { if (!onEdit) return; if (item.dispatchState === 'editing') onEdit(item.queueItemId); else void act(onEdit); }}><Pencil className="size-3.5" /></button>
+      <button type="button" className="h24-queue-tool" aria-label="编辑这条" title={item.readOnly?"本次参数已冻结，撤回后可从工作流重新准备":"取回输入框编辑"} disabled={!onEdit || item.readOnly || Boolean(item.operationId) || acting || sorting || waiting || Boolean(item.error)} onClick={() => { if (onEdit) void act(onEdit, true); }}><Pencil className="size-3.5" /></button>
       <button type="button" className="h24-queue-tool" aria-label="撤回这条" title="撤回这条" disabled={locked} onClick={() => void act(onWithdraw)}><X className="size-3.5" /></button>
     </div>
-    {item.error ? <span className="h24-queue-error" role="alert">{item.error}</span> : item.dispatchState === 'editing' ? <span className="h24-queue-status">输入框编辑中</span> : null}
+    {item.error ? <span className="h24-queue-error" role="alert">{item.error}</span> : null}
   </div>;
 }

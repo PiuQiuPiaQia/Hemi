@@ -1,6 +1,6 @@
 /**
  * 056 · 主 agent 的宿主工具：task 派单族（task／task_status／task_message／task_cancel）、
- * 对话侧长期记忆写入（memory_write，037 分域）、宿主诊断。
+ * 主会话宿主工具：任务委派、工作流准备与诊断。
  *
  * 派单族设计取自 ZCode/Claude Code（Agent + run_in_background）与 PI-Desktop
  * （ADR 0062/0166：只有 task 可并行、子 agent 不阻断主 agent 回合收尾、报告封顶）：
@@ -41,7 +41,6 @@ export function formatSubagentResult(result) {
  * @param {(id, text) => Promise<object>} deps.message
  * @param {(id) => Promise<object>} deps.cancel
  * @param {string[]} deps.agents                  可用角色名（task 的 enum）
- * @param {(args, signal) => Promise<object>} [deps.memoryWrite]
  * @param {() => object} [deps.runtimeDiagnostics]
  * @param {(args, signal) => Promise<object>} [deps.conversationRead]
  */
@@ -183,36 +182,6 @@ export function createAgentTools(deps) {
       },
       async execute(_id, params, signal) {
         return jsonResult(await deps.workflowPreparation(params, signal));
-      },
-    });
-  }
-
-  if (deps.memoryWrite) {
-    tools.push({
-      name: 'memory_write',
-      label: '写记忆',
-      description: '维护用户的长期记忆（分范围保存）。只写入用户明确表达的长期信息；写入结果以工具结果返回（带保存范围），成功才能向用户确认。',
-      parameters: {
-        type: 'object',
-        properties: {
-          target: {
-            type: 'string',
-            enum: ['user', 'global', 'workspace'],
-            description: 'user=关于你（称呼、语言、交流习惯等个人资料，全局生效）；global=全局约定（用户明确说「所有项目/全局」的规则）；workspace=当前工作区（「这个项目」或明显属于当前项目的约定）。拿不准先问用户，不要猜',
-          },
-          action: { type: 'string', enum: ['add', 'replace', 'remove'], description: 'add=新增条目；replace=替换匹配的条目；remove=删除匹配的条目' },
-          text: { type: 'string', description: 'add 或 replace 的新内容（第一行作为条目标题，其余为补充说明）' },
-          oldText: { type: 'string', description: 'replace 或 remove 要改掉的原文片段，需在目标范围内唯一匹配；多匹配会被拒绝并附候选' },
-          reason: { type: 'string', enum: ['explicit', 'stable_fact'], description: 'explicit=用户明确要求记住/修改/忘记；stable_fact=用户明确陈述的长期事实' },
-        },
-        required: ['target', 'action', 'reason'],
-      },
-      async execute(_id, params, signal) {
-        try {
-          return jsonResult(await deps.memoryWrite(params ?? {}, signal));
-        } catch (error) {
-          return jsonResult({ ok: false, error: `记忆写入失败：${error.message}` });
-        }
       },
     });
   }

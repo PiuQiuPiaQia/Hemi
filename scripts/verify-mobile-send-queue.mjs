@@ -166,13 +166,49 @@ try {
       networkDown = false; failSend = true; await page.evaluate(() => window.dispatchEvent(new Event('online')));
       await wait(() => requests.some(item => item.method === 'flow.snapshot' && item.params.id === id));
       await page.waitForTimeout(250);
-      await input.fill('结果不明时仍可核对'); await send.click();
-      await page.getByText('投递结果不明，待核对', {exact: true}).waitFor();
-      await page.getByRole('button', {name: '核对结果', exact: true}).click();
-      await page.waitForTimeout(150);
+      await input.fill('网络恢复后自动确认'); await send.click();
+      const confirming = page.getByText('正在确认消息是否已发送', {exact: true});
+      await confirming.waitFor();
+      assert.equal(await page.getByText('正在确认是否发送成功，请勿重复发送', {exact: true}).count(), 0, 'automatic confirmation needs no duplicate toast');
+      assert.equal(await page.getByText('已保存在手机，连接恢复后发送', {exact: true}).count(), 0, 'an older offline toast must not cover the current status');
+      assert.equal(await page.getByRole('button', {name: '核对结果', exact: true}).count(), 0);
+      assert.equal(await page.locator('.h24-queue-tray').count(), 0, 'uncertain send is not another waiting message');
+      const queries = requests.filter(item => item.method === 'operation.get').length;
+      await wait(() => requests.filter(item => item.method === 'operation.get').length > queries);
       assert.equal(requests.filter(item => item.method === 'flow.command' && item.params.command.type === 'send').length, 5);
-      assert.equal(await input.inputValue(), '结果不明时仍可核对'); await shot('unknown-375');
-      check('unknown delivery stays visible with its draft and read-only reconciliation does not replay the send');
+      assert.equal(await input.inputValue(), '网络恢复后自动确认'); await shot('unknown-375');
+      await input.fill('确认旧消息期间写的新草稿');
+      failSend = false;
+      const uncertain = requests.filter(item => item.method === 'flow.command' && item.params.command.type === 'send').at(-1);
+      await host.request('flow.command', uncertain.params);
+      await confirming.waitFor({state: 'hidden'});
+      assert.equal(await input.inputValue(), '确认旧消息期间写的新草稿');
+      assert.equal(requests.filter(item => item.method === 'flow.command' && item.params.command.type === 'send').length, 5);
+      assert.equal(await page.getByText('投递结果不明，待核对', {exact: true}).count(), 0);
+      await shot('automatically-confirmed-375');
+      check('uncertain sends use one plain notice, automatically query without replay, and clear on live acceptance while preserving newer typing');
+
+      const beforeRewind = await call('flow.snapshot', {id});
+      await call('flow.command', {id, generation: beforeRewind.generation, command: {type: 'stop', targetRunId: beforeRewind.activeRunId}});
+      await wait(async () => (await call('flow.snapshot', {id})).phase === 'idle');
+      await call('flow.command', {id, generation: beforeRewind.generation,
+        command: {type: 'rewind', targetInputId: beforeRewind.timeline.find(item => item.kind === 'user').id,
+          input: {inputId: 'post-rewind-input', text: '实际回卷后的新消息'}}});
+      await page.locator('.h24-user-bubble').filter({hasText: '实际回卷后的新消息'}).waitFor();
+      const prefix = `hemi-mobile:bot:${instanceId}:${id}:`;
+      await page.evaluate(({prefix, generation}) => localStorage.setItem(prefix + 'operations', JSON.stringify([
+        {id: 'legacy-missing-receipt', state: 'unknown', generation,
+          command: {type: 'send', input: {inputId: 'legacy-never-received', text: '编辑前未确认的旧消息'}}},
+      ])), {prefix, generation: beforeRewind.generation});
+      const commandsBeforeReload = requests.filter(item => item.method === 'flow.command').length;
+      await page.reload(); await input.waitFor();
+      await wait(async () => JSON.parse(await page.evaluate(prefix => localStorage.getItem(prefix + 'operations'), prefix))?.[0]?.result?.code === 'superseded');
+      assert.equal(await confirming.count(), 0);
+      assert.equal(await input.inputValue(), '确认旧消息期间写的新草稿');
+      assert.equal(await send.isDisabled(), false);
+      assert.equal(requests.filter(item => item.method === 'flow.command').length, commandsBeforeReload);
+      await shot('restored-superseded-375');
+      check('restoring a pre-rewind missing receipt automatically releases the send gate without replay or draft loss');
       await page.emulateMedia({colorScheme: 'dark'}); await shot('system-dark-375');
       assert.deepEqual(result.errors, []);
       check('375/414/768/1440 layouts and system dark preference have no overflow or renderer errors');

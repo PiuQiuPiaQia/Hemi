@@ -20,6 +20,7 @@ import {
 import { syncExecutorProxy } from '../lib/shell-proxy.mjs';
 import { pingJev } from '../agent/gate/jev-client.mjs';
 import { createLogger } from '../lib/logger.mjs';
+import { getBrowserBridgeService } from '../services/browser-bridge-service.mjs';
 
 const log = createLogger('executor');
 
@@ -29,6 +30,10 @@ const log = createLogger('executor');
  * 运行态与扩展导出。
  */
 export function registerExecutorIpc() {
+  const browserBridge = () => getBrowserBridgeService({ statePath: browserBridgeStatePathFor(app.getPath('userData')), log });
+  // 只预热回环桥，不启动浏览器；让 Dev/安装版在首次任务前各自完成扩展握手。
+  void readStoredConfig().then(stored => stored.browserControlEnabled ? browserBridge().start() : null)
+    .catch(error => log.warn(`浏览器桥预热失败：${error.message}`));
   // 006：computer use 开关与 macOS 权限检测/引导（设置页电脑控制区块）。
   // 视觉模型 2026-09-20 起归 设置 → 模型（llm.ipc 读写），这里只管开关。
   ipcMain.handle(IPC.executor.getComputerUse, async () => {
@@ -55,6 +60,7 @@ export function registerExecutorIpc() {
     if (payload && typeof payload.enabled === 'boolean') next.browserControlEnabled = payload.enabled;
     const saved = await saveStoredConfig(next);
     log.info(`浏览器操控开关：${saved.browserControlEnabled ? '开' : '关'}`);
+    if (saved.browserControlEnabled) await browserBridge().start();
     return { enabled: saved.browserControlEnabled === true };
   });
   // web 检索：开关与 provider key。key 只进不出的单向通道——回执永远只带

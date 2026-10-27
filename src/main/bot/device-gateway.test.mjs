@@ -59,10 +59,50 @@ test('actual TLS gateway: request has no access until exact PC approval, then re
   assert.equal((await f.signed('/v1/pair/status',{inviteId:invite.inviteId,requestId:apply.requestId})).result.status,'approved');
   const snapshot=await f.signed('/v1/rpc',{method:'snapshot',params:{}});assert.equal(snapshot.result.instanceId,f.instanceId);assert.deepEqual(snapshot.result.sessions,[]);
   assert.equal((await f.signed('/v1/rpc',{method:'models.sync',params:{}})).code,'permission');
+  for (const method of ['oauth.prepare','oauth.import','oauth.logout','model.import-newapi','model.import-receipt','model.account-config'])
+    assert.equal((await f.signed('/v1/rpc',{method,params:{provider:'openai',credential:{access:'UNTRUSTED'}}})).code,'permission');
   assert.equal((await f.signed('/v1/rpc',{method:'pairing.approve',params:{}})).code,'permission');
   const other=await generateKeyPair('ES256'), otherJwk=await exportJWK(other.publicKey);
   assert.equal((await f.apply(invite,randomUUID(),other,otherJwk)).ok,false);
   const disk=await fs.readFile(path.join(f.root,'device-access/state.json'),'utf8');assert.equal(disk.includes(invite.requestTicket),false);
+});
+
+test('a fresh gateway creates its certificate and serves verified HTTPS with no external programs on PATH', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-no-openssl-'));
+  const gateway = await createDeviceGateway({dataDir:root, instanceId:randomUUID(), request:async()=>({}), listenHost:'127.0.0.1'});
+  t.after(async () => {await gateway.close(); await fs.rm(root, {recursive:true, force:true});});
+  const oldPath = process.env.PATH;
+  try {
+    process.env.PATH = path.join(root, 'no-programs');
+    const endpoint = `https://127.0.0.1:${await freePort()}`;
+    const configured = await gateway.management('pairing.configure', {endpoint});
+    assert.equal(configured.enabled, true);
+    const cert = await fs.readFile(path.join(root, 'device-access/tls-cert.pem'));
+    const response = await new Promise((resolve, reject) => {
+      const req = https.request(endpoint + '/v1/challenge', {method:'POST', ca:cert, agent:false, headers:{'content-type':'application/json'}}, res => {
+        let body=''; res.on('data', bytes=>{body+=bytes;}); res.on('end',()=>resolve(JSON.parse(body)));
+      });
+      req.on('error', reject); req.end('{}');
+    });
+    assert.equal(response.ok, true);
+    assert.match(response.result.nonce, /^[A-Za-z0-9_-]+$/);
+    if (process.platform !== 'win32') for (const file of ['tls-cert.pem', 'tls-key.pem'])
+      assert.equal((await fs.stat(path.join(root, 'device-access', file))).mode & 0o777, 0o600);
+  } finally {if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;}
+});
+
+test('reconfiguration and restart preserve the certificate and approved device identity', async t => {
+  const f = await fixture(t), invite = await f.invite(); await f.apply(invite); await f.approve(invite);
+  const dir = path.join(f.root, 'device-access');
+  const key = await fs.readFile(path.join(dir, 'tls-key.pem'));
+  const before = await f.manage('pairing.status');
+  const configured = await f.manage('pairing.configure', {endpoint:f.endpoint});
+  assert.equal(configured.fingerprint, before.fingerprint);
+  assert.deepEqual(await fs.readFile(path.join(dir, 'tls-cert.pem')), f.cert);
+  assert.deepEqual(await fs.readFile(path.join(dir, 'tls-key.pem')), key);
+  await f.restart();
+  assert.equal((await f.signed('/v1/rpc', {method:'snapshot', params:{}})).ok, true);
+  assert.equal((await f.manage('pairing.status')).fingerprint, before.fingerprint);
 });
 
 test('actual TLS gateway preserves signed Chinese and emoji across UTF-8 chunk boundaries',async t=>{
@@ -189,4 +229,19 @@ test('actual WSS authenticates device proofs, replays cursors, isolates subscrip
   await wait(()=>second.frames.some(f=>f.type==='flow'));assert.ok(second.frames.filter(f=>f.type==='flow').every(f=>f.id===id));
   const closed=once(second.ws,'close');await f.manage('devices.revoke',{deviceId:f.deviceId,operationId:randomUUID()});await closed;
   const rejected=await connect({id});assert.equal(rejected.frames[0].code,'permission');
+});
+
+
+test('paired mobile reads only original files from its authenticated Bot',async t=>{
+ const f=await fixture(t),invite=await f.invite();await f.apply(invite);await f.approve(invite);
+ await fs.mkdir(path.join(f.root,'pi-memory','recovery'),{recursive:true});
+ await fs.writeFile(path.join(f.root,'pi-memory','MEMORY.md'),'NATIVE_BOT_SHARED_FILE');
+ const inspection=await f.signed('/v1/rpc',{method:'agent-environment.inspect',params:{instanceId:f.instanceId}});
+ assert.equal(inspection.ok,true);assert.equal(inspection.result.owner,'Bot');assert.ok(inspection.result.files.some(file=>file.path==='MEMORY.md'));
+ const read=await f.signed('/v1/rpc',{method:'agent-environment.read-file',params:{instanceId:f.instanceId,path:'MEMORY.md'}});
+ assert.equal(read.result.text,'NATIVE_BOT_SHARED_FILE');
+ for(const params of [{instanceId:'foreign-bot',path:'MEMORY.md'},{instanceId:f.instanceId,path:'../state.json'}]){
+  assert.equal((await f.signed('/v1/rpc',{method:'agent-environment.read-file',params})).ok,false);
+ }
+ assert.equal((await f.signed('/v1/rpc',{method:'agent-environment.configure',params:{exitSummaryEnabled:false}})).code,'permission');
 });

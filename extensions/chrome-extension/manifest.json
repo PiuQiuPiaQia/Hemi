@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hemi 浏览器控制",
   "short_name": "Hemi 控制",
-  "version": "0.3.2",
+  "version": "0.3.5",
   "description": "Hemi 语音助手的浏览器操作桥：在任务专用的后台窗口里打开网页、点击、读取结果，不抢前台焦点。附着调试器期间 Chrome 会显示系统提示条，属正常现象。",
   "icons": {
     "16": "icons/icon-16.png",
@@ -13,6 +13,7 @@
   "permissions": [
     "debugger",
     "tabs",
+    "tabGroups",
     "storage",
     "alarms"
   ],

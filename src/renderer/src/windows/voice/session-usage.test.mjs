@@ -98,6 +98,36 @@ test('aggregateUsage：缺用量计次不进数值；模型按总 tokens 降序'
   assert.equal(view.overall.missing, 3);
 });
 
+test('模型展示名：目录 ID 不作型号，供应商与真实型号各用自己的字段', () => {
+  const cases = [
+    ['旧 Bot 记录', { modelName: 'gpt-6.1-sol' }, 'gpt-6.1-sol'],
+    ['Bot 供应商名', { modelName: 'gpt-6.1-sol', providerName: '测试供应商', requestedModel: 'gpt-6.1-sol' }, '测试供应商 · gpt-6.1-sol'],
+    ['Bot 明确供应商且目录键非型号', { modelKey: 'p-test/main', modelName: 'gpt-6.1-sol', providerName: '测试供应商' }, '测试供应商 · gpt-6.1-sol'],
+    ['桌面冻结型号', { modelName: '测试供应商', requestedModel: 'gpt-6.1-sol' }, '测试供应商 · gpt-6.1-sol'],
+    ['缺少型号', { modelName: '测试供应商' }, '测试供应商'],
+    ['缺少全部名称', { modelName: '' }, '未知模型'],
+    ['真实型号可以含斜杠', { modelName: '测试供应商', requestedModel: 'openai/gpt-6.1-sol' }, '测试供应商 · openai/gpt-6.1-sol'],
+    ['显式型号可以以 m- 开头', { modelName: '测试供应商', requestedModel: 'm-real-model' }, '测试供应商 · m-real-model'],
+  ];
+  for (const [name, overrides, expected] of cases) {
+    const view = aggregateUsage([record('chat', 'p-test/m-dedfefd5-1234', overrides)]);
+    assert.equal(view.rows[0].label, expected, name);
+  }
+  assert.equal(aggregateUsage([record('chat', 'p-test/gpt-6.1-sol', { modelName: 'gpt-6.1-sol' })]).rows[0].label, 'gpt-6.1-sol', '同一型号不重复展示');
+  assert.equal(aggregateUsage([record('chat', 'p-test/gpt-6.1-sol', { modelName: '测试供应商' })]).rows[0].label, '测试供应商 · gpt-6.1-sol', '保留旧式供应商/型号键');
+});
+
+test('旧记录与新记录合并后补全供应商，同型号跨供应商仍分行', () => {
+  const records = [
+    record('chat', 'p-one/m-123', { modelName: 'gpt-6.1-sol', input: 10 }),
+    record('task', 'p-one/m-123', { modelName: 'gpt-6.1-sol', providerName: '供应商一', requestedModel: 'gpt-6.1-sol', input: 20 }),
+    record('chat', 'p-two/m-456', { modelName: 'gpt-6.1-sol', providerName: '供应商二', requestedModel: 'gpt-6.1-sol', input: 5 }),
+  ];
+  const view = aggregateUsage(records);
+  assert.deepEqual(view.rows.map(row => [row.label, row.calls]), [['供应商一 · gpt-6.1-sol', 2], ['供应商二 · gpt-6.1-sol', 1]]);
+  assert.equal(view.totals.input, 35);
+});
+
 test('usageEntryTotals：空记录返回 null（入口隐藏）', () => {
   assert.equal(usageEntryTotals([]), null);
   const totals = usageEntryTotals([

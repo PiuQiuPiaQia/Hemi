@@ -151,6 +151,7 @@ export function createImportCoordinator({
   async function journalPersist(op, extra = {}) {
     const payload = {
       siteOrigin: op.siteOrigin,
+      ...(op.destination ? { destination: op.destination } : {}),
       apiBaseUrl: op.apiBaseUrl,
       accountLabel: op.accountLabel,
       userId: op.userId,
@@ -198,6 +199,7 @@ export function createImportCoordinator({
       };
     });
     const plan = {
+      ...(op.destination ? { destination: op.destination } : {}),
       siteOrigin: op.siteOrigin,
       apiBaseUrl: op.apiBaseUrl,
       group: selection.group,
@@ -269,7 +271,7 @@ export function createImportCoordinator({
     assertNotPaused(op);
     await ensurePanel(op);
     if (!canEncrypt()) return failOp(op, 'ENCRYPTION_UNAVAILABLE', { retryTarget: 'preflight' });
-    const store = getProfilesStore();
+    const store = getProfilesStore(op.destination);
     let directory;
     try {
       directory = await store.list();
@@ -458,7 +460,7 @@ export function createImportCoordinator({
     }));
     let committed;
     try {
-      committed = await getProfilesStore().importProvidersAtomic({
+      committed = await getProfilesStore(op.destination).importProvidersAtomic({
         operationId: op.operationId,
         planHash: op.planHash,
         providers,
@@ -602,6 +604,7 @@ export function createImportCoordinator({
 
   function publicState(op) {
     return {
+      ...(op.destination ? { destination: op.destination } : {}),
       operationId: op.operationId,
       revision: op.revision,
       phase: op.phase,
@@ -660,8 +663,10 @@ export function createImportCoordinator({
     },
     requireOwner,
 
-    async start(event, { siteUrl }) {
+    async start(event, { siteUrl, destination }) {
       if (!requireOwner(event)) throw new Error('只有主窗口能发起导入');
+      if (destination && (destination.kind !== 'bot' || typeof destination.instanceId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(destination.instanceId))) throw new Error('模型导入目标无效');
+      if (destination) await getProfilesStore(destination).list();
       if (active) {
         // 已终态（成功/已取消/待清理）的操作让位；failed 保留可重试。
         if (!['success', 'cancelled', 'cleanup-pending'].includes(active.phase)) {
@@ -682,6 +687,7 @@ export function createImportCoordinator({
       if (!mainWindow) throw new Error('主窗口不可用');
       const operationId = newOperationId(now);
       const op = {
+        ...(destination ? { destination: { kind: 'bot', instanceId: destination.instanceId } } : {}),
         operationId,
         ownerWebContentsId: mainWindow.webContents.id,
         revision: 0,
@@ -1021,8 +1027,11 @@ export function createImportCoordinator({
       // 回执优先：已提交的导入不撤销，直接结算。
       let receipt = null;
       try {
-        receipt = await getProfilesStore().findImportReceipt(operationId);
-      } catch { /* 目录读失败按无回执处理 */ }
+        receipt = await getProfilesStore(payload.destination).findImportReceipt(operationId);
+      } catch (error) {
+        if (payload.destination) throw new Error('无法核对 Bot 导入回执，请恢复原 Bot 连接后重试。');
+        /* 本机目录读失败沿用原有恢复分支 */
+      }
       if (receipt) {
         await journal.remove(operationId);
         return {
@@ -1036,6 +1045,7 @@ export function createImportCoordinator({
         };
       }
       const op = {
+        ...(payload.destination ? { destination: payload.destination } : {}),
         operationId,
         ownerWebContentsId: event?.sender?.id ?? 0,
         revision: 0,

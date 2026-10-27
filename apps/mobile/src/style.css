@@ -23,6 +23,8 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 .mobile-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;min-width:0;max-width:680px;height:calc(var(--app-height,100%) - var(--keyboard-inset,0px));margin:auto;padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(min(env(safe-area-inset-bottom),20px)*var(--sa-bottom,1)) env(safe-area-inset-left);background:var(--m-white);overflow:hidden}
 [data-viewport-owner="native"] .mobile-shell{transition:height .25s ease-out}
 .mobile-content{display:flex;flex-direction:column;flex:1;min-height:0}
+/* 用量只覆盖底部既有安全留白；不参与布局，键盘收起留白时一并收起。 */
+.mobile-usage-slot{position:absolute;inset-inline:0;bottom:var(--s2);height:calc(min(env(safe-area-inset-bottom),var(--s5))*var(--sa-bottom,1));overflow:hidden}
 .connection-restore-status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding:var(--s6);text-align:center;font-size:var(--text-ui);line-height:1.7;color:var(--m-muted)}
 .navigation-stage{position:relative;isolation:isolate;flex:1;min-height:0;min-width:0;overflow:hidden}
 .app-surface{display:flex;flex-direction:column;min-height:0;height:100%;width:100%;transition:transform .24s cubic-bezier(.2,.75,.25,1)}
@@ -112,3 +114,9 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 @keyframes drawer-enter{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @media(max-height:620px){.connection-intro{padding:var(--s4) 0}.connect-scroll{padding-top:var(--s2)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+.runtime-files-header{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin-bottom:var(--s4)}
+.runtime-files-picker{display:flex;align-items:center;gap:var(--s3);font-size:var(--text-label);margin-bottom:var(--s4)}
+.runtime-files-picker select{min-width:0;flex:1;border:1px solid var(--m-line);border-radius:var(--r-control);padding:var(--s3);background:var(--m-surface);font:inherit;color:var(--m-ink)}
+.runtime-files-content{white-space:pre-wrap;overflow-wrap:anywhere;max-height:50dvh;overflow:auto;background:var(--m-surface);padding:var(--s4);border-radius:var(--r-control);font-size:var(--text-label);line-height:1.7}
+.runtime-files-help{margin-top:var(--s4)}

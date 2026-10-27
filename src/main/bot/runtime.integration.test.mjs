@@ -18,7 +18,7 @@ async function until(fn) {
 
 test(
   'actual Hemi SDK executes and registers a cloud file, returns its bytes, and resumes conversation after reload',
-  { timeout: 30000, skip: process.platform === 'win32' && 'Linux Host executes POSIX shell commands' },
+  { timeout: 30000 },
   async (t) => {
     const root = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-sdk-')),
@@ -49,7 +49,7 @@ test(
             function: {
               name: 'bash',
               arguments: JSON.stringify({
-                command: 'printf "cloud runtime bytes" > proof.md',
+                command: process.platform === 'win32' ? 'node -e "require(\'fs\').writeFileSync(\'proof.md\',\'cloud runtime bytes\')"' : 'printf "cloud runtime bytes" > proof.md',
               }),
             },
           };
@@ -196,9 +196,11 @@ test(
       ),
     );
     assert.ok(detail.usage.length >= 3);
+    assert.ok(detail.usage.every(call => call.modelName === 'fixture-model' && call.providerName === 'Fixture'), '真实 SDK 调用分别保存供应商名与型号');
     assert.equal(JSON.stringify(detail).includes('fixture-only-key'), false);
     await host.close();
     host = await createBotHost(options);
+    assert.deepEqual((await call('session.open', { id: session.id })).usage, detail.usage, '重启后保留用量的供应商名与型号');
     assert.equal(
       (await call('session.open', { id: session.id })).flow.timeline.length,
       detail.flow.timeline.length,

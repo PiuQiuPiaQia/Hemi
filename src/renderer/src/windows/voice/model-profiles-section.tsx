@@ -44,6 +44,8 @@ import { NewApiImportView, type ImportLock } from '@/windows/voice/newapi-import
 import { OAuthAccountSection } from '@/windows/voice/oauth-account-section';
 import { copyTextViaBridge } from '@/lib/use-clipboard-copy';
 import { useRemoteModels } from './lib/use-remote-models';
+import { groupModelProviders } from '@shared/model-categories.mjs';
+import { ModelConnectionMethods } from './model-connection-methods';
 
 /**
  * 037 模型页 v2（文本 tab）：「看图」即时保存 → 供应商摘要行 → 下钻供应商详情 / 添加供应商。
@@ -79,6 +81,7 @@ export function setModelProfilesFixtureState(state: FixtureState | null): void {
 
 /** 供应商连通状态：每个应用会话自动测一次（缓存在模块级，切页不重测）。 */
 const statusCache = new Map<string, ProviderStatus>();
+const botStatusCaches = new Map<string, Map<string, ProviderStatus>>();
 
 
 function prefersReducedMotion(): boolean {
@@ -472,6 +475,11 @@ type Mutate = (
 
 /** 子视图共用的读写口（数据、即时保存队列、探活、导航）。 */
 type Controller = {
+  bridge?: HemiVoiceBridge;
+  environment?: 'local' | 'bot';
+  botInstanceId?: string;
+  onSyncLocal?: () => void;
+  actions?: ReactNode;
   directory: ModelProfilesDirectory;
   readOnly: boolean;
   /** External hosts currently expose viewing and adding providers only. */
@@ -483,6 +491,7 @@ type Controller = {
   saveProvider: (input: SaveInput) => Promise<{ providerId: string; modelKeys: string[] }>;
   testProvider: (provider: ModelProviderView) => Promise<void>;
   setStatus: (providerId: string, status: ProviderStatus) => void;
+  clearStatus: (providerId: string) => void;
   /** 047：站点导入成功后重读主进程目录（不经 mutate 的乐观链）。 */
   reload: () => Promise<ModelProfilesDirectory | null>;
   back: () => void;
@@ -554,15 +563,38 @@ export function ModelProfilesSection({
   externalDirectory,
   onAddProvider,
   addDisabled,
+  api,
+  environment = 'local',
+  botInstanceId,
+  onSyncLocal,
+  actions,
+  disabled = false,
+  openAddRequest = 0,
 }: {
   fixtureDirectory?: ModelProfilesDirectory | null;
   /** Cloud directory: never load, probe or mutate local model configuration. */
   externalDirectory?: ModelProfilesDirectory;
   onAddProvider?: () => void;
   addDisabled?: boolean;
+  api?: HemiVoiceBridge;
+  environment?: 'local' | 'bot';
+  botInstanceId?: string;
+  onSyncLocal?: () => void;
+  actions?: ReactNode;
+  disabled?: boolean;
+  /** A host action may open the shared add flow, e.g. a pending Bot authorization. */
+  openAddRequest?: number;
   /** 下钻/返回时通知外壳（详情、添加页需要隐藏外层「模型」页头与「其他」组）。 */
   onViewChange?: (kind: ModelView['kind']) => void;
 }) {
+  const bridge = api ?? window.hemiVoice;
+  const probeCache = useMemo(() => {
+    if (environment !== 'bot') return statusCache;
+    const identity = botInstanceId ?? 'unbound';
+    let cache = botStatusCaches.get(identity);
+    if (!cache) { cache = new Map(); botStatusCaches.set(identity, cache); }
+    return cache;
+  }, [environment, botInstanceId]);
   const [initialFixture] = useState(() => fixtureState);
   const [directory, setDirectory] = useState<ModelProfilesDirectory | null>(externalDirectory ?? fixtureDirectory ?? null);
   const directoryRef = useRef<ModelProfilesDirectory | null>(directory);
@@ -570,7 +602,7 @@ export function ModelProfilesSection({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<ModelView>(initialFixture?.view ?? { kind: 'overview' });
   const [pane, setPane] = useState<{ key: number; anim: 'forward' | 'back' | null }>({ key: 0, anim: null });
-  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>(() => externalDirectory ? {} : Object.fromEntries(statusCache));
+  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>(() => Object.fromEntries(probeCache));
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -578,8 +610,8 @@ export function ModelProfilesSection({
   const savedTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const slowLoading = useDelayed(loading);
-  const external = Boolean(externalDirectory);
-  const readOnly = external || Boolean(directory?.corrupt);
+  const external = Boolean(externalDirectory) && !api;
+  const readOnly = external || disabled || Boolean(directory?.corrupt);
 
   const commit = useCallback((next: ModelProfilesDirectory | null) => {
     directoryRef.current = next;
@@ -587,12 +619,11 @@ export function ModelProfilesSection({
   }, []);
 
   const reload = useCallback(async () => {
-    const bridge = window.hemiVoice;
     if (external || fixtureDirectory || !bridge?.listModelProfiles) return directoryRef.current;
     const next = await bridge.listModelProfiles();
     commit(next);
     return next;
-  }, [external, fixtureDirectory, commit]);
+  }, [external, fixtureDirectory, commit, bridge]);
 
   useEffect(() => {
     if (externalDirectory) {
@@ -605,7 +636,6 @@ export function ModelProfilesSection({
       setLoading(false);
       return;
     }
-    const bridge = window.hemiVoice;
     if (!bridge?.listModelProfiles) {
       setLoading(false);
       setLoadError('读不到模型配置（桥接不可用）。');
@@ -629,7 +659,14 @@ export function ModelProfilesSection({
     return () => {
       cancelled = true;
     };
-  }, [externalDirectory, fixtureDirectory, commit]);
+  }, [externalDirectory, fixtureDirectory, commit, bridge]);
+
+  useEffect(() => {
+    if (environment !== 'bot') return;
+    let disposed = false;
+    void bridge.getOAuthLoginState().then(login => { if (!disposed && login?.phase === 'login') setView({ kind: 'add' }); }).catch(() => {});
+    return () => { disposed = true; };
+  }, [bridge, environment]);
 
   useEffect(
     () => () => {
@@ -678,20 +715,23 @@ export function ModelProfilesSection({
 
   const saveProvider = useCallback(async (input: SaveInput) => {
     if (external) throw new Error('当前 Bot 尚不支持修改已有供应商。');
-    const result = await window.hemiVoice.saveModelProfile(input);
+    const result = await bridge.saveModelProfile(input);
     if (!result?.ok) throw new Error('主进程没有确认保存');
     return { providerId: result.providerId, modelKeys: result.modelKeys ?? [] };
-  }, [external]);
+  }, [external, bridge]);
 
   const setStatus = useCallback((providerId: string, status: ProviderStatus) => {
-    statusCache.set(providerId, status);
+    probeCache.set(providerId, status);
     setStatuses((prev) => ({ ...prev, [providerId]: status }));
-  }, []);
+  }, [probeCache]);
+  const clearStatus = useCallback((providerId: string) => {
+    probeCache.delete(providerId);
+    setStatuses(prev => { const next = { ...prev }; delete next[providerId]; return next; });
+  }, [probeCache]);
 
   const testProvider = useCallback(
     async (provider: ModelProviderView) => {
       const first = provider.models[0];
-      const bridge = window.hemiVoice;
       if (external || !first || !bridge?.testModelProfile) return;
       setStatus(provider.id, { state: 'testing' });
       try {
@@ -705,18 +745,18 @@ export function ModelProfilesSection({
         setStatus(provider.id, { state: 'fail', error: errorText(error) });
       }
     },
-    [external, setStatus],
+    [external, setStatus, bridge],
   );
 
   // 进页面自动测一遍（每个供应商每个会话一次）：「连不上的会在这里直接标出来」。
   useEffect(() => {
-    if (external || !directory || fixtureDirectory || directory.corrupt) return;
+    if (readOnly || external || !directory || fixtureDirectory || directory.corrupt) return;
     for (const provider of directory.providers) {
-      if (provider.oauthProvider || statusCache.has(provider.id) || provider.models.length === 0) continue;
+      if (provider.oauthProvider || probeCache.has(provider.id) || provider.models.length === 0) continue;
       if (!provider.hasApiKey && !isLocalEndpoint(provider.baseUrl)) continue;
       void testProvider(provider);
     }
-  }, [external, directory, fixtureDirectory, testProvider]);
+  }, [external, directory, fixtureDirectory, testProvider, readOnly, probeCache]);
 
   const navigate = useCallback((next: ModelView, direction: 'forward' | 'back') => {
     const doc = document as ViewTransitionDocument;
@@ -741,6 +781,9 @@ export function ModelProfilesSection({
   }, []);
 
   const back = useCallback(() => navigate({ kind: 'overview' }, 'back'), [navigate]);
+  useEffect(() => {
+    if (openAddRequest) navigate({ kind: 'add' }, 'forward');
+  }, [openAddRequest, navigate]);
 
   const flash = useCallback((providerId: string) => {
     setFlashId(providerId);
@@ -756,7 +799,8 @@ export function ModelProfilesSection({
   const activeView: ModelView['kind'] = view.kind === 'provider' && !provider ? 'overview' : view.kind;
 
   const controller: Controller | null = directory
-    ? { directory, readOnly, external, addDisabled, saveState, statuses, mutate, saveProvider, testProvider, setStatus, reload, back }
+    ? { directory, readOnly, external, addDisabled, saveState, statuses, mutate, saveProvider, testProvider, setStatus, clearStatus, reload, back,
+      bridge, environment, botInstanceId, onSyncLocal, actions }
     : null;
 
   let body: ReactNode;
@@ -835,15 +879,16 @@ export function ModelProfilesSection({
  */
 function RoleModelsSection({ ctl }: { ctl: Controller }) {
   const { directory, readOnly } = ctl;
+  const bridge = ctl.bridge ?? window.hemiVoice;
   const [view, setView] = useState<RoleModelsView | null>(() => fixtureState?.roleModels ?? null);
   const [open, setOpen] = useState(false);
 
   const refresh = useCallback(() => {
     if (fixtureState?.roleModels) return;
-    void window.hemiVoice?.getRoleModels?.().then((next) => {
+    void bridge?.getRoleModels?.().then((next) => {
       if (next) setView(next);
     }).catch(() => {});
-  }, []);
+  }, [bridge]);
   useEffect(() => { refresh(); }, [directory, refresh]);
 
   const modelName = (modelKey: string | null) => {
@@ -879,6 +924,7 @@ function RoleModelsSection({ ctl }: { ctl: Controller }) {
       </div>
       {open ? (
         <ModelRoutingDialog
+          api={bridge}
           onClose={() => {
             setOpen(false);
             refresh();
@@ -912,7 +958,7 @@ function OverviewView({
     void mutate(
       (dir) => ({ ...dir, visionModelKey: next }),
       async () => {
-        const result = await window.hemiVoice.setVisionModel(next);
+        const result = await (ctl.bridge ?? window.hemiVoice).setVisionModel(next);
         if (!result?.ok) throw new Error('主进程没有确认看图模型');
       },
     );
@@ -921,7 +967,7 @@ function OverviewView({
 
   return (
     <>
-      {!ctl.external && directory.providers.length ? (
+      {!ctl.external && ctl.environment !== 'bot' && directory.providers.length ? (
         <section className="h37-section">
           <div className="h37-section-head">
             <h3>看图</h3>
@@ -968,14 +1014,15 @@ function OverviewView({
         <div className="h37-section-head">
           <h3>供应商</h3>
           <span className="h37-count">{directory.providers.length}</span>
-          <span className="h37-aside">
+          <span className="h37-aside h37m-provider-actions">
+            {ctl.actions}
             <button type="button" className="h37-btn h37-btn-secondary" disabled={ctl.external ? ctl.addDisabled : readOnly} onClick={onAdd}>
               <Plus aria-hidden />
               添加供应商
             </button>
           </span>
         </div>
-        <div className="h37-group">
+        <div className={directory.providers.length ? undefined : 'h37-group'}>
           {directory.providers.length === 0 ? (
             <div className="h37-row">
               <span className="h37-row-text">
@@ -988,7 +1035,13 @@ function OverviewView({
               </span>
             </div>
           ) : null}
-          {directory.providers.map((provider) => {
+        </div>
+      </section>
+      {groupModelProviders(directory.providers, ctl.environment === 'bot' || ctl.external).map(category => <section className="h37-section" key={category.id} aria-label={category.label}>
+        <div className="h37-section-head"><h3>{category.label}</h3><span className="h37-count">{category.providers.length}</span></div>
+        <div className="h37-group">
+          {!category.providers.length ? <div className="h37-row"><span className="h37-row-desc">{category.id === 'local' ? '还没有从本机同步的模型' : category.id === 'api' ? '暂无 API 配置' : category.id === 'newapi' ? '暂无 New API 站点' : '暂无订阅账号'}</span></div> : null}
+          {category.providers.map((provider) => {
             const host = hostOf(provider.baseUrl);
             return (
               <button
@@ -1015,13 +1068,14 @@ function OverviewView({
             );
           })}
         </div>
-      </section>
+      </section>)}
     </>
   );
 }
 
 function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProviderView }) {
   const { directory, readOnly, mutate, saveProvider } = ctl;
+  const bridge = ctl.bridge ?? window.hemiVoice;
   const status = ctl.statuses[provider.id];
   const [nameDraft, setNameDraft] = useState(provider.name);
   const [urlDraft, setUrlDraft] = useState(provider.baseUrl);
@@ -1031,8 +1085,8 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
   const [addError, setAddError] = useState<string | null>(null);
   const [keyRevision, setKeyRevision] = useState(0);
   const loadRemoteModels = useCallback(
-    () => window.hemiVoice.listRemoteModels({ providerId: provider.id }),
-    [provider.id, provider.baseUrl, provider.hasApiKey, provider.oauthProvider, keyRevision],
+    () => bridge.listRemoteModels({ providerId: provider.id }),
+    [provider.id, provider.baseUrl, provider.hasApiKey, provider.oauthProvider, keyRevision, bridge],
   );
   const canFetchModels = !ctl.external && !readOnly && Boolean(provider.hasApiKey || isLocalEndpoint(provider.baseUrl));
   const remote = useRemoteModels(canFetchModels ? loadRemoteModels : null);
@@ -1125,7 +1179,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
     setModelTests((prev) => ({ ...prev, [model]: { state: 'testing' } }));
     try {
       const keyless = !provider.hasApiKey && isLocalEndpoint(provider.baseUrl);
-      const result = await window.hemiVoice.testModelProfile({
+      const result = await bridge.testModelProfile({
         modelKey,
         model,
         ...(keyless ? { apiKey: KEYLESS_PLACEHOLDER_KEY } : {}),
@@ -1198,7 +1252,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
     void mutate(
       (dir) => ({ ...dir, visionModelKey: modelKey }),
       async () => {
-        const result = await window.hemiVoice.setVisionModel(modelKey);
+        const result = await bridge.setVisionModel(modelKey);
         if (!result?.ok) throw new Error('主进程没有确认看图模型');
       },
     );
@@ -1206,7 +1260,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
   const menuFor = (model: ModelEntryView, usage: 'vision' | null): MenuEntry[] => {
     // 056：看图模型单独配置（目录的 visionModelKey），这里是「正在使用」下拉之外的快捷入口。
     const entries: MenuEntry[] = [];
-    if (model.supportsVision && usage !== 'vision') {
+    if (ctl.environment !== 'bot' && model.supportsVision && usage !== 'vision') {
       entries.push({ kind: 'item', label: '设为看图模型', onSelect: () => setVisionHere(model.modelKey) });
     }
     entries.push(
@@ -1248,7 +1302,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
           <button
             type="button"
             className="h37-btn h37-btn-ghost"
-            disabled={status?.state === 'testing' || provider.models.length === 0}
+            disabled={readOnly || status?.state === 'testing' || provider.models.length === 0}
             onClick={() => void ctl.testProvider(provider)}
           >
             重新测试
@@ -1273,7 +1327,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
             <span className="h37-row-text break-all"><span>{value}</span></span>
           </div>)}
         </div>
-      </section> : provider.oauthProvider ? <OAuthAccountSection providers={directory.providers} onlyProvider={provider.oauthProvider} disabled={readOnly} onChanged={ctl.reload} onConnected={() => { ctl.setStatus(provider.id, { state: 'ok' }); }} /> : <section className="h37-section">
+      </section> : provider.oauthProvider ? <OAuthAccountSection api={bridge} target={ctl.environment} providers={directory.providers} onlyProvider={provider.oauthProvider} disabled={readOnly} onChanged={ctl.reload} onConnected={() => { ctl.setStatus(provider.id, { state: 'ok' }); }} /> : <section className="h37-section">
         <div className="h37-section-head">
           <h3>连接</h3>
         </div>
@@ -1485,7 +1539,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
           ) : null}
         </div>
         <div className="h37-section-foot">
-          {ctl.external ? '在 Bot 对话中切换要使用的模型。' : '添加时自动测试这个型号能不能用；「能看图」在行内直接改，看图模型在页面顶部的「看图」里换。'}
+          {ctl.external ? '在 Bot 对话中切换要使用的模型。' : ctl.environment === 'bot' ? '添加时自动测试这个型号能不能用；「能看图」在行内直接改。' : '添加时自动测试这个型号能不能用；「能看图」在行内直接改，看图模型在页面顶部的「看图」里换。'}
         </div>
       </section>
 
@@ -1523,11 +1577,11 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
           onCancel={() => setDeleteOpen(false)}
           onConfirm={async (replacementModelId) => {
             const error = await mutate(null, async () => {
-              const result = await window.hemiVoice.removeModelProfile({ providerId: provider.id, replacementModelId });
+              const result = await bridge.removeModelProfile({ providerId: provider.id, replacementModelId });
               if (!result?.ok) throw new Error('主进程没有确认删除');
             });
             if (error) return error;
-            statusCache.delete(provider.id);
+            ctl.clearStatus(provider.id);
             setDeleteOpen(false);
             ctl.back();
             return null;
@@ -1556,7 +1610,7 @@ function ModelSub({ model, test }: { model: ModelEntryView; test: ProviderStatus
  * 047 添加页外框：统一入口先选配置方式（New API 站点登录 / 手动配置），
  * 两份草稿各自保留；站点方式已创建 Key 后锁定切换（先完成或取消）。
  */
-export type ProviderSetupController = Omit<Controller, 'saveState' | 'statuses' | 'testProvider'>;
+export type ProviderSetupController = Omit<Controller, 'saveState' | 'statuses' | 'testProvider' | 'clearStatus'>;
 
 export function AddProviderScreen({
   ctl,
@@ -1571,7 +1625,7 @@ export function AddProviderScreen({
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const [method, setMethod] = useState<'oauth' | 'newapi' | 'manual'>(initial?.method ?? (fixtureState ? initial?.presetId ? 'manual' : 'newapi' : 'oauth'));
+  const [method, setMethod] = useState<'oauth' | 'newapi' | 'manual' | 'local'>(initial?.method ?? (fixtureState ? initial?.presetId ? 'manual' : 'newapi' : 'oauth'));
   const [switchNote, setSwitchNote] = useState<string | null>(null);
   const lockRef = useRef<ImportLock>({ locked: false, reason: '' });
   const [childBusy, setChildBusy] = useState(false);
@@ -1580,7 +1634,7 @@ export function AddProviderScreen({
     onBusyChange?.(busy);
   }, [onBusyChange]);
 
-  const choose = (next: 'oauth' | 'newapi' | 'manual') => {
+  const choose = (next: 'oauth' | 'newapi' | 'manual' | 'local') => {
     if (next === method) return;
     if (childBusy) return;
     if (lockRef.current.locked) {
@@ -1611,51 +1665,13 @@ export function AddProviderScreen({
       <div className="h37-page-head">
         <div>
           <h2>添加供应商</h2>
-          <p>登录 ChatGPT、Claude、GitHub Copilot 或 GLM Coding Plan，也可从 New API 导入或手动配置。</p>
+          <p>选择订阅、New API 或 API 配置，添加可用模型。</p>
         </div>
       </div></>}
 
       <section className="h37-section">
-        <div className="h47n-methods" role="radiogroup" aria-label="配置方式">
-          <button type="button" role="radio" disabled={childBusy} aria-checked={method === 'oauth'} className="h47n-method" data-on={method === 'oauth' ? 'true' : undefined} onClick={() => choose('oauth')}>
-            <span className="h37-tile h37m-tile-sm" data-tone={method === 'oauth' ? 'g' : undefined} aria-hidden><ExternalLink size={16} /></span>
-            <span className="h47n-method-text"><b>账号登录</b><span>ChatGPT · Claude · Copilot · GLM</span></span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            disabled={childBusy}
-            aria-checked={method === 'newapi'}
-            className="h47n-method"
-            data-on={method === 'newapi' ? 'true' : undefined}
-            onClick={() => choose('newapi')}
-          >
-            <span className="h37-tile h37m-tile-sm" data-tone={method === 'newapi' ? 'g' : undefined} aria-hidden>
-              <Globe size={16} />
-            </span>
-            <span className="h47n-method-text">
-              <b>New API 站点登录</b>
-              <span>登录站点，自动创建 Key 并导入模型</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            disabled={childBusy}
-            aria-checked={method === 'manual'}
-            className="h47n-method"
-            data-on={method === 'manual' ? 'true' : undefined}
-            onClick={() => choose('manual')}
-          >
-            <span className="h37-tile h37m-tile-sm" data-tone={method === 'manual' ? 'g' : undefined} aria-hidden>
-              <Lock size={16} />
-            </span>
-            <span className="h47n-method-text">
-              <b>手动配置</b>
-              <span>粘贴 API Key，选择要使用的模型</span>
-            </span>
-          </button>
-        </div>
+        <ModelConnectionMethods bot={ctl.environment === 'bot'} value={method === 'oauth' ? 'subscription' : method === 'manual' ? 'api' : method} disabled={childBusy}
+          onChange={value => choose(value === 'subscription' ? 'oauth' : value === 'newapi' ? 'newapi' : value === 'local' ? 'local' : 'manual')} />
         {switchNote ? (
           <div className="h37-note h37m-note-after" data-tone="warn" role="alert">
             {switchNote}
@@ -1663,10 +1679,14 @@ export function AddProviderScreen({
         ) : null}
       </section>
 
-      {method === 'oauth' ? <OAuthAccountSection providers={ctl.directory.providers} disabled={ctl.readOnly} onChanged={ctl.reload} onConnected={onAdded} onBusyChange={reportBusy} /> : method === 'manual' ? (
+      {method === 'oauth' ? <OAuthAccountSection api={ctl.bridge} target={ctl.environment} providers={ctl.directory.providers} disabled={ctl.readOnly} onChanged={ctl.reload} onConnected={onAdded} onBusyChange={reportBusy} /> : method === 'local' ? <section className="h37-section">
+        <div className="h37-section-head"><h3>本机配置</h3></div><p className="h37-help">同步勾选的本机模型；订阅账号为 Bot 单独授权，自动路由在 Bot 中配置。</p>
+        <button type="button" className="h37-btn h37-btn-secondary" disabled={ctl.readOnly} onClick={ctl.onSyncLocal}>从本机同步</button>
+      </section> : method === 'manual' ? (
         <AddProviderView ctl={ctl} initial={initial} onAdded={onAdded} onBusyChange={reportBusy} embedded />
       ) : (
         <NewApiImportView
+          destination={ctl.environment === 'bot' && ctl.botInstanceId ? { kind: 'bot', instanceId: ctl.botInstanceId } : undefined}
           onExit={ctl.back}
           onImported={(providerIds) => {
             void ctl.reload().catch(() => undefined);
@@ -1705,7 +1725,7 @@ export function AddProviderView({
   submitLabel?: (count: number) => string;
 }) {
   const { directory } = ctl;
-  const formServices = services ?? window.hemiVoice;
+  const formServices = services ?? ctl.bridge ?? window.hemiVoice;
   const existingNames = directory.providers.map((provider) => provider.name);
   const initialPreset = presetById(initial?.presetId);
   const [presetId, setPresetId] = useState<string | null>(initialPreset?.id ?? null);

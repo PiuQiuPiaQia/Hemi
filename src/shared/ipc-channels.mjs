@@ -347,31 +347,9 @@ export const IPC = {
     /** main → renderer：工作对象状态广播（全量）。 */
     state: 'context:state',
   },
-  memory: {
-    /** 016：读取记忆文档（含读取问题原因）与容量。 */
-    getState: 'memory:get-state',
-    /** 016：整文件保存（expectedText 冲突保护；清空＝保存空文本）。 */
-    saveDocument: 'memory:save-document',
-    /** 016：在系统文件管理器里打开记忆目录。 */
-    openDirectory: 'memory:open-directory',
-    /** 032：记忆运行状态（收尾摘要开关）。 */
-    getStatus: 'memory:get-status',
-    /** 032：任务收尾记忆摘要开关（存 stored config，执行器建会话时生效）。 */
-    setExitSummary: 'memory:set-exit-summary',
-    /** 037：分域条目列表（scope/query/cursor/limit；查看范围不改变对话绑定）。 */
-    listEntries: 'memory:list-entries',
-    /** 037：逐条新增/替换（expectedVersion CAS；失败不宣称已保存）。 */
-    mutateEntry: 'memory:mutate-entry',
-    /** 037：调整范围（一次跨文件提交，原位置不留副本）。 */
-    moveEntry: 'memory:move-entry',
-    /** 037：遗忘条目（含同域关联工作记录清理）。 */
-    forgetEntry: 'memory:forget-entry',
-    /** 037：清空范围（必须带 expectedRevision；其他范围保留）。 */
-    clearScope: 'memory:clear-scope',
-    /** 037：条目级撤销（只恢复该次变更）。 */
-    undo: 'memory:undo',
-    /** 037：main → renderer：持久提交成功后的变更摘要广播。 */
-    changed: 'memory:changed',
+  agentEnvironment: {
+    inspect: 'agent-environment:inspect',
+    readFile: 'agent-environment:read-file',
   },
   history: {
     /** 009：任务历史列表（含 corrupt 条目与 storageError）。 */

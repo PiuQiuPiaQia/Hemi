@@ -11,10 +11,15 @@ import {
 import { createBotTransport } from './transport.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
 import { manualProviderModels } from './models.mjs';
+import { modelSyncChanges, selectedModelChanges } from './model-sync.mjs';
 import { applyFlowChange } from '../../shared/conversation-flow.mjs';
 import {readComponentVersion, componentUpdateNeeded} from './component-version.mjs';
+import { createBotOAuthLogin } from './oauth-login.mjs';
+import { deviceEndpoint } from './device-gateway.mjs';
 
 const METHODS = new Set([
+  'agent-environment.inspect',
+  'agent-environment.read-file',
   'snapshot',
   'session.open',
   'session.control',
@@ -49,17 +54,23 @@ const METHODS = new Set([
 ]);
 const fingerprint = (value) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const COMPONENT_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+const COMPONENT_IDLE_RETRY = 60 * 1000;
+const COMPONENT_INITIAL_DELAY = 30 * 1000;
 export function createBotDesktopService({
   userDataDir,
   runner,
   profiles,
-  primaryUserDataDir = null,
   archivePath,
   onChanged = () => {},
   transport = createBotTransport({ runner, archivePath }),
   ensureArchive = async () => {},
   autoComponentUpdates = true,
+  openExternal = async () => {},
+  modelPreviewTimeoutMs = 15000,
 }) {
+  let oauthLogin = null, oauthIdentity = null;
+  function clearOAuthLogin() { oauthLogin?.dispose(); oauthLogin = null; oauthIdentity = null; }
   let storageError = '';
   function localJson(file, fallback) {
     try {
@@ -91,17 +102,16 @@ export function createBotDesktopService({
     diagnosticEvents.splice(0, Math.max(0, diagnosticEvents.length - 40));
     atomicJson(diagnosticsFile, diagnosticEvents);
   };
-  let localModels = [], localRoleModels = {}, localCatalogError = '', modelCatalogRevision = '';
-  let modelWork = Promise.resolve(), updatingModels = null;
-  const modelFailures = new Map();
   let syncStatus = localJson(syncFile, null),
     syncInFlight = false;
-  let componentStatus = null, componentWork = null, componentWatching = false, componentTimer = null, localComponent = null;
+  const modelPreviews = new Map();
+  let componentStatus = null, componentWork = null, componentTimer = null, componentScope = null, componentNextCheckAt = 0;
   if (syncStatus?.phase === 'sending')
     syncStatus = { ...syncStatus, phase: 'unknown' };
   let localDrafts = localJson(draftsFile, { instanceId: null, items: {} });
   let retryCount = 0,
-    retryAt = 0;
+    retryAt = 0,
+    retryBlocked = false;
   let disconnected = false,
     stoppedConfirmed = false,
     initializationAbort = null;
@@ -116,27 +126,20 @@ export function createBotDesktopService({
     activeId = null,
     closed = false,
     polling = null;
+  if (binding?.platform) transport.setPlatform?.(binding.host, binding.platform);
   if (cache?.instanceId !== binding?.instanceId) cache = null;
-  function modelsManagedByPrimary(instanceId = binding?.instanceId) {
-    if (!instanceId || !primaryUserDataDir || path.resolve(primaryUserDataDir) === path.resolve(userDataDir)) return false;
-    try {
-      const primary = JSON.parse(fs.readFileSync(path.join(primaryUserDataDir, 'bot/connection.json'), 'utf8'));
-      return primary.instanceId === instanceId;
-    } catch { return false; }
-  }
-  const primaryModelMessage = '此 Bot 的模型由正式版 Hemi 管理，请在正式版修改模型与路由。';
   activeId = cache?.selectedId ?? null;
   if (syncStatus?.instanceId !== binding?.instanceId) syncStatus = null;
   if (localDrafts.instanceId !== binding?.instanceId)
     localDrafts = { instanceId: binding?.instanceId ?? null, items: {} };
   const publish = () => {
     ensureRealtime();
+    scheduleComponentCheck();
     const value = getState();
     onChanged(value);
     return value;
   };
   function getState() {
-    const primaryModels = modelsManagedByPrimary();
     return {
       clientId,
       binding: binding ? { ...binding } : null,
@@ -147,9 +150,6 @@ export function createBotDesktopService({
       lastConnectedAt,
       stoppedConfirmed,
       syncStatus: syncStatus ? structuredClone(syncStatus) : null,
-      localModels: primaryModels ? [] : structuredClone(localModels),
-      localRoleModels: structuredClone(primaryModels ? cache?.roleModels ?? {} : localRoleModels),
-      modelConfigError: [...modelFailures.values()].map(value => value.message).join('；'),
       cache: cache ? structuredClone(cache) : null,
       candidate: candidate
         ? { id: candidate.id, host: candidate.host, info: candidate.info }
@@ -158,7 +158,6 @@ export function createBotDesktopService({
   }
   async function direct(method, params = {}) {
     if (!binding) fail('请先创建 Bot 连接。', 'missing');
-    if (modelsManagedByPrimary() && method === 'model.local-config') fail(primaryModelMessage, 'permission');
     return transport.rpc(binding.host, method, {
       ...params,
       instanceId: binding.instanceId,
@@ -189,57 +188,102 @@ export function createBotDesktopService({
       });
     }
   }
-  async function ensureCurrentComponent({active = true} = {}) {
-    if (!autoComponentUpdates) return getState();
-    if (active && !componentWatching) localComponent = null;
-    componentWatching = active;
-    clearTimeout(componentTimer);
-    if (!active || closed) return getState();
-    if (componentWork) return componentWork;
-    componentWork = (async () => {
-      if (!binding || !online || busy) {
+  function scheduleComponentCheck() {
+    const scope = binding ? JSON.stringify([binding.instanceId, binding.host]) : null;
+    if (scope !== componentScope) {
+      clearTimeout(componentTimer); componentTimer = null;
+      componentScope = scope;
+      componentStatus = null;
+      componentNextCheckAt = Date.now() + COMPONENT_INITIAL_DELAY;
+    }
+    if (!autoComponentUpdates || !binding || !online || closed || disconnected || stoppedConfirmed) {
+      clearTimeout(componentTimer); componentTimer = null;
+      return;
+    }
+    if (componentTimer || componentWork || busy) return;
+    componentTimer = setTimeout(() => {
+      componentTimer = null;
+      void ensureCurrentComponent({automatic: true});
+    }, Math.max(0, componentNextCheckAt - Date.now()));
+    componentTimer.unref?.();
+  }
+  async function ensureCurrentComponent({active = true, automatic = false} = {}) {
+    // Page visibility no longer owns the background updater. Accept legacy
+    // leave-page calls without cancelling the service's schedule.
+    if (!active || closed || (automatic && !autoComponentUpdates)) return getState();
+    if (componentWork) { await componentWork; return getState(); }
+    // Page changes and failures share the same long backoff. A manual check
+    // from settings can retry immediately.
+    if (automatic && Date.now() < componentNextCheckAt) return getState();
+    clearTimeout(componentTimer); componentTimer = null;
+    componentNextCheckAt = Date.now() + COMPONENT_CHECK_INTERVAL;
+    componentWork = Promise.resolve().then(async () => {
+      if (!binding || !online || busy || disconnected || stoppedConfirmed) {
+        componentNextCheckAt = Date.now() + COMPONENT_IDLE_RETRY;
         componentStatus = {phase: 'waiting', message: '连接恢复并空闲后自动更新云端组件'};
         return;
       }
       const identity = binding.instanceId, host = binding.host;
-      componentStatus = {phase: 'checking'}; publish();
+      componentStatus = {...componentStatus, phase: 'checking', message: undefined}; publish();
       try {
-        if (!localComponent) {await ensureArchive(); localComponent = archivePath && readComponentVersion(archivePath + '.manifest.json');}
-        const local = localComponent;
+        await ensureArchive();
+        const local = archivePath && readComponentVersion(archivePath + '.manifest.json');
         if (!local) fail('本机缺少云端组件版本清单，请更新 Hemi 后重试。', 'missing');
         const info = await transport.probe(host);
-        if (!componentWatching || binding?.instanceId !== identity || binding?.host !== host) return;
+        if (closed || disconnected || stoppedConfirmed || binding?.instanceId !== identity || binding?.host !== host) return;
         if (info.bot?.instanceId !== identity) fail('Bot 身份不同，已停止自动更新。', 'conflict');
         binding.componentVersion = info.bot.componentVersion ?? undefined;
         atomicJson(connectionFile, binding);
-        componentStatus = {phase: 'current', localVersion: local.version, remoteVersion: info.bot.componentVersion?.version};
+        componentStatus = {phase: 'current', checkedAt: Date.now(), localVersion: local.version, remoteVersion: info.bot.componentVersion?.version};
         if (!componentUpdateNeeded(local, info.bot.componentVersion)) return;
-        if (info.bot.activeJobs) {
+        if (info.bot.activeJobs || busy) {
+          componentNextCheckAt = Date.now() + COMPONENT_IDLE_RETRY;
           componentStatus = {...componentStatus, phase: 'waiting', message: '任务结束后自动更新云端组件'};
           return;
         }
         busy = 'component-update';
         componentStatus = {...componentStatus, phase: 'updating'}; publish();
         const updated = await installComponent(info, local);
-        componentStatus = {...componentStatus, phase: 'current', remoteVersion: updated.componentVersion?.version};
+        componentStatus = {...componentStatus, phase: 'current', checkedAt: Date.now(), remoteVersion: updated.componentVersion?.version};
         record('component-update', 'confirmed');
         await refresh();
       } catch (e) {
+        if (closed || binding?.instanceId !== identity || binding?.host !== host) return;
         componentStatus = {...componentStatus, phase: e.code === 'busy' ? 'waiting' : 'failed', message: e.message};
+        if (e.code === 'busy') componentNextCheckAt = Date.now() + COMPONENT_IDLE_RETRY;
         if (e.code !== 'busy') record('component-update', 'failed', e.code ?? 'failed');
       } finally {
         if (busy === 'component-update') busy = '';
       }
-    })().finally(() => {
+    }).finally(() => {
       componentWork = null; publish();
-      if (componentWatching && !closed && componentStatus?.phase === 'waiting') {
-        componentTimer = setTimeout(() => {void ensureCurrentComponent();}, 2000); componentTimer.unref?.();
-      }
     });
     await componentWork;
     return getState();
   }
   let stream=null, streamCursor=null, streamScope='', streamRetryAt=0, streamFailures=0, refreshAgain=false, eventRefresh=null, streamReconnect=null;
+  const olderCatalog = value => cache?.bootId && value.bootId === cache.bootId && value.revision < cache.revision;
+  function applySessionReceipt(value, method, params, result) {
+    if (!value || value.instanceId !== binding?.instanceId) return false;
+    if (olderCatalog(value)) return true;
+    const details = {};
+    for (const session of value.sessions) {
+      if (cache?.details[session.id]) details[session.id] = {...cache.details[session.id], ...session};
+    }
+    if (value.detail) details[value.detail.id] = value.detail;
+    for (const [id, draft] of Object.entries(localDrafts.items)) {
+      if (!value.sessions.some(session => session.id === id)) delete localDrafts.items[id];
+      else if (details[id]) details[id].draft = draft;
+    }
+    if (method === 'session.create' && details[result.id]) activeId = result.id;
+    if (method === 'session.remove' && activeId === params.id) activeId = null;
+    cache = {...value, details, detailRevisions: {}, selectedId: activeId, syncedAt: Date.now()};
+    delete cache.detail;
+    atomicJson(cacheFile, cache);
+    atomicJson(draftsFile, localDrafts);
+    publish();
+    return true;
+  }
   function changedCatalog() {
     if(polling){refreshAgain=true;return;}
     if(!eventRefresh)eventRefresh=setTimeout(()=>{eventRefresh=null;void refresh();},60);
@@ -258,6 +302,7 @@ export function createBotDesktopService({
       if(frame.type==='reset'){
         const value=frame.snapshot;
         if(value?.instanceId!==identity)throw new Error('Invalid Bot reset');
+        if (olderCatalog(value)) {changedCatalog(); return;}
         const details={...cache?.details};
         for(const key of Object.keys(details))if(!value.sessions.some(s=>s.id===key))delete details[key];
         if(value.detail){
@@ -302,7 +347,6 @@ export function createBotDesktopService({
       binding?.instanceId !== identity || binding?.host !== host;
     polling = (async () => {
       try {
-        await modelCandidates();
         if (stale()) return getState();
         if (!online) {
           const hello = await direct('handshake');
@@ -322,6 +366,9 @@ export function createBotDesktopService({
             : -1,
         });
         if (stale()) return getState();
+        // A command receipt may overtake a poll already on the wire. It must
+        // never resurrect a removed session or revert a confirmed model change.
+        if (olderCatalog(snapshot)) return getState();
         if(cache?.bootId!==initialBoot && snapshot.bootId && snapshot.bootId!==cache?.bootId)return getState();
         if (
           snapshot.notModified &&
@@ -334,6 +381,8 @@ export function createBotDesktopService({
           online = true;
           retryCount = 0;
           retryAt = 0;
+          retryBlocked = false;
+          error = '';
           lastConnectedAt = Date.now();
           if (cache && lastConnectedAt - (cache.syncedAt ?? 0) > 30000) {
             cache.syncedAt = lastConnectedAt;
@@ -391,6 +440,7 @@ export function createBotDesktopService({
           }
         }
         atomicJson(draftsFile, localDrafts);
+        if (olderCatalog(snapshot)) return getState();
         if (activeId && !snapshot.sessions.some((s) => s.id === activeId))
           activeId = null;
         // Draft receipts above can await SSH while realtime advances the flow.
@@ -423,6 +473,7 @@ export function createBotDesktopService({
         online = true;
         retryCount = 0;
         retryAt = 0;
+        retryBlocked = false;
         error = draftConflict;
         lastConnectedAt = Date.now();
         atomicJson(cacheFile, cache);
@@ -450,11 +501,8 @@ export function createBotDesktopService({
       } catch (e) {
         if (!stale()) {
           online = false;
-          retryCount = ['permission', 'conflict', 'unsupported'].includes(
-            e.code,
-          )
-            ? 4
-            : retryCount + 1;
+          retryBlocked = ['permission', 'conflict', 'unsupported'].includes(e.code);
+          retryCount = Math.min(4, retryCount + 1);
           retryAt =
             Date.now() +
             [1000, 5000, 15000, 60000][Math.min(3, retryCount - 1)];
@@ -464,29 +512,25 @@ export function createBotDesktopService({
         return getState();
       } finally {
         polling = null;
-        scheduleModelUpdates();
         if(refreshAgain){refreshAgain=false;changedCatalog();}
       }
     })();
     return polling;
   }
-  async function modelCandidates() {
+  async function localModelConfig() {
     const list = await profiles.list();
-    localCatalogError = list.corrupt ? '本机模型配置无法读取，云端原配置已保留。' : '';
-    if (localCatalogError) { modelFailures.set('$catalog', { message: localCatalogError }); return localModels; }
-    modelFailures.delete('$catalog');
-    localRoleModels = list.envOverride ? {} : list.roleModels ?? {};
-    const out = [];
+    if (list.corrupt) fail('本机模型配置无法读取，云端原配置已保留。', 'invalid');
+    const candidates = [], models = [];
     for (const provider of list.providers) {
       for (const model of provider.models) {
         const resolved = provider.oauthProvider
           ? null
           : await profiles.resolveStrict(model.modelKey);
-        const config = resolved?.ok ? resolved.config : null;
+        const config = resolved?.ok ? { ...resolved.config, ...(/^mpi-/.test(provider.id) ? { configuration: 'newapi' } : {}) } : null;
         const revision = config ? fingerprint(syncModelConfig(config)) : null;
         const remote = cache?.models?.find((v) => v.key === model.modelKey);
         let reason = provider.oauthProvider
-          ? '暂不支持云端账号授权'
+          ? '请在 Bot 模型设置中单独登录账号'
           : !config
             ? '缺少 API Key'
             : '';
@@ -501,8 +545,10 @@ export function createBotDesktopService({
         } catch {
           reason = '模型接口地址无效';
         }
-        out.push({
+        if (!reason) models.push(config);
+        candidates.push({
           key: model.modelKey,
+          ...(provider.oauthProvider ? { oauthProvider: provider.oauthProvider } : {}),
           providerId: provider.id,
           baseUrl: provider.baseUrl,
           api: config?.api ?? provider.api ?? 'openai-completions',
@@ -522,163 +568,20 @@ export function createBotDesktopService({
         });
       }
     }
-    localModels = out;
-    modelCatalogRevision = fingerprint({ models: out.map(model => [model.key, model.revision, model.reason]), roles: localRoleModels });
-    return out;
+    return { models, candidates };
   }
-
-  // Serialize first use and background updates. Only models already configured
-  // on this Host are updated automatically; listing never uploads credentials.
-  async function ensureModel(key) {
-    if (modelsManagedByPrimary()) {
-      if (key === 'auto' ? cache?.roleModels?.main : cache?.models.some(model => model.key === key)) return;
-      fail(primaryModelMessage, 'missing');
-    }
-    if (key === 'auto') return ensureRouting();
-    const identity = binding?.instanceId, host = binding?.host;
-    // An unrelated model may be validating for tens of seconds. Ready models
-    // must not wait behind it just to send an ordinary message.
-    const candidate = (await modelCandidates()).find(model => model.key === key);
-    if (localCatalogError) fail(localCatalogError, 'invalid');
-    if (binding?.instanceId !== identity || binding?.host !== host || !online || closed)
-      fail('恢复连接后才能配置模型。', 'offline');
-    if (candidate?.canSync && cache?.models.some(model => model.key === key && model.revision === candidate.revision)) return;
-    const run = modelWork.then(async () => {
-      const current = () => !closed && online && !disconnected &&
-        binding?.instanceId === identity && binding?.host === host;
-      if (!current()) fail('恢复连接后才能配置模型。', 'offline');
-      const model = (await modelCandidates()).find(item => item.key === key);
-      if (!current()) fail('Bot 连接已更换。', 'conflict');
-      if (!model) {
-        if (cache?.models.some(item => item.key === key)) return;
-        fail('模型已不在本机配置中，请重新选择。', 'missing');
-      }
-      if (!model.canSync) fail(model.reason, 'invalid');
-      if (syncStatus?.phase === 'unknown') await refresh();
-      if (!current()) fail('Bot 连接已更换。', 'conflict');
-      if (cache?.models.some(item => item.key === key && item.revision === model.revision)) {
-        if (modelFailures.delete(key)) publish();
-        return;
-      }
-      const result = await performCommand('models.sync', { keys: [key], automatic: true, expectedInstanceId: identity });
-      if (!current()) fail('Bot 连接已更换。', 'conflict');
-      const confirmed = result.results?.find(item => item.key === key);
-      if (!confirmed?.ok) fail(confirmed?.message ?? '模型未通过云端验证，原配置保留。', 'invalid');
-      if (modelFailures.delete(key)) publish();
-    });
-    modelWork = run.catch(() => {});
-    return run;
+  async function modelCandidates() {
+    return (await localModelConfig()).candidates;
   }
-  async function ensureRouting(prepare = true) {
-    if (modelsManagedByPrimary()) {
-      if (cache?.roleModels?.main) return;
-      fail(primaryModelMessage, 'missing');
+  async function sendModels(host, params, signal) {
+    const method = params.expectedModelRevision !== undefined ? 'model.configure' : params.source === 'manual' ? 'model.sync' : 'model.sync-local';
+    try {
+      return await transport.rpc(host, method, params, { signal });
+    } catch (error) {
+      if (error.code === 'unsupported')
+        error.message = '请先在 Bot 通用设置中维护云端组件，再修改或同步模型配置。';
+      throw error;
     }
-    await modelCandidates();
-    if (localCatalogError) fail(localCatalogError, 'invalid');
-    const identity = binding?.instanceId;
-    const roles = Object.fromEntries(Object.entries(localRoleModels).filter(([, key]) => key));
-    if (prepare && !roles.main) fail('请先在本机配置自动路由主模型。', 'missing');
-    for (const key of new Set(Object.values(roles))) {
-      if (prepare) await ensureModel(key);
-      else if (!localModels.some(model => model.key === key && model.canSync && model.status === 'synced'))
-        fail('本机路由模型尚未通过云端验证。', 'missing');
-    }
-    if (binding?.instanceId !== identity || !online || closed) fail('恢复连接后才能更新自动路由。', 'offline');
-    const keys = localModels.filter(model => model.canSync && cache?.models.some(remote => remote.key === model.key)).map(model => model.key).sort();
-    const remoteKeys = (cache?.models ?? []).filter(model => model.source !== 'cloud').map(model => model.key).sort();
-    if (JSON.stringify(keys) === JSON.stringify(remoteKeys) && fingerprint(roles) === fingerprint(cache?.roleModels ?? {})) return;
-    await direct('model.local-config', { keys, roleModels: roles });
-    await refresh();
-  }
-  function scheduleModelUpdates() {
-    if (modelsManagedByPrimary()) return;
-    if (closed || localCatalogError) return;
-    let cleared = false;
-    // Clear stale failures as soon as a corrected local configuration matches
-    // the verified Host, even while another verification is still settling.
-    if (syncStatus?.automatic && !['sending', 'unknown'].includes(syncStatus.phase) &&
-      (syncStatus.phase !== 'confirmed' || syncStatus.results?.some(result => !result.ok)) &&
-      syncStatus.keys.every(key => localModels.some(model => model.key === key && model.status === 'synced'))) {
-      syncStatus = null;
-      atomicJson(syncFile, null);
-      cleared = true;
-    }
-    for (const key of modelFailures.keys()) {
-      if (key.startsWith('$')) continue;
-      const model = localModels.find(model => model.key === key);
-      if (!model || model.status === 'synced') cleared = modelFailures.delete(key) || cleared;
-    }
-    const roles = Object.fromEntries(Object.entries(localRoleModels).filter(([, key]) => key));
-    const localKeys = localModels.filter(model => model.canSync).map(model => model.key).sort();
-    const remoteKeys = (cache?.models ?? []).filter(model => model.source !== 'cloud').map(model => model.key).sort();
-    if (fingerprint(roles) === fingerprint(cache?.roleModels ?? {}) && JSON.stringify(localKeys) === JSON.stringify(remoteKeys) &&
-      Object.values(roles).every(key => localModels.some(model => model.key === key && model.status === 'synced')))
-      cleared = modelFailures.delete('$routing') || cleared;
-    if (cleared) publish();
-    if (!online || disconnected || stoppedConfirmed || updatingModels || syncInFlight || syncStatus?.phase === 'unknown') return;
-    const identity = binding?.instanceId, catalogRevision = modelCatalogRevision;
-    updatingModels = (async () => {
-      for (const model of localModels) {
-        if (!model.canSync) continue;
-        if (model.status === 'synced') { modelFailures.delete(model.key); continue; }
-        const previous = modelFailures.get(model.key);
-        if (previous?.revision === model.revision && Date.now() < previous.retryAt) continue;
-        try { await ensureModel(model.key); } catch (error) {
-          if (binding?.instanceId !== identity || closed) return;
-          modelFailures.set(model.key, { revision: model.revision, retryAt: Date.now() + 30000,
-            message: `${model.name}：${['invalid', 'offline', 'needs-review', 'busy'].includes(error.code) ? error.message : '自动配置未完成，恢复连接后重试。'}` });
-        }
-      }
-      const previous = modelFailures.get('$routing');
-      const revision = fingerprint({ roles: localRoleModels, dependencies: localModels.filter(model => Object.values(localRoleModels).includes(model.key)).map(model => [model.key, model.revision, model.status]) });
-      if (previous?.revision === revision && Date.now() < previous.retryAt) return;
-      try { await ensureRouting(false); modelFailures.delete('$routing'); }
-      catch (error) {
-        if (binding?.instanceId !== identity || closed) return;
-        modelFailures.set('$routing', { revision, retryAt: Date.now() + 30000, message: error.code === 'unsupported' ? '请在 Bot 通用设置中更新云端组件以启用自动路由。' : '本机自动路由尚未更新到云端，请检查各角色模型是否可用。' });
-      }
-    })().finally(() => {
-      updatingModels = null;
-      if (!closed && binding?.instanceId === identity) {
-        publish();
-        if (catalogRevision !== modelCatalogRevision) scheduleModelUpdates();
-      }
-    });
-  }
-  const offProfiles = profiles.onChanged?.(() => {
-    if (!closed) changedCatalog();
-  });
-  async function sync(host, instanceId, keys, requestId, signal, isCurrent = () => true) {
-    if (modelsManagedByPrimary(instanceId)) fail(primaryModelMessage, 'permission');
-    if (!Array.isArray(keys) || !keys.length || new Set(keys).size > 50)
-      fail('请选择要同步的模型。');
-    const models = [];
-    for (const key of [...new Set(keys)].slice(0, 50)) {
-      const resolved = await profiles.resolveStrict(key);
-      if (!resolved.ok || resolved.config.oauthProvider)
-        fail('所选模型缺少独立 API Key，或使用暂不支持的账号授权。');
-      models.push(resolved.config);
-    }
-    if (!isCurrent()) fail('Bot 连接已更换。', 'conflict');
-    return transport.rpc(
-      host,
-      'model.sync',
-      { instanceId, requestId: requestId ?? 'sync-' + randomUUID(), models },
-      { signal },
-    );
-  }
-  async function syncInitialModels(host, instanceId, operationId, signal) {
-    const keys = (await modelCandidates()).filter(model => model.canSync).map(model => model.key);
-    if (localCatalogError) fail(localCatalogError, 'invalid');
-    if (!keys.length) fail('请先在本机添加云端可用的 API Key 模型，或填写云端专用配置。');
-    const results = [];
-    for (let offset = 0; offset < keys.length; offset += 50) {
-      const requestId = offset === 0 ? operationId : 'models-' + fingerprint([operationId, offset]).slice(0, 32);
-      const result = await sync(host, instanceId, keys.slice(offset, offset + 50), requestId, signal);
-      results.push(...result.results);
-    }
-    return { results };
   }
   async function uploadRecord(item) {
     if (item.instanceId !== binding?.instanceId)
@@ -707,6 +610,7 @@ export function createBotDesktopService({
   }
   async function routeCommand(method, params = {}) {
     const controls = [
+      'candidate.start',
       'service.start',
       'service.stop',
       'connection.remove',
@@ -720,7 +624,7 @@ export function createBotDesktopService({
     publish();
     try {
       const result = await performCommand(method, params);
-      record(method, 'confirmed');
+      if (method !== 'candidate.start') record(method, 'confirmed');
       return result;
     } catch (error) {
       record(method, 'failed', error.code ?? 'failed');
@@ -728,6 +632,19 @@ export function createBotDesktopService({
     } finally {
       busy = '';
       publish();
+    }
+  }
+  async function startCandidate(host, info) {
+    try {
+      await transport.control(host, 'start');
+      const ready = await transport.probe(host);
+      if (!ready.bot || ready.serviceError)
+        fail('启动后仍未收到 Bot 响应，请稍后重试。', 'offline');
+      record('candidate.start', 'confirmed');
+      return ready;
+    } catch (e) {
+      record('candidate.start', 'failed', e.code ?? 'failed');
+      return { ...info, serviceError: '自动启动 Bot 未成功：' + e.message };
     }
   }
   async function performCommand(method, params) {
@@ -765,46 +682,129 @@ export function createBotDesktopService({
     )
       fail('Bot 连接已更换，旧操作已取消。', 'conflict');
     if (method === 'component.ensure-current') return ensureCurrentComponent(params);
+    if (method.startsWith('oauth.')) {
+      if (!['oauth.start', 'oauth.state', 'oauth.answer', 'oauth.cancel', 'oauth.logout'].includes(method)) fail('不支持的账号操作。', 'unsupported');
+      if (oauthIdentity !== binding?.instanceId) clearOAuthLogin();
+      if (method === 'oauth.state') return oauthLogin?.getState() ?? null;
+      if (method === 'oauth.cancel') return await oauthLogin?.cancel(params.id) ?? null;
+      if (!online || !binding) fail('恢复连接后才能登录 Bot 账号。', 'offline');
+      if (method === 'oauth.logout') {
+        if (oauthLogin?.getState()?.phase === 'login') fail('请先完成或取消当前登录。', 'busy');
+        const result = await direct('oauth.logout', { provider: params.provider });
+        clearOAuthLogin(); await refresh(); return result;
+      }
+      if (!oauthLogin) {
+        const identity = binding.instanceId, host = binding.host;
+        const check = () => { if (closed || !online || binding?.instanceId !== identity || binding?.host !== host) fail('Bot 连接已更换或断开，请重新登录。', 'conflict'); };
+        oauthIdentity = identity;
+        oauthLogin = createBotOAuthLogin({ openExternal,
+          prepare: async () => {
+            check(); const hello = await direct('handshake'); check();
+            if (hello.capabilities?.botOAuth !== 1) fail('请先更新 Bot 运行组件，再登录订阅账号。', 'unsupported');
+            const result = await direct('oauth.prepare'); check(); return result;
+          },
+          install: async (provider, credential) => {
+            check(); const result = await direct('oauth.import', { provider, credential });
+            check(); await refresh(); return result;
+          },
+        });
+      }
+      return method === 'oauth.start' ? oauthLogin.start(params.provider) : oauthLogin.answer(params);
+    }
     if (method === 'models.test' || method === 'models.list') {
       if (!online) fail('恢复连接后才能验证模型。', 'offline');
       // Draft credentials go straight to the Host; never persist them in local
       // operation receipts, diagnostics, the model directory or Bot cache.
       try {
-        return await direct(method === 'models.test' ? 'model.test' : 'model.list', { config: params.config });
+        return await direct(method === 'models.test' ? 'model.test' : 'model.list', { config: params.config, modelKey: params.modelKey });
       } catch (error) {
         if (error.code !== 'unsupported') throw error;
         return { ok: false, error: '请先在 Bot 设置中重新部署云端组件，再测试连接或拉取型号；也可手动填写型号后直接添加。' };
       }
     }
-    if (method === 'models.sync' || method === 'models.add') {
-      if (!online) fail('恢复连接后才能添加模型。', 'offline');
+    if (method === 'models.roles') {
+      if (!online) fail('恢复连接后才能配置模型路由。', 'offline');
+      return direct('model.roles');
+    }
+    if (method === 'models.save' && cache?.models.some(model => model.providerId === params.provider?.id && model.oauthProvider)) {
+      if (!online) fail('恢复连接后才能修改账号型号。', 'offline');
+      const result = await direct('model.account-config', { providerId: params.provider.id, models: params.provider.models, expectedModelRevision: params.expectedModelRevision, requestId: params.requestId });
+      await refresh(); return result;
+    }
+    if (method === 'models.remove') {
+      if (!online) fail('恢复连接后才能删除模型配置。', 'offline');
+      const removed = cache.models.filter(model => model.providerId === params.providerId), keys = new Set(removed.map(model => model.key));
+      if (!keys.size) fail('供应商已不存在，请重新读取。', 'missing');
+      const roleModels = Object.fromEntries(Object.entries(cache.roleModels ?? {}).flatMap(([slot, key]) => keys.has(key) ? params.replacementModelId ? [[slot, params.replacementModelId]] : [] : [[slot, key]]));
+      const result = await direct('model.configure', { models: [], removeKeys: [...keys], roleModels, expectedModelRevision: params.expectedModelRevision, requestId: params.requestId });
+      if (removed[0].oauthProvider) await direct('oauth.logout', { provider: removed[0].oauthProvider });
+      await refresh(); return result;
+    }
+    if (method === 'models.diff') {
+      if (!online) fail('恢复连接后才能对比模型配置。', 'offline');
+      const identity = binding.instanceId, host = binding.host;
+      // The live catalog already includes the Host's model version. A second
+      // SSH snapshot only delays this read-only preview; configure validates
+      // the captured version again before applying any selected changes.
+      const remote = { models: structuredClone(cache?.models ?? []), roleModels: { ...cache?.roleModels },
+        oauthAccounts: structuredClone(cache?.oauthAccounts ?? []), modelConfigRevision: cache?.modelConfigRevision };
+      if (!remote.modelConfigRevision) fail('请先在 Bot 通用设置中维护云端组件，再对比模型配置。', 'unsupported');
+      let timer;
+      const local = await Promise.race([localModelConfig(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error('本机模型配置读取超时，请重新对比。'), { code: 'timeout' })), modelPreviewTimeoutMs);
+      })]).finally(() => clearTimeout(timer));
+      if (binding?.instanceId !== identity || binding?.host !== host || !online || closed) fail('Bot 连接已更换。', 'conflict');
+      const preview = { id: randomUUID(), identity, host, remote: { models: remote.models, roleModels: remote.roleModels, modelConfigRevision: remote.modelConfigRevision },
+        localRevision: fingerprint(local.models), changes: modelSyncChanges(local, remote) };
+      modelPreviews.set(preview.id, preview);
+      while (modelPreviews.size > 8) modelPreviews.delete(modelPreviews.keys().next().value);
+      return { id: preview.id, changes: preview.changes };
+    }
+    if (['models.sync', 'models.add', 'models.save', 'models.routing'].includes(method)) {
+      if (!online) fail('恢复连接后才能配置模型。', 'offline');
       if (syncInFlight || syncStatus?.phase === 'unknown')
         fail('正在确认模型配置，请稍后重试。', 'needs-review');
       const identity = binding.instanceId, host = binding.host;
       const requestId = params.requestId ?? 'sync-' + randomUUID();
-      const manual = method === 'models.add' ? manualProviderModels(params.provider, requestId) : null;
+      let providerModels = null, payload;
+      if (method === 'models.sync') {
+        const preview = modelPreviews.get(params.previewId);
+        if (!preview || params.previewId !== preview.id || preview.identity !== identity || preview.host !== host)
+          fail('配置对比已过期，请重新对比。', 'conflict');
+        const local = await localModelConfig();
+        if (fingerprint(local.models) !== preview.localRevision) fail('本机配置已变化，请重新对比后再同步。', 'conflict');
+        payload = { ...selectedModelChanges(preview.changes, params.selected, local),
+          fromLocal: true, expectedModelRevision: preview.remote.modelConfigRevision };
+      } else if (method === 'models.routing') {
+        if (!params.roleModels || typeof params.roleModels !== 'object' || Array.isArray(params.roleModels)) fail('路由配置无效。');
+        payload = { models: [], roleModels: { ...cache?.roleModels, ...params.roleModels }, expectedModelRevision: params.expectedModelRevision ?? '' };
+      } else {
+        const editing = method === 'models.save';
+        if (editing && !cache?.models.some(model => model.providerId === params.provider?.id)) fail('Bot 供应商已不存在，请重新读取。', 'missing');
+        providerModels = manualProviderModels(params.provider, requestId, { allowExisting: editing });
+        payload = editing ? { models: providerModels, preserveCredentials: true,
+          removeKeys: cache.models.filter(model => model.providerId === params.provider.id && !providerModels.some(next => next.modelKey === model.key)).map(model => model.key),
+          expectedModelRevision: params.expectedModelRevision ?? '' } : { models: providerModels, source: 'manual' };
+      }
+      if (binding?.instanceId !== identity || binding?.host !== host || !online || closed)
+        fail('Bot 连接已更换。', 'conflict');
+      if (syncInFlight || syncStatus?.phase === 'unknown')
+        fail('正在确认模型配置，请稍后重试。', 'needs-review');
       syncStatus = {
         instanceId: identity,
         requestId,
-        keys: manual ? manual.map(model => model.modelKey) : params.keys,
+        keys: payload.models.map(model => model.modelKey),
         phase: 'sending',
-        automatic: params.automatic === true,
         at: Date.now(),
       };
       syncInFlight = true;
       atomicJson(syncFile, syncStatus);
       publish();
       try {
-        const result = manual ? await transport.rpc(host, 'model.sync', {
-          instanceId: identity, requestId, models: manual, source: 'manual',
-        }) : await sync(
-          host,
-          identity,
-          params.keys,
-          syncStatus.requestId,
-          undefined,
-          () => binding?.instanceId === identity && binding?.host === host && online && !closed,
-        );
+        const result = await sendModels(host, {
+          instanceId: identity, requestId,
+          ...payload,
+        });
         if (binding?.instanceId === identity) {
           syncStatus = {
             ...syncStatus,
@@ -812,10 +812,11 @@ export function createBotDesktopService({
             results: result.results,
           };
           atomicJson(syncFile, syncStatus);
+          publish();
         }
         await refresh();
         record('models.sync', 'confirmed');
-        return { ...result, ...(manual ? { providerId: manual[0].providerId, modelKeys: manual.map(model => model.modelKey) } : {}) };
+        return { ...result, ...(providerModels ? { providerId: providerModels[0].providerId, modelKeys: providerModels.map(model => model.modelKey) } : {}) };
       } catch (e) {
         record('models.sync', 'failed', e.code ?? 'failed');
         if (binding?.instanceId === identity) {
@@ -851,21 +852,21 @@ export function createBotDesktopService({
     }
     if (method === 'candidate.start') {
       if (!candidate) fail('连接信息已过期。', 'conflict');
-      await transport.control(candidate.host, 'start');
-      candidate.info = await transport.probe(candidate.host);
+      candidate.info = await startCandidate(candidate.host, candidate.info);
       return publish();
     }
     if (method === 'connection.reconnect') {
       streamRetryAt=0;
       disconnected = false;
-      for (const failure of modelFailures.values()) failure.retryAt = 0;
       retryCount = 0;
       retryAt = 0;
+      retryBlocked = false;
       const result = await refresh();
       if (!online) fail(error, 'offline');
       return result;
     }
     if (method === 'connection.disconnect') {
+      clearOAuthLogin();
       disconnected = true;
       online = false;
       error = '连接已断开，云端可能仍在运行。';
@@ -892,9 +893,10 @@ export function createBotDesktopService({
       return publish();
     }
     if (method === 'connection.forget') {
+      clearOAuthLogin();
       await transport.disconnect?.();
       binding = null;
-      modelFailures.clear();
+      modelPreviews.clear();
       cache = null;
       activeId = null;
       syncStatus = null;
@@ -916,11 +918,13 @@ export function createBotDesktopService({
       const info = await transport.probe(host);
       if (info.bot?.instanceId !== binding?.instanceId)
         fail('新地址不是原来的 Bot，已保留原绑定。', 'conflict');
+      clearOAuthLogin();
       binding = { ...binding, host };
       atomicJson(connectionFile, binding);
       return refresh();
     }
     if (method === 'connection.remove') {
+      clearOAuthLogin();
       if (!binding) return { ok: true };
       if (!online && !stoppedConfirmed)
         fail('恢复连接并确认停止后才能移除绑定。', 'offline');
@@ -929,7 +933,7 @@ export function createBotDesktopService({
         await transport.control(binding.host, 'stop');
       }
       binding = null;
-      modelFailures.clear();
+      modelPreviews.clear();
       cache = null;
       activeId = null;
       syncStatus = null;
@@ -970,33 +974,53 @@ export function createBotDesktopService({
     }
 
     if (!online) fail('连接已断开，草稿保留；请重新连接后操作。', 'offline');
-    const identity = binding.instanceId;
-    if (method === 'session.update' && params.modelKey) {
-      if (!cache?.sessions.some(session => session.id === params.id)) fail('会话不属于当前 Bot。', 'missing');
-      await ensureModel(params.modelKey);
+    const identity = binding.instanceId, commandHost = binding.host, commandBoot = cache?.bootId;
+    if (method === 'pairing.configure' && params.endpoint === undefined) {
+      const access = await direct('pairing.status');
+      const hostname = access.endpoint ? null : await runner.resolveHostname(commandHost);
+      if (binding?.instanceId !== identity || binding?.host !== commandHost || !online || closed || disconnected || stoppedConfirmed)
+        fail('连接已更换，旧操作已取消。', 'conflict');
+      if (access.enabled) return access;
+      const address = hostname?.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname;
+      params = {...params, endpoint: access.endpoint || deviceEndpoint(`https://${address}:29421`)};
     }
-    if (method === 'flow.command' && ['send', 'rewind', 'resendInput'].includes(params.command?.type)) {
-      const session = cache?.sessions.find(item => item.id === params.id);
-      if (session) await ensureModel(session.modelKey);
-    }
-    if (binding?.instanceId !== identity) fail('Bot 连接已更换。', 'conflict');
-    if (method === 'session.remove' && activeId === params.id) activeId = null;
     if (method === 'session.open' && params.activate !== false) {
       if (activeId && activeId !== params.id) void direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
       activeId = params.id;
+      if (cache?.details[params.id]) {
+        cache.selectedId = activeId;
+        atomicJson(cacheFile, cache);
+        publish();
+        changedCatalog();
+        return structuredClone(cache.details[params.id]);
+      }
     }
     if (params.id && ['flow.command', 'session.draft', 'session.update', 'permission.decide'].includes(method)) {
       const control = cache?.sessions.find(item => item.id === params.id)?.control;
       if (control?.ownerId === clientId && params.controlEpoch === undefined) params = {...params, controlEpoch: control.epoch};
     }
-    const result = await direct(method, params);
+    if (method.startsWith('agent-environment.')) {
+      const hello = await direct('handshake');
+      if (hello.capabilities?.nativeMemory !== 1) fail('请更新 Bot 运行组件后使用共享记忆。', 'unsupported');
+    }
+    const fastSession = ['session.create', 'session.update', 'session.remove'].includes(method);
+    const result = await direct(method, fastSession ? {...params, includeSnapshot: true} : params);
     if (method === 'session.control' && result.control && cache) {
       cache.sessions = cache.sessions.map(item => item.id === params.id ? {...item, control: result.control} : item);
       if (cache.details[params.id]) cache.details[params.id].control = result.control;
       publish();
     }
-    if (binding?.instanceId !== identity)
+    if (binding?.instanceId !== identity || binding?.host !== commandHost || closed || disconnected || stoppedConfirmed)
       fail('连接已更换，旧结果已丢弃。', 'conflict');
+    if (fastSession && result.snapshot && cache?.bootId !== commandBoot && result.snapshot.bootId !== cache?.bootId) {
+      changedCatalog();
+      return result;
+    }
+    if (fastSession && applySessionReceipt(result.snapshot, method, params, result)) {
+      changedCatalog();
+      return result;
+    }
+    if (method === 'session.remove' && activeId === params.id) activeId = null;
     if (method === 'session.open' && params.activate !== false && cache) {
       cache.selectedId = activeId;
       atomicJson(cacheFile, cache);
@@ -1038,7 +1062,7 @@ export function createBotDesktopService({
       !closed &&
       !disconnected &&
       !stoppedConfirmed &&
-      (online || (retryCount < 4 && Date.now() >= retryAt))
+      (online || (!retryBlocked && Date.now() >= retryAt))
     ) {
       nextPollAt =
         Date.now() +
@@ -1050,6 +1074,24 @@ export function createBotDesktopService({
   timer.unref?.();
   return {
     getState,
+    importProfiles(expectedInstanceId) {
+      const check = () => {
+        if (!binding || binding.instanceId !== expectedInstanceId || closed) fail('Bot 连接已更换，导入已保留，请恢复原 Bot 连接。', 'conflict');
+        if (!online) fail('恢复 Bot 连接后才能导入 New API 模型。', 'offline');
+      };
+      return {
+        async list() {
+          check(); const hello = await direct('handshake'); check();
+          if (hello.capabilities?.newapiImport !== 1) fail('请先更新 Bot 运行组件，再导入 New API 模型。', 'unsupported');
+          return { providers: [], corrupt: false, envOverride: false };
+        },
+        async findImportReceipt(operationId) { check(); return direct('model.import-receipt', { operationId }); },
+        async importProvidersAtomic(input) {
+          check(); const result = await direct('model.import-newapi', { ...input, requestId: input.operationId });
+          check(); await refresh(); return result;
+        },
+      };
+    },
     diagnostics: () => ({
       events: structuredClone(diagnosticEvents),
       lastFailure:
@@ -1069,7 +1111,12 @@ export function createBotDesktopService({
           runner.rememberPassword?.(host, password, {
             remember: rememberPassword,
           });
-        const info = await transport.probe(host);
+        let info = await transport.probe(host);
+        if (info.serviceError) {
+          busy = 'start-service';
+          publish();
+          info = await startCandidate(host, info);
+        }
         candidate = { id: 'candidate-' + randomUUID(), host, info };
         return publish();
       } catch (e) {
@@ -1083,9 +1130,9 @@ export function createBotDesktopService({
     },
     async initialize({
       candidateId,
-      modelKeys,
       provider,
       existing = false,
+      accountSetup = false,
       requestId,
     } = {}) {
       if (!candidate || candidate.id !== candidateId)
@@ -1120,22 +1167,22 @@ export function createBotDesktopService({
             fail('云端版本不兼容。', 'unsupported');
           busy = 'models';
           publish();
-          const result = manual ? await transport.rpc(selected.host, 'model.sync', {
-            instanceId: info.instanceId, requestId: operationId, models: manual, source: 'manual',
-          }, { signal: cancellation.signal }) : await syncInitialModels(selected.host, info.instanceId, operationId, cancellation.signal);
-          if (!result.results?.some((item) => item.ok))
-            fail('没有模型通过云端验证，请检查模型配置后重试。');
-          if (!manual) {
-            const keys = result.results.filter(item => item.ok).map(item => item.key);
-            if (Object.values(localRoleModels).filter(Boolean).every(key => keys.includes(key))) await transport.rpc(selected.host, 'model.local-config', {
-              instanceId: info.instanceId, requestId: 'routing-' + fingerprint(operationId).slice(0, 32), keys, roleModels: localRoleModels,
-            }, { signal: cancellation.signal });
+          if (accountSetup && info.capabilities?.botOAuth !== 1) fail('请先更新 Bot 运行组件，再登录订阅账号。', 'unsupported');
+          if (!accountSetup) {
+          const local = manual ? null : await localModelConfig();
+          const result = await sendModels(selected.host, {
+            instanceId: info.instanceId, requestId: operationId,
+            ...(manual ? { models: manual, source: 'manual' } : { models: local.models }),
+          }, cancellation.signal);
+          if (!result.results?.length || result.results.some(item => !item.ok))
+            fail('模型未通过云端验证，请检查本机配置或填写云端专用配置后重试。');
           }
         }
         if (!existing)
           await transport.rpc(selected.host, 'initialize.verify', {
             instanceId: info.instanceId,
             requestId: 'verify-' + randomUUID(),
+            ...(accountSetup ? { accountSetup: true } : {}),
           });
         busy = 'verify-residency';
         publish();
@@ -1155,6 +1202,7 @@ export function createBotDesktopService({
         atomicJson(draftsFile, localDrafts);
         binding = {
           host: selected.host,
+          platform: verify.platform,
           instanceId: verify.instanceId,
           protocol: verify.protocol,
           version: verify.version,
@@ -1162,7 +1210,6 @@ export function createBotDesktopService({
           dataDir: verify.dataDir,
           boundAt: Date.now(),
         };
-        modelFailures.clear();
         syncStatus = null;
         atomicJson(syncFile, null);
         cache = null;
@@ -1241,16 +1288,17 @@ export function createBotDesktopService({
       return direct('file.download', { id, artifactId });
     },
     async close() {
-      componentWatching = false; clearTimeout(componentTimer);
-      if (online && activeId) await direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
+      clearOAuthLogin();
+      clearTimeout(componentTimer); componentTimer = null;
       closed = true;
-      offProfiles?.();
+      if (online && activeId) await direct('session.control', {id: activeId, action: 'release', controlEpoch: cache?.sessions.find(item => item.id === activeId)?.control?.epoch}).catch(() => {});
       stream?.abort();clearTimeout(eventRefresh);clearTimeout(streamReconnect);
       clearInterval(timer);
       initializationAbort?.abort();
       for (const item of uploads.values()) item.controller?.abort();
       uploads.clear();
-      runner.close?.();
+      if (transport.disconnect) await transport.disconnect();
+      else runner.close?.();
     },
   };
 }

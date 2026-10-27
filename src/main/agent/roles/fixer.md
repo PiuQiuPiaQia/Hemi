@@ -2,7 +2,7 @@
 name: fixer
 title: 执行
 mode: run
-tools: [context_read, task_read, read, write, edit, ls, grep, glob, bash, ui_list, ui_tree, ui_act, app_open, screen_view, ui_click, ui_type, ui_key, ui_scroll, browser_navigate, browser_extract, browser_tabs, browser_screenshot, browser_click, browser_type, browser_act, web_search, web_extract, register_delivery, memory_read, memory_search]
+tools: [context_read, task_read, read, write, edit, ls, grep, glob, bash, ui_list, ui_tree, ui_act, app_open, screen_view, ui_click, ui_type, ui_key, ui_scroll, browser_navigate, browser_extract, browser_tabs, browser_screenshot, browser_click, browser_type, browser_act, web_search, web_extract, register_delivery]
 description: 边界清楚的执行：多文件机械改动、跑命令、浏览器与桌面跑腿
 routing: |
   @fixer —— 范围清楚的执行：改文件、跑命令、浏览器与桌面操作。

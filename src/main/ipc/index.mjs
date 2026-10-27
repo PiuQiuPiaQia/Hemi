@@ -23,7 +23,7 @@ import path from 'node:path';
 import { IPC } from '../../shared/ipc-channels.mjs';
 import { state, isSmokeTest, BRAND_NAME } from '../state.mjs';
 import { registerLlmIpc } from './llm.ipc.mjs';
-import { registerMemoryIpc } from './memory.ipc.mjs';
+import { registerAgentEnvironmentIpc } from './agent-environment.ipc.mjs';
 import { registerOnboardingIpc } from './onboarding.ipc.mjs';
 import { registerPermissionsIpc } from './permissions.ipc.mjs';
 import { registerPlatformIpc } from './platform.ipc.mjs';
@@ -74,7 +74,7 @@ export async function registerAllIpcHandlers() {
   registerSkillsIpc();
   registerContextIpc();
   registerComposerIpc();
-  registerMemoryIpc();
+  registerAgentEnvironmentIpc();
   // 057：对话流服务（单注册表）先建，llm.ipc 注册时挂真实 runtime 适配。
   // 任务完成通知（2026-10-21）：用户不在主窗口前时，收口结果发一条系统横幅；
   // 点击回到应用。冒烟/自驱动实例不弹真实通知（自动化不该打扰桌面）。

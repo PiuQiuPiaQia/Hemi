@@ -2,9 +2,11 @@ import type {MobileResourceTransfers} from './bot/resource-host';
 import type {MobileUpload} from './bot/attachment-uploads';
 import type {ConversationClient} from '@hemi/conversation-flow/core';
 import type {ConversationFlowHost, FlowActionHandler} from '@hemi/conversation-flow';
+import type {UsageRecord} from '@hemi/conversation-flow/controls';
+import type {AgentEnvironmentSnapshot} from '../../../src/shared/protocol';
 
 export type MobileThinking = 'default' | 'off' | 'low' | 'medium' | 'high';
-export type MobileConversation = {id: string; title: string; pinned: boolean; model: string; thinking: MobileThinking; directory: string; running: boolean; status?: 'queued' | 'running' | 'waiting' | null; waitingResource?: boolean; blockedBy?: string[]; control?: {ownerId: string; epoch: string; expiresAt: number} | null};
+export type MobileConversation = {id: string; title: string; pinned: boolean; model: string; thinking: MobileThinking; directory: string; running: boolean; status?: 'queued' | 'running' | 'waiting' | null; waitingResource?: boolean; blockedBy?: string[]; control?: {ownerId: string; epoch: string; expiresAt: number} | null; usage?: UsageRecord[]};
 export type MobileModel = {source?: 'local' | 'cloud'; id: string; name: string; description?: string};
 export type MobileDirectory = {path: string; parent: string; home: string; folders: Array<{name: string; path: string}>; truncated?: boolean};
 export type MobileSessionPatch = Partial<Pick<MobileConversation, 'model' | 'thinking' | 'directory'>>;
@@ -40,6 +42,8 @@ export interface MobileWorkspace {
   remove?(id: string): Promise<void>;
   update(conversationId: string, patch: MobileSessionPatch): Promise<void>;
   listDirectories(path: string, signal?: AbortSignal): Promise<MobileDirectory>;
+  inspectAgentEnvironment?(): Promise<AgentEnvironmentSnapshot>;
+  readAgentRuntimeFile?(path: string): Promise<{path: string; text: string}>;
   attachmentsAvailable?: boolean;
   pickAttachments?(id: string, kind: 'photos'|'files'): Promise<void>;
   retryUpload?(id: string): void;

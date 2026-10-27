@@ -1,9 +1,9 @@
 import {ErrorState, LoadingState, StateView, StatusNotice, Toast, UiProvider, useTransientMessage} from '@hemi/ui';
-import {DirectoryControlButton, ModelSelectorControl, ThinkingLevelStrip} from '@hemi/conversation-flow/controls';
+import {DirectoryControlButton, ModelSelectorControl, SessionUsage, ThinkingLevelStrip} from '@hemi/conversation-flow/controls';
 import {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type TouchEvent} from 'react';
 import {ChevronDown, Clock3, Menu, Image, Paperclip, WifiOff} from 'lucide-react';
 import {ConversationFlow, type FlowActionHandler} from '@hemi/conversation-flow';
-import {createConversationActionHandler, createConversationPresenter, projectConversationQueue, queueStoppedIdle, type FlowInputView} from '@hemi/conversation-flow/core';
+import {createConversationActionHandler, createConversationPresenter, projectConversationQueue, queueStoppedIdle} from '@hemi/conversation-flow/core';
 import {useConnectionWarning, useConversation} from '@hemi/conversation-flow/react';
 import {ConversationFlowProvider, PermissionRequestCard, TurnQueueTray} from '@hemi/conversation-flow/parts';
 import {Composer} from './composer';
@@ -18,6 +18,7 @@ import {ConversationDrawer} from './components/conversation-drawer';
 import {ConnectionScreen} from './components/connection-screen';
 import {AppBoundary} from './components/app-boundary';
 import {SettingsPanel} from './components/chat-panels';
+import {RuntimeFilesPanel} from './components/runtime-files-panel';
 import {DirectoryPanel} from './components/directory-panel';
 import {NativeBot, nativeBotAvailable, createNativeBotRpc, createNativeFileSource, createNativeResourceFiles, type BotTarget} from './bot/native';
 import {createBotWorkspace} from './bot/workspace-client';
@@ -54,7 +55,7 @@ export function App({workspace: connectedWorkspace = null, onDisconnect}: {works
   </main>;
 }
 
-type Panel = 'model' | 'thinking' | 'folder' | 'settings' | 'attachment' | 'exit' | null;
+type Panel = 'model' | 'thinking' | 'folder' | 'settings' | 'memory' | 'attachment' | 'exit' | null;
 function MobileChat({workspace, onExit, onLicenses}: {workspace: MobileWorkspace; onExit(): void; onLicenses(): void}) {
   const catalog = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot, workspace.getSnapshot);
   useEffect(() => workspace.retain(), [workspace]);
@@ -77,7 +78,9 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   const [selectionPortal, setSelectionPortal] = useState<HTMLDivElement|null>(null);
   const [preview,setPreview]=useState<MobilePreview|null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [queueEdit, setQueueEdit] = useState<{inputId: string; revision: number; previousText: string} | null>(null), [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const queueTakingRef = useRef(false);
+  const [composerFocusToken, setComposerFocusToken] = useState(0);
   const [toast, setToast] = useTransientMessage<string>();
   const [submittingRevision, setSubmittingRevision] = useState<number | null>(null);
   const [settingsError,setSettingsError]=useState('');
@@ -99,7 +102,7 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   const activeTask = catalog.items.find(entry => item.waitingResource ? item.blockedBy?.includes(entry.id) : entry.status === 'running' || entry.status === 'waiting');
   const showConnectionWarning=useConnectionWarning(offline,workspace.environmentId);
   const submitting = submittingRevision === state.draft.revision;
-  const unknown = state.operations.some(operation => operation.state === 'unknown') || Boolean(snapshot?.pending.some(input => input.state === 'needs-review'));
+  const unknown = state.operations.some(operation => operation.state === 'unknown');
   const recovering = Object.values(snapshot?.runs ?? {}).some(run => ['waiting', 'offline', 'connecting'].includes(run.recovery?.phase ?? ''));
   const onAction = useMemo<FlowActionHandler>(() => {
     const ordinary = createConversationActionHandler(client, workspace.onAction ?? (async () => ({ok: false, error: {code: 'unsupported', message: '移动端尚未接入此操作'}})));
@@ -123,7 +126,7 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   }, [client, workspace, item.id, occupied]);
   const command = async (value: Record<string, unknown>) => {
     const result = await client.sendCommand(value);
-    if (!result.ok) setToast(result.message ?? '操作未完成，请核对当前状态');
+    if (!result.ok && result.code !== 'unknown') setToast(result.message ?? '操作未完成，请核对当前状态');
     return result;
   };
   const uploads=catalog.uploads?.filter(job=>job.conversationId===item.id)??[];
@@ -137,35 +140,30 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   };
   const send = async () => {
     if(uploads.length||picking||submitting)return;
-    if (queueEdit) {if (state.draft.text.trim()) await finishQueueEdit(); else setToast('请输入内容，或取消修改'); return;}
     const revision = state.draft.revision;
+    setToast(null);
     setSubmittingRevision(revision);
     try {
       const result = await client.sendDraft();
-      if (!result.ok) setToast(result.message ?? '发送未完成，草稿已保留');
-      else if (offline) setToast('已保存在手机，连接恢复后发送');
+      if (!result.ok && result.code !== 'unknown') setToast(result.message ?? '发送未完成，草稿已保留');
+      else if (result.ok && offline) setToast('已保存在手机，连接恢复后发送');
     } finally { setSubmittingRevision(current => current === revision ? null : current); }
   };
   const openQueueEdit = async (id: string) => {
-    if (saving || offline || queueEdit || uploads.length || picking) return;
+    if (queueTakingRef.current || saving || offline || uploads.length || picking || submitting) return;
     const source = snapshot?.pending.find(input => input.inputId === id);
     if (!source) return;
+    queueTakingRef.current = true;
     setSaving(true);
     try {
-      const result = await command({type: 'beginEditInput', inputId: id, expectedEditRevision: source.editRevision});
-      if (!result.ok) return;
-      const input = result.input as FlowInputView;
-      setQueueEdit({inputId: input.inputId, revision: input.editRevision, previousText: state.draft.text});
-      client.draft.setText(input.text);
-    } finally {setSaving(false);}
-  };
-  const finishQueueEdit = async (cancel = false) => {
-    if (!queueEdit || saving) return;
-    setSaving(true);
-    try {
-      const result = await command({type: 'finishEditInput', inputId: queueEdit.inputId, expectedEditRevision: queueEdit.revision, cancel, ...(cancel ? {} : {patch: {text: state.draft.text}})});
-      if (result.ok) {client.draft.setText(queueEdit.previousText); setQueueEdit(null);}
-    } finally {setSaving(false);}
+      const result = await command({type: 'withdrawInput', inputId: id, expectedEditRevision: source.editRevision, restoreToDraft: true});
+      if (!result.ok && result.code !== 'unknown') return;
+      const removed = result.input ?? source;
+      const input = removed.editDraft ?? removed;
+      const restored = client.restoreQueuedInput({text: input.text, attachments: input.attachmentViews ?? [], references: input.references ?? [], skills: input.skills ?? []});
+      setComposerFocusToken(value => value + 1);
+      await restored;
+    } finally {queueTakingRef.current = false; setSaving(false);}
   };
   const closePanel = () => {if(saving&&!selection)return;setSettingsError('');setPanel(null);};
   const select = (id: string) => {workspace.select(id); setDrawer(false); setEditing(null);};
@@ -187,7 +185,7 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   const edgeEnd = (event: TouchEvent<HTMLElement>) => {const start = edge.current, point = event.changedTouches[0]; edge.current = null; if (!panel && start && point.clientX - start.x > 60 && Math.abs(point.clientY - start.y) < (point.clientX - start.x) * .65) setDrawer(true);};
   const withdraw = async (id: string) => {
     const entry = queue.items.find(item => item.queueItemId === id);
-    if (entry?.operationId) {if (!await client.cancelWaiting(entry.operationId)) setToast('这条操作已经提交，请先核对结果');}
+    if (entry?.operationId) {if (!await client.cancelWaiting(entry.operationId)) setToast('消息已经发出，正在确认发送状态');}
     else await command({type: 'withdrawInput', inputId: id});
   };
   const awaitingDelivery = messages.some(message => message.author === 'user' && !message.runId);
@@ -198,17 +196,17 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
         <header className="app-topbar chat-topbar"><IconButton label="打开对话列表" aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu size={18}/></IconButton><button type="button" className="topbar-title title-button" aria-label="选择模型" aria-haspopup="dialog" aria-expanded={panel==='model'} disabled={offline||(saving&&!selection)} onClick={() => setPanel('model')}><strong>{item.title}</strong><small><span>{modelName}</span><ChevronDown size={12}/></small></button><DirectoryControlButton layout="touch" label={`工作目录：${item.directory}`} title={item.directory} disabled={offline||saving} aria-haspopup="dialog" aria-expanded={panel==='folder'} onClick={()=>setPanel('folder')}/></header>
         {showConnectionWarning ? <StatusNotice layout="touch" icon={<WifiOff size={18} aria-hidden="true"/>} actions={workspace.reconnect ? <button type="button" onClick={() => void reconnect()}>恢复连接</button> : null}>Bot 连接已断开</StatusNotice> : null}
         {queued && !offline ? <StatusNotice layout="touch" icon={<Clock3 size={18} aria-hidden="true"/>} title={item.waitingResource ? '等待资源' : '排队中'} detail={item.waitingResource ? activeTask ? `「${activeTask.title}」正在使用同一资源，相关操作结束后会自动继续。` : '同一资源正在使用中，相关操作结束后会自动继续。' : activeTask ? `「${activeTask.title}」${activeTask.status === 'waiting' ? '正在等待确认' : '正在执行'}，结束后会自动开始。` : '消息已受理，轮到后会自动开始。'} actions={activeTask ? <button type="button" onClick={() => select(activeTask.id)}>查看当前任务</button> : null}/> : null}
-        {unknown ? <StatusNotice layout="touch" title="操作结果待核对" detail="请先核对，避免重复发送。" actions={<button type="button" onClick={() => {void client.refresh();}}>核对结果</button>}/> : null}
+        {unknown ? <StatusNotice layout="touch" title="正在确认消息是否已发送" detail="网络中断过，正在自动确认。原文已保留，请勿重复发送。"/> : null}
         {occupied ? <StatusNotice layout="touch" title="会话已被占用" detail="另一台设备正在使用。抢占后可以继续编辑和发送。" actions={<button type="button" disabled={offline || saving} onClick={() => {setSaving(true);void workspace.acquireControl?.(item.id,true).catch(error=>setToast(error instanceof Error?error.message:'未能抢占会话')).finally(()=>setSaving(false));}}>抢占会话</button>}/> : null}
         {(!offline || showConnectionWarning) && (catalog.error || state.error) ? <StatusNotice layout="touch" variant="inline">{catalog.error || state.error}</StatusNotice> : null}
         {catalog.permissions?.filter(permission=>permission.conversationId===item.id).map(permission=><PermissionRequestCard key={permission.id} layout="touch" request={permission} disabled={offline||saving||!workspace.decidePermission} onChooseOption={value=>{setSaving(true);void workspace.decidePermission?.(permission.id,value).catch(()=>setToast('确认结果待核对，请恢复连接后刷新。')).finally(()=>setSaving(false));}}/>)}
         <section className="conversation-frame" aria-label="消息记录" style={{display: messages.length ? undefined : 'none'}}><ConversationFlow scope={scope} messages={messages} host={host} onAction={onAction} active={!drawer && !panel && !preview} state={{busy, readOnly: occupied, editingMessageId: editing, retryBlocked: offline ? '恢复连接后重试' : undefined}}/></section>
         {!messages.length ? <StateView as="section" className="empty-chat" kind={state.connection==='connecting'?'loading':'empty'} illustration={<img className="welcome-mark" src={brandMark} alt=""/>} titleAs="h1" title={state.connection==='connecting'?'正在读取对话…':'今天想做什么？'}/> : null}
         {!queue.items.length ? queueTray : null}
-        <Composer readOnly={occupied} busy={busy} offline={offline} blocked={occupied || unknown || recovering || saving || picking || submitting || uploads.length>0} hasAttachments={!submitting && !queueEdit && state.draft.attachments.length>0} addBlocked={occupied || offline || picking || submitting || !!queueEdit || !workspace.attachmentsAvailable || state.draft.attachments.length+uploads.length>=3} stopBlocked={occupied || unknown} text={submitting ? '' : state.draft.text} onText={text => {if(occupied)return;if(!item.control)void workspace.acquireControl?.(item.id).catch(error=>setToast(error instanceof Error?error.message:'会话已被占用'));if (submitting) client.draft.accept(state.draft.revision); client.draft.setText(text);}} onSend={() => void send()} onStop={() => {void command({type: 'stop', targetRunId: snapshot?.activeRunId});}} onAdd={() => setPanel('attachment')} editingQueue={!!queueEdit} onCancelQueueEdit={() => void finishQueueEdit(true)} controls={<>
+        <Composer readOnly={occupied} busy={busy} offline={offline} blocked={occupied || unknown || recovering || saving || picking || submitting || uploads.length>0} hasAttachments={!submitting && state.draft.attachments.length>0} addBlocked={occupied || offline || picking || submitting || !workspace.attachmentsAvailable || state.draft.attachments.length+uploads.length>=3} stopBlocked={occupied || unknown} text={submitting ? '' : state.draft.text} onText={text => {if(occupied)return;if(!item.control)void workspace.acquireControl?.(item.id).catch(error=>setToast(error instanceof Error?error.message:'会话已被占用'));if (submitting) client.draft.accept(state.draft.revision); client.draft.setText(text);}} onSend={() => void send()} onStop={() => {void command({type: 'stop', targetRunId: snapshot?.activeRunId});}} onAdd={() => setPanel('attachment')} focusToken={composerFocusToken} controls={<>
           <ThinkingLevelStrip layout="touch" level={selectedThinking} onChange={thinking=>{void updateSettings({thinking});}} saving={saving&&!selection} offline={offline} error={settingsError} open={panel==='thinking'} onOpenChange={open=>open?setPanel('thinking'):closePanel()} returnFocus={returnFocus.current}/>
         </>}>
-          <ComposerAttachments attachments={submitting ? [] : state.draft.attachments} uploads={uploads} disabled={saving||!!queueEdit} onRemove={id=>client.draft.setAttachments(previous=>previous.filter(file=>file.attachmentId!==id))} onCancel={id=>{void workspace.cancelUpload?.(id);}} onRetry={id=>workspace.retryUpload?.(id)}/>
+          <ComposerAttachments attachments={submitting ? [] : state.draft.attachments} uploads={uploads} disabled={saving} onRemove={id=>client.draft.setAttachments(previous=>previous.filter(file=>file.attachmentId!==id))} onCancel={id=>{void workspace.cancelUpload?.(id);}} onRetry={id=>workspace.retryUpload?.(id)}/>
           {picking?<StatusNotice layout="touch" variant="note">正在读取所选文件…</StatusNotice>:null}
           {queue.items.length ? queueTray : null}
           {offline && queue.items.some(item => item.operationId) ? <StatusNotice layout="touch" variant="note">尚未发送到 Bot</StatusNotice> : null}
@@ -218,10 +216,11 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
     {drawer ? <ConversationDrawer onRename={workspace.rename?((id,title)=>workspace.rename!(id,title)):undefined} onRemove={workspace.remove?((id)=>workspace.remove!(id)):undefined} returnFocus={returnFocus.current} items={catalog.items} activeId={item.id} botName={catalog.botName} offline={offline} onSelect={select} onNew={() => void create()} onSettings={() => {setDrawer(false); setPanel('settings');}} onClose={() => setDrawer(false)}/> : null}
     <ModelSelectorControl layout="touch" showTrigger={false} models={modelOptions} selected={selectedModel} onSelect={model=>{void updateSettings({model});}} saving={saving&&!selection} offline={offline} error={settingsError} open={panel==='model'} onOpenChange={open=>open?setPanel('model'):closePanel()} returnFocus={returnFocus.current}/>
     {panel === 'folder' ? <DirectoryPanel returnFocus={returnFocus.current} workspace={workspace} path={item.directory} defaultPath={catalog.defaultDirectory} recent={catalog.recentDirectories??[]} saving={saving} offline={offline} error={settingsError} onClose={closePanel} onSelect={directory=>void updateSettings({directory})}/> : null}
-    {panel === 'settings' ? <SettingsPanel returnFocus={returnFocus.current} botName={catalog.botName} offline={offline} onClose={closePanel} onExit={() => setPanel('exit')} onLicenses={onLicenses}/> : null}
+    {panel === 'settings' ? <SettingsPanel onMemory={workspace.inspectAgentEnvironment ? () => setPanel('memory') : undefined} returnFocus={returnFocus.current} botName={catalog.botName} offline={offline} onClose={closePanel} onExit={() => setPanel('exit')} onLicenses={onLicenses}/> : null}
     {panel === 'attachment' ? <Sheet returnFocus={returnFocus.current} title="添加内容" onClose={closePanel}><button type="button" className="selection-row" onClick={()=>void pickAttachments('photos')}><Image size={20}/><span>照片</span></button><button type="button" className="selection-row" onClick={()=>void pickAttachments('files')}><Paperclip size={20}/><span>文件</span></button><p className="field-note">最多 3 个附件 · 图片 10MB · 文档 20MB</p></Sheet> : null}
+    {panel === 'memory' ? <RuntimeFilesPanel workspace={workspace} returnFocus={returnFocus.current} onClose={() => setPanel('settings')} /> : null}
     {panel === 'exit' ? <Sheet returnFocus={returnFocus.current} title="断开 Bot 连接？" onClose={() => setPanel('settings')} footer={<div className="split-actions"><button type="button" className="secondary-button" onClick={() => setPanel('settings')}>取消</button><button type="button" className="primary-button" onClick={onExit}>断开连接</button></div>}><p className="body-copy">将移除本机连接身份，再次连接需要扫码。云端已受理的任务继续执行，设备授权可在 PC 撤销。</p></Sheet> : null}
     {toast ? <Toast layout="touch">{toast}</Toast> : null}
     <div ref={setSelectionPortal}/>
-  </div></UiProvider>;
+  </div><div className="mobile-usage-slot" inert={drawer || panel || preview ? true : undefined}><ConversationFlowProvider part scope={scope} host={host} onAction={onAction} active={!drawer && !panel && !preview}><SessionUsage layout="touch" records={item.usage ?? []} running={busy}/></ConversationFlowProvider></div></UiProvider>;
 }

@@ -59,7 +59,7 @@ export async function startOAuthTestServer() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const fetch = (url, init) => new URL(String(url)).hostname === '127.0.0.1' ? originalFetch(url, init) : originalFetch(`${origin}/?target=${encodeURIComponent(String(url))}`, init);
-  return { requests, fetch, bigmodel, close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }, originalFetch };
+  return { origin, requests, fetch, bigmodel, close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }, originalFetch };
 }
 
 export async function waitForOAuth(read, predicate, timeoutMs = 15000) {

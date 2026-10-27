@@ -150,7 +150,7 @@ test('敏感路径清单（.ssh/.zshrc/.env/凭据文件/系统根区）', () =>
 test('verify 阶段：写文件/命令拒，记忆只读放行、写类拒', () => {
   assert.equal(judge('bash', { command: 'cat a.txt' }, 'verify').verdict, VERDICT.deny);
   assert.equal(judge('write', { path: '/x/a.md', content: 'x' }, 'verify').verdict, VERDICT.deny);
-  for (const tool of ['memory_read', 'memory_search']) {
+  for (const tool of ['memory_read']) {
     assert.equal(judge(tool, {}, 'verify').verdict, VERDICT.allow, tool);
   }
   const verdict = judge('memory_write', { target: 'long_term', content: 'x' }, 'verify');
@@ -159,13 +159,12 @@ test('verify 阶段：写文件/命令拒，记忆只读放行、写类拒', () 
   assert.equal(judge('scratchpad', { action: 'add', text: 'x' }, 'verify').verdict, VERDICT.deny);
 });
 
-test('现有记忆工具免问，退役入口在 run/verify 中均拒绝', () => {
-  for (const tool of ['scratchpad', 'memory_forget', 'memory_restore', 'memory_status']) {
-    for (const phase of ['run', 'verify']) assert.equal(judge(tool, {}, phase).reasonCode, 'UNSUPPORTED_CHANNEL');
-  }
-  for (const tool of ['memory_write', 'memory_read', 'memory_search']) {
+test('原版记忆工具免问；只读阶段拒绝所有记忆写入工具', () => {
+  for (const tool of ['scratchpad', 'memory_forget', 'memory_restore', 'memory_write', 'memory_read']) {
     assert.equal(judge(tool, {}).verdict, VERDICT.allow, tool);
   }
+  for (const tool of ['scratchpad', 'memory_forget', 'memory_restore', 'memory_write']) assert.equal(judge(tool, {}, 'verify').verdict, VERDICT.deny, tool);
+  for (const tool of ['memory_read']) assert.equal(judge(tool, {}, 'verify').verdict, VERDICT.allow, tool);
 });
 
 test('宿主结构化工具按真实注册名放行：submit_task_result 恒放、register_delivery verify 拒', () => {

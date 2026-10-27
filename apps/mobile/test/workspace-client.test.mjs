@@ -8,6 +8,28 @@ import {createBotHost} from '../../../src/main/bot/host.mjs';
 import {moduleUnderTest} from '../../../packages/conversation-flow/test/compile.mjs';
 const {createBotWorkspace,BotCommandRejected}=await moduleUnderTest('../../../apps/mobile/test/workspace-test-api.ts');
 const wait=async(fn)=>{for(let i=0;i<100;i++){if(await fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('workspace condition timed out');};
+test('Bot usage preserves provider/model names and resolves legacy providers by exact catalog key',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-usage-provider-'));
+  let recordUsage;
+  const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:path.join(root,'work'),validateModel:async()=>{},executorFactory:options=>{
+    recordUsage=options.recordUsage;return{run:async()=>({}),stop:async()=>{},close:async()=>{}};
+  }});
+  t.after(async()=>{await host.close();await fs.rm(root,{recursive:true,force:true});});
+  const {instanceId}=await host.request('handshake');
+  const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
+  await call('model.sync',{models:[{modelKey:'fixture/m-opaque',providerId:'fixture',name:'目录供应商',model:'gpt-6.1-sol',api:'openai-completions',baseUrl:'https://example.invalid',apiKey:'FIXTURE_SECRET'}]});
+  const {id}=await call('session.create');
+  const usageDetail={input:10,output:2,cacheRead:0,cacheWrite:0,genMs:1000};
+  recordUsage(id,{modelKey:'fixture/m-opaque',modelName:'gpt-6.1-sol',at:1,usageDetail});
+  recordUsage(id,{modelKey:'fixture/m-opaque',modelName:'gpt-6.1-sol',providerName:'请求时供应商',at:2,usageDetail});
+  recordUsage(id,{modelKey:'removed/m-opaque',modelName:'gpt-6-luna',at:3,usageDetail});
+  const values=new Map(),storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+  const workspace=createBotWorkspace({rpc:{request:(method,params)=>host.request(method,params)},target:{endpoint:'https://127.0.0.1:29421',botInstanceId:instanceId,name:'Usage Bot'},storage});
+  t.after(()=>workspace.dispose());await workspace.reconnect();
+  const records=workspace.getSnapshot().items.find(item=>item.id===id).usage;
+  assert.deepEqual(records.map(record=>[record.providerName,record.requestedModel]),[['目录供应商','gpt-6.1-sol'],['请求时供应商','gpt-6.1-sol'],[undefined,'gpt-6-luna']]);
+  assert.deepEqual(records.map(record=>[record.input,record.output]),[[10,2],[10,2],[10,2]]);
+});
 test('mobile shows resource waits separately while conversations run independently and cancellation stays scoped',async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-workspace-queue-')),live=new Map(),started=[],stopped=[];
   let ask;

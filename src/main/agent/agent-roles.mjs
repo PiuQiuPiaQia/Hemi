@@ -90,7 +90,7 @@ export function buildRoutingSection(roles, { available = null } = {}) {
  * 编排者保留的工具（主 agent 的控制工具子集，固定／路由均同时保有执行工具）：派单族、记忆写入（记忆只有主
  * agent 一个写入口——子 agent 值得记的写进报告由主 agent 决定）、宿主诊断。
  */
-export const MAIN_CONTROL_TOOLS = Object.freeze(['task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'get_runtime_diagnostics', 'workflow_preparation', 'conversation_read']);
+export const MAIN_CONTROL_TOOLS = Object.freeze(['task', 'task_status', 'task_message', 'task_cancel', 'get_runtime_diagnostics', 'workflow_preparation', 'conversation_read']);
 
 /** 动手工具＝给定角色白名单的并集（子角色不持有主控制工具）。 */
 export function actionToolsOf(roles, { available = null } = {}) {

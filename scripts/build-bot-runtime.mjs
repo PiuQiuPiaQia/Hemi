@@ -36,12 +36,17 @@ export async function buildBotRuntime({
     const names = [
       '@earendil-works/pi-ai',
       '@earendil-works/pi-coding-agent',
+      'pi-memory',
       'fflate',
       'unpdf',
       '@xmldom/xmldom',
       'playwright-core',
       'jose',
       'ws',
+      'undici',
+      'vscode-jsonrpc',
+      '@peculiar/x509',
+      'reflect-metadata',
     ];
     const dependencies = Object.fromEntries(
       names.map((name) => [name, app.dependencies[name]]),

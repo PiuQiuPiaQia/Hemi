@@ -7,6 +7,8 @@ import { BOT_PROTOCOL, fail, botRpcTimeout } from './storage.mjs';
 import { NODE_RUNTIME } from './node-runtime.mjs';
 import { INSTALL_FAILURE_MARKER } from './install-dependencies.mjs';
 import {readComponentVersion} from './component-version.mjs';
+import {createRpcStream} from './rpc-stream.mjs';
+import { powershellCommand, powershellSource, copyWindowsInput, psLiteral, windowsProbeScript, windowsCliScript, windowsDirectoryScript, windowsInstallScript, windowsRollbackScript, windowsCleanupScript, windowsControlScript, windowsRoot, windowsRootSetupScript } from './windows-transport.mjs';
 const ROOT = '"$HOME/.local/share/hemi-bot"';
 const probeScript = String.raw`set -eu
 [ "$(uname -s)" = Linux ] || { echo '需要 Linux 服务器' >&2; exit 1; }
@@ -61,6 +63,15 @@ export function botServiceUnit(info) {
   ].join('\n');
 }
 export function createBotTransport({ runner, archivePath }) {
+  const platforms = new Map();
+  const streamHosts = new Set(), channels = new Map();
+  function closeChannel(host) {
+    channels.get(host)?.close(); channels.delete(host);
+  }
+  const isWindows = host => platforms.get(host) === 'win32';
+  const cliCommand = (host, mode, stdin, file) => isWindows(host)
+    ? powershellCommand(windowsCliScript(mode, Buffer.byteLength(stdin), file))
+    : `r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" ${mode}`;
   async function execute(host, command, stdin, timeoutMs = 30000, signal) {
     const r = await runner.exec({ host, command, stdin, timeoutMs, signal });
     if (r.connError || r.code === 255)
@@ -90,10 +101,10 @@ export function createBotTransport({ runner, archivePath }) {
             disk: '服务器磁盘空间不足，请释放空间后重试。',
             permission: 'Bot 安装目录无法写入，请检查服务器账号权限。',
             lock: 'Bot 安装包的依赖清单不一致，请更新 Hemi 后重试。',
-            timeout: 'Bot 依赖安装超时，请检查服务器网络后重试。',
+            timeout: 'Bot 依赖安装超时，请检查服务器网络和可用资源后重试。',
             other: 'Bot 依赖安装失败，请查看服务器上的安装日志。',
           };
-          const log = typeof detail.logFile === 'string' && detail.logFile.startsWith('/') ? ` 日志：${detail.logFile}` : '';
+          const log = typeof detail.logFile === 'string' && (path.posix.isAbsolute(detail.logFile) || path.win32.isAbsolute(detail.logFile)) ? ` 日志：${detail.logFile}` : '';
           fail((reasons[detail.kind] ?? reasons.other) + log, 'unsupported');
         }
       }
@@ -113,12 +124,49 @@ export function createBotTransport({ runner, archivePath }) {
     }
     return r.stdout.toString('utf8');
   }
-  async function rpc(host, method, params = {}, options = {}) {
-    const command = `r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" rpc`;
+  async function executeWindows(host, script, stdin, timeoutMs, signal) {
+    const command = powershellCommand(script);
+    if (command.length < 7500) return execute(host, command, stdin, timeoutMs, signal);
+    // cmd.exe's 8191-character limit also applies to OpenSSH's default shell.
+    // Upload longer scripts over stdin before sending the binary runtime archive.
+    const file = 'install-' + randomUUID() + '.ps1';
+    const source = Buffer.from('\ufeff' + powershellSource(script));
+    const location = `$r = Join-Path $env:USERPROFILE '.local\\share\\hemi-bot'; $file = Join-Path $r ${psLiteral(file)}`;
+    await execute(host, powershellCommand(`${windowsRootSetupScript}\n${location}\n$stream = [IO.File]::Create($file)\ntry { ${copyWindowsInput('$stream', source.length)} } finally { $stream.Dispose() }`),
+      source, 180000, signal);
+    try {
+      return await execute(host, powershellCommand(`${location}\n& $file`), stdin, timeoutMs, signal);
+    } finally {
+      await execute(host, powershellCommand(`${location}\nRemove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue`)).catch(() => {});
+    }
+  }
+  const windowsFile = file => `Join-Path (Join-Path $env:USERPROFILE '.local\\share\\hemi-bot') ${psLiteral(file)}`;
+  async function removeWindowsUpload(host, file) {
+    await executeWindows(host, `Remove-Item -LiteralPath (${windowsFile(file)}) -Force -ErrorAction SilentlyContinue`).catch(() => {});
+  }
+  async function uploadWindows(host, bytes, signal) {
+    const file = 'upload-' + randomUUID() + '.tmp';
+    await executeWindows(host, `${windowsRootSetupScript}\n[IO.File]::WriteAllBytes((${windowsFile(file)}), (New-Object byte[] 0))`, undefined, 180000, signal);
+    try {
+      // Windows OpenSSH can stall command stdin at its channel window limit.
+      // Bound each transfer and use ASCII base64 so console code pages and EOF
+      // conventions cannot change archives, credentials or attachment bytes.
+      for (let offset = 0; offset < bytes.length; offset += 48 * 1024) {
+        const chunk = Buffer.from(bytes.subarray(offset, offset + 48 * 1024).toString('base64'));
+        await executeWindows(host, `$encoded = New-Object IO.MemoryStream\n${copyWindowsInput('$encoded', chunk.length)}\n$bytes = [Convert]::FromBase64String([Text.Encoding]::ASCII.GetString($encoded.ToArray()))\n$stream = [IO.File]::Open((${windowsFile(file)}), 'Append', 'Write', 'None')\ntry { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose(); $encoded.Dispose() }`, chunk, 30000, signal);
+      }
+      return file;
+    } catch (error) { await removeWindowsUpload(host, file); throw error; }
+  }
+  async function singleRpc(host, method, params = {}, options = {}) {
+    const stdin = JSON.stringify({ method, params, clientId: options.clientId });
+    const upload = isWindows(host) && Buffer.byteLength(stdin) > 64 * 1024 ? await uploadWindows(host, Buffer.from(stdin), options.signal) : null;
+    try {
+    const command = cliCommand(host, 'rpc', stdin, upload);
     const r = await runner.exec({
       host,
       command,
-      stdin: JSON.stringify({ method, params, clientId: options.clientId }),
+      stdin: upload ? null : stdin,
       timeoutMs: botRpcTimeout(method, params),
       signal: options.signal,
     });
@@ -141,9 +189,32 @@ export function createBotTransport({ runner, archivePath }) {
     }
     if (!data.ok) fail(data.message, data.code);
     return data.result;
+    } finally { if (upload) await removeWindowsUpload(host, upload); }
+  }
+  async function rpc(host, method, params = {}, options = {}) {
+    const request = {method, params, clientId: options.clientId};
+    let result;
+    // Keep large Windows uploads on their bounded, staged path. Small control
+    // requests share one process and are correlated independently of ordering.
+    if (isWindows(host) && streamHosts.has(host) && Buffer.byteLength(JSON.stringify(request)) <= 60 * 1024) {
+      let channel = channels.get(host);
+      if (!channel || channel.closed) {
+        channel = createRpcStream({start: callbacks => runner.exec({
+          host, command: cliCommand(host, 'rpc-stream', ''), timeoutMs: 0, ...callbacks,
+        })});
+        channels.set(host, channel);
+      }
+      result = await channel.request(request, options);
+    } else result = await singleRpc(host, method, params, options);
+    if (method === 'handshake') {
+      if (result.capabilities?.rpcStream === 1) streamHosts.add(host);
+      else {streamHosts.delete(host); closeChannel(host);}
+    }
+    return result;
   }
   return {
     rpc,
+    setPlatform(host, platform) { if (platform === 'win32' || platform === 'linux') platforms.set(host, platform); },
     async watch(host, params, {signal, onEvent, clientId}) {
       const controller=new AbortController(), decoder=new StringDecoder('utf8');
       const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
@@ -151,8 +222,8 @@ export function createBotTransport({ runner, archivePath }) {
       let pending='', lastFrame=Date.now();
       const heartbeat=setInterval(()=>{if(Date.now()-lastFrame>45000)controller.abort();},5000);heartbeat.unref?.();
       try {
-        const command=`r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" watch`;
-        const result=await runner.exec({host,command,stdin:JSON.stringify({params,clientId}),timeoutMs:0,signal:controller.signal,onStdout(chunk){
+        const stdin=JSON.stringify({params,clientId}), command=cliCommand(host, 'watch', stdin);
+        const result=await runner.exec({host,command,stdin,timeoutMs:0,signal:controller.signal,onStdout(chunk){
           pending+=decoder.write(chunk);
           if(Buffer.byteLength(pending)>40*1024*1024)throw new Error('Bot event too large');
           let end;while((end=pending.indexOf('\n'))>=0){const raw=pending.slice(0,end);pending=pending.slice(end+1);if(!raw)continue;const frame=JSON.parse(raw);lastFrame=Date.now();onEvent(frame);}
@@ -160,9 +231,26 @@ export function createBotTransport({ runner, archivePath }) {
         if(!signal?.aborted && (result.code!==0 || !result.aborted))fail('实时连接已断开，正在恢复。','offline');
       } finally {clearInterval(heartbeat);signal?.removeEventListener('abort',abort);}
     },
-    disconnect: () => runner.close(),
+    disconnect() {
+      for (const host of channels.keys()) closeChannel(host);
+      streamHosts.clear();
+      return runner.close?.();
+    },
     async directory(host, raw = '~') {
       const requested = String(raw).trim();
+      if (isWindows(host)) {
+        if ((!/^[A-Za-z]:[\\/]/.test(requested) && requested !== '~' && !/^~[\\/]/.test(requested)) || requested.includes('\0'))
+          fail('请输入 Windows 主机上的绝对文件夹路径，例如 C:\\Users。');
+        const output = await executeWindows(host, windowsDirectoryScript(requested));
+        let reply;
+        try { reply = JSON.parse(output.split(/\r?\n/).findLast(line => line.startsWith('__HEMI_DIR_JSON__')).slice('__HEMI_DIR_JSON__'.length)); } catch { fail('服务器返回的目录列表不完整，请重试。', 'offline'); }
+        if (reply.status === 'missing') fail('服务器上找不到这个文件夹，请选择其他文件夹。', 'missing');
+        if (reply.status === 'not-directory') fail('这不是一个文件夹。', 'missing');
+        if (reply.status === 'permission') fail('当前服务器账号没有访问这个文件夹的权限。', 'permission');
+        if (reply.status !== 'ok' || !/^[A-Za-z]:[\\/]/.test(reply.path) || !/^[A-Za-z]:[\\/]/.test(reply.home) || !Array.isArray(reply.folders))
+          fail('服务器返回的目录列表不完整，请重试。', 'offline');
+        return {path: reply.path, parent: reply.parent, home: reply.home, folders: reply.folders.sort((a,b) => a.name.localeCompare(b.name)), truncated: reply.truncated};
+      }
       if (
         (!requested.startsWith('/') && requested !== '~' && !requested.startsWith('~/')) ||
         requested.includes('\0')
@@ -215,22 +303,30 @@ done
       };
     },
     async probe(host) {
-      const raw = await execute(host, probeScript),
+      let platform;
+      try {
+        const name = (await execute(host, 'uname -s')).trim();
+        if (name === 'Linux') platform = 'linux';
+        else if (!/^MINGW|^MSYS|^CYGWIN/.test(name)) fail('Bot 主机需要 Linux 或 Windows x64。', 'unsupported');
+      } catch (error) { if (error.code !== 'unsupported') throw error; }
+      const raw = platform === 'linux' ? await execute(host, probeScript) : await executeWindows(host, windowsProbeScript),
         fields = {};
       for (const line of raw.split('\n')) {
-        const match = /^__HB_(\w+)=(.*)$/.exec(line);
+        const match = /^__HB_(\w+)=(.*)$/.exec(line.trim());
         if (match)
           fields[match[1]] = Buffer.from(match[2], 'base64').toString('utf8');
       }
-      if (!fields.home || !NODE_RUNTIME[fields.arch])
+      platform = fields.platform ?? platform;
+      if (!fields.home || !(platform === 'win32' ? NODE_RUNTIME.win32[fields.arch] : NODE_RUNTIME[fields.arch]))
         fail('服务器探测未返回完整结果。');
       const info = {
         ...fields,
-        platform: 'linux',
-        root: path.posix.join(fields.home, '.local/share/hemi-bot'),
+        platform,
+        root: platform === 'win32' ? windowsRoot(fields.home) : path.posix.join(fields.home, '.local/share/hemi-bot'),
         existing: fields.existing === '1',
         runtimeNeeded: fields.runtimeNeeded === '1',
       };
+      platforms.set(host, platform);
       if (info.existing) {
         try {
           info.bot = await rpc(host, 'handshake');
@@ -238,13 +334,14 @@ done
             fail('Bot 协议版本不兼容，请先维护云端组件。', 'unsupported');
         } catch (error) {
           if (error.code === 'unsupported') throw error;
-          info.serviceError =
-            '检测到已有安装，但服务未能响应。请先检查 systemctl --user status hemi-bot';
+          info.serviceError = '检测到已有 Bot，但服务尚未就绪。';
         }
       }
       return info;
     },
     async install(host, info, signal) {
+      closeChannel(host); streamHosts.delete(host);
+      if (info.platform) platforms.set(host, info.platform);
       if (info.existing && !info.bot)
         fail('已有安装无法核对身份，停止覆盖。请先修复原服务。', 'conflict');
       if (info.bot?.activeJobs) fail('请等待云端任务结束后更新组件。', 'busy');
@@ -284,9 +381,14 @@ if ! systemctl --user enable hemi-bot || ! systemctl --user restart hemi-bot; th
   exit 1
 fi
 `;
-      await execute(host, script, archive, 600000, signal);
+      if (isWindows(host)) {
+        const inputFile = await uploadWindows(host, archive, signal);
+        try { await executeWindows(host, windowsInstallScript(info, {release, digest, inputFile}), undefined, 1200000, signal); }
+        finally { await removeWindowsUpload(host, inputFile); }
+      }
+      else await execute(host, script, archive, 600000, signal);
       let last;
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < (isWindows(host) ? 60 : 12); i++) {
         try {
           const bot = await rpc(host, 'handshake');
           if (
@@ -296,10 +398,10 @@ fi
           )
             fail('安装后的协议或实例身份不兼容。', 'unsupported');
           // Keep the running and previous release; user data lives outside releases.
-          await execute(
+          await (isWindows(host) ? executeWindows(host, windowsCleanupScript) : execute(
             host,
             `set -eu; r=${ROOT}; current=$(readlink "$r/current"); previous=$(cat "$r/previous-release" 2>/dev/null || true); for release in "$r"/releases/release-*; do [ -d "$release" ] || continue; [ "$release" = "$current" ] && continue; [ "$release" = "$previous" ] && continue; rm -rf -- "$release"; done`,
-          ).catch(() => {});
+          )).catch(() => {});
           return bot;
         } catch (error) {
           last = error;
@@ -307,26 +409,28 @@ fi
         }
       }
       if (info.bot) {
-        await execute(
+        await (isWindows(host) ? executeWindows(host, windowsRollbackScript) : execute(
           host,
           `set -eu; r=${ROOT}; old=$(cat "$r/previous-release"); case "$old" in "$r"/releases/*) ;; *) exit 1;; esac; ln -sfn "$old" "$r/current"; if [ -e "$r/previous.service" ]; then cp "$r/previous.service" "$HOME/.config/systemd/user/hemi-bot.service"; fi; systemctl --user daemon-reload; systemctl --user restart hemi-bot`,
-        );
+        ));
         fail(
           '新组件未通过握手，已切回上一版本；请重新连接核对。',
           'needs-review',
         );
       }
+      if (isWindows(host)) await executeWindows(host, windowsControlScript('stop')).catch(() => {});
       throw last;
     },
     async control(host, action) {
       if (!['start', 'stop'].includes(action)) fail('无效的服务操作。');
-      await execute(
+      closeChannel(host); streamHosts.delete(host);
+      await (isWindows(host) ? executeWindows(host, windowsControlScript(action)) : execute(
         host,
         `systemctl --user ${action === 'start' ? 'enable --now' : 'disable --now'} hemi-bot`,
-      );
+      ));
       if (action === 'start') {
         let last;
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < (isWindows(host) ? 60 : 16); i++) {
           try {
             const hello = await rpc(host, 'handshake');
             if (hello.protocol !== BOT_PROTOCOL)

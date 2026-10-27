@@ -49,6 +49,64 @@ test('npm internal failure retries once with private fresh cache, the selected N
   }
 });
 
+test('npm owns its proxy layer while the Bot environment keeps native proxy support', async t => {
+  const f = await fixture(t, `const networkFile='network.json';const rows=fs.existsSync(networkFile)?JSON.parse(fs.readFileSync(networkFile)):[];rows.push({native:process.env.NODE_USE_ENV_PROXY??null,disabled:process.execArgv.includes('--no-use-env-proxy'),https:process.env.HTTPS_PROXY??null});fs.writeFileSync(networkFile,JSON.stringify(rows));if(calls.length===1){console.error('ECONNRESET');process.exitCode=1;}`);
+  const env = {...process.env, NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: 'http://proxy.example.test:7897'};
+  await installBotDependencies({...f, env});
+  const values = JSON.parse(await fs.readFile(path.join(f.directory, 'network.json'), 'utf8'));
+  for (const value of values) {
+    assert.equal(value.native, null);
+    assert.equal(value.disabled, process.allowedNodeEnvironmentFlags.has('--use-env-proxy'));
+  }
+  assert.equal(values[0].https, null);
+  assert.equal(values[1].https, env.HTTPS_PROXY);
+  assert.equal(env.NODE_USE_ENV_PROXY, '1');
+});
+
+async function reusableFixture(t) {
+  const f = await fixture(t, '');
+  const reuseFrom = path.join(f.root, 'releases', 'previous');
+  const modules = path.join(reuseFrom, 'node_modules');
+  await fs.mkdir(path.join(modules, 'fixture-dependency'), {recursive: true});
+  const pkg = JSON.stringify({dependencies: {'fixture-dependency': '1.0.0'}});
+  const lock = JSON.stringify({packages: {'node_modules/fixture-dependency': {version: '1.0.0'}}});
+  for (const dir of [f.directory, reuseFrom]) {
+    await fs.writeFile(path.join(dir, 'package.json'), pkg);
+    await fs.writeFile(path.join(dir, 'package-lock.json'), lock);
+  }
+  await fs.writeFile(path.join(modules, '.package-lock.json'), lock);
+  await fs.writeFile(path.join(modules, 'fixture-dependency/package.json'), JSON.stringify({version: '1.0.0'}));
+  await fs.writeFile(path.join(modules, 'fixture-dependency/proof'), 'original');
+  return {...f, reuseFrom, modules};
+}
+
+test('unchanged Windows dependencies reuse a separate copy without npm or changes to the active release', async t => {
+  const f = await reusableFixture(t);
+  const result = await installBotDependencies(f);
+  assert.deepEqual(result.attempts, [{code: 0, strategy: 'reuse'}]);
+  assert.equal(await fs.stat(path.join(f.directory, 'calls.json')).then(() => true, () => false), false);
+  const proof = path.join(f.directory, 'node_modules/fixture-dependency/proof');
+  assert.equal(await fs.readFile(proof, 'utf8'), 'original');
+  await fs.writeFile(proof, 'changed new release');
+  assert.equal(await fs.readFile(path.join(f.modules, 'fixture-dependency/proof'), 'utf8'), 'original');
+  await fs.rm(path.join(f.directory, 'node_modules'), {recursive: true});
+  assert.equal(await fs.readFile(path.join(f.modules, 'fixture-dependency/proof'), 'utf8'), 'original');
+});
+
+test('changed locks, incomplete dependencies and unmanaged source directories use npm instead of reuse', async t => {
+  for (const kind of ['lock', 'marker', 'dependency', 'version', 'unmanaged']) {
+    const f = await reusableFixture(t);
+    if (kind === 'lock') await fs.appendFile(path.join(f.directory, 'package-lock.json'), ' ');
+    if (kind === 'marker') await fs.rm(path.join(f.modules, '.package-lock.json'));
+    if (kind === 'dependency') await fs.rm(path.join(f.modules, 'fixture-dependency'), {recursive: true});
+    if (kind === 'version') await fs.writeFile(path.join(f.modules, 'fixture-dependency/package.json'), JSON.stringify({version: '2.0.0'}));
+    if (kind === 'unmanaged') { const outside = path.join(f.dir, 'unmanaged'); await fs.rename(f.reuseFrom, outside); f.reuseFrom = outside; }
+    const result = await installBotDependencies(f);
+    assert.equal(result.attempts[0].strategy, 'direct', kind);
+    assert.equal(JSON.parse(await fs.readFile(path.join(f.directory, 'calls.json'))).length, 1, kind);
+  }
+});
+
 test('permanent failures stop immediately; retryable failures are bounded and retain logs', async t => {
   for (const [output, kind, count] of [
     ['ENOSPC\nExit handler never called!', 'disk', 1],
@@ -74,16 +132,60 @@ test('retry loads server shell proxies, supports ALL_PROXY, and keeps secrets ou
   const f = await fixture(t, `if(calls.length===1){console.error('ECONNRESET');process.exitCode=1;}else{fs.writeFileSync('proxy.json',JSON.stringify({https:process.env.https_proxy,http:process.env.http_proxy,no:process.env.NO_PROXY}));}`);
   const result = await installBotDependencies({ ...f, env: { PATH: process.env.PATH }, loadShellProxy: async () => ({ ALL_PROXY: proxy, NO_PROXY: 'localhost' }) });
   assert.equal(result.attempts.length, 2);
-  assert.equal(result.attempts[1].strategy, 'shell-proxy');
+  assert.equal(result.attempts[1].strategy, 'server-proxy');
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.directory, 'proxy.json'))), { https: proxy, http: proxy, no: 'localhost' });
   assert.ok(!(await fs.readFile(path.join(result.logDir, 'result.json'), 'utf8')).includes('fixture-password'));
+});
+
+test('cloud network.env is borrowed only after direct failure and explicit process values take precedence', async t => {
+  const f = await fixture(t, `const rows=fs.existsSync('routes.json')?JSON.parse(fs.readFileSync('routes.json')):[];rows.push({proxy:process.env.https_proxy??null,npm:process.env.npm_config_https_proxy??null,secret:process.env.UNRELATED_SECRET??null});fs.writeFileSync('routes.json',JSON.stringify(rows));if(calls.length===1){console.error('ETIMEDOUT');process.exitCode=1;}`);
+  await fs.mkdir(f.root,{recursive:true});
+  const network = 'HTTPS_PROXY="http://cloud-user:cloud-password@127.0.0.1:7897"\nNO_PROXY=localhost\nUNRELATED_SECRET=private\n';
+  await fs.writeFile(path.join(f.root,'network.env'),network);
+  const result = await installBotDependencies({...f,env:{PATH:process.env.PATH}});
+  assert.deepEqual(result.attempts.map(value=>value.strategy),['direct','server-proxy']);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.directory,'routes.json'))),[
+    {proxy:null,npm:null,secret:null},
+    {proxy:'http://cloud-user:cloud-password@127.0.0.1:7897',npm:'http://cloud-user:cloud-password@127.0.0.1:7897',secret:null},
+  ]);
+  const calls = JSON.parse(await fs.readFile(path.join(f.directory,'calls.json')));
+  assert.ok(calls[0].includes('--proxy=false') && calls[0].includes('--fetch-timeout=8000'));
+  assert.ok(!calls[1].includes('--proxy=false'));
+  assert.equal(await fs.readFile(path.join(f.root,'network.env'),'utf8'),network);
+  assert.ok(!(await fs.readFile(path.join(result.logDir,'result.json'),'utf8')).includes('cloud-password'));
+  assert.ok(result.attempts.every(value=>Number.isFinite(value.durationMs)));
+  await fs.rm(path.join(f.directory,'routes.json')); await fs.rm(path.join(f.directory,'calls.json'));
+  await installBotDependencies({...f,env:{PATH:process.env.PATH,https_proxy:'http://127.0.0.1:1080'}});
+  assert.equal(JSON.parse(await fs.readFile(path.join(f.directory,'routes.json')))[1].proxy,'http://127.0.0.1:1080');
+});
+
+test('a working direct download ignores a broken cloud proxy and does not probe other routes', async t => {
+  const f = await fixture(t, `fs.writeFileSync('direct.json',JSON.stringify(Object.keys(process.env).filter(key=>/^(https?_proxy|all_proxy|npm_config_.*proxy)$/i.test(key))));`);
+  await fs.mkdir(f.root,{recursive:true});await fs.writeFile(path.join(f.root,'network.env'),'HTTPS_PROXY=http://127.0.0.1:1\n');
+  const result=await installBotDependencies({...f,env:{PATH:process.env.PATH},loadShellProxy:async()=>{throw Error('must not probe when direct succeeds');}});
+  assert.deepEqual(result.attempts.map(value=>value.strategy),['direct']);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.directory,'direct.json'))),[]);
+});
+
+test('Windows proxy discovery reads only cloud user, machine and system proxy settings with a bounded probe', async () => {
+  let captured;
+  const result = await readShellProxyEnvironment({platform:'win32',env:{SystemRoot:'C:\\Windows'},timeoutMs:1234,
+    run(file,args,options,callback) {
+      captured={file,script:Buffer.from(args.at(-1),'base64').toString('utf16le'),options};
+      callback(null,JSON.stringify({HTTPS_PROXY:'http://127.0.0.1:7897',NO_PROXY:'localhost',UNRELATED_SECRET:'private'}));
+    }});
+  assert.deepEqual(result,{HTTPS_PROXY:'http://127.0.0.1:7897',NO_PROXY:'localhost'});
+  assert.match(captured.script,/GetEnvironmentVariables/); assert.match(captured.script,/GetSystemWebProxy/);
+  assert.equal(captured.options.timeout,1234);
+  assert.equal(captured.file,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.deepEqual(await readShellProxyEnvironment({platform:'win32',run(_file,_args,_options,callback){callback(new Error('unavailable'));}}),{});
 });
 
 test('network failures fall back to a direct mirror only for the final child, preserving server configuration', async t => {
   const f = await fixture(t, `if(calls.length<3){console.error('ETIMEDOUT');process.exitCode=1;}else{fs.writeFileSync('proxy.json',JSON.stringify(Object.keys(process.env).filter(key=>/proxy/i.test(key))));}`);
   const env = { PATH: process.env.PATH, HTTPS_PROXY: 'http://127.0.0.1:1', ALL_PROXY: 'socks5://127.0.0.1:2', NPM_CONFIG_HTTPS_PROXY: 'http://127.0.0.1:3' };
   const result = await installBotDependencies({ ...f, env });
-  assert.deepEqual(result.attempts.map(attempt => attempt.strategy), ['server', 'retry', 'npmmirror']);
+  assert.deepEqual(result.attempts.map(attempt => attempt.strategy), ['direct', 'server-proxy', 'npmmirror']);
   const calls = JSON.parse(await fs.readFile(path.join(f.directory, 'calls.json')));
   assert.ok(!calls[0].includes('--registry'));
   assert.ok(!calls[1].includes('--registry'));
@@ -194,7 +296,7 @@ test('actual npm ci recovers from registry failures, verifies the locked package
   let downloads = 0;
   const server = http.createServer((_req, response) => {
     downloads++;
-    if (downloads <= 2) { response.writeHead(503); response.end('temporary registry failure'); }
+    if (downloads <= 1) { response.writeHead(503); response.end('temporary registry failure'); }
     else { response.writeHead(200, { 'content-type': 'application/octet-stream' }); response.end(bytes); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -210,7 +312,7 @@ test('actual npm ci recovers from registry failures, verifies the locked package
   const result = await installBotDependencies(actual);
   assert.equal(result.attempts.length, 2);
   assert.equal(result.attempts[1].code, 0);
-  assert.ok(downloads >= 3);
+  assert.ok(downloads >= 2);
   assert.equal(await fs.readFile(path.join(f.directory, 'node_modules/hemi-install-fixture/proof.txt'), 'utf8'), 'locked dependency bytes');
 });
 
@@ -248,9 +350,9 @@ test('actual npm ci bypasses broken npmrc proxies for the mirror, preserves the 
   await fs.writeFile(path.join(f.directory, 'package.json'), JSON.stringify(pkg));
   await fs.writeFile(path.join(f.directory, 'package-lock.json'), lock);
   const { npmCli, ...actual } = f;
-  const options = { ...actual, env: { PATH: process.env.PATH, HOME: f.dir, npm_config_userconfig: userConfig }, mirrorRegistry: `http://127.0.0.1:${server.address().port}/` };
+  const options = { ...actual, env: { PATH: process.env.PATH, HOME: f.dir, npm_config_userconfig: userConfig, npm_config_registry:deadProxy }, mirrorRegistry: `http://127.0.0.1:${server.address().port}/` };
   const result = await installWithDiagnostics(options);
-  assert.deepEqual(result.attempts.map(value => value.strategy), ['server', 'retry', 'npmmirror']);
+  assert.deepEqual(result.attempts.map(value => value.strategy), ['direct', 'retry', 'npmmirror']);
   assert.equal(await fs.readFile(path.join(f.directory, 'node_modules/hemi-mirror-fixture/proof.txt'), 'utf8'), 'integrity-locked bytes');
   assert.deepEqual(requests, ['/hemi-mirror-fixture/-/hemi-mirror-fixture-1.0.0.tgz']);
   assert.equal(await fs.readFile(userConfig, 'utf8'), npmrc);
@@ -290,7 +392,7 @@ test('actual npm uses the discovered shell proxy for locked downloads without co
   const { npmCli, ...actual } = f;
   const result = await installWithDiagnostics({ ...actual, env: { PATH: process.env.PATH, HOME: f.dir, npm_config_userconfig: userConfig }, loadShellProxy: async () => ({ ALL_PROXY: `http://127.0.0.1:${proxy.address().port}` }) });
   assert.equal(result.attempts.length, 2);
-  assert.equal(result.attempts[1].strategy, 'shell-proxy');
+  assert.equal(result.attempts[1].strategy, 'server-proxy');
   assert.deepEqual(requests, [resolved]);
   assert.equal(await fs.readFile(userConfig, 'utf8'), npmrc);
   assert.equal(JSON.parse(await fs.readFile(path.join(f.directory, 'node_modules/hemi-proxy-fixture/package.json'))).version, '1.0.0');

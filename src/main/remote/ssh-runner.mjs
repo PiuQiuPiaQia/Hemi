@@ -9,7 +9,8 @@
 //   只握手一次；ControlPath 目录在 userData 下（dev/生产隔离），权限 0700。
 // - 退出码 255 一律按连接错误分类（hostkey/auth/timeout/unreachable），断线
 //   语义由调用方按分类收束任务。
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -127,7 +128,7 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
    * @returns {Promise<{code:number, stdout:Buffer, stderr:string, timedOut?:boolean,
    *            aborted?:boolean, connError?:string|null}>}
    */
-  function exec({ host, command, stdin = null, timeoutMs = 120_000, signal = null, onKill = null, password = null, onStdout = null }) {
+  function exec({ host, command, stdin = null, timeoutMs = 120_000, signal = null, onKill = null, password = null, onStdout = null, onStdin = null }) {
     const target = String(host ?? '').trim();
     if (signal?.aborted) return Promise.resolve({code:-1,stdout:Buffer.alloc(0),stderr:'',aborted:true});
     if (!isValidSshTarget(target)) {
@@ -192,8 +193,14 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
       });
       child.on('close', (code) => finish(code == null ? -1 : code));
 
-      if (stdin != null) {
-        child.stdin.on('error', () => {}); // 对端先退（命令失败）时 EPIPE 不许抛
+      child.stdin.on('error', () => {}); // 对端先退（命令失败）时 EPIPE 不许抛
+      if (onStdin) {
+        // Keep stdin open for a framed, persistent Bot control channel. Write
+        // callbacks provide backpressure and propagate a closed pipe to callers.
+        onStdin(bytes => new Promise((resolveWrite, rejectWrite) => {
+          child.stdin.write(bytes, error => error ? rejectWrite(error) : resolveWrite());
+        }));
+      } else if (stdin != null) {
         child.stdin.end(stdin);
       } else {
         child.stdin.end();
@@ -293,7 +300,18 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
     seenHosts.clear();
   }
 
-  return { exec, execReadOnly, probe, close, shq };
+  async function resolveHostname(host) {
+    const target = String(host ?? '').trim();
+    if (!isValidSshTarget(target)) throw new Error('SSH 地址无效。');
+    // Ask OpenSSH for the effective HostName so phone invitations never contain
+    // a desktop-only Host alias, username, or the SSH port.
+    const {stdout} = await promisify(execFile)(sshBin, ['-G', target], {timeout: 10000, maxBuffer: 1024 * 1024});
+    const hostname = /^hostname\s+(\S+)\s*$/mi.exec(stdout)?.[1];
+    if (!hostname || !/^[A-Za-z0-9.:[\]-]+$/.test(hostname)) throw new Error('无法读取 Bot 的服务器地址，请检查 SSH 配置中的 HostName。');
+    return hostname;
+  }
+
+  return { exec, execReadOnly, probe, close, shq, resolveHostname };
 }
 
 /** 连接错误分类 → 可操作的中文文案（终端修复方式；应用内不做指纹确认/密码输入）。 */

@@ -70,6 +70,17 @@ export function formatPercent(ratio: number | null): string {
 function bucketOf(record: UsageRecord): 'chat' | 'task' {
     return isTaskSource(record.source) ? 'task' : 'chat';
 }
+function modelLabel(record: UsageRecord): string {
+    const name = record.modelName?.trim() || '';
+    const providerName = record.providerName?.trim() || '';
+    const key = record.modelKey || '';
+    const keyedModel = key.includes('/') ? key.slice(key.indexOf('/') + 1) : key;
+    // 旧 Bot 记录的 modelName 是型号，目录键末段则可能是生成的 m-… ID。
+    // 缺少真实型号时只展示已知名称，不把内部 ID 拼成「供应商 · 型号」。
+    const model = record.requestedModel?.trim() || (providerName || /^m-/.test(keyedModel) ? name : keyedModel) || name || '未知模型';
+    const provider = providerName || (name !== model ? name : '');
+    return provider && provider !== model ? `${provider} · ${model}` : model;
+}
 export function aggregateUsage(records: UsageRecord[], filter: UsageSourceFilter = 'all'): UsageAggregate {
     const inFilter = (record: UsageRecord) => filter === 'all' ? true : bucketOf(record) === filter;
     let input = 0;
@@ -101,9 +112,7 @@ export function aggregateUsage(records: UsageRecord[], filter: UsageSourceFilter
         const row = byModel.get(key) ?? {
             modelKey: record.modelKey,
             modelName: record.modelName,
-            label: record.modelName && record.modelName !== (record.requestedModel || record.modelKey)
-                ? `${record.modelName} · ${record.requestedModel || (key.includes('/') ? key.slice(key.indexOf('/') + 1) : key)}`
-                : record.requestedModel || key,
+            label: modelLabel(record),
             calls: 0,
             missing: 0,
             input: 0,
@@ -115,6 +124,8 @@ export function aggregateUsage(records: UsageRecord[], filter: UsageSourceFilter
             genMs: 0,
             cacheRead: 0,
         };
+        if (record.providerName?.trim())
+            row.label = modelLabel(record);
         row.calls += record.calls ?? 1;
         row.missing += record.missing ?? 0;
         row.input += recordInput(record);

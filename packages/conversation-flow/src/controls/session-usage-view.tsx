@@ -3,12 +3,13 @@ import { InfoPopover } from '@hemi/ui';
 import type { UsageRecord } from './usage-types.js';
 import { aggregateRoleUsage, aggregateUsage, formatCompactTokens, formatPercent } from './session-usage.js';
 /** 输入框底部单行预览；弹窗直接展示整体与各角色数据。 */
-export function SessionUsage({ records, running, loadError = '', initialOpen = false }: {
+export function SessionUsage({ records, running, loadError = '', initialOpen = false, layout = 'desktop' }: {
     records: UsageRecord[];
     running: boolean;
     loadError?: string;
     /** fixtures 验收用。 */
     initialOpen?: boolean;
+    layout?: 'desktop' | 'touch';
 }) {
     const [open, setOpen] = useState(initialOpen);
     const [dimension, setDimension] = useState<'role' | 'model'>('role');
@@ -24,11 +25,11 @@ export function SessionUsage({ records, running, loadError = '', initialOpen = f
     const missingLabel = (missing: number) => missing ? `${missing} 次调用未返回用量` : undefined;
     if (!records.length && !loadError)
         return null;
-    return (<div className="h48-usage">
-      <InfoPopover openOnHover open={open} onOpenChange={setOpen} title="本会话用量" description={`${total.calls.toLocaleString('zh-CN')} 次调用`} headerActions={records.length ? (<div className="h48-usage-switch" role="group" aria-label="用量统计维度">
+    return (<div className="h48-usage" data-layout={layout}>
+      <InfoPopover openOnHover={layout === 'desktop'} open={open} onOpenChange={setOpen} title="本会话用量" description={`${total.calls.toLocaleString('zh-CN')} 次调用`} headerActions={records.length ? (<div className="h48-usage-switch" role="group" aria-label="用量统计维度">
             <button type="button" aria-pressed={byRole} onClick={() => setDimension('role')}>角色</button>
             <button type="button" aria-pressed={!byRole} onClick={() => setDimension('model')}>模型</button>
-          </div>) : null} className="h48-usage-panel" trigger={(<button type="button" className="h48-usage-entry" aria-label={`查看本会话用量，缓存命中 ${formatPercent(total.cacheHit)}，生成速度 ${speed(total.tps)}${running ? '，调用完成后更新' : ''}`}>
+          </div>) : null} className={`h48-usage-panel${layout === 'touch' ? ' h48-usage-touch-panel' : ''}`} trigger={(<button type="button" className="h48-usage-entry" aria-label={`查看本会话用量，缓存命中 ${formatPercent(total.cacheHit)}，生成速度 ${speed(total.tps)}${running ? '，调用完成后更新' : ''}`}>
             {running ? <span className="h48-usage-dot" aria-hidden="true"/> : null}
             {loadError && !records.length ? <span>用量暂不可用</span> : unknown ? <span>用量暂未返回</span> : (<>
                 <span className="h48-usage-volume">{formatCompactTokens(total.input + total.output)} tokens<span className="h48-usage-sep">·</span></span>

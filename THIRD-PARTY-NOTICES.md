@@ -29,7 +29,11 @@ Hemi 自有代码采用 MIT（根 [LICENSE](LICENSE)）；本文件列出随源�
 | @earendil-works/pi-coding-agent、pi-ai、pi-agent-core、pi-codemode、pi-mcp、pi-telemetry、pi-tui | 1.3.0 | MIT | Agent 会话与工具运行时（主／子 agent） | Hemi 未修改 | [固定源码](https://github.com/earendil-works/pi/tree/71023aec1546d6d677a65669c5665c0927ce0dd0) | [Pi MIT 全文](third-party/licenses/Pi-MIT.txt)；pi-mcp 包内 LICENSES 的第三方通知继续保留 |
 | playwright-core | 1.64.1 | Apache-2.0；内嵌组件各自许可 | 独立无头浏览器后端 | 未修改；使用本机浏览器程序，不随包分发浏览器 | https://github.com/microsoft/playwright | npm 包 LICENSE、NOTICE、ThirdPartyNotices 与 lib 许可侧文件；[来源及 WebP WASM 清单](third-party/playwright-sources.json) |
 | ws | 8.21.3 | MIT | WebSocket（浏览器扩展桥） | 未修改 | https://github.com/websockets/ws | npm 包 LICENSE |
-| pi-memory | 0.4.2 | MIT | 记忆扩展（能力对照保留，见 AGENTS.md） | 未修改 | npm registry | npm 包 LICENSE |
+| undici | 8.10.2 | MIT | Bot 的 HTTP(S) 代理与原生 fetch／SDK 网络通道 | 未修改 | https://github.com/nodejs/undici/tree/v8.10.2 | [原始 MIT 与版权](third-party/licenses/Undici-MIT.txt)，同时保留 npm 包 LICENSE |
+| vscode-jsonrpc | 10.0.0 | MIT | Windows Bot 持久控制通道的 JSON-RPC 消息编解码 | 未修改 | https://github.com/microsoft/vscode-languageserver-node/tree/main/jsonrpc | npm 包 License.txt |
+| @peculiar/x509 | 2.2.0 | MIT | Bot 设备入口的 X.509 证书编码，使用 Node 原生 WebCrypto | 未修改 | https://github.com/PeculiarVentures/x509 | [原始 MIT 与版权](third-party/licenses/Peculiar-X509-MIT.txt)，同时保留 npm 包 LICENSE |
+| reflect-metadata | 0.2.2 | Apache-2.0 | X.509 编码依赖的运行时元数据支持 | 未修改 | https://github.com/microsoft/reflect-metadata | [Apache 全文](third-party/licenses/Reflect-Metadata-Apache-2.0.txt)与[原始版权](third-party/licenses/Reflect-Metadata-CopyrightNotice.txt)，同时保留 npm 包声明 |
+| pi-memory | 0.4.2 | MIT | 主会话共享记忆引擎（通过 Pi SDK 原生扩展加载） | 未修改 | https://github.com/jayzeng/pi-memory/tree/v0.4.2 | npm 包 LICENSE |
 | electron-updater | 6.8.10 | MIT | 应用内更新 | 未修改 | https://github.com/electron-userland/electron-builder | npm 包 LICENSE |
 | unpdf／内嵌 PDF.js | 1.9.1／6.4.299 | MIT／Apache-2.0 | 本地 PDF 文字提取 | 上游 serverless bundle，Hemi 未修改 | https://github.com/unjs/unpdf；https://github.com/mozilla/pdf.js | npm 包 LICENSE；[PDF.js Apache 全文](third-party/pdfjs/PDFjs-LICENSE.txt)；PDF.js © Mozilla Foundation；不引入可选 canvas 原生依赖 |
 | Adobe CMaps（来自 pdfjs-dist） | 6.4.299 | BSD-3-Clause | 中文、日文、韩文 PDF 字符映射 | 字节表未修改，仅重打 ZIP | https://github.com/mozilla/pdfjs-dist/tree/v6.4.299/cmaps | [Adobe 原始版权与许可](third-party/pdfjs/CMap-LICENSE.txt)；[来源及逐文件哈希](third-party/pdfjs/sources.json) |
@@ -68,3 +72,7 @@ Photon Node 0.3.4 保留包内 Apache-2.0 文本，其 WASM 中观察到的 Rust
 
 可用 `node scripts/verify-distribution-licenses.mjs <解包目录> <仓外报告.json>` 核对实际安装包中的声明与构建输入一致，
 并列出实际分发的原生文件、所属 npm 包与哈希。依赖版本变化或出现新的原生包时须更新许可材料；检查会拒绝未经登记的原生包。
+
+## 记忆功能的依赖边界
+
+Hemi 直接加载上表的原版 pi-memory。记忆搜索不在当前交付范围：不分发或部署 qmd、llama.cpp、sqlite-vec 及其 GGUF 检索模型，也不提供搜索组件安装入口。

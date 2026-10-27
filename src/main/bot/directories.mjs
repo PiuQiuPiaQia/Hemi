@@ -10,16 +10,14 @@ export async function cloudDirectory(
 ) {
   let target = String(raw ?? '').trim();
   if (target === '~') target = os.homedir();
-  else if (target.startsWith('~/'))
+  else if (target.startsWith('~/') || (process.platform === 'win32' && target.startsWith('~\\')))
     target = path.join(os.homedir(), target.slice(2));
   if (!path.isAbsolute(target) || target.includes('\0'))
     fail('请输入服务器上的绝对文件夹路径。');
   try {
     const real = await fs.realpath(target);
-    if (
-      controlDir &&
-      (real === controlDir || real.startsWith(controlDir + path.sep))
-    )
+    const relative = controlDir ? path.relative(controlDir, real) : null;
+    if (relative !== null && (!relative || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))))
       fail('Bot 的运行数据目录不能作为工作目录。', 'permission');
     if (!(await fs.stat(real)).isDirectory())
       fail('这不是一个文件夹。', 'missing');

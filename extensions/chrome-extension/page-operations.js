@@ -2,12 +2,13 @@
 // Reference tables remain in an isolated world; both backends use the same v2 protocol.
 globalThis.HEMI_CREATE_PAGE_OPERATIONS = function ({
   requireActiveTab, evaluate, evaluateIn, cdp, delay, ensureWorld,
-  pageLogic: PAGE_LOGIC, serialized = (_task, run) => run(),
+  pageLogic: PAGE_LOGIC, serialized = (_task, run) => run(), showCursor = async () => {},
 }) {
   const recentReceipts = new Map();
   const RECEIPTS_CAP = 60;
   async function opExtract(params, task) {
     const tabId = requireActiveTab(task);
+    await showCursor(tabId, { action: 'read' });
     const selector = params.selector ? String(params.selector) : null;
     const data = await evaluate(
       tabId,
@@ -79,6 +80,7 @@ globalThis.HEMI_CREATE_PAGE_OPERATIONS = function ({
   async function opSnapshot(params, task) {
     const tabId = requireActiveTab(task);
     return serialized(task, async () => {
+      await showCursor(tabId, { action: 'read' });
       const contextId = await ensureWorld(tabId);
       const snap = await evaluateIn(tabId, contextId, PAGE_LOGIC.SNAPSHOT_SOURCE, []);
       if (!snap || snap.v !== 2 || !Array.isArray(snap.lines)) {
@@ -103,6 +105,7 @@ globalThis.HEMI_CREATE_PAGE_OPERATIONS = function ({
       if (params.dispatchId && recentReceipts.has(dedupKey)) return recentReceipts.get(dedupKey);
       const dir = String(params.text || '') === 'SCROLL_UP' ? -1 : 1;
       const contextId = await ensureWorld(tabId);
+      await showCursor(tabId, { action: 'scroll' });
       await evaluateIn(tabId, contextId, `(d) => { scrollBy(0, d * innerHeight * 0.8); }`, [dir]);
       await delay(150);
       const receipt = { status: 'ok', label: '', id: '' };
@@ -165,6 +168,7 @@ globalThis.HEMI_CREATE_PAGE_OPERATIONS = function ({
       await delay(300);
       receipt = { status: 'ok', label: probe.label, id: probe.id };
     } else {
+      await showCursor(tabId, { x: probe.x, y: probe.y, action: 'select' });
       // select：精确且唯一匹配才动手（021 R-11）——空文本拒绝、模糊多候选返回
       // 歧义、无匹配返回 fail，任何非 ok 结果都不修改 DOM。匹配函数以源码内联
       // 传入（evaluate 参数走 JSON 序列化，函数对象传不过去）。

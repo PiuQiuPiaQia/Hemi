@@ -5,7 +5,7 @@ import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models
 import { ZAI_CODING_CN_MODELS } from '@earendil-works/pi-ai/providers/zai-coding-cn.models';
 import { ZAI_MODELS } from '@earendil-works/pi-ai/providers/zai.models';
 import { DEFAULT_LEVEL_TIER, normalizeThinkingFormat, normalizeThinkingLevel } from '../services/thinking-level.mjs';
-import { oauthCatalogModel, streamOAuthModel } from '../services/oauth-models.mjs';
+import { oauthCatalogModel, oauthModelApi, streamOAuthModel } from '../services/oauth-models.mjs';
 
 // 只查原厂目录；伙伴／订阅计划目录存在同名型号，不能按名字拿其专用端点能力。
 const OPENAI_CATALOGS = [OPENAI_MODELS, DEEPSEEK_MODELS, ZAI_CODING_CN_MODELS, ZAI_MODELS];
@@ -91,7 +91,8 @@ export function piModelOf(candidate, provider = 'hemi-chat') {
 export function providerRegistrationOf(candidate) {
   if (candidate.oauthProvider) {
     const definition = candidateModelDef(candidate);
-    return { baseUrl: candidate.baseUrl, api: definition.api, apiKey: 'oauth', models: [definition], streamSimple: (_model, context, options) => streamOAuthModel(candidate, context, options) };
+    const api = oauthModelApi(candidate.oauthProvider);
+    return { baseUrl: candidate.baseUrl, api, apiKey: 'oauth', models: [{ ...definition, api }], streamSimple: (_model, context, options) => streamOAuthModel(candidate, context, options) };
   }
   return {
     baseUrl: modelBaseUrl(candidate.baseUrl, candidate.api),

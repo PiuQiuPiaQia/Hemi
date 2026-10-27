@@ -6,8 +6,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { entriesFromTurns } from '../agent/main-agent.mjs';
+import { agentEnvironmentPaths } from '../agent-runtime/process-environment.mjs';
+import { listRuntimeFiles, readRuntimeFile } from '../services/runtime-files.mjs';
 import { createConversationController } from '../services/conversation-controller.mjs';
 import {readComponentVersion} from './component-version.mjs';
 import { restoreFlowSnapshot } from '../services/flow-bootstrap.mjs';
@@ -31,6 +34,7 @@ import {
   publicModel,
   fail,
   syncModelConfig,
+  modelConfigRevision,
 } from './storage.mjs';
 import { cloudDirectory, listCloudDirectories } from './directories.mjs';
 import { createBotExecutor, validateCloudModel } from './runtime.mjs';
@@ -41,12 +45,22 @@ import { createResourceFiles } from './resource-files.mjs';
 import { createAttachmentUploads } from './attachment-uploads.mjs';
 import { createBotEventStream } from './event-stream.mjs';
 import {createSessionControl} from './session-control.mjs';
+import { createBotOAuth } from './oauth.mjs';
+import { withOAuthRuntime } from '../services/oauth-models.mjs';
+import { createLocalSecretStorage } from '../lib/local-secrets.mjs';
+import { importBotNewApi } from './newapi-import.mjs';
+import { loadRoles } from '../agent/agent-roles.mjs';
+import { roleModelsView } from '../lib/role-models.mjs';
+import { normalizeThinkingLevel } from '../services/thinking-level.mjs';
+import { configureBotNetwork } from './network.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const inside = (root, file) =>
-  file === root || file.startsWith(root + path.sep);
+const inside = (root, file) => {
+  const relative = path.relative(root, file);
+  return !relative || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+};
 const MIME = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -80,6 +94,7 @@ export async function createBotHost({
   componentVersion = readComponentVersion(),
   now = Date.now,
 } = {}) {
+  configureBotNetwork();
   privateDirectory(dataDir);
   dataDir = await fsp.realpath(dataDir);
   const bootId = randomUUID();
@@ -88,6 +103,11 @@ export async function createBotHost({
       ? path.dirname(dataDir)
       : dataDir;
   const stateFile = path.join(dataDir, 'state.json');
+  const modelSecrets = createLocalSecretStorage({ directory: path.join(dataDir, 'secrets') });
+  const privateConfig = config => {
+    const { encryptedApiKey, ...value } = clone(config);
+    return encryptedApiKey ? { ...value, apiKey: modelSecrets.decryptString(Buffer.from(encryptedApiKey, 'base64')) } : value;
+  };
   const state = readJson(stateFile, {
     instanceId: randomUUID(),
     protocol: BOT_PROTOCOL,
@@ -155,12 +175,36 @@ export async function createBotHost({
     if (catalogChanged) events.publish({ type: 'catalog' });
   };
   const laterSave = () => {
+    if (closed) return;
     if (!flushTimer)
       flushTimer = setTimeout(() => {
         flushTimer = null;
         save(false);
       }, 120);
   };
+  const oauth = await createBotOAuth({ dataDir, validateModel, saveModels(providerId, configs) {
+    const before = clone({ models: state.models, modelSources: state.modelSources, versions: state.versions,
+      roleModels: state.roleModels, defaultModel: state.defaultModel });
+    try {
+      const keys = new Set(configs.map(config => config.modelKey));
+      for (const config of configs) {
+        const previous = state.versions[state.models[config.modelKey]];
+        const next = { ...config, thinkingLevel: previous?.thinkingLevel ?? config.thinkingLevel };
+        const revision = hash(next);
+        state.versions[revision] = next;
+        state.models[next.modelKey] = revision;
+        state.modelSources[next.modelKey] = 'cloud';
+      }
+      for (const key of Object.keys(state.models))
+        if (state.versions[state.models[key]].providerId === providerId && !keys.has(key)) {
+          delete state.models[key]; delete state.modelSources[key];
+        }
+      applyRouting(Object.fromEntries(Object.entries(state.roleModels).filter(([, key]) => state.models[key])));
+      pruneVersions(); save();
+    } catch (error) { Object.assign(state, before); throw error; }
+  } });
+  const modelView = (config, revision, source) => ({ ...publicModel(config, revision, source),
+    ...(config.oauthProvider ? { oauthConnected: oauth.connected(config.oauthProvider) } : {}) });
   const requireSession = (id) => {
     if (!validId(id) || !Object.hasOwn(state.sessions, id))
       fail('会话不存在或已删除。', 'missing');
@@ -168,7 +212,7 @@ export async function createBotHost({
   };
   const requireOnlineModel = (key) => {
     if (key === 'auto') {
-      if (!state.roleModels.main) fail('请先在本机配置自动路由主模型。', 'missing');
+      if (!state.roleModels.main) fail('请先在 Bot 设置中配置自动路由主模型。', 'missing');
       for (const candidate of new Set(Object.values(state.roleModels).filter(Boolean))) requireOnlineModel(candidate);
       return;
     }
@@ -177,7 +221,10 @@ export async function createBotHost({
       : null;
     if (!revision)
       fail('当前模型不可用，请在本机检查配置或选择可用模型。', 'missing');
-    return state.versions[revision];
+    const config = state.versions[revision];
+    if (config.oauthProvider && !oauth.connected(config.oauthProvider))
+      fail('Bot 账号已退出，请在 Bot 模型设置中重新登录。', 'missing');
+    return config;
   };
   const resourceWait = session => session.flow?.runs?.[session.flow.activeRunId]?.activity;
   const view = (session) => ({
@@ -213,14 +260,14 @@ export async function createBotHost({
         const url = new URL(raw);
         if (url.hostname && url.hostname !== 'localhost')
           fail('文件链接主机不匹配。', 'permission');
-        raw = decodeURIComponent(url.pathname);
+        raw = fileURLToPath(url);
       } catch (error) {
         if (error.code === 'permission') throw error;
         fail('文件链接无效。');
       }
-    } else if (/^[a-z][a-z\d+.-]*:/i.test(raw)) fail('文件链接无效。');
+    } else if (/^[a-z][a-z\d+.-]*:/i.test(raw) && !(process.platform === 'win32' && /^[a-z]:[\\/]/i.test(raw))) fail('文件链接无效。');
     if (raw === '~') raw = os.homedir();
-    else if (raw.startsWith('~/')) raw = path.join(os.homedir(), raw.slice(2));
+    else if (raw.startsWith('~/') || (process.platform === 'win32' && raw.startsWith('~\\'))) raw = path.join(os.homedir(), raw.slice(2));
     else if (raw.startsWith('~')) fail('文件链接无效。');
     return { raw, absolute: path.resolve(session.dir, raw) };
   }
@@ -277,9 +324,9 @@ export async function createBotHost({
     job.running = true;
     laterSave();
     try {
-      const result = await executor.run(job.spec, (fact) =>
+      const result = await withOAuthRuntime(oauth.runtime, () => executor.run(job.spec, (fact) =>
         controllers.get(job.id)?.applyFact(fact),
-      );
+      ));
       job.controller.applyFact({
         type: 'run-settled',
         runId: job.spec.runId,
@@ -491,7 +538,9 @@ export async function createBotHost({
       const config = state.versions[revision];
       if (!config || config.modelKey !== key)
         fail('受理的模型版本已失效。', 'missing');
-      return clone(config);
+      if (config.oauthProvider && !oauth.connected(config.oauthProvider))
+        fail('Bot 账号已退出，请重新登录。', 'missing');
+      return privateConfig(config);
     },
     recordUsage: (id, call) => {
       if (!Object.hasOwn(state.sessions, id)) return;
@@ -643,47 +692,116 @@ export async function createBotHost({
       ...(a.thumbnailUrl ? { thumbnailUrl: a.thumbnailUrl } : {}),
     };
   }
+  function localRouting(keys, input) {
+    const roles = {};
+    for (const role of ['main', 'explorer', 'oracle', 'fixer', 'designer', 'fallback']) {
+      const key = input?.[role];
+      if (!key) continue;
+      if (!keys.has(key)) fail('路由模型尚未通过验证，原路由保留。', 'missing');
+      roles[role] = key;
+    }
+    return roles;
+  }
+  function applyLocalConfig(keys, roles) {
+    for (const key of Object.keys(state.models)) if (state.modelSources[key] === 'local' && !keys.has(key)) {
+      delete state.models[key]; delete state.modelSources[key];
+    }
+    applyRouting(roles);
+  }
+  function applyRouting(roles) {
+    const firstRouting = !state.roleModels.main && roles.main;
+    state.roleModels = roles;
+    if (firstRouting) state.defaultModel = 'auto';
+    if (state.defaultModel === 'auto' ? !roles.main : !state.models[state.defaultModel])
+      state.defaultModel = roles.main ? 'auto' : Object.keys(state.models)[0] ?? null;
+  }
   async function mutate(method, p, clientId) {
     switch (method) {
+      case 'model.account-config': {
+        if (maintenanceActive() || modelSyncActive) fail('正在维护模型配置，请稍后重试。', 'busy');
+        if (p.expectedModelRevision !== modelConfigRevision(state.models, state.roleModels)) fail('Bot 模型已变化，请重新读取后保存。', 'conflict');
+        const originals = Object.values(state.models).map(revision => state.versions[revision]).filter(config => config.providerId === p.providerId && config.oauthProvider);
+        const original = originals[0];
+        if (!original || !Array.isArray(p.models) || !p.models.length || p.models.length > 1000) fail('账号模型配置无效。');
+        const configs = p.models.map(raw => {
+          const native = oauth.runtime.models.getModel(original.oauthProvider, raw.model);
+          if (!native) fail('请选择账号目录中的模型。');
+          const previous = originals.find(model => model.modelKey === `${p.providerId}/${raw.id}`) ?? originals.find(model => model.model === raw.model);
+          return { ...original, modelKey: previous?.modelKey ?? `${p.providerId}/m-${createHash('sha256').update(raw.model).digest('hex').slice(0,24)}`,
+            model: raw.model, baseUrl: native.baseUrl, api: native.api, thinkingLevel: normalizeThinkingLevel(raw.thinkingLevel), supportsVision: raw.supportsVision === true && native.input.includes('image') };
+        });
+        const keys = new Set(configs.map(config => config.modelKey));
+        localRouting(new Set([...Object.keys(state.models).filter(key => !originals.some(model => model.modelKey === key)), ...keys]), state.roleModels);
+        for (const config of configs) { const revision = hash(config); state.versions[revision] = config; state.models[config.modelKey] = revision; state.modelSources[config.modelKey] = 'cloud'; }
+        for (const model of originals) if (!keys.has(model.modelKey)) { delete state.models[model.modelKey]; delete state.modelSources[model.modelKey]; }
+        if (state.defaultModel !== 'auto' && !state.models[state.defaultModel]) state.defaultModel = configs[0].modelKey;
+        pruneVersions(); save(); return { ok: true, providerId: p.providerId, modelKeys: [...keys] };
+      }
+      case 'model.import-newapi': {
+        if (maintenanceActive() || modelSyncActive) fail('正在维护模型配置，请稍后重试。', 'busy');
+        modelSyncActive = true;
+        try { return await importBotNewApi({ input: p, state, validateModel, secretStorage: modelSecrets, save }); }
+        catch (error) {
+          if (['invalid','conflict','busy'].includes(error.code)) throw error;
+          fail('Bot 未能验证或保存 New API 模型，请检查服务器连接后重试。');
+        } finally { modelSyncActive = false; }
+      }
+      case 'oauth.import':
+      case 'oauth.logout': {
+        if (maintenanceActive() || modelSyncActive) fail('正在维护模型配置，请稍后重试。', 'busy');
+        modelSyncActive = true;
+        try {
+          const result = method === 'oauth.import' ? await oauth.import(p.provider, p.credential) : await oauth.logout(p.provider);
+          save();
+          return result;
+        } finally { modelSyncActive = false; }
+      }
       case 'model.local-config': {
         if (modelSyncActive) fail('云端仍在验证模型。', 'busy');
         if (!Array.isArray(p.keys) || p.keys.length > 1000) fail('本机模型配置无效。');
         const keys = new Set(p.keys);
-        const roles = {};
-        for (const role of ['main', 'explorer', 'oracle', 'fixer', 'designer', 'fallback']) {
-          const key = p.roleModels?.[role];
-          if (!key) continue;
-          if (!keys.has(key)) fail('本机路由模型尚未通过云端验证，原路由保留。', 'missing');
-          roles[role] = key;
-        }
+        const roles = localRouting(keys, p.roleModels);
         for (const key of keys) {
           requireOnlineModel(key);
           if (state.modelSources[key] !== 'local') fail('本机配置不能覆盖云端模型。', 'permission');
         }
-        for (const key of Object.keys(state.models)) if (state.modelSources[key] === 'local' && !keys.has(key)) {
-          delete state.models[key]; delete state.modelSources[key];
-        }
-        const firstRouting = !state.roleModels.main && roles.main;
-        state.roleModels = roles;
-        if (firstRouting) state.defaultModel = 'auto';
-        if (state.defaultModel === 'auto' ? !roles.main : !state.models[state.defaultModel])
-          state.defaultModel = roles.main ? 'auto' : Object.keys(state.models)[0] ?? null;
+        applyLocalConfig(keys, roles);
         pruneVersions(); save(); return { ok: true };
       }
+      case 'model.configure':
+      case 'model.sync-local':
       case 'model.sync': {
         if (maintenanceActive())
           fail('云端组件正在维护，请稍后再同步模型。', 'busy');
         if (modelSyncActive)
           fail('云端仍在验证模型，请等待结果后重新核对。', 'busy');
+        // A desktop sync replaces its complete local catalog and routing in one
+        // durable operation. Older clients can still import individual models.
+        const localConfig = method === 'model.sync-local';
+        const configure = method === 'model.configure';
+        const checkRevision = () => {
+          if (configure && p.expectedModelRevision !== modelConfigRevision(state.models, state.roleModels))
+            fail('Bot 模型或路由已变化，请重新读取后再保存。', 'conflict');
+        };
+        checkRevision();
+        if (localConfig && p.source === 'manual') fail('本机同步不能修改云端独立配置。');
+        const limit = localConfig || configure ? 1000 : 50;
         if (
           !Array.isArray(p.models) ||
-          !p.models.length ||
-          p.models.length > 50
+          (!localConfig && !configure && !p.models.length) ||
+          p.models.length > limit
         )
-          fail('每次请选择 1 至 50 个模型。');
+          fail(localConfig ? '最多同步 1000 个本机模型。' : '每次请选择 1 至 50 个模型。');
+        const localKeys = new Set(p.models.map(model => model.modelKey));
+        const removeKeys = configure ? p.removeKeys ?? [] : [];
+        if (!Array.isArray(removeKeys) || removeKeys.length > 1000 || removeKeys.some(key => typeof key !== 'string')) fail('移除的模型配置无效。');
+        if (removeKeys.some(key => localKeys.has(key))) fail('不能同时保存并移除同一个模型。');
+        const finalKeys = new Set([...Object.keys(state.models).filter(key => !removeKeys.includes(key)), ...localKeys]);
+        const roles = localConfig ? localRouting(new Set([...Object.keys(state.models).filter(key => state.modelSources[key] !== 'local'), ...localKeys]), state.roleModels)
+          : configure ? localRouting(finalKeys, p.roleModels ?? state.roleModels) : null;
         modelSyncActive = true;
         try {
-          const rawModels = (p.models ?? []).slice(0, 50),
+          const rawModels = p.models,
             results = new Array(rawModels.length),
             validated = new Array(rawModels.length);
           let cursor = 0;
@@ -693,22 +811,25 @@ export async function createBotHost({
               if (index >= rawModels.length) return;
               const raw = rawModels[index],
                 config = syncModelConfig(raw);
-              const source = p.source === 'manual' ? 'cloud' : 'local';
+              const providerModel = Object.values(state.models).map(revision => state.versions[revision]).find(model => model.providerId === config.providerId);
+              const source = configure ? state.modelSources[config.modelKey] ?? state.modelSources[providerModel?.modelKey] ?? (p.fromLocal ? 'local' : 'cloud') : p.source === 'manual' ? 'cloud' : 'local';
               const previousRevision = state.models[config.modelKey];
-              const previous = state.versions[previousRevision] ?? (source === 'cloud' ? Object.values(state.models).map(revision => state.versions[revision]).find(config => config.providerId === raw.providerId && state.modelSources[config.modelKey] === 'cloud') : null);
-              if (source === 'cloud' && !config.apiKey && previous && state.modelSources[previous.modelKey] === 'cloud') config.apiKey = previous.apiKey;
+              const previous = state.versions[previousRevision] ?? (configure && p.preserveCredentials ? providerModel : source === 'cloud' ? Object.values(state.models).map(revision => state.versions[revision]).find(config => config.providerId === raw.providerId && state.modelSources[config.modelKey] === 'cloud') : null);
+              if (!config.apiKey && previous && (configure ? p.preserveCredentials : source === 'cloud' && state.modelSources[previous.modelKey] === 'cloud')) config.apiKey = privateConfig(previous).apiKey;
+              if (previous?.configuration === 'newapi') config.configuration = 'newapi';
               const rejected = (message) =>
                 (results[index] = { key: config.modelKey, ok: false, message });
-              if ((previousRevision && state.modelSources[config.modelKey] !== source) || Object.entries(state.models).some(([key, revision]) => state.versions[revision].providerId === config.providerId && state.modelSources[key] !== source)) {
+              if (!configure && ((previousRevision && state.modelSources[config.modelKey] !== source) || Object.entries(state.models).some(([key, revision]) => state.versions[revision].providerId === config.providerId && state.modelSources[key] !== source))) {
                 rejected('本机来源模型请前往本机设置修改。'); continue;
               }
               if (
                 !config.modelKey ||
                 !config.model ||
                 !config.apiKey ||
-                raw.oauthProvider
+                raw.oauthProvider || previous?.oauthProvider || providerModel?.oauthProvider ||
+                String(config.providerId).startsWith('bot-oauth-')
               ) {
-                rejected('此模型缺少独立的 API Key，或账号授权暂不支持。');
+                rejected('此模型缺少独立的 API Key；账号模型请在 Bot 中登录管理。');
                 continue;
               }
               let endpoint;
@@ -722,7 +843,7 @@ export async function createBotHost({
                 !['https:', 'http:'].includes(endpoint.protocol) ||
                 endpoint.username ||
                 endpoint.password ||
-                (!allowLoopbackModels && p.source !== 'manual' &&
+                (!allowLoopbackModels && (configure ? p.fromLocal : p.source !== 'manual') &&
                   /^(localhost|127\.|\[?::1\]?$|0\.0\.0\.0)/i.test(
                     endpoint.hostname,
                   ))
@@ -733,7 +854,7 @@ export async function createBotHost({
               try {
                 await validateModel(config);
                 const revision = hash(config);
-                validated[index] = { config, revision };
+                validated[index] = { config, revision, source };
                 results[index] = { key: config.modelKey, ok: true, revision };
               } catch {
                 rejected('服务器未能验证模型连接，原配置保留。');
@@ -745,24 +866,34 @@ export async function createBotHost({
           );
           // The manual form saves one provider as a unit, like local setup.
           // A retry after one failed model must not leave duplicate providers.
-          if (p.source === 'manual' && results.some(result => !result.ok)) {
+          if ((p.source === 'manual' || localConfig || configure) && results.some(result => !result.ok)) {
             return { results: results.map(result => result.ok ? {
-              key: result.key, ok: false, message: '同组有型号未通过验证，本组模型尚未添加。',
+              key: result.key, ok: false, message: localConfig || configure
+                ? '有模型未通过验证，Bot 原模型与路由配置保留。'
+                : '同组有型号未通过验证，本组模型尚未添加。',
             } : result) };
           }
+          checkRevision();
           for (const item of validated) {
             if (!item) continue;
-            state.versions[item.revision] = item.config;
+            const { apiKey, ...metadata } = item.config;
+            state.versions[item.revision] = item.config.configuration === 'newapi'
+              ? { ...metadata, encryptedApiKey: modelSecrets.encryptString(apiKey).toString('base64') } : item.config;
             state.models[item.config.modelKey] = item.revision;
-            state.modelSources[item.config.modelKey] = p.source === 'manual' ? 'cloud' : 'local';
+            state.modelSources[item.config.modelKey] = item.source;
             state.defaultModel ??= item.config.modelKey;
           }
-          if (p.source === 'manual') {
+          if (p.source === 'manual' && !configure) {
             const providers = new Set(validated.filter(Boolean).map(item => item.config.providerId));
             const keys = new Set(validated.filter(Boolean).map(item => item.config.modelKey));
             for (const key of Object.keys(state.models)) if (state.modelSources[key] === 'cloud' && providers.has(state.versions[state.models[key]].providerId) && !keys.has(key)) {
               delete state.models[key]; delete state.modelSources[key];
             }
+          }
+          if (localConfig) applyLocalConfig(localKeys, roles);
+          if (configure) {
+            for (const key of removeKeys) { delete state.models[key]; delete state.modelSources[key]; }
+            applyRouting(roles);
           }
           if (state.defaultModel !== 'auto' && !state.models[state.defaultModel]) state.defaultModel = Object.keys(state.models)[0] ?? null;
           pruneVersions();
@@ -771,7 +902,7 @@ export async function createBotHost({
             results,
             roleModels: clone(state.roleModels),
             models: Object.entries(state.models).map(([key, revision]) =>
-              publicModel(state.versions[revision], revision, state.modelSources[key]),
+              modelView(state.versions[revision], revision, state.modelSources[key]),
             ),
           };
         } finally {
@@ -779,7 +910,7 @@ export async function createBotHost({
         }
       }
       case 'initialize.verify': {
-        requireOnlineModel(state.defaultModel);
+        if (!p.accountSetup || state.defaultModel) requireOnlineModel(state.defaultModel);
         const directory = await cloudDirectory(state.defaultDir, {
           writable: true,
           controlDir,
@@ -793,8 +924,8 @@ export async function createBotHost({
             mode: 0o600,
           });
           const output = await promisify(execFile)(
-            '/bin/sh',
-            [
+            process.platform === 'win32' ? process.execPath : '/bin/sh',
+            process.platform === 'win32' ? ['-e', 'const fs=require("node:fs");const v=fs.readFileSync("proof","utf8").trim();if(v!==process.argv[1])process.exit(1);process.stdout.write(v)', proof] : [
               '-c',
               'IFS= read -r value < proof; test "$value" = "$1"; printf %s "$value"',
               'hemi-verify',
@@ -1061,7 +1192,7 @@ export async function createBotHost({
         save();
         for (const id of controllers.keys())
           await controller(id).command({ type: 'stop' });
-        await executor.close();
+        // RPC stop disables work; only actual Host shutdown ends native sessions.
         await Promise.all([...jobs.values()].map((job) => job.settled.promise));
         save();
         return { ok: true };
@@ -1084,6 +1215,15 @@ export async function createBotHost({
       default:
         fail('不支持的操作。', 'unsupported');
     }
+  }
+  function sessionReply(method, p, result) {
+    const reply = clone(result);
+    if (p.includeSnapshot === true && ['session.create', 'session.update', 'session.remove'].includes(method)) {
+      // Capture after the durable receipt. Keep large catalogs out of the
+      // operation journal; a replay returns the current authoritative catalog.
+      reply.snapshot = catalog(method === 'session.create' ? result.id : undefined);
+    }
+    return reply;
   }
   async function request(method, p = {}, context = {}) {
     const clientId = context.clientId ?? 'legacy';
@@ -1120,8 +1260,10 @@ export async function createBotHost({
         defaultDir: state.defaultDir,
         enabled: state.enabled,
         configured: state.initialized === true,
-        capabilities: { devicePairing: 1, realtime: 1, modelRouting: 1, modelSources: 1, sessionControl: 1 },
+        capabilities: { nativeMemory: 1, devicePairing: 1, realtime: 1, modelRouting: 1, modelSources: 1, sessionControl: 1, botOAuth: 1, newapiImport: 1, rpcStream: 1 },
       };
+    if (method === 'oauth.prepare') return oauth.prepare();
+    if (method === 'model.import-receipt') return state.newapiReceipts?.[p.operationId]?.receipt ?? null;
     if (method === 'snapshot' && p.revision === state.revision)
       return {
         instanceId: state.instanceId,
@@ -1129,23 +1271,39 @@ export async function createBotHost({
         notModified: true,
         deviceAccess: gateway.summary(),
       };
+    if (method === 'model.roles') {
+      const roles = loadRoles();
+      const directory = { roleModels: state.roleModels, providers: Object.entries(state.models).map(([key, revision]) => {
+        const model = state.versions[revision];
+        return { hasApiKey: !model.oauthProvider || oauth.connected(model.oauthProvider), models: [{ modelKey: key }] };
+      }) };
+      return { roles: [...roles.values()].map(role => ({ name: role.name, title: role.title, description: role.description, needsVision: false })), ...roleModelsView(directory, roles) };
+    }
     if (method === 'model.test' || method === 'model.list') {
-      const config = syncModelConfig(p.config ?? {});
+      const config = p.modelKey ? privateConfig(requireOnlineModel(p.modelKey)) : syncModelConfig(p.config ?? {});
       // This draft is entered explicitly for the Bot: localhost names the
       // server. Importing desktop profiles keeps the original loopback guard.
       modelEndpoint(config, { allowLoopback: true });
       if (!config.apiKey) fail('请填写 API Key。');
       try {
-        if (method === 'model.list') return { ok: true, ...(await listRemoteModels(config)) };
+        if (method === 'model.list') return config.oauthProvider
+          ? { ok: true, models: (await oauth.runtime.catalog(config.oauthProvider)).map(model => model.id) }
+          : { ok: true, ...(await listRemoteModels(config)) };
         if (!config.model) fail('请填写模型型号。');
         const start = Date.now();
-        await validateModel(config);
+        await withOAuthRuntime(oauth.runtime, () => validateModel(config));
         return { ok: true, latencyMs: Date.now() - start };
       } catch {
         return { ok: false, error: method === 'model.list' ? '服务器无法拉取模型列表，请检查接口地址和 API Key，或手动填写型号。' : '服务器未能验证模型连接，请检查接口地址、API Key 和型号。' };
       }
     }
     if (method === 'snapshot') return {...catalog(p.id), clientId};
+    if (method === 'agent-environment.inspect') return {
+      owner: 'Bot', memoryDir: agentEnvironmentPaths(dataDir).memoryDir,
+      files: await listRuntimeFiles(agentEnvironmentPaths(dataDir).memoryDir),
+      summaryUsageIncluded: false,
+    };
+    if (method === 'agent-environment.read-file') return readRuntimeFile(agentEnvironmentPaths(dataDir).memoryDir, p.path);
     if (method === 'session.open') {
       const session = requireSession(p.id);
       // Opening a conversation counts as the last model choice, just like local
@@ -1363,7 +1521,7 @@ export async function createBotHost({
       if (known.hash !== digest) fail('操作身份已用于其他内容。', 'conflict');
       if (known.status !== 'done')
         fail('上次操作结果待核对，请刷新云端状态。', 'needs-review');
-      return clone(known.result);
+      return sessionReply(method, p, known.result);
     }
     state.operations[key] = { hash: digest, status: 'pending' };
     save();
@@ -1382,7 +1540,7 @@ export async function createBotHost({
       for (const old of keys.slice(0, Math.max(0, keys.length - 1000)))
         delete state.operations[old];
       save();
-      return clone(result);
+      return sessionReply(method, p, result);
     } catch (error) {
       delete state.operations[key];
       save();
@@ -1391,6 +1549,8 @@ export async function createBotHost({
   }
   function catalog(id) {
     return {
+        capabilities: { nativeMemory: 1, botOAuth: 1 },
+        oauthAccounts: oauth.accounts(),
         instanceId: state.instanceId,
         bootId,
         revision: state.revision,
@@ -1401,8 +1561,9 @@ export async function createBotHost({
         recentDirs: state.recentDirs,
         deviceAccess: gateway.summary(),
         roleModels: clone(state.roleModels),
+        modelConfigRevision: modelConfigRevision(state.models, state.roleModels),
         models: Object.entries(state.models).map(([key, rev]) =>
-          publicModel(state.versions[rev], rev, state.modelSources[key]),
+          modelView(state.versions[rev], rev, state.modelSources[key]),
         ),
         sessions: state.order
           .filter((id) => state.sessions[id])
@@ -1494,7 +1655,7 @@ export async function createBotHost({
       events.close();
       await gateway.close();
       const running = [...jobs.values()].map(job => job.settled.promise);
-      await executor.close();
+      await withOAuthRuntime(oauth.runtime, () => executor.close());
       for (const c of controllers.values()) await c.close();
       await Promise.all(running);
       save();

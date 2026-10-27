@@ -743,6 +743,45 @@ test('060 R-21：显式插队——保存优先关系后停 A；A 收口后 B �
   await settle(4);
 });
 
+test('取回队列消息后移除原身份，不自动发送；用户重发时排到队尾', async () => {
+  const effects = makeEffects(), controller = makeController(effects);
+  const a = controller.command({type: 'send', input: {inputId: 'A', text: '正在执行'}});
+  await settle(); effects.runtime.starts[0].resolve({}); await a;
+  const runA = controller.getSnapshot().activeRunId;
+  const payload = {inputId: 'B', text: '取回的消息', attachmentIds: ['file-b'], attachmentViews: [{attachmentId: 'file-b'}],
+    references: [{key: 'ref-b'}], skills: [{skillId: 'skill-b'}]};
+  await controller.command({type: 'send', input: payload});
+  await controller.command({type: 'send', input: {inputId: 'C', text: '后续消息'}});
+  const result = await controller.command({type: 'withdrawInput', inputId: 'B', restoreToDraft: true});
+  assert.equal(result.ok, true);
+  for (const key of ['text','attachmentIds','attachmentViews','references','skills']) assert.deepEqual(result.input[key], payload[key]);
+  assert.deepEqual(controller.getSnapshot().pending.map(input => input.inputId), ['C']);
+  assert.equal(effects.runtime.starts.length, 1);
+  assert.equal((await controller.command({type: 'withdrawInput', inputId: 'B', restoreToDraft: true})).code, 'not-found');
+  await controller.command({type: 'send', input: {...payload, inputId: 'B-new', text: '修改后重发'}});
+  assert.deepEqual(controller.getSnapshot().pending.map(input => input.inputId), ['C', 'B-new']);
+  controller.applyFact({type: 'run-closed', runId: runA, outcome: 'completed', at: 30});
+  await settle();
+  assert.equal(effects.runtime.starts[1].spec.envelope.inputId, 'C');
+  effects.runtime.starts[1].resolve({});
+});
+
+test('取回编辑草稿携带最新内容，拒绝过期版本和已进入派发的消息', async () => {
+  const effects = makeEffects(), controller = makeController(effects);
+  const a = controller.command({type: 'send', input: {inputId: 'A', text: '正在执行'}});
+  await settle(); effects.runtime.starts[0].resolve({}); await a;
+  await controller.command({type: 'send', input: {inputId: 'B', text: '原文'}});
+  assert.equal((await controller.command({type: 'withdrawInput', inputId: 'B', restoreToDraft: true, expectedEditRevision: 9})).code, 'stale-input');
+  await controller.command({type: 'beginEditInput', inputId: 'B'});
+  await controller.command({type: 'saveInputEditDraft', inputId: 'B', draftRevision: 1, patch: {text: '遗留编辑草稿'}});
+  const result = await controller.command({type: 'withdrawInput', inputId: 'B', restoreToDraft: true});
+  assert.equal(result.input.editDraft.text, '遗留编辑草稿');
+  await controller.command({type: 'send', input: {inputId: 'C', text: '正在交接'}});
+  await controller.command({type: 'promoteInput', inputId: 'C'});
+  assert.equal((await controller.command({type: 'withdrawInput', inputId: 'C', restoreToDraft: true})).code, 'locked');
+  assert.equal(controller.getSnapshot().pending[0].inputId, 'C');
+});
+
 test('060 输入框编辑锁定队列原位置；旧回合完成后不越过编辑项，保存后原身份派发一次', async () => {
   const effects = makeEffects(), controller = makeController(effects);
   const a = controller.command({ type: 'send', input: { inputId: 'A', text: 'A' } });
@@ -920,6 +959,7 @@ test('结构化工作流撤回必须同步归属状态；失败留在队列，�
   const active=controller.command({type:'send',input:{text:'当前任务'}});await settle();
   const queued=await controller.command({type:'send',input:{text:'工作流',workflow:{invocationId:'inv-withdraw'}}});
   assert.equal((await controller.command({type:'beginEditInput',inputId:queued.inputId})).code,'workflow-frozen');
+  assert.equal((await controller.command({type:'withdrawInput',inputId:queued.inputId,restoreToDraft:true})).code,'workflow-frozen');
   assert.equal((await controller.command({type:'withdrawInput',inputId:queued.inputId})).code,'storage-failed');
   assert.equal(controller.getSnapshot().pending[0].state,'pending');
   assert.equal((await controller.command({type:'withdrawInput',inputId:queued.inputId})).ok,true);

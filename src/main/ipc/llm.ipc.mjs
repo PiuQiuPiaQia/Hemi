@@ -10,7 +10,6 @@ import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-
 import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
 import { createConversationTurns } from '../services/conversation-turns.mjs';
 import { finalizeTurnParts, hasNonTextParts } from '../../shared/turn-parts.mjs';
-import { MAX_WRITES_PER_TURN } from '../services/memory.mjs';
 import { buildTurnContextBlock, buildWorkspaceTurnBlock } from '../services/text-model.mjs';
 import { summarizeForSpeech } from '../services/mouth.mjs';
 import { buildAmbientBlock } from '../services/ambient.mjs';
@@ -22,7 +21,6 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 import { registerLlmProfilesIpc } from './llm-profiles.ipc.mjs';
 import { getComposerAttachments } from './composer.ipc.mjs';
 import { assembleTurnEnvelope } from '../composer/turn-envelope.mjs';
-import { getMemoryService } from './memory.ipc.mjs';
 import {
   recordConversationUsage,
   persistConversationTurns,
@@ -72,7 +70,7 @@ export { getProfiles };
 
 // ---- 宿主依赖注入（task.ipc 注册；模块注入避免 llm ↔ task 互相 import） ----
 let runtimeDeps = null;
-/** task.ipc 启动时注册：{ history, onTaskState, onModelUsage, scheduleExtraction, readArtifact }。 */
+/** task.ipc 启动时注册：{ history, onTaskState, onModelUsage, readArtifact }。 */
 export function setAgentRuntimeDeps(deps) {
   runtimeDeps = deps;
 }
@@ -242,12 +240,11 @@ export function getAgentRuntime() {
     saveArchiveAgent: saveConversationAgent,
     onEventTurn: handleEventTurn,
     getSkillService,
-    getMemoryService,
+    nativeMemory: true,
     getWorkspaceService,
     getWorkflowService,
     history: runtimeDeps?.history ?? null,
     onModelUsage: runtimeDeps?.onModelUsage ?? null,
-    scheduleExtraction: runtimeDeps?.scheduleExtraction ?? null,
     onTaskState: (snapshot) => {
       runtimeDeps?.onTaskState?.(snapshot);
       // 聚合快照内所有任务分别进所属 flow，不能只投影 primaryTask。
@@ -824,27 +821,11 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     }));
 
     // 冻结本回合上下文（工具执行期读取；事件回合复用最近一份）。
-    const memory = getMemoryService();
     const ctx = {
       conversationId, inputSource, profileId, workspace, userText, config, fallback, routed, policySnapshot, modelPlan,
       generation: flowService?.controllerFor(conversationId).getSnapshot().generation ?? 0,
       // 060 R-22：本回合主运行 id——子 agent spawn 记归属，插队停止按根目标取消。
       runId: typeof runId === 'string' && runId ? runId : null,
-      memoryWriteCount: 0, memoryChanged: [],
-      memoryWrite: memory
-        ? async (args, signal) => {
-            if (ctx.memoryWriteCount >= MAX_WRITES_PER_TURN) return { ok: false, error: '本回合记忆修改次数已达上限，未写入' };
-            ctx.memoryWriteCount += 1;
-            const outcome = await memory.chatMemoryWrite({ ...args, workspaceId: workspace?.id ?? null, conversationId, signal });
-            if (outcome.ok && !outcome.unchanged) {
-              ctx.memoryChanged.push({
-                target: String(args?.target ?? ''), action: String(args?.action ?? ''), reason: String(args?.reason ?? ''),
-                scopeLabel: outcome.scopeLabel ?? '', operationId: outcome.operationId ?? null, title: outcome.title ?? outcome.removed ?? '',
-              });
-            }
-            return outcome;
-          }
-        : null,
       runtimeDiagnostics: () => ({ ok: true, current: runtimeDiagnostic, recent: getConversationDiagnostics(conversationId) }),
     };
     lastTurnCtx.set(conversationId, ctx);
@@ -984,7 +965,6 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           ...(hasNonTextParts(parts) ? { parts } : {}),
           ...(thinkingText || thinkingMs ? { thinking: { text: thinkingText, durationMs: thinkingMs } } : {}),
           ...(calls.length ? { usage: usageOfTurn() } : {}),
-          memoryChanged: ctx.memoryChanged,
           toolNames: run.toolNames,
           ...(run.budgetLimited ? { budgetLimited: true } : {}),
         };
@@ -1001,7 +981,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
       }
     }
     llmLog.info(
-      `turn ${turnId} ✓ 回应 ${result.text.length} 字（${bodyDeltaCount} 个增量分片，本轮 ${fmtMs(Date.now() - turnStartedAt)}）${result.memoryChanged?.length ? `，记忆 ${result.memoryChanged.length} 次` : ''}${speechText ? '，口语已转述' : ''}${result.toolNames?.length ? `，工具 ${result.toolNames.join(',')}` : ''}`,
+      `turn ${turnId} ✓ 回应 ${result.text.length} 字（${bodyDeltaCount} 个增量分片，本轮 ${fmtMs(Date.now() - turnStartedAt)}）${speechText ? '，口语已转述' : ''}${result.toolNames?.length ? `，工具 ${result.toolNames.join(',')}` : ''}`,
     );
     return persistReply({ ...result, inputSource, finishReason: 'stop', ...(speechText ? { speechText } : {}) });
   } catch (error) {
@@ -1320,8 +1300,8 @@ function summarizeArgs(args) {
 }
 
 /** before-quit 收尾：中断所有会话请求，收走主 agent 与子 agent（条目随档）、控制器排空保存链。 */
-export function abortActiveTextModelTurn() {
+export async function abortActiveTextModelTurn() {
   conversationTurns.abortAll();
-  runtime?.disposeAll();
-  void flowService?.dropAll?.().catch(() => {});
+  await runtime?.close();
+  await flowService?.dropAll?.().catch(() => {});
 }

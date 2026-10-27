@@ -146,7 +146,6 @@ export function clipReport(text, limit = MAX_REPORT_CHARS) {
  * @param {(event) => void} [deps.onTerminal] 后台子 agent 终态 → 唤醒主 agent（agent-registry 注入）
  * @param {(task) => void} [deps.onModelUsage] 用量变化（渲染层重取聚合）
  * @param {(taskId) => void} [deps.cleanupAccessTask] 终态清任务级临时授权
- * @param {(snapshot) => object} [deps.scheduleExtraction] 037 D 终态经验提炼
  */
 export function createSubagentManager({
   createSession,
@@ -158,7 +157,6 @@ export function createSubagentManager({
   onSettled = null,
   onModelUsage = null,
   cleanupAccessTask = null,
-  scheduleExtraction = null,
   onDeliveryDeclared = null,
   log = null,
   nowFn = Date.now,
@@ -1116,23 +1114,6 @@ export function createSubagentManager({
         }, { at: task.endedAt });
       } catch (error) {
         log?.warn?.(`[history] 成果落档失败（${artifact?.path ?? artifact?.id ?? '?'}）：${error.message}`);
-      }
-    }
-    if (scheduleExtraction && outcome === 'complete' && task.role.mode === 'run') {
-      try {
-        scheduleExtraction({
-          taskId: task.historyId ?? task.key,
-          rootRunId: task.rootRunId,
-          conversationId: task.conversationId ?? null,
-          taskText: task.description || task.prompt,
-          verdict: outcome,
-          report: task.resultText ?? '',
-          checks: [],
-          workspaceId: task.workspace?.id ?? null,
-          modelConfig: task.modelPlan?.config ?? null,
-        });
-      } catch (error) {
-        log?.warn?.(`[memory-extraction] 排队失败（不影响终态）：${error.message}`);
       }
     }
     try { cleanupAccessTask?.(task.historyId ?? task.key); } catch { /* 尽力而为 */ }

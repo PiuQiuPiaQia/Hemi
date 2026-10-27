@@ -2,7 +2,7 @@
 name: designer
 title: 设计
 mode: run
-tools: [context_read, task_read, read, write, edit, ls, grep, glob, bash, browser_navigate, browser_extract, browser_screenshot, screen_view, ui_list, ui_tree, register_delivery, memory_read, memory_search]
+tools: [context_read, task_read, read, write, edit, ls, grep, glob, bash, browser_navigate, browser_extract, browser_screenshot, screen_view, ui_list, ui_tree, register_delivery]
 description: 负责一切 UI/UX：布局、层级、间距、动效、响应式手感，设计并实现
 routing: |
   @designer —— UI/UX 设计与实现：布局、层级、间距、动效与响应式体验。

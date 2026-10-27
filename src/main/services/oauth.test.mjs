@@ -168,3 +168,33 @@ test('账号状态与偏好保存不访问加密 API；删除供应商同时退�
   await f.profiles.removeProvider({ providerId: account.id, replacementModelId: replacement });
   assert.equal(await f.runtime.connected('openai'), false);
 });
+
+test('original pi-memory exit hook uses all four SDK OAuth credential paths without alias-key fallback', {timeout:60000}, async t => {
+  const f = await fixture(t);
+  const fs = await import('node:fs/promises');
+  const values = {PI_MEMORY_DIR:path.join(f.dir,'pi-memory'),PI_MEMORY_QMD_UPDATE:'off',PI_MEMORY_EXIT_SUMMARY:'1',PI_MEMORY_NO_SEARCH:'1',PI_MEMORY_SNAPSHOT:'per-turn'};
+  const previous = Object.fromEntries(Object.keys(values).map(key=>[key,process.env[key]])); Object.assign(process.env,values);
+  t.after(()=>{for(const[key,value]of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
+  for(const provider of ['openai','anthropic','github-copilot','bigmodel']) {
+    await f.connect(provider);
+    const account=(await f.profiles.list()).providers.find(item=>item.oauthProvider===provider);
+    const config=await f.profiles.get(account.models[0].modelKey);
+    for (const mode of ['fixed', 'routed']) {
+    const selection=mode==='fixed'?{model:config}:{routing:{execution:config,fallbacks:[]}};
+    const session=createHemiSession({cwd:f.dir,agentDir:path.join(f.dir,'memory-agent'),...selection,nativeMemory:true,tools:[],features:{},settings:{retry:{enabled:false}}});
+    try {
+      for(const text of ['First decision','Second decision'])assert.equal((await session.prompt(text)).modelError,null);
+      const normal=f.transport.requests.at(-1);
+      const before=f.transport.requests.length; await session.close();
+      const summaries=f.transport.requests.slice(before).filter(request=>request.body.includes('Review the conversation and extract'));
+      assert.equal(summaries.length,1,provider+' must issue the original plugin summary request');
+      assert.equal(summaries[0].headers.authorization,normal.headers.authorization,provider+' '+mode+' native summary must preserve OAuth authorization');
+      assert.equal(summaries[0].headers['x-api-key'],normal.headers['x-api-key'],provider+' native summary must preserve the SDK auth header');
+      assert.notEqual(summaries[0].headers.authorization,'Bearer oauth');
+      const files=await fs.readdir(path.join(values.PI_MEMORY_DIR,'daily'));
+      const daily=await fs.readFile(path.join(values.PI_MEMORY_DIR,'daily',files[0]),'utf8');
+      assert.match(daily,/OAuth OK|BigModel/);
+    } finally { await session.close('reload'); }
+    }
+  }
+});

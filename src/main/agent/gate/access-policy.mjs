@@ -24,7 +24,7 @@ export const VERDICT = {
  * 宿主诊断也免问——它们本身无副作用，子 agent 的每一步仍各自过门控。
  */
 // 引用读取的对话／派发范围和来源权限由 context-extension/context-store 复核。
-const ALWAYS_ALLOWED_TOOLS = new Set(['task', 'task_status', 'task_message', 'task_cancel', 'context_read', 'task_read', 'conversation_read', 'get_runtime_diagnostics', 'workflow_wait', 'memory_read', 'memory_search', 'memory_write']);
+const ALWAYS_ALLOWED_TOOLS = new Set(['task', 'task_status', 'task_message', 'task_cancel', 'context_read', 'task_read', 'conversation_read', 'get_runtime_diagnostics', 'workflow_wait', 'memory_read', 'memory_write', 'memory_forget', 'memory_restore', 'scratchpad']);
 /** 桌面只发现：最小身份，不返回内容（矩阵 ui_list 行）。 */
 const DISCOVERY_TOOLS = new Set(['ui_list']);
 /** 文件类工具（read/write/edit 走 path 参数；ls/grep/glob 走 path 或 cwd）。 */

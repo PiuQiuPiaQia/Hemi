@@ -5,9 +5,10 @@ import {createConversation, type ConversationClient, type ConversationIdentity, 
 import type {MobileDirectory, MobileThinking, MobileWorkspace, MobileWorkspaceSnapshot} from '../workspace';
 import {BotCommandRejected, createBotConversationTransport, type BotRpc} from './conversation-transport';
 import type {BotTarget} from './native';
+import type {UsageRecord} from '@hemi/conversation-flow/controls';
 
-type Detail = {id: string; permissions: Record<string,{id: string;title: string;options: string[];status: string}>};
-type Snapshot = {clientId?: string; instanceId: string; defaultDir: string; recentDirs: string[]; roleModels?: Record<string, string | null>; models: Array<{key: string; name: string; model: string; source?: 'local' | 'cloud'}>; sessions: Array<{id: string; title: string; modelKey: string; thinking: MobileThinking; dir: string; status: 'queued' | 'running' | null; waitingPermission?: boolean; waitingResource?: boolean; blockedBy?: string[]; control?: {ownerId: string; epoch: string; expiresAt: number} | null}>; detail?: Detail};
+type Detail = {id: string; permissions: Record<string,{id: string;title: string;options: string[];status: string}>; usage?: Array<Pick<UsageRecord, 'modelKey'|'modelName'|'providerName'|'at'|'role'> & {usageDetail: Pick<UsageRecord, 'input'|'output'|'cacheRead'|'cacheWrite'|'genMs'> | null}>};
+type Snapshot = {capabilities?: {nativeMemory?: number}; clientId?: string; instanceId: string; defaultDir: string; recentDirs: string[]; roleModels?: Record<string, string | null>; models: Array<{key: string; name: string; model: string; source?: 'local' | 'cloud'}>; sessions: Array<{id: string; title: string; modelKey: string; thinking: MobileThinking; dir: string; status: 'queued' | 'running' | null; waitingPermission?: boolean; waitingResource?: boolean; blockedBy?: string[]; control?: {ownerId: string; epoch: string; expiresAt: number} | null}>; detail?: Detail};
 export function createBotWorkspace({rpc, target, files, resourceFiles, storage = localStorage}: {rpc: BotRpc; target: BotTarget; files?: MobileFileSource; resourceFiles?: MobileResourceFiles; storage?: Storage}): MobileWorkspace {
   const environmentId = `bot:${target.botInstanceId}`, prefix = `hemi-mobile:${environmentId}:`;
   const clients = new Map<string, ConversationClient>(), listeners = new Set<() => void>(), removedIds = new Set<string>();
@@ -35,6 +36,11 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
     catch(error){if((error as {code?:string}).code==='permission')resources?.clear();throw error;}
     finally {signal?.removeEventListener('abort',abort);pending.delete(controller);}
   }
+  async function nativeFiles<T>(method: string, params: Record<string,unknown> = {}): Promise<T> {
+    const info = await request<Snapshot>('snapshot');
+    if (info.capabilities?.nativeMemory !== 1) throw new Error('请在桌面更新 Bot 运行组件后使用共享记忆。');
+    return request<T>(method, params);
+  }
   async function refresh() {
     if (closed) return;
     if (loading) return loading;
@@ -44,9 +50,17 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
         const requestedId=snapshot.activeId;
         const value = await request<Snapshot>('snapshot',requestedId ? {id:requestedId} : {});
         if (value.instanceId !== target.botInstanceId || !Array.isArray(value.sessions) || !Array.isArray(value.models)) throw new Error('Bot 会话列表身份或格式无效');
-        const items = value.sessions.filter(item=>!removedIds.has(item.id)).map(item=>({id:item.id,title:item.title,pinned:false,model:item.modelKey,thinking:item.thinking??'default',directory:item.dir,running:!!item.status,waitingResource:item.waitingResource,blockedBy:item.blockedBy,control:item.control,status:item.status==='queued'?'queued' as const:item.waitingPermission?'waiting' as const:item.status}));
+        const cachedUsage = new Map(snapshot.items.map(item=>[item.id,item.usage]));
+        const items = value.sessions.filter(item=>!removedIds.has(item.id)).map(item=>({id:item.id,title:item.title,pinned:false,model:item.modelKey,thinking:item.thinking??'default',directory:item.dir,running:!!item.status,waitingResource:item.waitingResource,blockedBy:item.blockedBy,control:item.control,status:item.status==='queued'?'queued' as const:item.waitingPermission?'waiting' as const:item.status,usage:cachedUsage.get(item.id)}));
         const activeId = items.some(item=>item.id===snapshot.activeId) ? snapshot.activeId : items[0]?.id ?? null;
-        const detail=value.detail ?? (activeId ? await request<Detail>('session.open',{id:activeId,activate:false}) : null);
+        const detail=value.detail?.id===activeId ? value.detail : (activeId ? await request<Detail>('session.open',{id:activeId,activate:false}) : null);
+        const detailedItem = items.find(item=>item.id===detail?.id);
+        if (detailedItem && detail) detailedItem.usage = (detail.usage ?? []).map(call=>({
+          source:'chat',role:call.role,modelKey:call.modelKey,modelName:call.modelName,providerName:call.providerName || value.models.find(model=>model.key===call.modelKey)?.name,requestedModel:call.modelName,at:call.at,
+          input:call.usageDetail?.input??0,output:call.usageDetail?.output??0,
+          cacheRead:call.usageDetail?.cacheRead??0,cacheWrite:call.usageDetail?.cacheWrite??0,genMs:call.usageDetail?.genMs??0,
+          missing:call.usageDetail ? 0 : 1,
+        }));
         const permissions=detail?.id===activeId ? Object.values(detail.permissions ?? {}).filter(p=>p.status==='pending').map(p=>({...p,conversationId:activeId!})) : [];
         catalogReady = true;
         const mainModel = value.models.find(model=>model.key===value.roleModels?.main);
@@ -165,6 +179,8 @@ export function createBotWorkspace({rpc, target, files, resourceFiles, storage =
       try {const value=await request<{id:string}>('session.create',{requestId});storage.removeItem(prefix+'create-operation');await refresh();return value.id;}
       catch(error){if(error instanceof BotCommandRejected)storage.removeItem(prefix+'create-operation');throw error;}
     },
+    inspectAgentEnvironment: () => nativeFiles('agent-environment.inspect'),
+    readAgentRuntimeFile: path => nativeFiles('agent-environment.read-file', {path}),
     async rename(id,title){
       const next=title.trim();if(!next)throw new Error('请输入会话名称。');
       await manage('session.rename',id,next.slice(0,100));

@@ -25,7 +25,7 @@ import { discoverProjectSkills } from '../skills/project-skills.mjs';
 import { resolveRoleModel } from '../lib/role-models.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
 import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
-import { MEMORY_TOOL_GUIDELINES } from '../services/memory.mjs';
+import { acquireAgentEnvironment } from './process-environment.mjs';
 import { buildWorkspaceContextBlock } from '../workspace/context.mjs';
 import { hydrateWorkflowModel } from '../workflows/workflow-model-plan.mjs';
 import { createWorkflowNodeAgent } from '../agent/workflow-node-agent.mjs';
@@ -92,7 +92,6 @@ export function collectSkills({ skillService, workspace }) {
  * @param {(cid, payload) => boolean} deps.saveArchiveAgent
  * @param {(cid, result, meta) => void} deps.onEventTurn 事件唤醒回合的产出收口（llm.ipc）
  * @param {() => object} deps.getSkillService
- * @param {() => object} deps.getMemoryService
  * @param {() => object} deps.getWorkspaceService
  * @param {object} deps.history 任务档案
  * @param {(task) => void} [deps.onModelUsage]
@@ -116,18 +115,18 @@ export function createAgentRuntime({
   saveArchiveAgent,
   onEventTurn,
   getSkillService = () => null,
-  getMemoryService = () => null,
+  nativeMemory = false,
   getWorkspaceService = () => null,
   getWorkflowService = null,
   history,
   onModelUsage = null,
   isOnline = () => true,
-  scheduleExtraction = null,
   onTaskState,
   onDeliveryDeclared = null,
   log,
 }) {
   if (!userDataDir || !getProfiles || !resolveCapabilities || !getAccessService) throw new Error('执行运行时缺少宿主依赖');
+  const environment = nativeMemory ? acquireAgentEnvironment({ dataDir: userDataDir }) : null;
   const agentDir = path.join(userDataDir, 'pi-agent');
   try { mkdirSync(agentDir, { recursive: true }); } catch { /* inMemory 会话仍可跑 */ }
   const journal = createRunJournal({ dir: path.join(userDataDir, 'runtime-v2') });
@@ -159,7 +158,7 @@ export function createAgentRuntime({
     },
   });
 
-  // 标题／记忆是无副作用辅助作业，与业务目标分别收口，实际请求仍归属原目标的额度和费用。
+  // 标题等无工具副作用的辅助作业，与业务目标分别收口，实际请求仍归属原目标的额度和费用。
   const auxiliaryJobs = new Map();
   async function auxiliaryCall({ config, conversationId, sourceRootRunId = null, purpose, ...options }) {
     await journalReady;
@@ -237,7 +236,7 @@ export function createAgentRuntime({
   async function currentRoleLoadout(workspace) {
     const [caps, placement] = await Promise.all([resolveCapabilities(), resolvePlacement(workspace, {log})]);
     const skills = collectSkills({skillService: getSkillService(), workspace});
-    try { return await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: Boolean(getMemoryService())}); }
+    try { return await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: false}); }
     finally { skills.release(); }
   }
 
@@ -245,15 +244,14 @@ export function createAgentRuntime({
     const caps = await resolveCapabilities();
     const placement = await resolvePlacement(workspace, { log });
     const skills = collectSkills({ skillService: getSkillService(), workspace });
-    const memory = getMemoryService();
     try {
-      if (modelPlan.loadoutRevision && modelPlan.loadoutRevision !== await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: Boolean(memory)})) throw new Error('工具、技能或项目规范已变化，请重新派单');
+      if (modelPlan.loadoutRevision && modelPlan.loadoutRevision !== await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: false})) throw new Error('工具、技能或项目规范已变化，请重新派单');
     } catch (error) { skills.release(); throw error; }
     const modelOptions = sessionModelOptions({ config: modelPlan.config, fallback: modelPlan.fallback, fallbacks: modelPlan.allowedFallbacks, visionOn: false, vision: caps.vision });
     const session = createHemiSession({
       ...sessionOptions,
       ...placement,
-      agentDir, sessionSource,
+      agentDir, sessionSource, nativeMemory: false,
       ...modelOptions,
       // 只读角色（explorer/oracle）走 052 只读边界，不走 055 的 verify 阶段：verify 对未授权
       // 路径一律自动拒绝、不弹卡（那是「复核已授权产物」的语义）；侦察是一等调查者，读新
@@ -275,7 +273,6 @@ export function createAgentRuntime({
       browserBridge: caps.browserOn && role.tools.some((tool) => tool.startsWith('browser_'))
         ? createBrowserClient({ taskId: accessId, taskLabel: role.title })
         : null,
-      memoryClient: memory ? memory.bindTaskClient({ workspaceId: workspace?.id ?? null, mode: role.mode }) : null,
       skills: skills.items,
       accessId,
       interactiveOwner: modelPlan.interactiveOwner,
@@ -314,7 +311,6 @@ export function createAgentRuntime({
     },
     history,
     onModelUsage,
-    scheduleExtraction,
     cleanupAccessTask: (taskId) => accessService().cleanupTask(taskId),
     onSettled: async (task, result) => {
       result.reportRef = await contextStore.put({ owner: { conversationId: task.conversationId, rootRunId: task.rootRunId, taskId: result.taskId, generation: task.generation ?? 0 }, kind: 'report', content: [{ type: 'text', text: [task.resultText, result.outcomeReason ? `［宿主错误详情］\n${result.outcomeReason}` : null].filter(Boolean).join('\n\n') }], source: { kind: 'tool', tool: 'task' } });
@@ -354,7 +350,6 @@ export function createAgentRuntime({
     const { conversationId } = turn;
     const caps = await resolveCapabilities();
     const placement = await resolvePlacement(turn.workspace, { log });
-    const memory = getMemoryService();
     const skills = collectSkills({ skillService: getSkillService(), workspace: turn.workspace });
     // 角色可用性：解析不出模型（如 designer 没有视觉模型）的角色不进路由卡。
     const available = new Set();
@@ -367,7 +362,6 @@ export function createAgentRuntime({
     if (view?.type === 'project' && view.status === 'ok' && !view.host) workspaceBlock = buildWorkspaceContextBlock(view);
     const appendSystem = buildAgentAppendSystem({
       routingSection: buildRoutingSection(roles, { available }),
-      memoryToolGuidelines: memory ? MEMORY_TOOL_GUIDELINES : '',
       workspaceBlock,
     });
     appendSystem.push(...hostSystem);
@@ -392,7 +386,7 @@ export function createAgentRuntime({
       if (existing.agent.isDisposed()) log?.info?.(`[agent] ${conversationId} 旧实例已释放，保留条目重建主会话`);
       sessionSource = await existing.agent.exportSession();
       entries = Array.isArray(sessionSource?.entries) ? [sessionSource.header, ...sessionSource.entries] : null;
-      existing.agent.dispose();
+      await existing.agent.close('reload');
       existing.skills?.release();
       agents.delete(conversationId);
     } else {
@@ -423,11 +417,11 @@ export function createAgentRuntime({
       conversationId,
       appendSystem,
       entries,
-      readMemoryView: memory ? () => memory.buildView({ workspaceId: entry.ctx?.workspace?.id ?? null }) : null,
       toolDeps: toolDepsFor(conversationId, entry, available),
       sessionOptions: {
         ...sessionOptions,
         ...placement,
+        nativeMemory,
         agentDir,
         ...modelOptions,
         executionContext: executionFor(turn, turn.modelPlan),
@@ -530,11 +524,17 @@ export function createAgentRuntime({
       },
       message: (id, text) => subagents.message(id, text, { conversationId, rootRunId: entry.ctx.runId }),
       cancel: (id) => subagents.stop(id, { reason: 'cancel', conversationId, rootRunId: entry.ctx.runId }),
-      memoryWrite: getMemoryService()
-        ? async (args, signal) => entry.ctx?.memoryWrite?.(args, signal) ?? { ok: false, error: '记忆服务不可用' }
-        : null,
       runtimeDiagnostics: () => entry.ctx?.runtimeDiagnostics?.() ?? { ok: false },
     };
+  }
+
+  const pendingClosures = new Set();
+  const workflowClosures = new Set();
+  function retiring(work) {
+    const promise = Promise.resolve(work).catch(error => log?.warn?.(`释放执行会话失败：${error.message}`));
+    pendingClosures.add(promise);
+    void promise.finally(() => pendingClosures.delete(promise));
+    return promise;
   }
 
   function evictLRU(keep) {
@@ -544,11 +544,12 @@ export function createAgentRuntime({
       .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
     for (const [id, entry] of candidates) {
       if (agents.size <= MAX_RESIDENT) break;
-      void entry.agent.exportSession().then((payload) => {
-        if (payload && archiveWriters.get(id) === entry.archiveToken) saveArchiveAgent(id, payload);
-      }).catch(() => {});
-      entry.agent.dispose();
-      entry.skills?.release();
+      retiring((async () => {
+        try {
+          const payload = await entry.agent.exportSession();
+          if (payload && archiveWriters.get(id) === entry.archiveToken) await saveArchiveAgent(id, payload);
+        } finally { await entry.agent.close('reload'); entry.skills?.release(); }
+      })());
       agents.delete(id);
     }
   }
@@ -577,7 +578,7 @@ export function createAgentRuntime({
       toolDeps: toolDepsFor(invocation.conversationId, entry, available),
       sessionOptions: {
         ...sessionOptions,
-        ...placement, agentDir,
+        ...placement, agentDir, nativeMemory,
         executionContext: executionFor(context, plan.modelPlan),
         ...sessionModelOptions({ config: plan.config, fallback: plan.fallback, fallbacks: plan.modelPlan?.allowedFallbacks, visionOn: false, vision: caps.vision }),
         mode: 'run',
@@ -613,7 +614,7 @@ export function createAgentRuntime({
     main.on('model-call',call=>recordCall(call));
     main.on('permission', request => subagents.hostPermission({ conversationId: invocation.conversationId, inputSource: 'text', session: main, request }));
     try { await main.ready(); signal?.throwIfAborted(); }
-    catch (error) { main.dispose(); throw error; }
+    catch (error) { await main.close('reload'); throw error; }
     const abort = async () => {
       context.cancelled = true;
       subagents.clearHostedPermission(invocation.conversationId);
@@ -628,14 +629,23 @@ export function createAgentRuntime({
       const failed = owned.find(task => task.outcome !== 'complete');
       if (failed) throw new Error(`子任务未成功：${failed.outcomeReason ?? failed.outcome}`);
       return {...result,toolNames:[...usedTools]};
-    }, abort, dispose: () => main.dispose(), isBusy: () => main.isBusy(), requestHandoff: () => main.requestHandoff() };
-    return {
-      agent: createWorkflowNodeAgent({ session, nodeSpec, executionOwner, log }),
-      release: async () => { try { await abort(); await Promise.all(usageWrites); } finally {
-        for(const task of subagents._internals.tasks.values())if(task.rootRunId===executionOwner.workflowRunId&&task.phase==='terminal') {try{task.session?.dispose();}catch(error){log?.warn?.(`释放工作流子会话失败：${error.message}`);}finally{task.session=null;}}
-        main.dispose();
-      } },
-    };
+    }, abort, dispose: () => { retiring(release()); }, isBusy: () => main.isBusy(), requestHandoff: () => main.requestHandoff() };
+    let releasePromise;
+    function release() {
+      releasePromise ??= (async () => {
+        try { await abort(); await Promise.all(usageWrites); }
+        finally {
+          for (const task of subagents._internals.tasks.values()) if (task.rootRunId === executionOwner.workflowRunId && task.phase === 'terminal') {
+            try { task.session?.dispose(); } finally { task.session = null; }
+          }
+          await main.close('session-end');
+          workflowClosures.delete(release);
+        }
+      })();
+      return releasePromise;
+    }
+    workflowClosures.add(release);
+    return { agent: createWorkflowNodeAgent({ session, nodeSpec, executionOwner, log }), release };
   }
 
   async function prepareExecution(ctx) {
@@ -761,8 +771,7 @@ export function createAgentRuntime({
     try { accessService().cleanupTask(conversationGrantScope(conversationId)); } catch { /* 尽力而为 */ }
     if (!entry) return;
     subagents.clearHostedPermission(conversationId);
-    entry.agent.dispose();
-    entry.skills?.release();
+    retiring(entry.agent.close('reload').finally(() => entry.skills?.release()));
     agents.delete(String(conversationId ?? ''));
     log?.info?.(`[agent] ${conversationId} 档案被剪，主 agent 将按新档案重建`);
   }
@@ -807,13 +816,24 @@ export function createAgentRuntime({
     subagents.disposeAll();
   }
 
-  async function close() {
+  let closePromise = null;
+  function close() {
+    closePromise ??= closeRuntime();
+    return closePromise;
+  }
+  async function closeRuntime() {
     // Initialization/recovery also writes the journal when no conversation ran.
     await journalReady;
+    await Promise.all([...agents].map(async ([id, entry]) => {
+      await abort(id);
+      if (entry.ctx?.runId) await subagents.cancelByRootRun(entry.ctx.runId, { reason: 'stop' });
+    }));
+    await Promise.all([...agents.values()].map(entry => entry.agent.close('session-end')));
+    await Promise.all([...workflowClosures].map(release => release()));
+    await Promise.all([...pendingClosures]);
     disposeAll();
-    await sessionStore.flush();
-    await journal.flush();
+    try { await sessionStore.flush(); await journal.flush(); } finally { environment?.release(); }
   }
 
-  return { prepareExecution, auxiliarySession, usageRecordsFor, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
+  return { isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
 }

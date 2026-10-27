@@ -9,6 +9,7 @@ import { createLogger } from '../lib/logger.mjs';
 import { getProfiles } from '../lib/profiles-holder.mjs';
 import { state as appState } from '../state.mjs';
 import { createImportCoordinator } from '../services/provider-import/provider-import.mjs';
+import { getBotService } from './bot.ipc.mjs';
 
 const log = createLogger('provider-import');
 
@@ -25,7 +26,8 @@ export function registerProviderImportIpc() {
     WebContentsView,
     sessionFromPartition: (partition) => session.fromPartition(partition),
     safeStorage: secretStorage,
-    getProfilesStore: () => getProfiles(),
+    getProfilesStore: destination => destination?.kind === 'bot'
+      ? getBotService().importProfiles(destination.instanceId) : getProfiles(),
     journalDirPath: app.getPath('userData') + '/provider-import',
     log,
   });

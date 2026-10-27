@@ -1,20 +1,18 @@
 /**
  * 056 · 主 agent——每个对话一个持全工具的 Pi 会话（取代 055 的「大脑＋手」两层）。
  *
- * 会话本体来自 hemi-session（门控、文件/命令、浏览器、桌面、视觉、联网、记忆桥、
+ * 会话本体来自 hemi-session（门控、文件/命令、浏览器、桌面、视觉、联网、原生记忆扩展、
  * 路由、远端）；本模块只加主 agent 自己的那一层，全部从 055 brain-session 迁来：
  *   - 派单族工具（agent-tools：task/task_status/task_message/task_cancel）与
- *     对话侧 memory_write、宿主诊断；
+ *     宿主诊断；记忆工具由官方插件注册。
  *   - ［本轮上下文］随本次 prompt 冻结进用户消息；图片走 SDK 原生 images，
  *     后续请求与恢复原样重放，不在请求钩子里改写已发送的历史；
  *   - 第 4 缓存断点经 before_provider_request 补在「本回合用户消息前一条」（B5）；
- *   - 对话侧记忆视图投影（context_with_system，037；与执行侧记忆桥二选一）；
  *   - 条目导出供上下文读取；生产持久化由 Pi 管理，Hemi 档案仅存会话引用；
  *   - 子 agent 后台完成经 notify 唤醒（空闲 triggerTurn、忙时 followUp，探针 A5）。
  */
 import { createHemiSession, messageText } from './hemi-session.mjs';
 import { createAgentTools } from './agent-tools.mjs';
-import { projectMessages } from './gate/pi-memory-bridge-core.mjs';
 import { summarizeBudget } from '../agent-runtime/budget-summary.mjs';
 import { breakdownOfRequestParams, buildContextSnapshot } from './context-usage.mjs';
 
@@ -60,8 +58,8 @@ export const AGENT_PRINCIPLES = buildAgentPrinciples();
  * 主 agent 追加到 SDK 默认提示词之后的稳定段（按稳定度从高到低；空段跳过）。
  * 逐回合变化的块（环境时间、诊断、附件封装）放进本次 prompt，随 Pi 历史保存。
  */
-export function buildAgentAppendSystem({ routingSection = '', memoryToolGuidelines = '', workspaceBlock = '' } = {}) {
-  return [AGENT_PRINCIPLES, routingSection, memoryToolGuidelines, workspaceBlock]
+export function buildAgentAppendSystem({ routingSection = '', workspaceBlock = '' } = {}) {
+  return [AGENT_PRINCIPLES, routingSection, workspaceBlock]
     .filter((part) => typeof part === 'string' && part.trim());
 }
 
@@ -134,8 +132,7 @@ export function addHistoryBreakpoint(payload) {
  * @param {object} options.sessionOptions 交给 hemi-session 的会话参数（cwd/model/routing/工具开关/访问上下文…）
  * @param {string[]} options.appendSystem 主 agent 稳定系统段（buildAgentAppendSystem）
  * @param {Array|null} [options.entries] 既有条目
- * @param {object} options.toolDeps agent-tools 的依赖（spawn/status/…/memoryWrite/runtimeDiagnostics）
- * @param {(() => Promise<object>)|null} [options.readMemoryView] 对话侧记忆视图（037 buildView）
+ * @param {object} options.toolDeps agent-tools 的依赖（spawn/status/…/runtimeDiagnostics）
  */
 export function createMainAgent({
   conversationId,
@@ -143,30 +140,8 @@ export function createMainAgent({
   appendSystem,
   entries = null,
   toolDeps,
-  readMemoryView = null,
   log = null,
 }) {
-  async function memoryProjectionHook(event) {
-    if (!readMemoryView) return undefined;
-    let view = null;
-    try {
-      view = await readMemoryView();
-    } catch (error) {
-      log?.warn?.(`[agent] ${conversationId} 记忆视图读取异常，本请求不带记忆：${error?.message ?? error}`);
-    }
-    if (!view?.ok) return { messages: projectMessages(event.messages, '［长期记忆当前不可用（读取失败）］', 0) };
-    const body = view.data.text
-      ? `${view.data.text}${view.data.omittedCount > 0 ? `\n（另有 ${view.data.omittedCount} 条超预算省略）` : ''}`
-      : '（当前范围内还没有长期记忆。）';
-    return {
-      messages: projectMessages(
-        event.messages,
-        `［长期记忆 · 关于你｜全局约定｜工作区］有效记忆如下；工作区约定只对当前工作区生效：\n${body}`,
-        0,
-      ),
-    };
-  }
-
   // 上下文容量的分类估算：每次请求暂存（总量另有 usage 锚点，见 context-usage.mjs）。
   const requestBreakdown = { current: null };
 
@@ -178,7 +153,6 @@ export function createMainAgent({
         addHistoryBreakpoint(event.payload);
         requestBreakdown.current = breakdownOfRequestParams(event.payload);
       });
-      pi.on('context_with_system', memoryProjectionHook);
     },
   };
 
@@ -186,8 +160,6 @@ export function createMainAgent({
     ...sessionOptions,
     appendSystem,
     entries,
-    // 主 agent 不挂执行侧记忆桥（对话侧 memory_write＋视图投影承担），避免两套记忆工具。
-    memoryClient: null,
     // 057：主 agent 也能声明正式交付（声明经适配层捕获进 flow.artifacts，不伪造子任务）。
     delivery: true,
     extraExtensions: [...(sessionOptions.extraExtensions ?? []), agentExtension],
@@ -259,6 +231,7 @@ export function createMainAgent({
     recentUserTurns,
     isBusy: () => Boolean(summary) || session.isBusy(),
     dispose: () => { summary?.controller.abort(); session.dispose(); },
+    close: reason => { summary?.controller.abort(); return session.close(reason); },
     on: (...args) => session.on(...args),
     off: (...args) => session.off(...args),
   };

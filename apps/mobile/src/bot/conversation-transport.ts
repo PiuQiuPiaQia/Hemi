@@ -40,7 +40,8 @@ export function createBotConversationTransport(rpc: BotRpc, instanceId: string, 
     async lookupOperation(scope, requestId, context) {
       guard(scope, context.signal);
       const receipt = await rpc.request<{status: string; result?: FlowCommandResult}>('operation.get', {instanceId, operationId: requestId}, context);
-      return receipt.status === 'done' && typeof receipt.result?.ok === 'boolean' ? receipt.result : null;
+      if (receipt.status === 'done' && typeof receipt.result?.ok === 'boolean') return receipt.result;
+      return receipt.status === 'interrupted' ? {ok: false, code: 'rejected', message: '上次发送已中断，原文已保留，可以重新发送。'} : null;
     },
   };
 }

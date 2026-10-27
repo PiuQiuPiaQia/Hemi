@@ -22,6 +22,16 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
   });
   const publish = () => onChange([...active].filter(r => r.background).map(view));
   const backgroundFor = owner => [...active, ...completed].filter(r => r.background && sameOwner(r.owner, owner));
+  // 工具批次边界与整轮收口共享同一个消费入口，不等待仍在运行的命令。
+  const takeCompleted = owner => {
+    const ready = completed.filter(r => sameOwner(r.owner, owner));
+    for (const record of ready) completed.splice(completed.indexOf(record), 1);
+    const failure = ready.find(r => r.error);
+    if (failure) throw failure.error;
+    return ready.map(record => ({ ...view(record), outputRef: record.outputRef,
+      text: commandToolResult(record.result).content[0].text.slice(-12_000),
+    }));
+  };
 
   async function run(options) {
     const scope = currentExecutionScope(), execution = scope?.execution;
@@ -134,19 +144,14 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
 
   return {
     run,
+    takeCompleted,
     hasBackground: owner => backgroundFor(owner).length > 0,
     async waitForCompletion(owner) {
       const records = backgroundFor(owner);
       if (!records.some(r => r.settled) && records.length) {
         await Promise.race(records.map(r => r.promise));
       }
-      const ready = completed.filter(r => sameOwner(r.owner, owner));
-      for (const record of ready) completed.splice(completed.indexOf(record), 1);
-      const failure = ready.find(r => r.error);
-      if (failure) throw failure.error;
-      return ready.map(record => ({ ...view(record), outputRef: record.outputRef,
-        text: commandToolResult(record.result).content[0].text.slice(-12_000),
-      }));
+      return takeCompleted(owner);
     },
     async abort() {
       const owned = [...active];

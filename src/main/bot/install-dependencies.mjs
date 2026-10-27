@@ -3,13 +3,42 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {parseEnv} from 'node:util';
 import { atomicJson, privateDirectory } from './storage.mjs';
 
 export const INSTALL_FAILURE_MARKER = '__HEMI_BOT_NPM_FAILURE__';
 const MIRROR_REGISTRY = 'https://registry.npmmirror.com/';
 const PROXY_KEY = /^(?:https?_proxy|all_proxy|no_proxy|proxy|npm_config_(?:https?[-_]proxy|proxy|noproxy))$/i;
 
-export async function readShellProxyEnvironment({ env = process.env, timeoutMs = 5000 } = {}) {
+export async function readShellProxyEnvironment({ env = process.env, timeoutMs = 5000, platform = process.platform, run = execFile } = {}) {
+  if (platform === 'win32') {
+    // OpenSSH's service can inherit an older environment than the user's proxy
+    // configuration. Probe only proxy values in this cloud Windows account.
+    const script = `
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+$values = @{}
+foreach ($scope in @('Machine','User')) {
+  foreach ($entry in [Environment]::GetEnvironmentVariables($scope).GetEnumerator()) {
+    if ($entry.Key -match '^(https?_proxy|all_proxy|no_proxy|npm_config_(https?[-_]proxy|proxy|noproxy))$') { $values[$entry.Key] = [string]$entry.Value }
+  }
+}
+if (!$values.ContainsKey('HTTP_PROXY') -and !$values.ContainsKey('HTTPS_PROXY') -and !$values.ContainsKey('ALL_PROXY')) {
+  $systemProxy = [Net.WebRequest]::GetSystemWebProxy()
+  foreach ($scheme in @('http','https')) {
+    $uri = [Uri]($scheme + '://registry.npmjs.org/')
+    $proxy = $systemProxy.GetProxy($uri)
+    if ($proxy -and $proxy -ne $uri) { $values[$scheme + '_proxy'] = $proxy.AbsoluteUri }
+  }
+}
+$values | ConvertTo-Json -Compress
+`;
+    const powershell = path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+    return new Promise(resolve => run(powershell, ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')], {env,timeout:timeoutMs,maxBuffer:64*1024,windowsHide:true}, (error, stdout) => {
+      if (error) return resolve({});
+      try {resolve(Object.fromEntries(Object.entries(JSON.parse(stdout)).filter(([key,value]) => PROXY_KEY.test(key) && typeof value === 'string')));}
+      catch {resolve({});}
+    }));
+  }
   const shell = env.SHELL || '/bin/bash';
   if (!path.isAbsolute(shell) || !['bash', 'zsh', 'sh', 'dash', 'ksh'].includes(path.basename(shell))) return {};
   // SSH's non-interactive shell may return before the proxy exports in .bashrc.
@@ -81,6 +110,11 @@ function npmEntry() {
   const dirs = [path.dirname(process.execPath), ...(process.env.PATH ?? '').split(path.delimiter)];
   for (const dir of dirs) {
     if (!path.isAbsolute(dir)) continue;
+    if (process.platform === 'win32') {
+      const entry = path.join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (fs.existsSync(entry)) return entry;
+      continue;
+    }
     const candidate = path.join(dir, 'npm');
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
@@ -91,7 +125,7 @@ function npmEntry() {
   throw new Error('没有找到可用的 npm，请检查服务器运行环境。');
 }
 
-async function attempt({ directory, npmCli, cache, logDir, number, timeoutMs, env, registry }) {
+async function attempt({ directory, npmCli, cache, logDir, number, timeoutMs, env, registry, direct = false }) {
   const logFile = path.join(logDir, `${number}.log`);
   const npmLogs = path.join(logDir, `${number}-npm`);
   privateDirectory(npmLogs);
@@ -106,12 +140,18 @@ async function attempt({ directory, npmCli, cache, logDir, number, timeoutMs, en
     }
   };
   try {
-    child = spawn(process.execPath, [npmCli, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-progress', '--update-notifier=false',
-      '--cache', cache, '--logs-dir', npmLogs, '--fetch-retries=1', '--fetch-retry-mintimeout=1000',
-      '--fetch-retry-maxtimeout=5000', '--fetch-timeout=20000', '--maxsockets=4', '--strict-ssl=true',
-      ...(registry ? ['--registry', registry, '--replace-registry-host=registry.npmjs.org', '--proxy=false', '--https-proxy=null'] : [])], {
+    // npm already implements HTTPS_PROXY. Node's native proxy layer can wrap
+    // npm's proxy connection again, so disable it only for this child.
+    const npmEnv = { ...env, PATH: path.dirname(process.execPath) + path.delimiter + (env.PATH ?? '') };
+    delete npmEnv.NODE_USE_ENV_PROXY;
+    const nodeArgs = process.allowedNodeEnvironmentFlags.has('--use-env-proxy') ? ['--no-use-env-proxy'] : [];
+    child = spawn(process.execPath, [...nodeArgs, npmCli, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-progress', '--update-notifier=false',
+      '--cache', cache, '--logs-dir', npmLogs, '--fetch-retries=' + (direct ? 0 : 1), '--fetch-retry-mintimeout=1000',
+      '--fetch-retry-maxtimeout=5000', '--fetch-timeout=' + (direct ? 8000 : 20000), '--maxsockets=4', '--strict-ssl=true',
+      ...(registry ? ['--registry', registry, '--replace-registry-host=registry.npmjs.org'] : []),
+      ...(direct || registry ? ['--proxy=false', '--https-proxy=null'] : [])], {
       cwd: directory,
-      env: { ...env, PATH: path.dirname(process.execPath) + path.delimiter + (env.PATH ?? '') },
+      env: npmEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.on('data', append);
@@ -150,23 +190,72 @@ async function attempt({ directory, npmCli, cache, logDir, number, timeoutMs, en
   }
 }
 
+export function reuseBotDependencies({root, directory, reuseFrom}) {
+  if (!reuseFrom) return false;
+  let source, target;
+  try {
+    const releases = fs.realpathSync(path.join(root, 'releases'));
+    source = fs.realpathSync(reuseFrom);
+    const relative = path.relative(releases, source);
+    if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) return false;
+    if (source === fs.realpathSync(directory)) return false;
+    for (const name of ['package.json', 'package-lock.json'])
+      if (!fs.readFileSync(path.join(source, name)).equals(fs.readFileSync(path.join(directory, name)))) return false;
+    const modules = path.join(source, 'node_modules');
+    // npm's completed installation marker and every direct dependency must
+    // exist. An interrupted or changed installation falls back to npm ci.
+    JSON.parse(fs.readFileSync(path.join(modules, '.package-lock.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(path.join(directory, 'package-lock.json'), 'utf8'));
+    for (const name of Object.keys(pkg.dependencies ?? {})) {
+      const installed = JSON.parse(fs.readFileSync(path.join(modules, name, 'package.json'), 'utf8'));
+      const version = lock.packages?.['node_modules/' + name]?.version;
+      if (typeof version !== 'string' || installed.version !== version) return false;
+    }
+    target = path.join(directory, 'node_modules');
+    if (fs.existsSync(target)) return false;
+    // Copy, not hard-link: a failed update or later npm operation must never
+    // modify the still-running release or the rollback copy.
+    fs.cpSync(modules, target, {recursive: true, verbatimSymlinks: true});
+    return true;
+  } catch {
+    if (target) fs.rmSync(target, {recursive: true, force: true});
+    return false;
+  }
+}
+
 export async function installBotDependencies({
-  root, directory = process.cwd(), npmCli = npmEntry(), timeoutMs = 90000,
-  env = process.env, loadShellProxy = readShellProxyEnvironment, mirrorRegistry = MIRROR_REGISTRY,
+  root, directory = process.cwd(), npmCli = npmEntry(), timeoutMs = process.platform === 'win32' ? 300000 : 90000,
+  env = process.env, loadShellProxy = readShellProxyEnvironment, mirrorRegistry = MIRROR_REGISTRY, reuseFrom,
 }) {
   const logDir = path.join(root, 'install-logs', 'install-' + randomUUID());
   const cache = path.join(root, 'npm-cache');
   privateDirectory(logDir);
   privateDirectory(cache);
   const attempts = [];
-  let installEnv = proxyEnvironment(env), strategy = 'server';
+  if (reuseBotDependencies({root, directory, reuseFrom})) {
+    attempts.push({code: 0, strategy: 'reuse'});
+    atomicJson(path.join(logDir, 'result.json'), {node: process.version, attempts});
+    return {logDir, attempts};
+  }
+  // Read the cloud Bot's own network file on both platforms. Values explicitly
+  // supplied to this process retain precedence, matching Node's env-file flag.
+  let network = {};
+  try {network = parseEnv(fs.readFileSync(path.join(root, 'network.env'), 'utf8'));}
+  catch (error) {if (error.code !== 'ENOENT') throw error;}
+  const explicitKeys = new Set(Object.keys(env).map(key => key.toLowerCase().replaceAll('-','_')));
+  env = {...Object.fromEntries(Object.entries(network).filter(([key]) => PROXY_KEY.test(key) && !explicitKeys.has(key.toLowerCase().replaceAll('-','_')))), ...env};
+  const directEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !PROXY_KEY.test(key)));
+  let installEnv = directEnv, strategy = 'direct';
   for (let number = 1; number <= 3; number++) {
     const registry = number === 3 ? mirrorRegistry : undefined;
     const currentCache = number === 1 ? cache : path.join(logDir, `retry-cache-${number}`);
     privateDirectory(currentCache);
     let result;
     try {
-      result = await attempt({ directory, npmCli, cache: currentCache, logDir, number, timeoutMs, env: installEnv, registry });
+      const started = Date.now();
+      result = await attempt({ directory, npmCli, cache: currentCache, logDir, number, timeoutMs, env: installEnv, registry, direct:strategy === 'direct' || strategy === 'retry' });
+      result.durationMs = Date.now() - started;
     } finally {
       // Keep diagnostics, not another full dependency cache after every retry.
       if (number > 1) {
@@ -184,9 +273,12 @@ export async function installBotDependencies({
       throw Object.assign(new Error('Bot 依赖安装失败。'), { kind: result.kind, logFile: result.logFile });
     }
     if (number === 1) {
-      const shellProxy = ['npm', 'network'].includes(result.kind) ? await loadShellProxy({ env }) : {};
-      installEnv = shellProxyEnvironment(env, shellProxy);
-      strategy = Object.keys(shellProxy).some(key => !/no_?proxy$/i.test(key) && shellProxy[key]) ? 'shell-proxy' : 'retry';
+      const configured = proxyEnvironment(env);
+      const hasProxy = values => Object.entries(values).some(([key,value]) => PROXY_KEY.test(key) && !/no_?proxy$/i.test(key) && value);
+      const shellProxy = ['npm', 'network'].includes(result.kind)
+        ? hasProxy(configured) ? Object.fromEntries(Object.entries(configured).filter(([key]) => PROXY_KEY.test(key))) : await loadShellProxy({env}) : {};
+      installEnv = hasProxy(shellProxy) ? shellProxyEnvironment(env, shellProxy) : directEnv;
+      strategy = hasProxy(shellProxy) ? 'server-proxy' : 'retry';
     } else {
       // The mirror is a final direct route, so a dead local proxy cannot block
       // it too. Override npmrc proxies only for this child; keep TLS and SRI.
@@ -199,7 +291,7 @@ export async function installBotDependencies({
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.umask(0o077);
   try {
-    await installBotDependencies({ root: process.argv[2] });
+    await installBotDependencies({ root: process.argv[2], reuseFrom: process.argv[3] });
   } catch (error) {
     process.stderr.write(INSTALL_FAILURE_MARKER + JSON.stringify({ kind: error.kind ?? classifyInstallFailure(error.code ?? ''), logFile: error.logFile ?? null }) + '\n');
     process.exitCode = 1;

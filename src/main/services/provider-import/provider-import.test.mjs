@@ -219,7 +219,7 @@ function inferenceFetch(site) {
   };
 }
 
-function buildHarness({ siteOverrides = {} } = {}) {
+function buildHarness({ siteOverrides = {}, profilesFor = null } = {}) {
   const site = makeSite();
   Object.assign(site, siteOverrides);
   const electron = makeFakeElectron(site);
@@ -235,7 +235,7 @@ function buildHarness({ siteOverrides = {} } = {}) {
     WebContentsView: electron.WebContentsView,
     sessionFromPartition: electron.sessionFromPartition,
     safeStorage: safeStub,
-    getProfilesStore: () => store,
+    getProfilesStore: destination => profilesFor ? profilesFor(destination, store) : store,
     journalDirPath: '/ud/provider-import',
     env: {},
     log: null,
@@ -250,8 +250,8 @@ function buildHarness({ siteOverrides = {} } = {}) {
   return { site, electron, fs, store, coordinator, states, event };
 }
 
-async function driveToSelecting(harness) {
-  const started = await harness.coordinator.start(harness.event, { siteUrl: 'vvcode.top' });
+async function driveToSelecting(harness, destination) {
+  const started = await harness.coordinator.start(harness.event, { siteUrl: 'vvcode.top', ...(destination ? { destination } : {}) });
   assert.equal(started.ok, true);
   harness.site.loggedIn = true; // 用户在页面上完成登录
   const checked = await harness.coordinator.checkLogin(harness.event, {
@@ -275,6 +275,27 @@ async function waitForPhase(harness, phases, timeoutMs = 8000) {
 function latest(harness) {
   return harness.states[harness.states.length - 1];
 }
+
+test('Bot destination is frozen in preview, journal, recovery and save; unavailable Bot never falls back to local storage', async () => {
+  const destination = { kind: 'bot', instanceId: 'bot-fixture' }, targets = [];
+  const harness = buildHarness({ profilesFor: (target, store) => { targets.push(target); assert.deepEqual(target, destination); return store; } });
+  const operationId = await driveToSelecting(harness, destination);
+  const selected = await harness.coordinator.setSelection(harness.event, { operationId, revision: latest(harness).revision,
+    selection: { group: 'default', models: [{ modelName: 'gpt-5.2', api: 'openai-completions' }] } });
+  assert.deepEqual(selected.state.destination, destination);
+  await harness.coordinator.submit(harness.event, { operationId, revision: latest(harness).revision, planHash: selected.state.preview.planHash });
+  assert.equal((await waitForPhase(harness, ['success','failed'])).phase, 'success');
+  assert.ok(targets.length >= 3);
+
+  const disconnected = buildHarness({ profilesFor: target => { assert.deepEqual(target, destination); throw new Error('Bot is offline'); } });
+  const journal = createImportJournal({ dirPath: '/ud/provider-import', safeStorage: safeStub, ...disconnected.fs });
+  await journal.persist('pi-offline-bot', { destination, siteOrigin: SITE, apiBaseUrl: SITE, phase: 'saving', apiKey: 'not-a-live-key', committed: false });
+  assert.deepEqual((await journal.list())[0].destination, destination);
+  await assert.rejects(disconnected.coordinator.resumePending(disconnected.event, { operationId: 'pi-offline-bot' }), /无法核对 Bot/);
+  assert.ok(await journal.read('pi-offline-bot'), 'journal remains recoverable');
+  assert.equal((await disconnected.store.list()).providers.length, 0);
+  assert.equal(disconnected.site.createCalls, 0);
+});
 
 test('全链路：登录→选择→创建→查证→读Key→验证→原子保存→清理', async () => {
   const harness = buildHarness();

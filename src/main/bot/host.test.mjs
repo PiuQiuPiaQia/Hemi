@@ -93,7 +93,7 @@ test('cloud sessions, models and credentials are isolated; duplicate request ret
   );
 });
 
-test('正文路径可预览但不登记交付，链接身份隔离会话且不可作为交付下载', {skip: process.platform === 'win32' && 'Linux Host file URL semantics'}, async t => {
+test('正文路径可预览但不登记交付，链接身份隔离会话且不可作为交付下载', async t => {
   const f = await fixture(t);
   const a = await f.req('session.create'), b = await f.req('session.create');
   const target = path.join(f.root, 'workspace', '正文 100% 报告.md');

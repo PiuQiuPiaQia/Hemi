@@ -315,16 +315,6 @@ export type ChatTurnResult = {
   speechText?: string;
   /** 055 R-06：播报回合（announce）的出声判定来源（任务建档来源，024 口径）。 */
   inputSource?: 'voice' | 'text';
-  /** 016：本回合实际落盘的记忆写入（显式确认由模型回答承担，这里供轻提示）。 */
-  memoryChanged?: Array<{
-    target: string;
-    action: string;
-    reason: string;
-    /** 037 C-3：范围标签（关于你/全局约定/工作区名）与操作 id（提示/撤销用）。 */
-    scopeLabel?: string;
-    operationId?: string | null;
-    title?: string;
-  }>;
   /**
    * 048：本回合的思考全文与时长（跨工具轮累计，主进程权威）。模型没思考
    * （档位关闭或模型自行不思考）时缺省。
@@ -1025,98 +1015,13 @@ export type AccessMutationResult = {
 /** 008 工作对象种类（视图层不含正文与图片本体，快照权威在主进程内存）。 */
 export type WorkContextKind = 'web' | 'file' | 'image';
 
-/** 016 记忆文档目标：USER.md（用户资料）与 MEMORY.md（重要事实）。 */
-export type MemoryDocumentTarget = 'user' | 'memory';
-
-/** 016 单份记忆文档视图：text 为 null 表示读取受保护/失败，issue 说明原因。 */
-export type MemoryDocumentView = {
-  text: string | null;
-  issue: 'oversized' | 'unreadable' | 'invalid' | null;
-};
-
-/** 016 设置页/注入用的记忆状态。 */
-export type MemoryState = {
-  documents: Record<MemoryDocumentTarget, MemoryDocumentView>;
-  limits: Record<MemoryDocumentTarget, number>;
-};
-
-/** 016 记忆写入/保存结果：冲突时附当前磁盘内容，由调用方决定下一步。 */
-export type MemoryWriteResult = {
-  ok: boolean;
-  error?: string;
-  conflict?: boolean;
-  current?: string;
-  overLimit?: boolean;
-  limit?: number;
-  size?: number;
-  canceled?: boolean;
-};
-
-/** 032 记忆运行状态：收尾摘要开关（唯一记忆用户设置，写 stored config）。 */
-export type MemoryStatus = {
-  exitSummaryEnabled: boolean;
+/** Original runtime files, transported without parsing into memory entities. */
+export type AgentRuntimeFile = { path: string; size: number; modifiedAt: number };
+export type AgentEnvironmentSnapshot = {
+  owner: string;
   memoryDir: string;
-};
-
-/** 037 记忆范围选择：关于你 / 全局约定 / 工作区（默认空间、具名项目、未绑定域）。 */
-export type MemoryScopeSelector =
-  | { kind: 'global'; target: 'user' | 'facts' }
-  | { kind: 'workspace'; workspaceId: string };
-
-/** 037 分域条目视图（列表用；来源/关联为宿主登记的引用）。 */
-export type MemoryEntryView = {
-  id: string;
-  version: number;
-  kind: string;
-  title: string;
-  body: string;
-  sourceRefs: string[];
-  relatedEntryIds: string[];
-  createdAt: number;
-  updatedAt: number;
-  scope: MemoryScopeSelector;
-};
-
-/** 037 条目列表结果：失败 ok=false＋code；成功带分页与待整理概况。 */
-export type MemoryEntryListResult = {
-  ok: boolean;
-  code?: string;
-  message?: string;
-  data?: {
-    scope: MemoryScopeSelector;
-    revision: number;
-    epoch: number;
-    loose: { kind: 'profile' | 'unsorted'; count: number; issues: Array<{ line?: number; reason: string }> };
-    entries: MemoryEntryView[];
-    total: number;
-    nextCursor: number | null;
-  };
-};
-
-/** 037 条目变更结果：冲突附当前版本，草稿留在 renderer（R-07/R-16）。 */
-export type MemoryMutationResult = {
-  ok: boolean;
-  code?: string;
-  message?: string;
-  operationId?: string;
-  unchanged?: boolean;
-  current?: unknown;
-  data?: unknown;
-};
-
-/** 037 变更广播：持久提交成功后发送；不带原文（renderer 有草稿时只标记外部更新）。 */
-export type MemoryChangedEvent = {
-  scopeKey: string | null;
-  operationId: string | null;
-  revision: number | null;
-  epoch: number | null;
-  entrySummary: string | null;
-  /** 037 C-3：来源（chat=对话写入；settings=设置页；task=终态提炼）与会话过滤。 */
-  origin?: 'chat' | 'settings' | 'task' | null;
-  conversationId?: string | null;
-  action?: 'add' | 'replace' | 'forget' | 'remove' | 'move' | 'clear' | 'undo' | null;
-  /** 条目标题（forget 时为被删条目名，供提示点名）。 */
-  title?: string | null;
+  files: AgentRuntimeFile[];
+  summaryUsageIncluded: boolean;
 };
 
 /** 008 附加动作：网页 / 选中文件（访达选中优先、浏览窗兜底，2026-09-20 合并）/ 系统交互截图。 */
@@ -1360,6 +1265,7 @@ export type UsageRecord = {
   source: 'chat' | 'fallback' | 'summary' | 'title' | 'task';
   modelKey: string;
   modelName: string;
+  providerName?: string;
   requestedModel?: string;
   input: number;
   output: number;
@@ -1518,6 +1424,7 @@ export type OAuthLoginState = {
 
 /** 031 v2：供应商视图（端点＋Key＋协议＋模型列表；无 Key 材料）。 */
 export type ModelProviderView = {
+  configuration?: 'newapi';
   source?: 'local' | 'cloud';
   oauthProvider?: OAuthProvider;
   id: string;
@@ -2004,6 +1911,7 @@ export type ProviderImportPreview = {
 
 /** 047：安全状态 DTO（无 Key/JWT/Cookie/DOM；revision 递增）。 */
 export type ProviderImportState = {
+  destination?: { kind: 'bot'; instanceId: string };
   operationId: string;
   revision: number;
   phase: ProviderImportPhase;
@@ -2045,6 +1953,7 @@ export type ProviderImportState = {
 
 /** 047：journal 待处理摘要（恢复入口；不含秘密）。 */
 export type ProviderImportPendingItem = {
+  destination?: { kind: 'bot'; instanceId: string };
   operationId: string;
   readable: boolean;
   phase: string;
@@ -2162,7 +2071,7 @@ export type HemiVoiceBridge = {
   /** 设置页「测试连通性」：最小请求探活文本模型（表单值可覆盖存储值）。 */
   testTextModel: (overrides?: ModelTestOverrides) => Promise<ModelTestResult>;
   /** 047 New API 站点登录导入：命令进主进程协调器，状态订阅消费安全 DTO。 */
-  startProviderImport: (payload: { siteUrl: string }) => Promise<{ ok: boolean; state: ProviderImportState }>;
+  startProviderImport: (payload: { siteUrl: string; destination?: { kind: 'bot'; instanceId: string } }) => Promise<{ ok: boolean; state: ProviderImportState }>;
   getProviderImportState: (operationId?: string | null) => Promise<{ ok: boolean; state: ProviderImportState | null }>;
   listPendingProviderImports: () => Promise<{
     ok: boolean;
@@ -2504,55 +2413,8 @@ export type HemiVoiceBridge = {
     conversationId: string,
     attachmentId: string,
   ) => Promise<{ ok: boolean; message?: string; code?: string }>;
-  /** 016 本地文件记忆：状态（开关+两份文档）、整文件保存、开关设置、打开目录。 */
-  getMemoryState: () => Promise<MemoryState>;
-  saveMemoryDocument: (payload: {
-    target: MemoryDocumentTarget;
-    text: string;
-    expectedText: string | null;
-  }) => Promise<MemoryWriteResult>;
-  openMemoryDirectory: () => Promise<{ ok: boolean }>;
-  /** 032 记忆运行状态与收尾摘要开关（唯一新增用户设置）。 */
-  getMemoryStatus: () => Promise<MemoryStatus>;
-  setMemoryExitSummary: (next: { enabled: boolean }) => Promise<MemoryStatus>;
-  /** 037 分域条目管理：列表/新增/替换/调整范围/遗忘/清空/撤销与变更订阅（设置页记忆区）。 */
-  listMemoryEntries: (payload: {
-    scope: MemoryScopeSelector | null;
-    query?: string;
-    cursor?: number;
-    limit?: number;
-  }) => Promise<MemoryEntryListResult>;
-  mutateMemoryEntry: (payload: {
-    scope: MemoryScopeSelector | null;
-    action: 'add' | 'replace';
-    entryId?: string;
-    expectedVersion?: number;
-    title?: string;
-    body?: string;
-    kind?: string;
-    sourceRefs?: string[];
-    relatedEntryIds?: string[];
-  }) => Promise<MemoryMutationResult>;
-  moveMemoryEntry: (payload: {
-    fromScope: MemoryScopeSelector | null;
-    entryId: string;
-    expectedVersion?: number;
-    toScope: MemoryScopeSelector | null;
-  }) => Promise<MemoryMutationResult>;
-  forgetMemoryEntry: (payload: {
-    scope: MemoryScopeSelector | null;
-    entryId: string;
-    expectedVersion?: number;
-  }) => Promise<MemoryMutationResult>;
-  clearMemoryScope: (payload: {
-    scope: MemoryScopeSelector | null;
-    expectedRevision?: number;
-  }) => Promise<MemoryMutationResult>;
-  undoMemoryMutation: (payload: {
-    operationId: string;
-    expectedAfterVersion?: number;
-  }) => Promise<MemoryMutationResult>;
-  onMemoryChanged: (callback: (event: MemoryChangedEvent) => void) => () => void;
+  inspectAgentEnvironment: () => Promise<AgentEnvironmentSnapshot>;
+  readAgentRuntimeFile: (payload: { path: string }) => Promise<{ path: string; text: string; modifiedAt: number }>;
   /** 009 任务历史：列表 / 详情 / 删除 / 重新总结（全部按 taskId 寻址）。 */
   getTaskHistory: () => Promise<TaskHistoryList>;
   getTaskHistoryRecord: (taskId: string) => Promise<TaskHistoryRecord>;

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { retryingRenameSync } from '../lib/rename-retry.mjs';
 
 const replaceJson = retryingRenameSync((from, to) => fs.renameSync(from, to));
@@ -53,6 +53,9 @@ export function publicModel(config, revision, source = 'local') {
     supportsVision: config.supportsVision === true,
     revision,
     source,
+    keyStoredSecurely: Boolean(config.encryptedApiKey || config.oauthProvider),
+    ...(config.oauthProvider ? { oauthProvider: config.oauthProvider } : {}),
+    ...(config.configuration ? { configuration: config.configuration } : {}),
     thinkingLevel: config.thinkingLevel ?? 'default',
     thinkingFormat: config.thinkingFormat ?? null,
   };
@@ -103,12 +106,18 @@ export const syncModelConfig = (raw) =>
       'thinkingFormat',
       'supportsTools',
       'contextWindow',
+      'configuration',
     ]
       .filter((k) => raw[k] !== undefined)
       .map((k) => [k, raw[k]]),
   );
 
+export const modelConfigRevision = (models, roles) => createHash('sha256').update(JSON.stringify({
+  models: Object.entries(models).sort(([a], [b]) => a.localeCompare(b)),
+  roles: Object.entries(roles).filter(([, key]) => key).sort(([a], [b]) => a.localeCompare(b)),
+})).digest('hex');
+
 export const botRpcTimeout = (method, params = {}) =>
-  method === 'model.sync'
-    ? 30000 + Math.ceil(Math.min(50, params.models?.length ?? 1) / 4) * 60000
+  ['model.sync', 'model.sync-local', 'model.configure'].includes(method)
+    ? 30000 + Math.ceil(Math.min(method === 'model.sync' ? 50 : 1000, params.models?.length ?? 1) / 4) * 60000
     : 180000;
