@@ -182,9 +182,9 @@ export function createMainAgent({
   }
 
   /** 用户输入身份随 SDK 条目落档；编辑按身份回卷，不按同文消息猜位置。 */
-  async function runTurn({ userText, inputId = null, contextText = '', imageBlocks = [] }) {
+  async function runTurn({ userText, inputId = null, contextText = '', imageBlocks = [], hostEvent = null }) {
     const modelText = [String(userText ?? ''), String(contextText ?? '')].filter(Boolean).join('\n\n');
-    return session.prompt(modelText, { inputId, images: Array.isArray(imageBlocks) ? imageBlocks : [] });
+    return session.prompt(modelText, { inputId: hostEvent ? null : inputId, hostEvent, images: Array.isArray(imageBlocks) ? imageBlocks : [] });
   }
 
   /** 最近的模型用户输入（含冻结上下文；界面原话由 flow 保存）。 */
@@ -207,7 +207,9 @@ export function createMainAgent({
     ready: () => session.ready(),
     runTurn,
     summarizeLimit,
+    recordGoalCompletion: (text, signal) => session.recordBudgetSummary({text, customType:'hemi_goal_complete', fallback:false}, signal),
     setExecutionContext: value => session.setExecutionContext(value),
+    recordEvents: (events, content) => session.appendContextFact('hemi_subagent_result', content, {eventIds:events.map(event=>event.eventId)}),
     consumeEvents: (events, content) => session.prompt('', { hostEvent: { customType: 'hemi_subagent_result', content, eventIds: events.map(event => event.eventId) } }),
     callAnchor: id => session.callAnchor(id),
     steer: (text) => session.steer(text),

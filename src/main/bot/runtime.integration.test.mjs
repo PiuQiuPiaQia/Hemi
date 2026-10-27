@@ -1,3 +1,4 @@
+import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -35,7 +36,7 @@ test(
     const server = http.createServer(async (req, res) => {
       let raw = '';
       for await (const chunk of req) raw += chunk;
-      const body = JSON.parse(raw);
+      const body = JSON.parse(raw);if(replyToGoalCheck(body,res))return;
       requests.push(body);
       const text = JSON.stringify(body.messages);
       const tools = body.messages.filter((m) => m.role === 'tool');

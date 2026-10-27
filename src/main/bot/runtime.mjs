@@ -8,6 +8,7 @@ import { createHemiSession } from '../agent/hemi-session.mjs';
 import { createRunPartProjector } from '../services/flow-parts-projection.mjs';
 import { createTaskFactPublisher } from '../services/task-fact-publisher.mjs';
 import { createPermissionService } from '../services/permission-service.mjs';
+import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 
 const TOOLS = ['context_read', 'task_read', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'bash', 'register_delivery'];
 const CLOUD_SYSTEM = `你是 Hemi，运行在用户的 ${process.platform === 'win32' ? 'Windows' : 'Linux'} 远端主机上。所有文件和命令都在这台主机执行。${process.platform === 'win32' ? 'bash 工具在此执行 Windows cmd.exe 命令，不是 POSIX bash；需要 PowerShell 时显式调用 powershell.exe -NoProfile -NonInteractive -Command。路径使用 Windows 绝对路径。' : ''}用用户的语言完成已授权的工作。没有本机桌面、麦克风、录屏、语音或浏览器能力；不能宣称已操作用户电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。`;
@@ -55,7 +56,7 @@ export async function validateCloudModel(config) {
 }
 
 /** Cloud host bindings only. Desktop and Bot share the same execution runtime. */
-export function createBotExecutor({dataDir, readEntries, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService}) {
+export function createBotExecutor({dataDir, readEntries, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, goalPolicy = {}}) {
   const active = new Map(), generations = new Map(), cancelledBeforeStart = new Set();
   const access = createPermissionService({dir: dataDir}), ready = access.load();
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
@@ -72,7 +73,7 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
     void pending.catch(() => {});owner.deliveries.push(pending);
   };
   const runtime = createAgentRuntime({
-    userDataDir: dataDir, getProfiles: profilesFor, nativeMemory: true,
+    userDataDir: dataDir, getProfiles: profilesFor, nativeMemory: true, goalPolicy, onGoalVerification:(id,call)=>recordUsage?.(id,call),
     resolveCapabilities: async () => ({visionOn: false, browserOn: false, features: {vision: false, browser: false, web: false}}),
     getAccessService: () => access,
     sessionOptions: {tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
@@ -119,7 +120,7 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
       const owner = {spec, ctx, stopped: false, permissions: new Map(), deliveries: [], settled: Promise.withResolvers()};active.set(conversationId, owner);
       const projector = createRunPartProjector({runId, generation, inputId: envelope.inputId});
       const fact = event => {for (const value of projector.handle(event)) apply(value);};
-      let session, outcome = 'failed';
+      let session, outcome = 'failed', cleanupUnconfirmed = false;
       const onStream = event => {
         if (event.type === 'text_delta') fact({kind: 'text', text: event.delta});
         else if (event.type === 'thinking_delta') fact({kind: 'thinking', text: event.delta});
@@ -146,16 +147,21 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
         if (ctx.cancelled) return {stopped: true};
         const result = await runtime.runRootTurn(conversationId, {userText: input.text, inputId: envelope.inputId, imageBlocks: input.images ?? []});
         await Promise.all(owner.deliveries);await runtime.persist(conversationId);
+        if (result.budgetLimited || (!result.aborted && !ctx.cancelled && !result.goalComplete)) throw Object.assign(new Error('任务尚未通过完成校验，已有成果已保留。'), {code:'goal-incomplete'});
         outcome = result.aborted || ctx.cancelled ? 'stopped' : 'completed';
         for (const value of projector.finish({stopped: result.aborted || ctx.cancelled})) apply(value);
         return {stopped: result.aborted || ctx.cancelled};
       } catch (error) {
+        cleanupUnconfirmed = error.code === 'cleanup-unconfirmed';
         for (const value of projector.finish({error: owner.stopped ? null : error, stopped: owner.stopped})) apply(value);
-        if (!owner.stopped) throw error;
+        if (!owner.stopped || cleanupUnconfirmed) throw error;
         return {stopped: true};
       } finally {
         session?.off('stream', onStream);session?.off('activity', onActivity);session?.off('recovery', onRecovery);session?.off('progress', onProgress);
-        try {await runtime.completeConversation(conversationId, owner.stopped ? 'stopped' : outcome, null, runId);}
+        try {
+          const completion=runtime.completeConversation(conversationId,cleanupUnconfirmed?'failed':owner.stopped?'stopped':outcome,null,runId);
+          if(cleanupUnconfirmed)await commandDeadline(completion,10000,'异常命令终态保存未确认，请核对后重启运行时');else await completion;
+        }
         finally {if (active.get(conversationId) === owner) active.delete(conversationId);owner.settled.resolve();}
       }
     },
@@ -171,11 +177,14 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
       const result = pending.decide(value);if (result) owner.permissions.delete(permissionId);return result;
     },
     async close() {
-      await ready;
-      const running = [...active.values()];
-      await Promise.all(running.map(owner => this.stop(owner.spec.conversationId)));
-      await Promise.all(running.map(owner => owner.settled.promise));
-      taskFacts?.dispose();await runtime.close();
+      try {
+        await ready;
+        const running = [...active.values()];
+        const stops = await commandDeadline(Promise.allSettled(running.map(owner => this.stop(owner.spec.conversationId))),20000,'Bot 命令停止未能确认');
+        await commandDeadline(Promise.all(running.map(owner => owner.settled.promise)),20000,'Bot 运行退出未能确认');
+        const failure=stops.find(result=>result.status==='rejected');
+        if(failure)throw failure.reason;
+      } finally {taskFacts?.dispose();await runtime.close();}
     },
   };
 }

@@ -3,6 +3,7 @@ import { runCommand, commandToolResult } from './command-execution.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 import { processBirth } from '../../agent-runtime/owned-processes.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
+import {commandDeadline, cleanupFailure, blockCommandCleanup} from './command-deadline.mjs';
 
 export const COMMAND_FOREGROUND_MS = 10_000;
 export const COMMAND_TIMEOUT_MS = 30 * 60_000;
@@ -11,8 +12,15 @@ const sameOwner = (a, b) => a?.conversationId === b?.conversationId && a?.rootRu
 const outputTail = result => [result.stdout.slice(-2000), result.stderr.slice(-2000)].filter(Boolean).join('\n').slice(-2000);
 
 /** 进程属于目标而非一次 SDK 请求。后台只交还模型调用，取消/退出仍确认进程树清理。 */
-export function createCommandScope({ onChange = () => {}, now = Date.now } = {}) {
+export function createCommandScope({ onChange = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000 } = {}) {
   const active = new Set(), completed = [];
+  let quarantine = null;
+  const uncertain = (execution, message) => {
+    quarantine = cleanupFailure(message);
+    blockCommandCleanup(execution?.journal,quarantine);
+    if (execution) {execution.cleanupUnconfirmed=true;execution.fatalError=message;}
+    return quarantine;
+  };
   const view = record => ({
     id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 8000),
     commandTruncated: record.command.length > 8000, description: record.description, lastOutputAt: record.lastOutputAt,
@@ -34,6 +42,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
   };
 
   async function run(options) {
+    if (quarantine) throw quarantine;
     const scope = currentExecutionScope(), execution = scope?.execution;
     if (execution?.cancelled?.()) throw new DOMException('目标已停止', 'AbortError');
     const controller = new AbortController();
@@ -45,6 +54,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
       toolCallId: scope?.toolCallId, command: options.command, startedAt: now(),
       description: normalizeCommandDescription(options.description), lastOutputAt: null,
       background: false, output: '', promise: null, settled: false,
+      deadlineAt: now()+(options.timeoutMs>0?options.timeoutMs:COMMAND_TIMEOUT_MS)+settleTimeoutMs,
     };
     const token = randomUUID();
     let registered = false, ready;
@@ -68,13 +78,20 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
           }, remaining);
         }
       },
-      onSpawn: async pid => {
+      onSpawn: async (pid, isolation) => {
         if (execution?.journal) {
           const birth = await processBirth(pid);
-          await execution.journal.processStart({ id: record.id, token, pid, birth, owner: execution.owner,
+          const registration = execution.journal.processStart({ id: record.id, token, pid, birth, ...isolation, owner: execution.owner,
             command: options.command, description: record.description, cwd: options.cwd, toolCallId: record.toolCallId,
           });
-          registered = true;
+          // A late durable write must not resurrect an already closed command.
+          void registration.then(async()=>{
+            registered=true;
+            if(record.settled)await execution.journal.processEnd(record.id,{state:'unknown',cleanupConfirmed:false,status:'registration-late'});
+          }).catch(()=>{});
+          try {await commandDeadline(registration,persistenceTimeoutMs,'命令归属保存超时，用户命令未启动');}
+          catch(error){throw uncertain(execution,error.message);}
+          registered=true;
         }
         await options.onSpawn?.(pid);
         ready();
@@ -82,26 +99,24 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
     }).then(async result => {
       record.result = result;
       record.output = outputTail(result);
+      if(quarantine)throw quarantine;
       if (registered) {
         try {
-          await execution.journal.processEnd(record.id, {
+          await commandDeadline(execution.journal.processEnd(record.id, {
             state: result.cleanupConfirmed ? 'finished' : 'unknown', cleanupConfirmed: result.cleanupConfirmed,
             status: result.status, code: result.code, output: record.output, lastOutputAt: record.lastOutputAt,
-          });
+          }),persistenceTimeoutMs,'命令退出事实保存超时');
         } catch (error) {
-          execution.fatalError = `命令退出事实保存失败：${error.message}`;
-          throw error;
+          throw uncertain(execution,`命令退出事实保存失败：${error.message}`);
         }
       }
-      if (!result.cleanupConfirmed && execution) {
-        execution.cleanupUnconfirmed = true;
-        execution.fatalError = '命令进程尚未确认退出，已停止后续操作；请核对后重启应用';
-        throw new Error(execution.fatalError);
+      if (!result.cleanupConfirmed) {
+        throw uncertain(execution,'命令进程尚未确认退出，已停止后续操作；请核对后重启运行时');
       }
       if (record.background && execution?.contextStore) {
-        record.outputRef = await execution.contextStore.put({ owner: execution.owner, kind: 'tool',
+        record.outputRef = await commandDeadline(execution.contextStore.put({ owner: execution.owner, kind: 'tool',
           content: commandToolResult(result).content, source: { kind: 'tool', tool: 'bash' },
-        });
+        }),persistenceTimeoutMs,'后台命令结果保存超时');
         if (execution.allowedRefs && !execution.allowedRefs.includes(record.outputRef)) execution.allowedRefs.push(record.outputRef);
       }
       // 完整结果已有不可变快照，等待模型收口时只保留有界尾部。
@@ -110,7 +125,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
         truncated: result.truncated || result.stdout.length > 12_000 || result.stderr.length > 12_000,
       };
       return record.result;
-    }).catch(error => { record.error = error; throw error; }).finally(() => {
+    }).catch(error => { record.error = error; if(error.code==='cleanup-unconfirmed')uncertain(execution,error.message); throw error; }).finally(() => {
       clearTimeout(progressTimer);
       record.settled = true;
       record.endedAt = now();
@@ -135,7 +150,15 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
     record.background = true;
     // 已转后台的进程随目标取消，不随当前 SDK 模型回合结束而丢失。
     options.signal?.removeEventListener('abort', onAbort);
-    if (registered) await execution.journal.processBackground(record.id);
+    if (registered) {
+      try {await commandDeadline(execution.journal.processBackground(record.id),persistenceTimeoutMs,'命令后台状态保存超时');}
+      catch(error){
+        const failure=uncertain(execution,error.message);
+        controller.abort();
+        await commandDeadline(record.promise,settleTimeoutMs,'命令取消未能确认').catch(()=>{});
+        throw failure;
+      }
+    }
     publish();
     return { status: 'background', jobId: record.id, cleanupConfirmed: false, code: null,
       stdout: '', stderr: '', background: true, startedAt: record.startedAt,
@@ -149,18 +172,21 @@ export function createCommandScope({ onChange = () => {}, now = Date.now } = {})
     async waitForCompletion(owner) {
       const records = backgroundFor(owner);
       if (!records.some(r => r.settled) && records.length) {
-        await Promise.race(records.map(r => r.promise));
+        const remaining=Math.max(1,Math.min(...records.map(r=>r.deadlineAt-now())));
+        try {await commandDeadline(Promise.race(records.map(r=>r.promise)),remaining,'后台命令结果未能确认，已阻止继续执行');}
+        catch(error){if(error.code==='cleanup-unconfirmed')throw uncertain(currentExecutionScope()?.execution,error.message);throw error;}
       }
       return takeCompleted(owner);
     },
     async abort() {
       const owned = [...active];
       for (const record of owned) record.controller.abort();
-      const results = await Promise.allSettled(owned.map(record => record.promise));
+      const results = await Promise.allSettled(owned.map(record => commandDeadline(record.promise,settleTimeoutMs,'命令取消未能确认完成，已阻止后续执行')));
       completed.length = 0;
+      if(quarantine)throw quarantine;
       const failure = results.find(result => result.status === 'rejected');
-      if (failure) throw failure.reason;
-      if (results.some(result => !result.value.cleanupConfirmed)) throw new Error('命令所属进程未确认退出，请核对后继续');
+      if (failure) throw uncertain(currentExecutionScope()?.execution,failure.reason.message);
+      if (results.some(result => !result.value.cleanupConfirmed)) throw uncertain(currentExecutionScope()?.execution,'命令所属进程未确认退出，请核对后重启运行时');
     },
   };
 }

@@ -121,11 +121,11 @@ export async function serve(options = {}) {
     if (closing) return;
     closing = true;
     for(const client of clients)client.destroy();
-    await host.close();
-    await new Promise((resolve) => server.close(resolve));
-    try {
-      if (process.platform !== 'win32') fs.unlinkSync(socketPath);
-    } catch {}
+    try {await host.close();}
+    finally {
+      await new Promise((resolve) => server.close(resolve));
+      try {if (process.platform !== 'win32') fs.unlinkSync(socketPath);} catch {}
+    }
   };
   return { host, server, close };
 }
@@ -142,7 +142,7 @@ if (
     });
     for (const signal of ['SIGINT', 'SIGTERM'])
       process.once(signal, () => {
-        void instance.close().then(() => process.exit(0));
+        void instance.close().then(() => process.exit(0), () => process.exit(1));
       });
   } else if (process.argv[2] === 'watch') {
     process.stdin.setEncoding('utf8');

@@ -3,6 +3,7 @@ import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -88,6 +89,7 @@ export async function createBotHost({
   dataDir,
   defaultDir = path.join(os.homedir(), 'hemi-workspace'),
   executorFactory = createBotExecutor,
+  goalPolicy = {},
   validateModel = validateCloudModel,
   allowLoopbackModels = false,
   editLeaseMs = 60000,
@@ -341,6 +343,9 @@ export async function createBotHost({
         at: Date.now(),
       });
     } catch (error) {
+      if (error.code === 'cleanup-unconfirmed') {
+        closeUnconfirmedCommand(job.controller,{runId:job.spec.runId,generation:job.spec.generation,error});
+      }
       job.controller.applyFact({
         type: 'part-appended',
         runId: job.spec.runId,
@@ -500,6 +505,7 @@ export async function createBotHost({
     return c;
   }
   const executor = executorFactory({
+    goalPolicy,
     dataDir,
     flowService: {has: id => controllers.has(id), controllerFor: controller},
     readEntries: (id, generation, inputId) => {

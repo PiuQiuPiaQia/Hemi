@@ -38,6 +38,11 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 
 .conversation-frame{display:flex;flex:1;min-height:0;min-width:0}.conversation-frame>.hcf-root{width:100%}
 .navigation-stage [data-hemi-conversation-flow]{--fs-15:var(--text-body);--hcf-message-action-size:var(--s7)}
+.conversation-frame .h56-run-activity{flex-shrink:0;margin:0 var(--s3) var(--s2);font-size:var(--text-label)}
+.conversation-frame .h56-run-activity-head{min-height:var(--s11);padding:var(--s2) var(--s3)}
+.conversation-frame .h56-run-activity-head>svg{width:var(--s4);height:var(--s4)}
+.conversation-frame .h56-run-activity-title{white-space:normal;overflow-wrap:anywhere}
+.conversation-frame .h56-run-activity-body{max-height:min(calc((var(--app-height,100dvh) - var(--keyboard-inset,0px))*.3),calc(var(--s16)*3));padding:var(--s3)}
 .queue-region{--queue-control-size:calc(var(--s8) + var(--s1));min-width:0}.queue-region:has(.h24-queue-tray){border-bottom:1px solid var(--m-line)}.queue-region>.hcf-root{display:block;--hcf-touch-target:var(--queue-control-size)}
 .queue-region .h24-queue-tray{border:0;border-radius:0;margin:0;padding:0 var(--s2)}
 .queue-region .h24-queue-body{max-height:min(calc((var(--app-height,100dvh) - var(--keyboard-inset,0px))*.24),calc(var(--queue-control-size)*4))}

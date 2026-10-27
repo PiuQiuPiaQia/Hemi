@@ -1,3 +1,4 @@
+import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 // Production Host -> shared runtime -> installed SDK -> real HTTP and POSIX tools.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,7 +28,7 @@ async function fixture(t) {
   const first=path.join(root,'workspace'),other=path.join(root,'other');await fs.mkdir(first);await fs.mkdir(other);
   const server=http.createServer(async(req,res)=>{
     let raw='';for await(const chunk of req)raw+=chunk;
-    const body=JSON.parse(raw),text=JSON.stringify(body.messages);requests.push(body);
+    const body=JSON.parse(raw);if(replyToGoalCheck(body,res))return;const text=JSON.stringify(body.messages);requests.push(body);
     const lastUser=JSON.stringify(body.messages.filter(message=>message.role==='user').at(-1));
     if(lastUser?.includes('HOLD_MODEL')){held.set(lastUser.match(/HOLD_MODEL_(\w+)/)[1].toLowerCase(),res);return;}
     const toolCalled=body.messages.some(message=>message.role==='tool');

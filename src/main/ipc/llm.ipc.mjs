@@ -1,4 +1,6 @@
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
+import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
+import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { ipcMain, app, shell, dialog, net } from 'electron';
 import { createLocalFileActions } from '../services/local-file-actions.mjs';
 import { randomUUID, createHash } from 'node:crypto';
@@ -490,6 +492,13 @@ function createLlmFlowRuntime(conversationId) {
         return { modelUsed: result?.usage?.requestedModel ?? null, result, aborted: false };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if(error?.code==='cleanup-unconfirmed'){
+          flushFacts();
+          closeUnconfirmedCommand(controller,{runId,generation,error});
+          await commandDeadline(runtime?.completeConversation(conversationId,'failed',message,runId),5000,'异常终态保存超时').catch(()=>{});
+          completeInput(envelope?.inputId,error,null);
+          return {aborted:false,pendingStop:false,cleanupUnconfirmed:true};
+        }
         const cancelled = Boolean(controller.getSnapshot().runs[runId]?.stopRequested) || error?.name === 'AbortError' || /回合已取消/.test(message);
         if (error?.pendingStop) {
           flushFacts();
@@ -500,6 +509,11 @@ function createLlmFlowRuntime(conversationId) {
         }
         try { await stoppingRuns.get(runId); } catch (stopError) {
           flushFacts();
+          if(stopError?.code==='cleanup-unconfirmed'){
+            closeUnconfirmedCommand(controller,{runId,generation,error:stopError});
+            completeInput(envelope?.inputId,stopError,null);
+            return {aborted:false,pendingStop:false,cleanupUnconfirmed:true};
+          }
           for (const fact of projector.finish({ error: stopError })) controller.applyFact(fact);
           llmLog.error(`turn ${runId} 停止未确认：${stopError.message}`);
           completeInput(envelope?.inputId, stopError, null);

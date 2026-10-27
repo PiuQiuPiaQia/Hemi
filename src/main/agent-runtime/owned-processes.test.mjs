@@ -7,6 +7,12 @@ import path from 'node:path';
 import {createRunJournal} from './run-journal.mjs';
 import {recoverOwnedProcesses,processBirth} from './owned-processes.mjs';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
+test('an explicitly unconfirmed legacy tree cannot be declared gone merely because its parent PID vanished',async()=>{
+ const record={id:'unknown',state:'unknown',cleanupConfirmed:false,pid:99999999,birth:'old',token:'old'};
+ let writes=0;
+ await assert.rejects(recoverOwnedProcesses({snapshot:async()=>({processes:{unknown:record}}),processEnd:async()=>{writes++;}}),{code:'cleanup-unconfirmed'});
+ assert.equal(writes,0);
+});
 test('宿主崩溃后按随机归属标记回收实际进程组；相同PID但标记不符的独立工作存活', {skip:process.platform==='win32'?'Windows进程树需真机验证':false}, async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'hemi064-orphans-'));
  let child,independent;

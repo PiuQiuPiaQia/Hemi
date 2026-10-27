@@ -436,7 +436,7 @@ export function createSubagentManager({
       for (const task of tasks.values()) {
         if (task.phase !== 'running') continue;
         runnable = true;
-        if (['waiting-background', 'waiting-resource'].includes(task.activity?.phase)) {
+        if (task.modelRequestActive || ['waiting-background', 'waiting-resource'].includes(task.activity?.phase)) {
           // 宿主有明确等待事实；后台进程的硬超时/取消负责收口，不误报模型流停摆。
           task.lastActivityAt = now;
           continue;
@@ -848,7 +848,7 @@ export function createSubagentManager({
     task.terminalWait = new Promise((resolve) => { task.resolveTerminal = resolve; });
   }
 
-  async function spawn({ role, prompt, description = '', background = false, sessionId = null, conversationId = null, inputSource = 'voice', workspace = null, modelPlan = null, signal = null, toolCallId = null, rootRunId = null, dispatchKey = null, generation = 0 }) {
+  async function spawn({ role, prompt, description = '', background = false, sessionId = null, conversationId = null, inputSource = 'voice', workspace = null, modelPlan = null, signal = null, toolCallId = null, rootRunId = null, dispatchKey = null, taskId = null, generation = 0 }) {
     const text = String(prompt ?? '').trim();
     if (!text) return { ok: false, error: 'prompt 不能为空' };
     let task = null, previous = null, retainedSession = null;
@@ -876,6 +876,7 @@ export function createSubagentManager({
       let historyId = null;
       try {
         historyId = history?.createRecord({
+          ...(taskId ? { taskId } : {}),
           taskText: String(description || text).slice(0, 400),
           context: text,
           conversationId,
@@ -887,6 +888,8 @@ export function createSubagentManager({
       } catch (error) {
         log?.warn?.(`[history] 子 agent 建档失败（不阻断）：${error.message}`);
       }
+      if (taskId && historyId && historyId !== taskId) return { ok: false, error: '任务档案身份与持久派单不一致' };
+      historyId = taskId ?? historyId ?? `task-${randomUUID()}`;
       task = {
         seq, key, historyId, alias: `${role.name}-${seq}`,
         role, prompt: text, description: String(description ?? '').trim(),
@@ -939,7 +942,12 @@ export function createSubagentManager({
       });
       // 模型正在流式输出（思考／正文／工具参数分片）也是活动：停摆看门狗只认工具事件会把
       // 读完资料后写长报告、或长思考的那一轮当成「模型流停摆」掐掉（10-19 t24 实录）。
-      session.on('stream', () => { if (task.phase === 'running' && tasks.get(task.key)?.session === session) task.lastActivityAt = nowFn(); });
+      session.on('stream', event => {
+        if (tasks.get(task.key)?.session !== session) return;
+        if (event.type === 'hemi_request_start') task.modelRequestActive = true;
+        if (event.type === 'hemi_request_end') task.modelRequestActive = false;
+        if (task.phase === 'running') task.lastActivityAt = nowFn();
+      });
       session.on('permission', (request) => { if (tasks.get(task.key)?.session === session) handlePermission(task, request); });
       session.on('model-call', (call) => { if (tasks.get(task.key)?.session === session) recordModelCall(task, call); });
       session.on('model-route', (event) => {

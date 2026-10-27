@@ -1,3 +1,4 @@
+import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -84,7 +85,7 @@ test('real Hemi SDK selects each role model, falls back for main and roles, and 
   let blockedReview = false;
   const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw), text = JSON.stringify(body.messages); requests.push(body);
+    const body = JSON.parse(raw);if(replyToGoalCheck(body,res))return;const  text = JSON.stringify(body.messages); requests.push(body);
     const isChild = text.includes('ROLE_WORK');
     if (body.model === 'shared-model' && req.url.includes('/primary/')) { res.writeHead(503); res.end('temporary failure'); return; }
     if (body.model === 'main-model' && text.includes('BG_STOP') && body.messages.filter(message => message.role === 'user').length > 1) { blockedReview = true; res.writeHead(200, { 'content-type': 'text/event-stream' }); res.flushHeaders(); return; }

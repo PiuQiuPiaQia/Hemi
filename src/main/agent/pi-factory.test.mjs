@@ -29,11 +29,11 @@ function routerOf({ withoutFallback = false, extraFallbacks = [] } = {}) {
 
 const failure = { message: { stopReason: 'error', errorMessage: '503 service_unavailable', content: [] } };
 
-test('managed recovery keeps only the SDK candidate-switch budget for routed sessions', () => {
+test('managed recovery owns retries and fallback selection for fixed and routed sessions', () => {
   const fixed = sessionSettingsOf({managedRecovery: true});
   assert.equal(fixed.retry.enabled, false);
   const routed = sessionSettingsOf({managedRecovery: true, routing: {fallbacks: [{}, {}]}, settings: {retry: {provider: {maxRetries: 8}}}});
-  assert.equal(routed.retry.enabled, true);assert.equal(routed.retry.maxRetries, 2);assert.equal(routed.retry.provider.maxRetries, 0);
+  assert.equal(routed.retry.enabled, false);assert.equal(routed.retry.provider.maxRetries, 0);
 });
 
 test('SDK 预算先耗尽时按实际候选说明失败，未走完候选／取消／已有明确原因不改写', () => {

@@ -1,3 +1,4 @@
+import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -16,7 +17,7 @@ test('真实独立进程：旧聊天与私有快照迁移、重启续聊、再�
   const requests = [];
   const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw), all = JSON.stringify(body.messages); requests.push(body);
+    const body = JSON.parse(raw); if(replyToGoalCheck(body,res))return; const all = JSON.stringify(body.messages); requests.push(body);
     const continuing = /CONTINUE_AFTER_/.test(all);
     const toolDone = body.messages.some(message => message.role === 'tool');
     const tool = !continuing && all.includes('REMEMBER_NATIVE_FIRST') && !toolDone ? {

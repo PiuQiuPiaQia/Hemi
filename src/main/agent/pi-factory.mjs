@@ -21,7 +21,7 @@ import { MODEL_OUTPUT_LIMIT, providerRegistrationOf, sdkThinkingLevelOf } from '
  * @param {(event: {to: object, fallbackUsed: boolean}) => void} [options.onRoute] 切换通知（宿主记账/日志）
  * @param {string} [options.name] 扩展名（日志用）
  */
-export function createRoutingExtension({ routing, runtime, onRoute = null, name = 'hemi-routing' }) {
+export function createRoutingExtension({ routing, runtime, onRoute = null, name = 'hemi-routing', managedRecovery = false }) {
   const candidates = [routing.execution, ...(routing.fallbacks?.length ? routing.fallbacks : routing.fallback ? [routing.fallback] : [])];
   const providerOf = index => index === 0 ? 'hemi' : index === 1 ? 'hemi-fallback' : `hemi-fallback-${index}`;
   return {
@@ -35,6 +35,12 @@ export function createRoutingExtension({ routing, runtime, onRoute = null, name 
         name: 'Hemi 自动路由',
         thinkingLevels: ['off', 'low', 'medium', 'high'],
         route: (request, ctx) => {
+          // 受控会话的候选由请求恢复器选择；SDK 只投影当前物理模型，不再次解释错误文案。
+          if (managedRecovery) {
+            const index = runtime.state.candidateIndex ?? 0;
+            const candidate = candidates[index];
+            return { model: ctx.modelRegistry.find(providerOf(index), candidate.model), thinkingLevel: sdkThinkingLevelOf(candidate.thinkingLevel), state: request.reason === 'direct' ? undefined : { ...runtime.state } };
+          }
           // 057：state 带 epoch——宿主回合重置（resetRoutingForApplicationTurn）递增
           // epoch 后，SDK 回传的旧代 state 作废，改用宿主持有的新 state。否则 SDK 会把
           // 上一回合的备用 state 原样送回来，宿主重置被冲掉。
@@ -145,9 +151,9 @@ export function settledRoutingError(message, { routing, state, aborted = false, 
  * 自动压缩管理；子 agent 维持 SDK 默认）。
  */
 export function sessionSettingsOf({ routing = false, settings = {}, managedRecovery = false } = {}) {
-  // Host recovery owns same-candidate retries. A routing session still needs the
-  // SDK retry boundary to select the next frozen candidate once.
-  if (managedRecovery && !routing) return { ...settings, retry: { ...settings.retry, enabled: false, provider: { ...settings.retry?.provider, maxRetries: 0 } } };
+  // Host recovery owns both same-candidate retries and frozen-candidate selection.
+  // Virtual routing only projects that decision into the SDK model registry.
+  if (managedRecovery) return { ...settings, retry: { ...settings.retry, enabled: false, provider: { ...settings.retry?.provider, maxRetries: 0 } } };
   if (!routing) return settings;
   return {
     ...settings,

@@ -104,10 +104,12 @@ export function applyFlowFact(snapshot, fact) {
       if (snapshot.pending.some((entry) => entry.inputId === fact.input.inputId)) {
         return { snapshot, patch: null, applied: false, dropped: 'duplicate-input' };
       }
-      if (snapshot.pending.length >= PENDING_CAPACITY) {
+      // A replacement already accepted before a failed cleanup must remain reviewable,
+      // even when the ordinary queue filled while handoff was pending.
+      if (snapshot.pending.length >= PENDING_CAPACITY && !fact.needsReview) {
         return { snapshot, patch: null, applied: false, dropped: 'queue-full' };
       }
-      const next = { ...snapshot, revision: snapshot.revision + 1, pending: [...snapshot.pending, { ...fact.input, state: 'pending', targetRunId: null }] };
+      const next = { ...snapshot, revision: snapshot.revision + 1, pending: [...snapshot.pending, { ...fact.input, state: fact.needsReview ? 'needs-review' : 'pending', targetRunId: null }] };
       return { snapshot: next, patch: { kind: 'queue', pending: next.pending }, applied: true };
     }
     case 'input-edit-started':

@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "platform": "win32-x64",
+  "runtime": ".NET Framework 4",
+  "sourceSha256": "af9a6636981b566cd915461c01209145e728406e6e5a649bc222aca96a29bf32",
+  "binarySha256": "b5bea733886399ef3fc6239e310d3223688ef428508f7787e68415506f510efa"
+}

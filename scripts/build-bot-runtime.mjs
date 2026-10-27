@@ -6,14 +6,18 @@ import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import {COMPONENT_MANIFEST} from '../src/main/bot/component-version.mjs';
 import { fileURLToPath } from 'node:url';
+import {readWindowsCommandArtifact} from '../src/main/agent/gate/windows-command-job.mjs';
 const exec = promisify(execFile);
 export async function buildBotRuntime({
   root = path.resolve(import.meta.dirname, '..'),
   output = path.join(root, 'build/hemi-bot-runtime.tgz'),
+  componentVersion = null,
 } = {}) {
   const temporaryOutput = output + '.' + randomUUID() + '.tmp';
   const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-package-'));
   try {
+    const guard = path.join(root, 'src/main/agent/gate');
+    if (await fs.access(path.join(guard, 'windows-command-job.cs')).then(()=>true,()=>false)) await readWindowsCommandArtifact(guard);
     async function copy(dir, relative) {
       for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         if (entry.name.startsWith('._') || entry.name.endsWith('.test.mjs'))
@@ -22,7 +26,7 @@ export async function buildBotRuntime({
           target = path.join(stage, relative, entry.name);
         if (entry.isDirectory())
           await copy(source, path.join(relative, entry.name));
-        else if ((/\.(mjs|json)$/.test(entry.name) || (relative === 'src/main/agent/roles' && entry.name.endsWith('.md')))) {
+        else if ((/\.(mjs|json)$/.test(entry.name) || (relative === 'src/main/agent/gate' && /^windows-command-job\.(?:cs|exe)$/.test(entry.name)) || (relative === 'src/main/agent/roles' && entry.name.endsWith('.md')))) {
           await fs.mkdir(path.dirname(target), { recursive: true });
           await fs.copyFile(source, target);
         }
@@ -33,6 +37,8 @@ export async function buildBotRuntime({
     const app = JSON.parse(
       await fs.readFile(path.join(root, 'package.json'), 'utf8'),
     );
+    const version = componentVersion ?? app.version;
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Bot 组件版本号无效');
     const names = [
       '@earendil-works/pi-ai',
       '@earendil-works/pi-coding-agent',
@@ -99,7 +105,7 @@ export async function buildBotRuntime({
           // Git on Windows can check out source with CRLF. The component
           // fingerprint identifies source content across PCs; archiveSha256
           // below still verifies the exact payload, including binary files.
-          const text = /\.(?:mjs|js|json|md|txt)$/.test(name) || name === 'LICENSE';
+          const text = /\.(?:mjs|js|cs|json|md|txt)$/.test(name) || name === 'LICENSE';
           hash.update(name + '\0');
           hash.update(text ? bytes.toString('utf8').replace(/\r\n/g, '\n') : bytes);
           hash.update('\0');
@@ -107,7 +113,8 @@ export async function buildBotRuntime({
       }
     }
     await fingerprint(stage);
-    const manifest = JSON.stringify({version: app.version, build: hash.digest('hex')}, null, 2) + '\n';
+    // Component maintenance can advance independently of a desktop release.
+    const manifest = JSON.stringify({version, build: hash.digest('hex')}, null, 2) + '\n';
     await fs.writeFile(path.join(stage, COMPONENT_MANIFEST), manifest);
     await fs.mkdir(path.dirname(output), { recursive: true });
     await exec(

@@ -11,6 +11,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import hemiGate from './gate/pi-gate.mjs';
 import hemiFileTools, { hemiCommandTool } from './gate/file-tools.mjs';
 import { createCommandScope } from './gate/command-execution.mjs';
+import {commandDeadline} from './gate/command-deadline.mjs';
 import { createAccessContext } from './gate/access-context.mjs';
 // 049：远端工作区的同名工具接管与访问上下文（SSH 后端）。
 import { createRemoteAccessContext, hemiRemoteFileTools, hemiRemoteBash } from '../remote/remote-file-tools.mjs';
@@ -269,6 +270,8 @@ export function createHemiSession({
   let activeTools = 0;
   let stallTimer = null;
   let modelRecoveryActive = false;
+  let modelRequestActive = false;
+  let managedRoutingOwner = null;
   let modelRecoveryControl = null;
   /** tool-start 的参数按 toolCallId 存档——end 事件本体不回传参数。 */
   const startArgsByCall = new Map();
@@ -278,7 +281,7 @@ export function createHemiSession({
   const touchStallWatchdog = () => {
     clearTimeout(stallTimer);
     stallTimer = null;
-    if (!stallTimeoutMs || !busy || activeTools > 0 || resourceWaits.size > 0 || modelRecoveryActive) return;
+    if (!stallTimeoutMs || !busy || activeTools > 0 || resourceWaits.size > 0 || modelRecoveryActive || modelRequestActive) return;
     stallTimer = setTimeout(() => {
       log?.warn?.(`[${label}] 静默超过 ${Math.round(stallTimeoutMs / 60000)} 分钟，按停止收口`);
       void abort();
@@ -292,6 +295,7 @@ export function createHemiSession({
     ? createRoutingExtension({
         routing,
         runtime: routingRuntime,
+        managedRecovery: Boolean(executionContext),
         onRoute: (event) => emitter.emit('model-route', event),
       })
     : null;
@@ -634,7 +638,7 @@ export function createHemiSession({
           const detail = usageDetailOf(event.message);
           run.usages.push(detail);
           const messageAt = Number(event.message?.timestamp) || 0;
-          emitter.emit('model-call', {
+          if (!runtimeExecution) emitter.emit('model-call', {
             modelKey: runtimeExecution?.actualCandidate?.modelKey ?? null,
             model: event.message.model ?? event.message.providerId ?? null,
             stopReason: event.message.stopReason ?? null,
@@ -659,7 +663,7 @@ export function createHemiSession({
         case 'agent_settled': {
           const finished = run;
           const outputStarted = failedMessage?.content?.some(part => part?.type === 'text' ? Boolean(part.text?.trim()) : Boolean(part));
-          finished.modelError = settledRoutingError(finished.modelError, { routing, state: routingRuntime?.state, aborted: abortRequested, outputStarted });
+          if (!runtimeExecution) finished.modelError = settledRoutingError(finished.modelError, { routing, state: routingRuntime?.state, aborted: abortRequested, outputStarted });
           failedMessage = null;
           run = freshRun();
           overrun = false;
@@ -775,20 +779,37 @@ export function createHemiSession({
       }
       return created;
     })();
-    const timeout = delay(initTimeoutMs).then(() => {
+    let initTimer;
+    const timeout = new Promise((_,reject)=>{initTimer=setTimeout(()=>{
       initAbandoned = true;
-      throw new AgentSessionError('start-failed', `会话初始化超时（${Math.round(initTimeoutMs / 1000)}s）`);
-    });
+      reject(new AgentSessionError('start-failed', `会话初始化超时（${Math.round(initTimeoutMs / 1000)}s）`));
+    },initTimeoutMs);});
     session = await Promise.race([build, timeout]).catch((error) => {
       session = null;
       if (error instanceof AgentSessionError) throw error;
       throw new AgentSessionError('start-failed', `会话初始化失败：${error?.message ?? error}`);
-    });
+    }).finally(()=>clearTimeout(initTimer));
     if (executionContext) session.agent.streamFunction = controlledStream(session.agent.streamFunction, () => runtimeExecution ? {
-      ...runtimeExecution, compacting: () => compacting, onCandidateSelected: candidate => { runtimeExecution.actualCandidate = candidate; },
+      ...runtimeExecution, compacting: () => compacting,
+      onAttemptRecorded: ({ candidate, requestId, purpose, stopReason, isError, coverage, tokenUsage, startedAt, genMs }) => emitter.emit('model-call', {
+        modelKey: candidate.modelKey, model: candidate.model, requestId, purpose, stopReason, isError,
+        usageStatus: coverage === 'complete' ? 'service' : 'unknown',
+        usageDetail: coverage === 'complete' ? { input: tokenUsage.uncachedInput, output: tokenUsage.output, cacheRead: tokenUsage.cacheRead, cacheWrite: tokenUsage.cacheWrite, genMs } : null,
+        at: startedAt,
+      }),
+      selectedCandidateIndex: routingRuntime?.state.candidateIndex ?? 0,
+      resolveModel: (candidate, index) => session.modelRuntime.getModel(index === 0 ? 'hemi' : index === 1 ? 'hemi-fallback' : `hemi-fallback-${index}`, candidate.model),
+      onCandidateSelected: (candidate, index) => {
+        runtimeExecution.actualCandidate = candidate;
+        if (routingRuntime && (routingRuntime.state.candidateIndex ?? 0) !== index) {
+          routingRuntime.state = { slot: index ? 'fallback' : 'primary', fallbackUsed: index > 0, candidateIndex: index };
+          emitter.emit('model-route', { to: { modelKey: candidate.modelKey, name: candidate.name, model: candidate.model }, fallbackUsed: index > 0 });
+        }
+      },
       beforeRequest: () => persistExecution(),
       onImageProjection: stats => log?.info?.(`[${label}] 请求图片投影 ${stats.mode}：${stats.imagesBefore} 张，省略 ${stats.omitted} 张，压缩 ${stats.resized} 张，Base64 ${stats.bytesBefore} → ${stats.bytesAfter} 字节`),
-      onRequestStart: () => emitter.emit('stream', { type: 'hemi_request_start' }),
+      onRequestStart: () => { modelRequestActive = true; touchStallWatchdog(); emitter.emit('stream', { type: 'hemi_request_start' }); },
+      onRequestEnd: () => { modelRequestActive = false; touchStallWatchdog(); emitter.emit('stream', { type: 'hemi_request_end' }); },
       onRequestReset: () => emitter.emit('stream', { type: 'hemi_request_reset' }),
       onRecoveryControl: control => { modelRecoveryControl = control; if (!control) { modelRecoveryActive = false; touchStallWatchdog(); } },
       onRecovery: recovery => {
@@ -849,7 +870,10 @@ export function createHemiSession({
     busy = true;
     // 057（AC-32）：新的应用回合重置备用——SDK 的 reason=user 不再承担该判定
     // （并入消化的请求也带 user，探针 B6a/B6b）；宿主在 prompt 边界显式记账。
-    if (!hostEvent && routing && routingRuntime) {
+    const owner = runtimeExecution?.owner;
+    const ownerKey = owner ? JSON.stringify([owner.conversationId, owner.rootRunId, owner.generation, owner.taskId]) : null;
+    if (routing && routingRuntime && (runtimeExecution ? ownerKey !== managedRoutingOwner : !hostEvent)) {
+      managedRoutingOwner = ownerKey;
       resetRoutingForApplicationTurn({
         routing,
         runtime: routingRuntime,
@@ -857,20 +881,25 @@ export function createHemiSession({
       });
     }
     touchStallWatchdog();
+    const abandoned = Promise.withResolvers();
     const settled = new Promise((resolve) => {
-      pendingPrompt = { resolve };
+      pendingPrompt = { resolve, abandon: abandoned.resolve };
     });
     let promptError = null;
     try {
       // 自定义条目只存身份、不进入模型消息。回卷可保留之前完整的工具／图片历史。
       if (typeof inputId === 'string' && inputId) sessionManager.appendCustomEntry('hemi.input', { inputId });
-      if (hostEvent) await session.sendCustomMessage({ customType: hostEvent.customType, content: hostEvent.content, display: false, details: { eventIds: hostEvent.eventIds } }, { triggerTurn: true });
-      else await session.prompt(String(text ?? ''), Array.isArray(images) && images.length ? { images } : undefined);
+      const dispatch = hostEvent
+        ? session.sendCustomMessage({ customType: hostEvent.customType, content: hostEvent.content, display: false, details: { eventIds: hostEvent.eventIds } }, { triggerTurn: true })
+        : session.prompt(String(text ?? ''), Array.isArray(images) && images.length ? { images } : undefined);
+      // SDK abort waits for tool handlers. Disposal must also release our outer waiter.
+      await Promise.race([dispatch, abandoned.promise]);
     } catch (error) {
       promptError = error;
     }
     await browserCleanup;
-    const result = await Promise.race([settled, delay(SETTLE_GRACE_MS).then(() => null)]);
+    let settleTimer;
+    const result = await Promise.race([settled, new Promise(resolve=>{settleTimer=setTimeout(()=>resolve(null),SETTLE_GRACE_MS);})]).finally(()=>clearTimeout(settleTimer));
     if (result) {
       return {
         ...result,
@@ -899,9 +928,16 @@ export function createHemiSession({
         toolNames: [...result.toolNames, ...next.toolNames], requests: result.requests + next.requests,
       };
     };
+    let quotaHold = false;
+    const chunkLimited = async () => {
+      if (!execution?.journal) return false;
+      const root = await execution.journal.root(execution.owner);
+      return Boolean(root?.goal && root.requestLimitReached);
+    };
     try {
-      while (!result.aborted && !result.modelError && !disposed && !abortRequested
-        && !execution?.cancelled?.() && commands.hasBackground(execution?.owner)) {
+      while (!result.aborted && !disposed && !abortRequested
+        && !execution?.cancelled?.() && commands.hasBackground(execution?.owner)
+        && (!result.modelError || (quotaHold = await chunkLimited()))) {
         waitingForBackground = true;
         backgroundWaitSince = Date.now();
         publishActivity();
@@ -911,10 +947,13 @@ export function createHemiSession({
         if (disposed || abortRequested || execution?.cancelled?.() || runtimeExecution !== execution) break;
         if (!events.length) continue;
         // hostEvent 不创建用户目标、不重置备用或预算；命令结果按原归属只消费一次。
-        append(await promptOnce('', { hostEvent: backgroundCommandEvent(events) }));
+        if (quotaHold) {
+          const event = backgroundCommandEvent(events);
+          await appendContextFact(event.customType, event.content, {eventIds:event.eventIds});
+        } else append(await promptOnce('', { hostEvent: backgroundCommandEvent(events) }));
         await persistExecution();
       }
-      if (result.aborted || result.modelError || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
+      if (result.aborted || (result.modelError && !quotaHold) || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
       return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
     } catch (error) {
       await commands.abort();
@@ -978,10 +1017,7 @@ export function createHemiSession({
     clearTimeout(stallTimer);
     releasePermissions();
     try {
-      await Promise.race([
-        session.abort(),
-        delay(abortGraceMs).then(() => { throw new Error('abort-timeout'); }),
-      ]);
+      await commandDeadline(session.abort(),abortGraceMs,'abort-timeout');
     } catch (error) {
       log?.warn?.(`[${label}] 停止未在宽限内完成，释放会话并在下一轮重建：${error?.message ?? error}`);
       dispose();
@@ -995,9 +1031,18 @@ export function createHemiSession({
   /** 优先任务只在 SDK 当前 turn（模型响应及整批工具）结束后交接。 */
   async function requestHandoff() {
     await ensurePromise?.catch(() => {});
-    if (!session || disposed || !busy) return;
+    if (!session || disposed) return;
+    if(waitingForBackground){
+      abortRequested=true;
+      await commands.abort();
+      return;
+    }
+    if(!busy)return;
     handoffRequested = true;
-    await new Promise((resolve) => handoffWaiters.add(resolve));
+    let boundary;
+    try {await commandDeadline(new Promise(resolve=>{boundary=resolve;handoffWaiters.add(resolve);}),abortGraceMs,'交接等待超时');}
+    catch {await abort();}
+    finally {handoffWaiters.delete(boundary);}
     await commands.abort();
   }
 
@@ -1010,10 +1055,10 @@ export function createHemiSession({
   }
 
   /** 一次性宿主收尾进入同一正文／历史；网络请求由根运行的受控总结入口承担。 */
-  async function recordBudgetSummary({ text, fallback, call }, signal) {
+  async function recordBudgetSummary({ text, fallback, call, customType = 'hemi_budget_summary' }, signal) {
     signal.throwIfAborted();
     if (disposed || abortRequested || runtimeExecution?.cancelled?.()) return false;
-    await appendContextFact('hemi_budget_summary', text, { fallback, rootRunId: runtimeExecution?.owner.rootRunId });
+    await appendContextFact(customType, text, { fallback, rootRunId: runtimeExecution?.owner.rootRunId });
     signal.throwIfAborted();
     if (disposed || abortRequested || runtimeExecution?.cancelled?.()) return false;
     emitter.emit('stream', { type: 'text_start' });
@@ -1057,6 +1102,7 @@ export function createHemiSession({
     if (closePromise) return closePromise;
     closePromise = (async () => {
       if (disposed) return;
+      try {
       await (ensurePromise ?? Promise.resolve()).catch(() => {});
       if (busy || waitingForBackground) await abort();
       if (nativeMemory && session) {
@@ -1077,7 +1123,7 @@ export function createHemiSession({
         } catch (error) { log?.warn?.(`[${label}] ${error.message}`); }
         finally { clearTimeout(timer); }
       }
-      dispose();
+      } finally {dispose();}
     })();
     return closePromise;
   }
@@ -1092,6 +1138,7 @@ export function createHemiSession({
     void reclaimBrowserPages();
     const waiter = pendingPrompt;
     pendingPrompt = null;
+    waiter?.abandon();
     waiter?.resolve({ ...run, aborted: true });
     resolveHandoff();
     void (ensurePromise ?? Promise.resolve()).catch(() => {}).then(() => {

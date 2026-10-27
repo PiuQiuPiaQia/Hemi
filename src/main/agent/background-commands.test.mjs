@@ -123,6 +123,19 @@ test('等待后台时停止目标会清理真实进程树，旧完成不会唤�
   assert.equal(Object.values((await f.journal.snapshot()).processes)[0].state, 'finished');
 });
 
+test('后台等待中的交接取消真实命令，不把取消结果再次唤醒旧目标',posix,async t=>{
+ const f=await fixture(t,dir=>`sleep 2; printf forbidden > '${path.join(dir,'late')}'`);
+ const {session}=await f.make();
+ const pending=session.prompt('HANDOFF');
+ await until(()=>f.activities.some(activity=>activity.phase==='waiting-background'));
+ const before=f.requests.length;
+ await session.requestHandoff();
+ assert.equal((await pending).aborted,true);
+ assert.equal(f.requests.length,before);
+ assert.ok(Object.values((await f.journal.snapshot()).processes).every(record=>record.state==='finished'&&record.cleanupConfirmed));
+ assert.equal(await readFile(path.join(f.dir,'late'),'utf8').catch(()=>null),null);
+});
+
 test('后台失败把真实退出码交回原目标，失效目标不再续跑', posix, async t => {
   const f = await fixture(t, () => 'sleep 0.2; printf ACTUAL_FAILURE >&2; exit 7');
   const first = await f.make();

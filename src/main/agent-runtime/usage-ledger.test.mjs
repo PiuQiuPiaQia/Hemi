@@ -50,3 +50,25 @@ test('角色身份随真实请求落盘，恢复投影保留身份；旧子请�
   assert.equal(records.length, 4);
   assert.deepEqual(usageRecordsFromJournal(await restored.snapshot(), 'other'), []);
 });
+
+test('response journal failure never replays an already sent provider request', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'hemi-response-write-'));
+  t.after(() => rm(dir, {recursive:true, force:true}));
+  let hits = 0;
+  const server = http.createServer((req, res) => {
+    req.resume(); req.on('end', () => {hits++; res.writeHead(200, {'content-type':'text/event-stream'}); res.end('data: [DONE]\n\n');});
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {server.closeAllConnections(); server.close();});
+  const config = {modelKey:'p/m', providerId:'p', credentialRef:'p', model:'test', baseUrl:`http://127.0.0.1:${server.address().port}/v1`, api:'openai-completions', apiKey:'SYNTHETIC_ONLY'};
+  const owner = {conversationId:'c', rootRunId:'r', generation:1}, journal = createRunJournal({dir});
+  await journal.beginRoot(owner);
+  journal.requestResponse = async () => {throw new Error('journal connection error: persistence failed');};
+  const recovery = [];
+  const execution = {journal, owner, plan:{role:'main', primary:config, allowedFallbacks:[]}, store:{resolveStrict:async () => ({ok:true, config})},
+    budgets:{maxRequestsPerRun:10}, purpose:'main', onRecovery:state => recovery.push(state)};
+  const result = await controlledStream(streamSimple, () => execution)(piModelOf(config, 'hemi'), {messages:[{role:'user', content:'hi', timestamp:0}]}).result();
+  assert.match(result.errorMessage, /persistence failed/);
+  assert.equal(hits, 1);
+  assert.deepEqual(recovery, []);
+});

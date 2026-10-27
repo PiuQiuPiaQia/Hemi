@@ -34,6 +34,12 @@ test('runtime manifest identifies packaged source content and verifies the exact
   assert.equal(first.archiveSha256, createHash('sha256').update(await fs.readFile(output)).digest('hex'));
   await buildBotRuntime({root, output: path.join(root, 'same.tgz')});
   assert.equal(readComponentVersion(path.join(root, 'same.tgz.manifest.json')).build, first.build);
+  const independent=path.join(root,'component-patch.tgz');
+  await buildBotRuntime({root,output:independent,componentVersion:'0.2.20'});
+  const independentVersion=readComponentVersion(independent+'.manifest.json');
+  assert.equal(independentVersion.version,'0.2.20');
+  assert.equal(independentVersion.build,first.build,'component version metadata does not change verified runtime source');
+  assert.equal(componentUpdateNeeded(first,independentVersion),false,'an older desktop must not replace the independently updated component');
   await fs.writeFile(path.join(root, 'src/main/example.mjs'), 'export const value = 1;\r\n');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) await fs.writeFile(path.join(root, file), 'test license\r\n');
   const windows = path.join(root, 'windows.tgz');
@@ -53,4 +59,27 @@ test('runtime manifest identifies packaged source content and verifies the exact
   await fs.appendFile(output, 'changed after packaging');
   await assert.rejects(() => transport.install('fixture', {existing: true, bot: {instanceId: 'same', activeJobs: 0}}), /版本清单不一致/);
   assert.equal(remoteCalls, 0);
+});
+
+test('runtime includes a matching Windows supervisor binary and refuses stale native source', async t => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-native-package-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const gate=path.join(root,'src/main/agent/gate');
+  for(const folder of [gate,path.join(root,'src/shared'),path.join(root,'third-party')])await fs.mkdir(folder,{recursive:true});
+  const actual=path.resolve(import.meta.dirname,'../agent/gate');
+  for(const extension of ['cs','exe','json'])await fs.copyFile(path.join(actual,'windows-command-job.'+extension),path.join(gate,'windows-command-job.'+extension));
+  await fs.writeFile(path.join(root,'package.json'),JSON.stringify({version:'0.2.19',dependencies:{}}));
+  await fs.writeFile(path.join(root,'package-lock.json'),JSON.stringify({packages:{}}));
+  for(const name of ['LICENSE','THIRD-PARTY-NOTICES.md'])await fs.writeFile(path.join(root,name),'fixture license\n');
+  const output=path.join(root,'native.tgz');
+  await buildBotRuntime({root,output});
+  for(const extension of ['cs','exe','json']){
+    const packaged=execFileSync('tar',['-xOf',output,'./src/main/agent/gate/windows-command-job.'+extension]);
+    assert.deepEqual(packaged,await fs.readFile(path.join(gate,'windows-command-job.'+extension)));
+  }
+  await fs.appendFile(path.join(gate,'windows-command-job.cs'),'\n// source changed\n');
+  await assert.rejects(buildBotRuntime({root,output}),/源码校验不一致/);
+  await fs.copyFile(path.join(actual,'windows-command-job.cs'),path.join(gate,'windows-command-job.cs'));
+  await fs.writeFile(path.join(gate,'windows-command-job.exe'),'corrupt executable');
+  await assert.rejects(buildBotRuntime({root,output}),/源码校验不一致/);
 });

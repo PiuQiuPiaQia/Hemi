@@ -7,6 +7,7 @@ const suspended = root => root?.kind === 'workflow' && root.status === 'waiting'
 const owns = (root, owner) => root && root.owner.conversationId === owner.conversationId && root.owner.rootRunId === owner.rootRunId && root.owner.generation === owner.generation;
 const initial = () => ({ version: 2, roots: {}, dispatches: {}, tasks: {}, inbox: {}, requests: {}, observations: {}, processes: {} });
 export const BUDGET_SUMMARY_PURPOSE = 'budget-summary';
+export const GOAL_VERIFICATION_PURPOSE = 'goal-verification';
 const sourceRoot = (s, owner) => {
   const root = s.roots[owner.rootRunId];
   return s.roots[root?.sourceRootRunId ?? owner.rootRunId];
@@ -67,11 +68,56 @@ export function createRunJournal({ dir }) {
       root.status = 'waiting';
       return root;
     }),
+    beginGoal: (owner, objective, policy) => transaction(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || terminal.has(root.status) || owner.taskId) throw new Error('目标归属已失效');
+      root.goal ??= { objective, policy, phase: 'active', round: 1, requestOffset: 0, verifications: [], startedAt: Date.now() };
+      return root.goal;
+    }),
+    checkGoal: owner => transaction(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || terminal.has(root.status) || !root.goal || root.goal.phase !== 'active') throw new Error('目标不能校验');
+      const belongs = item => item.owner.rootRunId === owner.rootRunId;
+      if (Object.values(s.requests).some(item => belongs(item) && !item.endedAt)
+        || Object.values(s.observations).some(item => belongs(item) && item.phase !== 'finished')
+        || Object.values(s.processes).some(item => belongs(item) && (!item.cleanupConfirmed || item.state !== 'finished'))
+        || Object.values(s.dispatches).some(item => belongs(item) && item.state !== 'terminal')
+        || Object.values(s.inbox).some(item => belongs(item) && item.state === 'pending')) throw new Error('目标仍有未确认的执行，不能判定完成');
+      root.goal.phase = 'checking';
+      return root.goal;
+    }),
+    recordGoalCheck: (owner, verdict) => transaction(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || terminal.has(root.status) || root.goal?.phase !== 'checking') throw new Error('目标校验已失效');
+      root.goal.verifications.push({ ...verdict, round: root.goal.round, at: Date.now() });
+      root.goal.phase = verdict.status === 'complete' ? 'complete' : verdict.status === 'blocked' ? 'blocked' : 'active';
+      return root.goal;
+    }),
+    continueGoal: owner => transaction(s => {
+      const root = s.roots[owner.rootRunId], goal = root?.goal;
+      if (!owns(root, owner) || terminal.has(root.status) || (goal?.phase !== 'active' || goal.verifications.at(-1)?.status !== 'continue' || goal.verifications.at(-1)?.round !== goal.round)) throw new Error('目标已停止或缺少续跑校验，不能续跑');
+      const used = Object.values(s.requests).filter(item => (s.roots[item.owner.rootRunId]?.sourceRootRunId ?? item.owner.rootRunId) === owner.rootRunId && ![BUDGET_SUMMARY_PURPOSE, GOAL_VERIFICATION_PURPOSE].includes(item.purpose)).length;
+      if (goal.round >= goal.policy.maxRounds || used >= goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code: 'goal-budget-limit'});
+      goal.round++; goal.requestOffset = used;
+      if (root.requestLimitReached) { (goal.limitHistory ??= []).push(root.requestLimitReached); delete root.requestLimitReached; }
+      return goal;
+    }),
+    endGoal: (owner, phase, reason) => transaction(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || !root.goal) throw new Error('目标归属已失效');
+      // A late verifier must never turn a cancelled/interrupted goal into success.
+      if (root.goal.phase !== 'complete') Object.assign(root.goal, {phase, reason, endedAt: Date.now()});
+      return root.goal;
+    }),
     finishRoot: (owner, status, reason = null) => transaction(s => {
       if (!terminal.has(status)) throw new Error('根目标终态无效');
       const root = s.roots[owner.rootRunId];
       if (!root || JSON.stringify(root.owner) !== JSON.stringify(owner)) throw new Error('根目标身份已失效');
       if (terminal.has(root.status)) return root;
+      if (status === 'completed' && ((root.requestLimitReached && !root.goal) || (root.goal && root.goal.phase !== 'complete'))) {
+        status = 'partial'; reason ??= root.goal?.reason ?? '目标尚未通过完成校验';
+      }
+      if (root.goal && status !== 'completed' && root.goal.phase !== 'blocked' && root.goal.phase !== 'budget_limited') Object.assign(root.goal, {phase: status === 'cancelled' ? 'cancelled' : 'interrupted', reason});
       root.status = status; root.reason = reason; root.terminalAt = Date.now();
       if (status !== 'completed') for (const item of Object.values(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') item.state = 'obsolete';
       return root;
@@ -84,17 +130,20 @@ export function createRunJournal({ dir }) {
       const root = s.roots[facts.owner.rootRunId];
       if (!owns(root, facts.owner) || terminal.has(root.status) || suspended(root)) throw new Error('根目标已停止或挂起，不能派单');
       assertExecuting(s, facts.owner);
-      const record = { key, owner: facts.owner, createdAt: Date.now(), state: 'reserved', ...facts };
+      // 持久任务身份在受理的同一事务分配；t1 等显示编号不能成为重启后的主键。
+      const record = { ...facts, key, owner: facts.owner, taskId: `task-${randomUUID()}`, createdAt: Date.now(), state: 'reserved' };
       s.dispatches[key] = record; return { existing: false, ...record };
     }),
     recordReceipt: (key, receipt) => transaction(s => {
       const record = s.dispatches[key]; if (!record) throw new Error('派单锚点不存在');
-      record.receipt = receipt; record.state = record.result ? 'terminal' : 'accepted'; return record;
+      if (record.taskId && receipt.ok && receipt.taskId && receipt.taskId !== record.taskId) throw new Error('派单回执的任务身份不匹配');
+      record.receipt = receipt; record.state = record.result || receipt.ok === false ? 'terminal' : 'accepted'; return record;
     }),
     completeTask: ({ dispatchKey, owner, result, background }) => transaction(s => {
       const key = result.taskId;
       if (!owns(s.roots[owner.rootRunId], owner)) throw new Error('子任务终态归属无效');
       if (dispatchKey && !owns(s.dispatches[dispatchKey], owner)) throw new Error('子任务派单归属无效');
+      if (dispatchKey && s.dispatches[dispatchKey].taskId && (s.dispatches[dispatchKey].taskId !== key || owner.taskId !== key)) throw new Error('子任务终态的持久身份不匹配');
       if (s.tasks[key]) {
         if (!owns(s.tasks[key], owner) || s.tasks[key].owner.taskId !== owner.taskId) throw new Error('子任务身份已被其他目标占用');
         return s.tasks[key];
@@ -151,9 +200,13 @@ export function createRunJournal({ dir }) {
       if (request.purpose === BUDGET_SUMMARY_PURPOSE) {
         if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || !root.requestLimitReached || root.budgetSummary?.state !== 'preparing') throw new Error('任务总结机会不可用');
         Object.assign(root.budgetSummary, { state: 'requested', requestId: request.requestId });
+      } else if (request.purpose === GOAL_VERIFICATION_PURPOSE) {
+        if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || root.goal?.phase !== 'checking'
+          || Object.values(s.requests).some(item => item.owner.rootRunId === owner.rootRunId && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round)) throw new Error('目标校验请求不可用');
+        request = {...request, goalRound: root.goal.round};
       } else {
-        const cap = source?.policySnapshot?.budgets?.maxRequestsPerRun ?? limit;
-        const used = Object.values(s.requests).filter(r => r.purpose !== BUDGET_SUMMARY_PURPOSE && (s.roots[r.owner.rootRunId]?.sourceRootRunId ?? r.owner.rootRunId) === sourceRootId).length;
+        const cap = source?.goal ? Math.min(source.goal.requestOffset + Math.min(source.goal.policy.maxRequestsPerRound, source.policySnapshot?.budgets?.maxRequestsPerRun ?? limit), source.goal.policy.maxRequests) : source?.policySnapshot?.budgets?.maxRequestsPerRun ?? limit;
+        const used = Object.values(s.requests).filter(r => ![BUDGET_SUMMARY_PURPOSE, GOAL_VERIFICATION_PURPOSE].includes(r.purpose) && (s.roots[r.owner.rootRunId]?.sourceRootRunId ?? r.owner.rootRunId) === sourceRootId).length;
         if (source?.requestLimitReached || used >= cap) {
           (source ?? root).requestLimitReached ??= { limit: cap, at: Date.now() };
           // 先提交触顶事实，再在事务外拒绝；否则 throw 会回滚，兄弟执行者看不到停止新工作的边界。
@@ -179,11 +232,20 @@ export function createRunJournal({ dir }) {
       Object.assign(root.budgetSummary, result, { state: result.fallback ? 'fallback' : 'complete', endedAt: Date.now() });
       return root.budgetSummary;
     }),
+    requestResponse: (requestId, response) => transaction(s => {
+      const request = s.requests[requestId]; if (!request) throw new Error('请求身份不存在');
+      return Object.assign(request, response, { responseAt: Date.now() });
+    }),
+    requestRecovery: (requestId, recovery) => transaction(s => {
+      const request = s.requests[requestId]; if (!request) throw new Error('请求身份不存在');
+      return Object.assign(request, { recovery });
+    }),
     requestEnd: (requestId, result) => transaction(s => {
       if (!s.requests[requestId]) throw new Error('请求身份不存在');
       return Object.assign(s.requests[requestId], result, { endedAt: Date.now() });
     }),
     recover: () => transaction(s => {
+      for (const root of Object.values(s.roots)) if (root.goal && !terminal.has(root.status)) Object.assign(root.goal, {phase: 'interrupted', reason: '进程重启；等待用户核对后继续'});
       for (const root of Object.values(s.roots)) if (!terminal.has(root.status) && !suspended(root)) Object.assign(root, { status: 'interrupted', reason: '进程重启；不会自动重放副作用', terminalAt: Date.now() });
       for (const dispatch of Object.values(s.dispatches)) if (!['terminal','interrupted'].includes(dispatch.state)) Object.assign(dispatch, {state:'interrupted', interruptionReason:'进程重启；受理不代表完成，不自动重投'});
       for (const observation of Object.values(s.observations)) if (observation.phase === 'started') Object.assign(observation, {phase:'unknown', interruptionReason:'进程重启，工具是否生效需要核对'});

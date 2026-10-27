@@ -4,6 +4,7 @@ import { currentExecutionScope } from './execution-scope.mjs';
 import { recoverOwnedProcesses } from './owned-processes.mjs';
 import os from 'node:os';
 import path from 'node:path';
+import {assertCommandCleanup,commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { mkdirSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -11,6 +12,7 @@ import { createRunJournal, dispatchIdentity } from '../agent-runtime/run-journal
 import { formatSubagentResult } from '../agent/agent-tools.mjs';
 import { createContextStore } from './context-store.mjs';
 import { createConversationHistoryReader } from './conversation-history.mjs';
+import {driveGoal, goalPolicy as normalizeGoalPolicy, goalEvidence, verifyGoalCompletion} from './goal-driver.mjs';
 import { budgetSummaryFacts } from './budget-summary.mjs';
 import { sessionCompatibility } from './model-policy.mjs';
 import { sessionLoadoutRevision, roleSessionRevision } from './session-revision.mjs';
@@ -116,6 +118,8 @@ export function createAgentRuntime({
   onEventTurn,
   getSkillService = () => null,
   nativeMemory = false,
+  goalPolicy = null,
+  onGoalVerification = null,
   getWorkspaceService = () => null,
   getWorkflowService = null,
   history,
@@ -504,7 +508,7 @@ export function createAgentRuntime({
             return { ok: false, error: '该派单已受理但执行状态未知；请核对已有结果，不会重复启动' };
           }
           const receipt = await subagents.spawn({
-          role, prompt, description, background, sessionId, signal, toolCallId, dispatchKey, generation: owner.generation,
+          role, prompt, description, background, sessionId, signal, toolCallId, dispatchKey, taskId: reserved.taskId, generation: owner.generation,
           conversationId, inputSource: ctx.inputSource, workspace: ctx.workspace,
           // 060 R-22：记所属主运行（插队停止按根目标取消，不限前台/后台）。
           rootRunId: typeof ctx.runId === 'string' && ctx.runId ? ctx.runId : null,
@@ -649,11 +653,28 @@ export function createAgentRuntime({
   }
 
   async function prepareExecution(ctx) {
+    assertCommandCleanup(journal);
     await journalReady;await journal.beginRoot(ownerOf(ctx), {policySnapshot:ctx.policySnapshot,workspace:ctx.workspace});
     return executionFor(ctx,ctx.modelPlan,'input-preparation');
   }
   async function runRootTurn(conversationId, args) {
-    return runOwnedTurn(agents.get(conversationId), args);
+    const entry = agents.get(conversationId);
+    if (!goalPolicy) return runOwnedTurn(entry, args);
+    if (!entry || entry.ctx.cancelled) throw new Error('目标已停止');
+    const ctx = entry.ctx, owner = ownerOf(ctx), controller = new AbortController();
+    entry.goalController = controller; entry.activeRootRunId = owner.rootRunId;
+    await journalReady;
+    await journal.beginRoot(owner, {policySnapshot:ctx.policySnapshot, workspace:ctx.workspace});
+    try {
+      const result = await driveGoal({journal, owner, objective:args.userText, policy:normalizeGoalPolicy(goalPolicy), signal:controller.signal,
+        run: hostEvent => runOwnedTurn(entry, {...args, hostEvent, goalRound:true}),
+        verify: (objective, evidence) => verifyGoalCompletion({execution:{...executionFor(ctx, ctx.modelPlan), actualCandidate:entry.actualCandidate}, objective, evidence, signal:controller.signal, onCall:call=>onGoalVerification?.(conversationId,call)}),
+        evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
+        persist: () => entry.agent.persistExecution(),
+      });
+      if (result.completionText) await entry.agent.recordGoalCompletion(result.completionText, controller.signal);
+      return result;
+    } finally { if (entry.goalController === controller) { entry.goalController = null; entry.activeRootRunId = null; } }
   }
   /** 上下文容量快照（渲染层轮末/切换会话时拉取；无在途会话返回 null）。 */
   function contextUsageFor(conversationId) {
@@ -703,6 +724,21 @@ export function createAgentRuntime({
           const owned = [...subagents._internals.tasks.values()].filter(task => task.rootRunId === owner.rootRunId);
           await Promise.all(owned.filter(task => !task.finalized).map(task => task.running ?? task.terminalWait));
           if (ctx.cancelled) throw new DOMException('任务已停止', 'AbortError');
+          if (args.goalRound) {
+            const events = await journal.pending(owner);
+            let entries = (await agent.exportEntries())?.entries ?? [];
+            const anchor = event => entries.findLast(item => item.type === 'custom_message' && item.details?.eventIds?.includes(event.eventId));
+            const unseen = events.filter(event => !anchor(event));
+            if (unseen.length) await agent.recordEvents(unseen, ['［子任务完成 · 宿主观察，不是用户新指令］', ...unseen.map(event => formatSubagentResult(event.result))].join('\n\n'));
+            await agent.persistExecution();
+            entries = (await agent.exportEntries())?.entries ?? [];
+            for (const event of events) {
+              const entry = anchor(event);
+              if (!entry) throw new Error('子任务报告尚未保存，不能续跑');
+              await journal.consume([event.eventId], entry.id);
+            }
+            return {...combined, modelError:null, aborted:false, budgetLimited:true};
+          }
           const state = await journal.snapshot();
           const observations = Object.values(state.observations).filter(item => item.owner.rootRunId === owner.rootRunId);
           // 仅取本轮已通过工具边界投影的历史文本，不从 outputRef 旁路读取未经复核的原始结果。
@@ -720,7 +756,7 @@ export function createAgentRuntime({
       try { await Promise.all([agent.abort(), subagents.cancelByRootRun(owner.rootRunId, { reason: 'stop' })]); }
       catch (cleanupError) { cleanupError.pendingStop = true; throw cleanupError; }
       throw error;
-    } finally { if (entry.activeRootRunId === owner.rootRunId) entry.activeRootRunId = null; }
+    } finally { entry.actualCandidate = execution.actualCandidate; if (!args.goalRound && entry.activeRootRunId === owner.rootRunId) entry.activeRootRunId = null; }
   }
 
   async function completeConversation(conversationId, status, reason = null, rootRunId = null) {
@@ -767,6 +803,7 @@ export function createAgentRuntime({
   function invalidate(conversationId) {
     archiveWriters.delete(String(conversationId ?? ''));
     const entry = agents.get(String(conversationId ?? ''));
+    entry?.goalController?.abort();
     subagents.disposeConversation(String(conversationId ?? ''));
     try { accessService().cleanupTask(conversationGrantScope(conversationId)); } catch { /* 尽力而为 */ }
     if (!entry) return;
@@ -781,6 +818,7 @@ export function createAgentRuntime({
     const entry = agents.get(conversationId);
     if (entry?.ctx) {
       entry.ctx.cancelled = true;
+      entry.goalController?.abort();
       for (const job of auxiliaryJobs.values()) if (job.sourceRootRunId === entry.ctx.runId) job.controller.abort();
     }
     subagents.clearHostedPermission(conversationId);
@@ -807,6 +845,7 @@ export function createAgentRuntime({
 
   function disposeAll() {
     for (const [, entry] of agents) {
+      entry.goalController?.abort();
       entry.agent.dispose();
       entry.skills?.release();
     }
@@ -822,17 +861,19 @@ export function createAgentRuntime({
     return closePromise;
   }
   async function closeRuntime() {
-    // Initialization/recovery also writes the journal when no conversation ran.
-    await journalReady;
-    await Promise.all([...agents].map(async ([id, entry]) => {
-      await abort(id);
-      if (entry.ctx?.runId) await subagents.cancelByRootRun(entry.ctx.runId, { reason: 'stop' });
-    }));
-    await Promise.all([...agents.values()].map(entry => entry.agent.close('session-end')));
-    await Promise.all([...workflowClosures].map(release => release()));
-    await Promise.all([...pendingClosures]);
-    disposeAll();
-    try { await sessionStore.flush(); await journal.flush(); } finally { environment?.release(); }
+    try {
+      // Initialization/recovery also writes the journal when no conversation ran.
+      await journalReady;
+      const stops=await Promise.allSettled([...agents].map(async ([id, entry]) => {
+        await abort(id);
+        if (entry.ctx?.runId) await subagents.cancelByRootRun(entry.ctx.runId, { reason: 'stop' });
+      }));
+      const closes=await Promise.allSettled([...agents.values()].map(entry => entry.agent.close('session-end')));
+      const releases=await commandDeadline(Promise.allSettled([...workflowClosures].map(release=>release()).concat([...pendingClosures])),20000,'执行器退出未能确认');
+      const failed=[...stops,...closes,...releases].find(result=>result.status==='rejected');
+      if(failed)throw failed.reason;
+      await commandDeadline(Promise.all([sessionStore.flush(),journal.flush()]),10000,'执行器退出记录保存未确认');
+    } finally {disposeAll();environment?.release();}
   }
 
   return { isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };

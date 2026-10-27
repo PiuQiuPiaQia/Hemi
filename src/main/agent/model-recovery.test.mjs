@@ -57,7 +57,7 @@ test('a failed stream retries the same model request, replacing only its partial
   assert.doesNotMatch(JSON.stringify(await journal.snapshot()),/SYNTHETIC_ONLY/);
 });
 
-test('a permanent error after recovery restores the normal stream watchdog for the next prompt', async t => {
+test('a permanent error after recovery releases the request owner; the next prompt has its own idle deadline and cancellation', async t => {
   const dir=await mkdtemp(path.join(os.tmpdir(),'hemi-recovery-watchdog-'));
   let requests=0;
   const server=http.createServer(async(req,res)=>{
@@ -74,5 +74,10 @@ test('a permanent error after recovery restores the normal stream watchdog for t
   const session=createHemiSession({cwd:dir,agentDir:dir,model:config,tools:[],features:{},executionContext:execution,initTimeoutMs:2000,stallTimeoutMs:500});
   t.after(async()=>{session.dispose();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
   const first=await session.prompt('失败后恢复');assert.match(first.modelError,/Unauthorized/);assert.equal(requests,2);
-  const second=await session.prompt('检查下一轮的流停滞保护');assert.equal(second.aborted,true);assert.equal(requests,3);
+  execution.budgets.streamIdleTimeoutMs=80;
+  const waiting=Promise.withResolvers();session.on('recovery',state=>{if(state.phase==='waiting')waiting.resolve(state);});
+  const pending=session.prompt('检查下一轮的流停滞保护');await waiting.promise;
+  const last=Object.values((await journal.snapshot()).requests).at(-1);
+  assert.equal(last.failure.phase,'idle');assert.equal(last.failure.code,'TIMEOUT');
+  await session.abort();const second=await pending;assert.equal(second.aborted,true);assert.equal(requests,3);
 });

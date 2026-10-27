@@ -12,7 +12,29 @@ test('同一持久派单重投只有一个 reservation；不同条目短 call id
   const key=dispatchIdentity(fields);
   const results=await Promise.all([journal.reserveDispatch(key,{owner}),journal.reserveDispatch(key,{owner})]);
   assert.deepEqual(results.map(x=>x.existing),[false,true]);
+  assert.match(results[0].taskId,/^task-/);assert.equal(results[0].taskId,results[1].taskId);
   assert.notEqual(key,dispatchIdentity({...fields,callAnchorId:'b'}));
+});
+
+test('durable admission identities survive reload and fence receipts/results; response headers do not settle a request', async t => {
+  const { journal, dir } = await fixture(t); await journal.beginRoot(owner);
+  const reserved = await journal.reserveDispatch('first', { owner });
+  const restored = createRunJournal({ dir });
+  assert.equal((await restored.reserveDispatch('first', { owner })).taskId, reserved.taskId);
+  await assert.rejects(restored.recordReceipt('first', { ok: true, taskId: 't1' }), /不匹配/);
+  await assert.rejects(restored.completeTask({ dispatchKey: 'first', owner: { ...owner, taskId: 't1' }, result: { taskId: 't1' } }), /不匹配/);
+  await restored.completeTask({ dispatchKey: 'first', owner: { ...owner, taskId: reserved.taskId }, result: { taskId: reserved.taskId } });
+  await restored.recordReceipt('first', { ok: true, taskId: reserved.taskId });
+  const rejected = await restored.reserveDispatch('rejected', { owner });
+  assert.notEqual(rejected.taskId, reserved.taskId);
+  await restored.recordReceipt('rejected', { ok: false, error: '子会话不兼容，未开始执行' });
+  await restored.requestStart(owner, { requestId: 'inflight' }, 3);
+  await restored.requestResponse('inflight', { httpStatus: 200 });
+  await restored.beginGoal(owner, 'read', { maxRequests: 3, maxRounds: 1 });
+  await assert.rejects(restored.checkGoal(owner), /未确认/);
+  await restored.requestEnd('inflight', { coverage: 'unknown' });
+  await restored.checkGoal(owner);
+  assert.equal((await restored.snapshot()).dispatches.rejected.state, 'terminal');
 });
 test('终态与完成事件同落盘，重启保留事实且不自动续跑，重复完成不增事件',async t=>{
   const {journal,dir}=await fixture(t);await journal.beginRoot(owner);

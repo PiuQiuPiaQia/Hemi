@@ -1,3 +1,4 @@
+import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -12,7 +13,7 @@ test('real Bot SDK shares native memory across sessions and restart through Host
  const requests=[];
  const provider=http.createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;
-  const body=JSON.parse(raw);requests.push(body);
+  const body=JSON.parse(raw);if(replyToGoalCheck(body,res))return;requests.push(body);
   if (JSON.stringify(body.messages).includes('CLOSE_IN_FLIGHT')) {
    await new Promise(resolve=>setTimeout(resolve,500));
    if (res.destroyed) return;

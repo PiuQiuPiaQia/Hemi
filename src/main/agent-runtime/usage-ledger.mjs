@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { hydrateCandidate } from './model-policy.mjs';
 import { createModelRecovery, retryAfterMs } from './model-recovery.mjs';
+import { modelFailure, requestWatchdog } from './model-failure.mjs';
+import { piModelOf, sdkThinkingLevelOf } from '../lib/pi-model.mjs';
+import { isSameCandidate } from '../lib/model-routing.mjs';
 import { createRequestImageProjector, isRequestMediaTooLarge } from './request-images.mjs';
 
 const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
@@ -20,115 +23,143 @@ export function controlledStream(stream, getExecution) {
     const output = createAssistantMessageEventStream();
     void (async () => {
       const execution = getExecution();
+      let lastRequestId = null, finalMessage, physical = model;
       const recovery = createModelRecovery({ signal: options.signal, isOnline: execution?.isOnline,
-        onState: state => execution?.onRecovery?.(state), ...(execution?.recoveryTestClock ?? {}) });
+        onState: async state => {
+          if (lastRequestId) await execution.journal.requestRecovery(lastRequestId, state);
+          execution?.onRecovery?.(state);
+        }, ...(execution?.recoveryTestClock ?? {}) });
       execution?.onRecoveryControl?.(recovery);
-      let finalMessage, boundaryFailure, startForwarded = false, retrying = false;
-      const failedMessage = error => ({ role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      const failedMessage = error => ({ role: 'assistant', content: [], api: physical.api, provider: physical.provider, model: physical.id,
         usage: zeroUsage(), stopReason: options.signal?.aborted ? 'aborted' : 'error', errorMessage: String(error.message ?? error), timestamp: Date.now() });
+      let boundaryFailure, startForwarded = false, retrying = false;
       try {
         if (!execution || execution.cancelled?.() || execution.fatalError) throw new Error(execution?.fatalError ?? '执行归属已失效');
-        const plan = execution.plan;
-        const candidate = [plan.primary, ...plan.allowedFallbacks][candidateIndex(model.provider)];
-        if (!candidate || candidate.model !== model.id) throw new Error('实际模型不在冻结计划中');
-        if (candidate.supportsVision !== true && (context.messages ?? []).some(message => Array.isArray(message.content) && message.content.some(block => block.type === 'image'))) throw new Error('unsupported-modality：实际候选不支持历史中的图像，未删图或发出请求');
-        // The SDK may update its live message while streaming. Retries always use the pre-request context.
+        const plan = execution.plan, candidates = [plan.primary, ...plan.allowedFallbacks];
+        if (model.provider !== 'hemi-routing' && candidates[candidateIndex(model.provider)]?.model !== model.id) throw new Error('实际模型不在冻结计划中');
+        let index = execution.selectedCandidateIndex ?? candidateIndex(model.provider);
+        if (!candidates[index]) throw new Error('实际模型不在冻结计划中');
         const logicalCallId = `call-${randomUUID()}`;
         const hasTools = context.tools?.length || context.messages?.some(message => message.role === 'system' && message.toolsAdded?.length);
         const purpose = execution.purpose && !['main','subagent'].includes(execution.purpose) ? execution.purpose : execution.compacting?.() || !hasTools ? 'compaction' : execution.purpose;
-        const endpoint = `${candidate.api}:${candidate.baseUrl}`;
-        let projection = await projectImages(context.messages ?? [], { mode: reducedEndpoints.has(endpoint) ? 'retry' : 'normal', signal: options.signal });
-        const requestContext = { ...context, messages: structuredClone(projection.messages) };
-        if (projection.stats.omitted || projection.stats.resized) execution.onImageProjection?.(projection.stats);
-        let mediaRetried = false;
+        const canRecover = ['main', 'subagent'].includes(execution.purpose) && !execution.compacting?.();
+        const hasImages = (context.messages ?? []).some(message => Array.isArray(message.content) && message.content.some(block => block.type === 'image'));
+        const originalContext = structuredClone(context.messages ?? []);
+        let projection, mediaRetried = false, lastEndpoint;
         execution.onRequestStart?.();
         while (true) {
           options.signal?.throwIfAborted();
           if (execution.cancelled?.()) throw new DOMException('执行归属已失效', 'AbortError');
+          const candidate = candidates[index];
+          if (hasImages && candidate.supportsVision !== true) throw new Error('unsupported-modality：实际候选不支持历史中的图像，未删图或发出请求');
           const live = await hydrateCandidate(candidate, execution.store);
-          execution.onCandidateSelected?.(candidate);
+          physical = execution.resolveModel ? execution.resolveModel(candidate, index) : piModelOf(candidate, index === 0 ? 'hemi' : index === 1 ? 'hemi-fallback' : `hemi-fallback-${index}`);
+          if (!physical) throw new Error('冻结候选没有注册到模型运行时');
+          execution.onCandidateSelected?.(candidate, index);
+          const endpoint = `${candidate.api}:${candidate.baseUrl}`;
+          if (!projection || endpoint !== lastEndpoint) {
+            projection = await projectImages(originalContext, { mode: reducedEndpoints.has(endpoint) ? 'retry' : 'normal', signal: options.signal });
+            lastEndpoint = endpoint; mediaRetried = false;
+            if (projection.stats.omitted || projection.stats.resized) execution.onImageProjection?.(projection.stats);
+          }
           await execution.beforeRequest?.();
-          const ids = [], failure = {};
-          const attempt = new AbortController();
+          const ids = [], attempts = new Map(), transport = {}, attempt = new AbortController();
           const signal = options.signal ? AbortSignal.any([options.signal, attempt.signal]) : attempt.signal;
-          let timedOut = false, resetSent = !retrying, responseStarted = false;
-          const timeoutMs = recovery.state ? Math.min(15000, Math.max(1, recovery.state.deadlineAt - (execution.recoveryTestClock?.now ?? Date.now)())) : 60000;
-          let timeout = setTimeout(() => { timedOut = true; attempt.abort(new Error('模型连接超时')); }, timeoutMs);
+          const timeouts = Object.fromEntries([['connectionMs','connectionTimeoutMs'],['firstOutputMs','firstOutputTimeoutMs'],['idleMs','streamIdleTimeoutMs']].filter(([, key]) => execution.budgets[key] !== undefined).map(([name,key]) => [name,execution.budgets[key]]));
+          const watchdog = requestWatchdog({ controller: attempt, signal, timeouts,
+            remainingMs: () => recovery.state ? recovery.state.deadlineAt - (execution.recoveryTestClock?.now ?? Date.now)() : Infinity });
+          let resetSent = !retrying, responseStarted = false;
           const trackedFetch = async (url, init) => {
             if (execution.cancelled?.() || signal.aborted) throw signal.reason ?? new DOMException('执行归属已失效', 'AbortError');
             const requestId = `request-${randomUUID()}`;
             const { apiKey: _secret, encryptedApiKey: _encrypted, ...publicCandidate } = candidate;
-            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, actualModel: publicCandidate, cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
+            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
             catch (error) { boundaryFailure = error; throw error; }
-            ids.push(requestId);
+            ids.push(requestId); attempts.set(requestId, { startedAt: Date.now() }); lastRequestId = requestId;
             try {
               const response = await (options.fetch ?? globalThis.fetch)(url, { ...init, signal });
-              failure.status = response.status;
-              failure.retryAfterMs = retryAfterMs(response.headers?.get('retry-after'));
-              await execution.journal.requestEnd(requestId, { httpStatus: response.status, coverage: 'unknown' });
+              transport.status = response.status;
+              attempts.get(requestId).status = response.status;
+              transport.retryAfterMs = retryAfterMs(response.headers?.get('retry-after'));
+              watchdog.connected();
+              // 收到响应头不是请求终态；额度与完成校验必须仍看见这次在途生成。
+              try { await execution.journal.requestResponse(requestId, { httpStatus: response.status }); }
+              catch (error) { boundaryFailure = error; throw error; }
               return response;
             } catch (error) {
-              failure.code = error.cause?.code ?? error.code;
-              await execution.journal.requestEnd(requestId, { error: String(error.message), coverage: 'unknown' }); throw error;
+              transport.code = error.cause?.code ?? error.code;
+              transport.message = String(error.message);
+              throw error;
             }
           };
           finalMessage = null;
           try {
-            const inner = await stream(model, { ...requestContext, messages: structuredClone(requestContext.messages) }, { ...options, apiKey: live.apiKey, maxRetries: 0, signal, fetch: trackedFetch });
-            for await (const event of inner) {
+            // 跨供应商时不继承上一候选的认证头；各 provider 注册负责自身请求认证。
+            const { apiKey: _key, headers: _headers, env: _env, ...crossProviderOptions } = options;
+            const requestOptions = physical.provider === model.provider ? options : crossProviderOptions;
+            const inner = await watchdog.wait(stream(physical, { ...context, messages: structuredClone(projection.messages) }, { ...requestOptions,
+              apiKey: live.apiKey, reasoning: physical.provider === model.provider ? options.reasoning : sdkThinkingLevelOf(candidate.thinkingLevel) === 'off' ? undefined : sdkThinkingLevelOf(candidate.thinkingLevel),
+              maxTokens: Math.min(options.maxTokens ?? physical.maxTokens, physical.maxTokens), maxRetries: 0, signal, fetch: trackedFetch }));
+            const iterator = inner[Symbol.asyncIterator]();
+            try { while (true) {
+              const next = await watchdog.wait(iterator.next());
+              if (next.done) break;
+              const event = next.value;
               if (options.signal?.aborted || execution.cancelled?.()) throw new DOMException('已停止恢复', 'AbortError');
               if (event.type === 'done' || event.type === 'error') finalMessage = event.message ?? event.error;
               else if (event.type === 'start') {
                 if (!startForwarded) { output.push(event); startForwarded = true; }
               } else {
+                watchdog.activity();
                 if (!resetSent) { execution.onRequestReset?.(); resetSent = true; }
-                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') { responseStarted = true; clearTimeout(timeout); timeout = null; }
+                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') responseStarted = true;
                 output.push(event);
               }
-            }
+            } } finally { if (signal.aborted) void Promise.resolve(iterator.return?.()).catch(() => {}); }
           } catch (error) { finalMessage = failedMessage(error); }
-          finally { clearTimeout(timeout); }
-          if (timedOut && !options.signal?.aborted) finalMessage = failedMessage(new Error('模型连接超时'));
+          finally { watchdog.dispose(); }
+          if (watchdog.timeoutPhase && !options.signal?.aborted) finalMessage = failedMessage(signal.reason);
+          const unsuccessful = !finalMessage || ['error','aborted'].includes(finalMessage.stopReason);
+          const failure = unsuccessful ? modelFailure({ ...transport, phase: watchdog.phase, outputStarted: responseStarted,
+            timeoutPhase: watchdog.timeoutPhase, message: finalMessage?.errorMessage ?? transport.message ?? 'provider 流未返回终态',
+            aborted: Boolean(options.signal?.aborted || execution.cancelled?.()) || (finalMessage?.stopReason === 'aborted' && !watchdog.timeoutPhase) }) : null;
+          if (failure) finalMessage = { ...(finalMessage ?? failedMessage(failure)), errorMessage: failure.message, stopReason: failure.kind === 'cancelled' ? 'aborted' : 'error' };
           const tokenUsage = usageOf(finalMessage);
-          for (const [index, requestId] of ids.entries()) await execution.journal.requestEnd(requestId, {
-            tokenUsage: index === ids.length - 1 ? tokenUsage : { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null },
-            coverage: index === ids.length - 1 && tokenUsage.uncachedInput !== null ? 'complete' : 'unknown', error: finalMessage?.errorMessage ?? null,
-          });
+          for (const [position, requestId] of ids.entries()) {
+            const last = position === ids.length - 1, meta = attempts.get(requestId);
+            const recordedFailure = last ? failure : meta.status >= 400 ? modelFailure({ status: meta.status, message: `HTTP ${meta.status}` }) : null;
+            const recordedUsage = last ? tokenUsage : { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null };
+            const coverage = last && tokenUsage.uncachedInput !== null ? 'complete' : 'unknown';
+            await execution.journal.requestEnd(requestId, { tokenUsage: recordedUsage, coverage, error: recordedFailure?.message ?? null, failure: recordedFailure });
+            execution.onAttemptRecorded?.({ candidate, requestId, purpose, stopReason: recordedFailure ? 'error' : finalMessage?.stopReason,
+              isError: Boolean(recordedFailure), coverage, tokenUsage: recordedUsage, startedAt: meta.startedAt, genMs: Date.now() - meta.startedAt });
+          }
           execution.onRequestRecorded?.();
           if (boundaryFailure) throw boundaryFailure;
           if (!ids.length) throw new Error(finalMessage?.errorMessage ?? 'provider 没有经过受控 HTTP 请求边界，无法确认实际模型请求');
-          if (!finalMessage) throw new Error('provider 流未返回终态');
-          if (!['error','aborted'].includes(finalMessage.stopReason)) {
+          if (!failure) {
             if (!resetSent) execution.onRequestReset?.();
             if (mediaRetried) reducedEndpoints.add(endpoint);
-            recovery.success();
+            await recovery.success();
             break;
           }
-          // 参考 zcode 的 compact media retry：先缩减请求媒体，再重试同一次模型调用。
-          // 不重跑工具、不切模型，也不让 413 进入三十分钟的网络重试。
-          if (finalMessage.stopReason === 'error' && !responseStarted && isRequestMediaTooLarge({ ...failure, message: finalMessage.errorMessage })) {
+          if (!responseStarted && isRequestMediaTooLarge({ ...transport, message: failure.message })) {
             if (!mediaRetried && projection.stats.bytesAfter > 0) {
-              const reduced = await projectImages(context.messages ?? [], { mode: 'retry', signal: options.signal });
+              const reduced = await projectImages(originalContext, { mode: 'retry', signal: options.signal });
               if (reduced.stats.bytesAfter < projection.stats.bytesAfter) {
-                projection = reduced;
-                requestContext.messages = structuredClone(reduced.messages);
+                projection = reduced; mediaRetried = true; retrying = true;
                 execution.onImageProjection?.(reduced.stats);
-                mediaRetried = true;
-                retrying = true;
                 continue;
               }
             }
-            const summary = failure.status === 413 || /\b413\b/.test(finalMessage.errorMessage ?? '')
-              ? '模型请求体超过服务限制（HTTP 413）' : '模型图片请求超过服务限制';
-            finalMessage = { ...finalMessage, errorMessage: `${summary}。请减少本轮附件或输入内容；原始会话记录已保留。` };
+            finalMessage.errorMessage = `${transport.status === 413 ? '模型请求体超过服务限制（HTTP 413）' : '模型图片请求超过服务限制'}。请减少本轮附件或输入内容；原始会话记录已保留。`;
             break;
           }
-          // Let the shared router try the remaining configured candidates before
-          // recovering the last candidate. Recovery must not hide a usable fallback.
-          const enabled = ['main', 'subagent'].includes(execution.purpose)
-            && candidateIndex(model.provider) >= plan.allowedFallbacks.length;
-          if (!enabled || !await recovery.failed({ ...failure, message: finalMessage.errorMessage,
-            aborted: Boolean(options.signal?.aborted || execution.cancelled?.()) || (finalMessage.stopReason === 'aborted' && !timedOut) })) break;
+          if (!canRecover || !failure.retryable) break;
+          // 已经输出的同一次请求只在原候选恢复；已提交工具结果在请求前历史中，不会重放。
+          const next = responseStarted ? -1 : candidates.findIndex((item, i) => i > index && (!hasImages || item.supportsVision === true) && !isSameCandidate(candidate, item));
+          if (!await recovery.failed({ ...failure, retryAfterMs: transport.retryAfterMs })) break;
+          if (next >= 0) index = next;
           retrying = true;
         }
         if (recovery.state?.phase === 'expired') finalMessage = { ...finalMessage, errorMessage: 'HEMI_RECOVERY_EXPIRED: 自动恢复已到期（30 分钟）。当前进度已保留，可以稍后重新开始。' };
@@ -138,7 +169,9 @@ export function controlledStream(stream, getExecution) {
       } catch (error) {
         const message = failedMessage(error);
         output.push({ type: 'error', reason: message.stopReason, error: message });
-      } finally { recovery.dispose(); execution?.onRecoveryControl?.(null); output.end(); }
+      } finally {
+        recovery.dispose(); execution?.onRecoveryControl?.(null); execution?.onRequestEnd?.(); output.end();
+      }
     })();
     return output;
   };

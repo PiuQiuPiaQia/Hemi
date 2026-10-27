@@ -560,8 +560,11 @@ test('060 不响应取消的工具触发释放，主 agent 明确暴露不可复
     assert.equal(entered, true);
     await agent.abort();
     assert.equal(agent.isDisposed(), true);
-    release();
-    assert.equal((await running).aborted, true);
+    let timer;
+    try {
+      const result=await Promise.race([running,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('disposed prompt still waits for the blocked tool')),1000);})]);
+      assert.equal(result.aborted,true);
+    } finally {clearTimeout(timer);release();}
   }, { sessionOptions: { abortGraceMs: 30 } });
 });
 test('上下文容量：轮后有快照（usage 锚点总量＋before_provider_request 分类暂存）', async () => {

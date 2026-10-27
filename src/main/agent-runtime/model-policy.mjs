@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export const ROLE_MODEL_NAMES = Object.freeze(['explorer', 'oracle', 'fixer', 'designer']);
-export const DEFAULT_BUDGETS = Object.freeze({ maxRequestsPerRun: 60, maxParallelTasks: 5, maxAttemptsPerCandidate: 1, maxRetryDelayMs: 10000, outputChars: 8000 });
+export const DEFAULT_BUDGETS = Object.freeze({ maxRequestsPerRun: 60, maxParallelTasks: 5, maxRetryDelayMs: 10000, outputChars: 8000, connectionTimeoutMs: 60000, firstOutputTimeoutMs: 300000, streamIdleTimeoutMs: 300000 });
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fail = message => { throw new Error(message); };
 const clean = value => {
@@ -31,9 +31,9 @@ export async function freezeModelPolicy({ store, modelKey = null, fixedConfig = 
     const config = clean(resolved.config);
     candidates[key] = { ...config, credentialRef: config.providerId ?? String(key).split('/')[0], configRevision: digest(config) };
   }
-  const limits = { ...DEFAULT_BUDGETS, ...budgets };
+  // 旧策略的 SDK 单候选次数字段不再参与调度；新计划只冻结宿主实际执行的限制。
+  const { maxAttemptsPerCandidate: _legacyAttempts, ...limits } = { ...DEFAULT_BUDGETS, ...budgets };
   for (const [name, value] of Object.entries(limits)) if (!Number.isSafeInteger(value) || value <= 0) fail(`运行上限 ${name} 必须是正整数`);
-  if (limits.maxAttemptsPerCandidate !== 1) fail('当前每个候选只允许一次请求，请将 maxAttemptsPerCandidate 设为 1');
   const payload = { version: 2, mode: routed ? 'routed' : 'fixed', policy, fixedKey: routed ? null : keys[0], candidates, budgets: limits };
   return { ...payload, id: `policy-${digest(payload)}` };
 }
