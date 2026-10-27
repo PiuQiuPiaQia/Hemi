@@ -8,7 +8,7 @@ export const ConversationBridgeContext = createContext<HemiVoiceBridge | null>(
 export function useConversationBridge() {
   return useContext(ConversationBridgeContext) ?? window.hemiVoice;
 }
-export type ApplicationPage = 'home' | 'bot' | 'skills' | 'workflows' | 'settings';
+export type ApplicationPage = 'home' | 'bot' | 'skills' | 'workflows' | 'settings' | 'usage';
 export const ApplicationNavigationContext = createContext<{
   page: ApplicationPage;
   navigate: (page: ApplicationPage, settingsPage?: 'general' | 'models', settingsEnvironment?: 'local' | 'bot') => void;

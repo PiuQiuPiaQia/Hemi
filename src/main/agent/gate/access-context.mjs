@@ -30,6 +30,7 @@ export function createAccessContext({
   service, taskId, grantScopeId = null, home = os.homedir(), workspaceDir = null, cwd = null, listAppWindows,
   controlRoots = null,
   skillRoots = null,
+  findApplication = findInstalledApplication,
   log = null,
 }) {
   const execCwd = cwd ?? workspaceDir ?? home;
@@ -123,7 +124,7 @@ export function createAccessContext({
     async appBundleFor(input, tool = null) {
       // app_open：目标是「已安装应用」而非运行中窗口，按安装清单精确解析。
       if (tool === 'app_open') {
-        const hit = await findInstalledApplication(input?.app);
+        const hit = await findApplication(input?.app);
         return hit ? { bundleId: hit.bundleId, name: hit.name } : null;
       }
       const pick = (hit) => (hit?.bundleId ? { bundleId: hit.bundleId, name: hit.name, pid: hit.pid } : null);

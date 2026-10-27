@@ -26,7 +26,7 @@ test('真实 transport 逐请求记录，异步 SDK stream 支持、Key 不落�
   const answer=await wrapped(piModelOf(config,'hemi'),context).result();assert.equal(answer.stopReason,'stop');
   const blocked=await wrapped(piModelOf(config,'hemi'),context).result();assert.match(blocked.errorMessage,/上限/);assert.equal(hits,1);
   const state=await journal.snapshot(),requests=Object.values(state.requests);assert.equal(requests.length,1);assert.equal(requests[0].purpose,'main');assert.equal(requests[0].role,'main');
-  assert.equal(requests[0].coverage,'complete');assert.deepEqual(requests[0].tokenUsage,{uncachedInput:5,output:3,cacheRead:10,cacheWrite:0});
+  assert.equal(requests[0].coverage,'complete');assert.deepEqual(requests[0].tokenUsage,{uncachedInput:5,output:3,cacheRead:10,cacheWrite:0,reasoning:0});
   assert.equal(JSON.stringify(state).includes('DO_NOT_PERSIST'),false);assert.equal(requests[0].cost.status,'unknown');
 });
 

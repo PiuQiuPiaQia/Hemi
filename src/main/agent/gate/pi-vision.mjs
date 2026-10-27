@@ -16,11 +16,12 @@
 //  - 中文键入走驱动的 AX Unicode 直插（spike 真机验证），无输入法依赖；
 //  - details.actionState 语义沿用（executed | not-executed），来源映射见
 //    cua-client 的 describeAction/describeToolResult。
-import { cua, describeAction, describeToolResult, firstImage } from './cua-client.mjs';
+import { cua as defaultCua, describeAction, describeToolResult, firstImage } from './cua-client.mjs';
 
 import { VISION_ACT_TOOLS } from './policy.mjs';
 
 export { VISION_ACT_TOOLS };
+const deliverySchema = {type: 'string', enum: ['background', 'foreground'], description: '默认 background。foreground 使用驱动的前台投递，短暂置前目标窗口；用于已获授权且后台不能正确投递的操作。'};
 
 function checkAborted(signal) {
   if (signal?.aborted) throw new Error('操作已被中断，未执行后续动作');
@@ -50,7 +51,7 @@ function missingTarget() {
  * 动作后截图（view:true / ui_type 默认）：拍目标窗口并附回。截图失败不推翻
  * 已执行的动作（006 既定语义）。
  */
-async function finishWithScreenshot(prefix, executed, target, signal) {
+async function finishWithScreenshot(prefix, executed, target, signal, cua) {
   try {
     const state = await cua.windowState({
       pid: target.pid, windowId: target.windowId, includeScreenshot: true, signal,
@@ -58,6 +59,7 @@ async function finishWithScreenshot(prefix, executed, target, signal) {
     const img = firstImage(state);
     if (!img) throw new Error('驱动未返回截图');
     return {
+      isError: !executed,
       content: [
         { type: 'text', text: `${prefix}（已附目标窗口截图 ${state.screenshotWidth}×${state.screenshotHeight}，坐标以这张图为准）` },
         { type: 'image', data: img.data, mimeType: img.mimeType },
@@ -66,6 +68,7 @@ async function finishWithScreenshot(prefix, executed, target, signal) {
     };
   } catch (error) {
     return {
+      isError: !executed,
       content: [{ type: 'text', text: `${prefix}。但后续截图失败：${error.message}——请用 screen_view 补一张再继续` }],
       details: { actionState: executed ? 'executed' : 'not-executed', screenshotError: error.message },
     };
@@ -76,6 +79,7 @@ async function finishWithScreenshot(prefix, executed, target, signal) {
 function finishWithoutScreenshot(prefix, executed, note = '') {
   const extra = note ? `（${note}）` : '';
   return {
+    isError: !executed,
     content: [
       { type: 'text', text: `${prefix}${extra}。未截图。后续连贯动作可在同一次回复里连续调用、不必每步核验；需要看结果时再 screen_view（或给动作传 view:true）` },
     ],
@@ -84,14 +88,14 @@ function finishWithoutScreenshot(prefix, executed, note = '') {
 }
 
 /** 动作失败（驱动拒绝/异常翻译后）：原因 + 新截图供重新定位（006 语义）。 */
-async function notExecuted(reason, signal) {
+async function notExecuted(reason, signal, cua, target) {
   let shot = null;
   try {
-    shot = firstImage(await cua.desktopState({ signal }));
+    if (target?.pid && target?.windowId) shot = firstImage(await cua.windowState({...target, includeScreenshot: true, signal}));
   } catch { /* 尽力附图 */ }
-  const content = [{ type: 'text', text: `${reason}。${shot ? '已附当前屏幕截图，请据此重新定位。' : ''}` }];
+  const content = [{ type: 'text', text: `${reason}。${shot ? '已附目标窗口截图，请据此重新定位。' : ''}` }];
   if (shot) content.push({ type: 'image', data: shot.data, mimeType: shot.mimeType });
-  return { content, details: { actionState: 'not-executed' } };
+  return { isError: true, content, details: { actionState: 'not-executed' } };
 }
 
 /**
@@ -100,11 +104,12 @@ async function notExecuted(reason, signal) {
  */
 export default function hemiVision(pi, { config = {} } = {}) {
   if (config.enabled !== true) return;
+  const cua = config.driver ?? defaultCua;
 
   pi.registerTool({
     name: 'screen_view',
     label: '截屏',
-    description: '截取屏幕并返回图片（只读）。推荐传 target（ui_list 的 pid/windowId）：按目标窗口截，token 更省、小元素更清晰；都不传截主显示器。坐标原点在图片左上角，单位是图片像素；后续动作的 x/y 用这张图的像素坐标。',
+    description: '截取目标窗口并返回图片（只读）。先 ui_list，传 target（pid/windowId），按目标应用授权。坐标原点在图片左上角，单位是图片像素；后续动作的 x/y 用这张图的像素坐标。',
     promptSnippet: 'screen_view：截屏（优先按目标窗口裁剪）',
     promptGuidelines: ['浏览器/网页内容（含 Web 应用、本地 HTML）一律用 browser_* 工具——它们在后台任务窗口执行、不碰用户屏幕；屏幕工具只用于浏览器之外的桌面应用，或网页的 DOM 与 AX 都拿不到时的最后手段。用户要"看页面"时也先在后台改完再说明，不因此切换到屏幕操作。', 'screen_view 是只读的：任何需要"看一眼屏幕"的场景（描述界面、找按钮、核对结果）都直接用它；要看某个应用就传 target（ui_list 的 pid/windowId）。不要用 bash 的 screencapture——那是写文件，会弹确认卡还绕过截图预算。', '连贯动作序列只在检查点看屏：序列末尾 screen_view 一次核验全部结果，比每步看一次快得多。'],
     parameters: {
@@ -120,7 +125,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
           required: ['pid', 'windowId'],
         },
       },
-      required: [],
+      required: ['target'],
     },
     async execute(_id, params, signal) {
       checkAborted(signal);
@@ -141,15 +146,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
           details: { imageW: state.screenshotWidth, imageH: state.screenshotHeight },
         };
       }
-      const desk = await cua.desktopState({ signal });
-      const img = firstImage(desk);
-      if (!img) throw new Error('驱动未返回截图');
-      return {
-        content: [
-          { type: 'text', text: `主显示器截图。后续动作用这张图的像素坐标（左上原点）；要精确操控某个应用，请先 ui_list 拿 pid/windowId 再按窗口截图。` },
-          { type: 'image', data: img.data, mimeType: img.mimeType },
-        ],
-      };
+      return notExecuted(missingTarget(), signal, cua);
     },
   });
 
@@ -189,6 +186,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
         y: { type: 'number', description: '截图像素 Y' },
         target: targetSchema(),
         view: { type: 'boolean', description: 'true＝附操作后截图（目标窗口）；默认 false（不截图，序列中间步用）' },
+        delivery: deliverySchema,
       },
       required: ['x', 'y', 'target'],
     },
@@ -196,30 +194,30 @@ export default function hemiVision(pi, { config = {} } = {}) {
       checkAborted(signal);
       const target = params?.target;
       if (!target || !Number.isFinite(Number(target.pid)) || !target.windowId) {
-        return notExecuted(missingTarget(), signal);
+        return notExecuted(missingTarget(), signal, cua);
       }
       let result;
       try {
         result = await cua.click({
           pid: Number(target.pid), windowId: String(target.windowId),
-          x: params.x, y: params.y, signal,
+          x: params.x, y: params.y, delivery: params.delivery, signal,
         });
       } catch (error) {
-        return notExecuted(error.message, signal);
+        return notExecuted(error.message, signal, cua, target);
       }
       const { actionState, note } = describeAction(result);
       const executed = actionState === 'executed';
-      const prefix = `已点击 (${Math.round(Number(params.x))},${Math.round(Number(params.y))}${note ? `，${note}` : ''})`;
+      const prefix = `${executed ? '已点击' : '点击未执行'} (${Math.round(Number(params.x))},${Math.round(Number(params.y))}${note ? `，${note}` : ''})`;
       onUpdate?.({ content: [{ type: 'text', text: prefix }], details: { actionState } });
       if (params.view !== true) return finishWithoutScreenshot(prefix, executed);
-      return finishWithScreenshot(prefix, executed, target, signal);
+      return finishWithScreenshot(prefix, executed, target, signal, cua);
     },
   });
 
   pi.registerTool({
     name: 'ui_type',
     label: '键入',
-    description: '向目标窗口键入文本（驱动的 AX 直插，中文/Emoji 直接键入不乱码、不经输入法）。先用 ui_click 点进输入框再键入。必须带 ui_list 返回的 target。默认附目标窗口截图核验文字落位（view:false 省略）。',
+    description: '向目标窗口键入文本。先用 ui_click 点进输入框；必须带 ui_list 返回的 target。Windows 包含 Emoji 的输入使用 delivery="foreground"；前台投递会短暂置前目标窗口。默认附目标窗口截图核验文字落位（view:false 省略）。',
     promptSnippet: 'ui_type：向目标窗口键入文本（中文直插不乱码）',
     promptGuidelines: ['ui_type 必须带目标窗口 target（pid/windowId）。先 ui_click 点进输入框，再 ui_type，并在返回截图中确认文字落在正确输入框。', '中文/Emoji 直接用 ui_type 键入——运行时自动绕过输入法，不需要改用剪贴板。', '不要用 bash/pbcopy 绕过 ui_type：这会覆盖用户剪贴板且无法恢复。', '文件、代码、命令行任务优先用 bash/read/write/edit 等既有工具，不要用屏幕工具。'],
     parameters: {
@@ -228,6 +226,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
         text: { type: 'string', description: '要输入的文本' },
         target: targetSchema(),
         view: { type: 'boolean', description: 'false＝不附截图（连贯序列的中间步）；默认附目标窗口截图核验文字落位' },
+        delivery: deliverySchema,
       },
       required: ['text', 'target'],
     },
@@ -237,30 +236,30 @@ export default function hemiVision(pi, { config = {} } = {}) {
       checkAborted(signal);
       const target = params?.target;
       if (!target || !Number.isFinite(Number(target.pid)) || !target.windowId) {
-        return notExecuted(missingTarget(), signal);
+        return notExecuted(missingTarget(), signal, cua);
       }
       let result;
       try {
         result = await cua.typeText({
-          text, pid: Number(target.pid), windowId: String(target.windowId), signal,
+          text, pid: Number(target.pid), windowId: String(target.windowId), delivery: params.delivery, signal,
         });
       } catch (error) {
-        return notExecuted(error.message, signal);
+        return notExecuted(error.message, signal, cua, target);
       }
       const { actionState, note } = describeToolResult(result);
       const executed = actionState === 'executed';
-      const prefix = `已键入 ${Array.from(text).length} 字${note ? `，${note}` : ''}`;
+      const prefix = `${executed ? '已键入' : '键入未执行'} ${Array.from(text).length} 字${note ? `，${note}` : ''}`;
       onUpdate?.({ content: [{ type: 'text', text: prefix }], details: { actionState } });
       // 键入默认附图核验（view:false 才省掉）：文字落错位/落错框是高风险错误。
       if (params.view === false) return finishWithoutScreenshot(prefix, executed);
-      return finishWithScreenshot(prefix, executed, target, signal);
+      return finishWithScreenshot(prefix, executed, target, signal, cua);
     },
   });
 
   pi.registerTool({
     name: 'ui_key',
     label: '按键',
-    description: '按组合键，如 "cmd+a"、"enter"、"shift+tab"、"esc"。必须带 ui_list 返回的 target。',
+    description: '按组合键，如 Windows 的 "ctrl+a"、macOS 的 "cmd+a"、"enter"、"shift+tab"。必须带 ui_list 返回的 target。Windows 组合快捷键使用 delivery="foreground"，驱动短暂置前目标窗口后投递并恢复。',
     promptSnippet: 'ui_key：按组合键（cmd+a / enter / esc…）',
     promptGuidelines: ['ui_key 必须带目标窗口 target（pid/windowId）；组合键写法如 cmd+a、enter、shift+tab、esc。每次按键后重新看返回截图再决定下一步。', '结束操作前回收本任务明确打开且已无用途的临时页面／对话框，先用新截图核对目标，再定向关闭；用户原有窗口、交付成果页、未保存内容及归属不明的窗口保留，不使用全局关闭或退出应用来清理。'],
     parameters: {
@@ -268,6 +267,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
       properties: {
         combo: { type: 'string', description: '组合键，如 cmd+a、enter、shift+tab' },
         target: targetSchema(),
+        delivery: deliverySchema,
         view: { type: 'boolean', description: 'true＝附操作后截图（目标窗口）；默认 false（不截图）' },
       },
       required: ['combo', 'target'],
@@ -276,22 +276,22 @@ export default function hemiVision(pi, { config = {} } = {}) {
       checkAborted(signal);
       const target = params?.target;
       if (!target || !Number.isFinite(Number(target.pid)) || !target.windowId) {
-        return notExecuted(missingTarget(), signal);
+        return notExecuted(missingTarget(), signal, cua);
       }
       let result;
       try {
         result = await cua.key({
-          combo: params.combo, pid: Number(target.pid), windowId: String(target.windowId), signal,
+          combo: params.combo, pid: Number(target.pid), windowId: String(target.windowId), delivery: params.delivery, signal,
         });
       } catch (error) {
-        return notExecuted(error.message, signal);
+        return notExecuted(error.message, signal, cua, target);
       }
       const { actionState, note } = describeToolResult(result);
       const executed = actionState === 'executed';
-      const prefix = `已按 ${params.combo}${note ? `，${note}` : ''}`;
+      const prefix = `${executed ? '已按' : '按键未执行'} ${params.combo}${note ? `，${note}` : ''}`;
       onUpdate?.({ content: [{ type: 'text', text: prefix }], details: { actionState } });
       if (params.view !== true) return finishWithoutScreenshot(prefix, executed);
-      return finishWithScreenshot(prefix, executed, target, signal);
+      return finishWithScreenshot(prefix, executed, target, signal, cua);
     },
   });
 
@@ -305,6 +305,7 @@ export default function hemiVision(pi, { config = {} } = {}) {
       type: 'object',
       properties: {
         deltaY: { type: 'number', description: '正=向上，负=向下' },
+        delivery: deliverySchema,
         x: { type: 'number', description: '截图像素 X（可选）' },
         y: { type: 'number', description: '截图像素 Y（可选）' },
         target: targetSchema(),
@@ -316,26 +317,26 @@ export default function hemiVision(pi, { config = {} } = {}) {
       checkAborted(signal);
       const target = params?.target;
       if (!target || !Number.isFinite(Number(target.pid)) || !target.windowId) {
-        return notExecuted(missingTarget(), signal);
+        return notExecuted(missingTarget(), signal, cua);
       }
       let result;
       try {
         result = await cua.scroll({
-          deltaY: params.deltaY,
+          deltaY: params.deltaY, delivery: params.delivery,
           x: Number.isFinite(Number(params.x)) ? Number(params.x) : undefined,
           y: Number.isFinite(Number(params.y)) ? Number(params.y) : undefined,
           pid: Number(target.pid), windowId: String(target.windowId), signal,
         });
       } catch (error) {
-        return notExecuted(error.message, signal);
+        return notExecuted(error.message, signal, cua, target);
       }
       const escalated = Boolean(result?.hemiEscalatedForeground);
       const { actionState, note } = describeToolResult(result);
       const executed = actionState === 'executed';
-      const prefix = `已滚动 deltaY=${Number(params.deltaY)}${escalated ? '（后台不可用，已改前台执行）' : ''}${note ? `，${note}` : ''}`;
+      const prefix = `${executed ? '已滚动' : '滚动未执行'} deltaY=${Number(params.deltaY)}${escalated && executed ? '（后台不可用，已改前台执行）' : ''}${note ? `，${note}` : ''}`;
       onUpdate?.({ content: [{ type: 'text', text: prefix }], details: { actionState } });
       if (params.view !== true) return finishWithoutScreenshot(prefix, executed);
-      return finishWithScreenshot(prefix, executed, target, signal);
+      return finishWithScreenshot(prefix, executed, target, signal, cua);
     },
   });
 

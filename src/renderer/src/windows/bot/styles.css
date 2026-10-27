@@ -492,6 +492,15 @@
 .h-bot-sync-dialog > .h-bot-dialog-body { min-height: 0; overflow-y: auto; }
 .h-bot-sync-dialog > :is(.h-bot-dialog-head, .h-bot-dialog-foot) { flex: none; }
 
+.h-bot-capability-details { padding: var(--sp-16); }
+.h-bot-capability-details summary { font-weight: 600; }
+.h-bot-capability-details form { display: grid; gap: var(--sp-12); padding-top: var(--sp-16); }
+.h-bot-capability-details label { display: grid; gap: var(--sp-4); }
+.h-bot-capability-details form > button { justify-self: start; }
+.h-bot-context-windows { display: grid; gap: var(--sp-8); }
+.h-bot-context-windows > button { display: grid; gap: var(--sp-4); justify-items: start; justify-content: stretch; height: auto; padding: var(--sp-12); line-height: 1.4; white-space: normal; text-align: left; }
+.h-bot-context-windows span { color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+
 @media (max-width: 480px) {
   .h-bot-component-row > .h37-row-text { flex-basis: 100%; }
   .h-bot-component-row > .h37-row-end { margin-left: auto; }

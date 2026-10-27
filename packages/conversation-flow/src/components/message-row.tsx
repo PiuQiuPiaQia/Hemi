@@ -456,6 +456,7 @@ export function ChatTurnItem({
             未完成 · 已停止
           </span>
         ) : null}
+        {item.replyStatus === "awaiting-user" ? <span className="h24-reply-status" role="status">等待你的回复</span> : null}
         {streaming && !item.recovery && !item.parts?.length && !item.text ? (
           <WaitingStatus />
         ) : null}

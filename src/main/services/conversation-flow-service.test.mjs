@@ -168,3 +168,19 @@ test('完成通知素材：最近收口回合的结果口径与该回合输入�
     await service.dropAll(); __resetConversationFlowServiceForTests(); fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('root-only restart recovery is durably saved without a task archive, unread change, or dispatch', async () => {
+  __resetConversationFlowServiceForTests();const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hemi-restart-root-'));
+  const id='conv-restart',file=path.join(dir,id+'.json'),flow=createFlowSnapshot({conversationId:id});
+  flow.activeRunId='root';flow.phase='running';flow.historyVersion=1;
+  flow.runs.root={runId:'root',startedAt:1,closedAt:null,outcome:null,activity:{phase:'waiting-background',jobs:[{id:'push'}]}};
+  flow.timeline=[{kind:'assistant',runId:'root',parts:[{kind:'tool',partId:'push',status:'running'}]}];
+  fs.writeFileSync(file,JSON.stringify({id,updatedAt:5,unreadAt:3,flow,turns:[]}));
+  let starts=0;const service=initConversationFlowService({dir,runtimeFactory:()=>({start(){starts++;},stop:async()=>{}})});
+  try{
+    const restored=service.controllerFor(id).getSnapshot();await service.store.flush(id);
+    const saved=JSON.parse(fs.readFileSync(file,'utf8'));
+    assert.equal(restored.phase,'idle');assert.deepEqual(saved.flow,restored);assert.equal(saved.updatedAt,5);assert.equal(saved.unreadAt,3);assert.equal(starts,0);
+    assert.equal(saved.flow.timeline[0].parts[0].status,'stopped');assert.equal(service.getStatus(id),null);
+  }finally{await service.dropAll();__resetConversationFlowServiceForTests();fs.rmSync(dir,{recursive:true,force:true});}
+});

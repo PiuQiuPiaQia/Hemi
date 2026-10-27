@@ -41,6 +41,7 @@ import {
   BotSetup,
 } from './dialogs';
 import { BotPairing } from './pairing';
+import {BotContextPicker} from './context-picker';
 import './styles.css';
 const EMPTY_STATE: BotState = {
   binding: null,
@@ -793,7 +794,8 @@ export function BotPage({
               contextState={{ objects: [] }}
               contextBusy={uploading}
               contextError={attachmentError}
-              onAttachContext={() => void upload({})}
+              remoteWindowContext={state.cache?.hostCapabilities?.computerUseEnabled}
+              onAttachContext={kind => {if (kind === 'screenshot') setPanel('context');else void upload({});}}
               onRefreshContext={() => {}}
               onRemoveContext={() => {}}
               errorMessage={operationError}
@@ -1038,10 +1040,13 @@ export function BotPage({
                 引用云端文件与会话。
               </p>
               <p className="h-bot-small">
-                本机技能、记忆和工作流不会自动同步到云端。
+                在 Bot 设置中管理浏览器、联网检索、Windows 桌面与技能库。本机技能和记忆不会自动同步到 Bot；工作流暂不可用。
               </p>
             </BotDialog>
           )}
+          {panel === 'context' && id && state.binding ? <BotContextPicker key={`${state.binding.instanceId}:${id}`} api={api} instanceId={state.binding.instanceId} conversationId={id}
+            onClose={() => setPanel(null)} onFile={() => {setPanel(null);void upload({});}}
+            onAttached={async attachment => {await acceptUploaded(id, [attachment], state.binding?.instanceId);}}/> : null}
         </ConversationBridgeContext.Provider>
       </ConversationOnlineContext.Provider>
       </ConversationEnvironmentIdContext.Provider>

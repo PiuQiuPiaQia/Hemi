@@ -337,6 +337,8 @@ export type TurnToolCall = {
   tool: string;
   args: Record<string, string | number | boolean>;
   state: 'running' | 'done' | 'error' | 'stopped';
+  output?: string;
+  outputTruncated?: boolean;
 };
 /** 059 人工输入（HI 通用节点）：冻结后的表单投影（配置、预览与运行同一 schema）。 */
 export interface WorkflowInteractionField {
@@ -818,6 +820,12 @@ export type TaskStateSnapshot = {
   taskText: string;
   /** 进度行文案（无总数时不伪造计数，R-13）。 */
   progressText: string;
+  /** 子任务自身的展示对话；不进入主 agent 的对话正文或上下文。 */
+  conversation?: {
+    revision: number;
+    truncated?: boolean;
+    messages: Array<{ id: string; author: 'user' | 'hemi'; text: string; createdAt: number; parts?: TurnPart[] }>;
+  } | null;
   /** 宿主的后台命令/资源等待事实，供任务详情和恢复投影使用。 */
   activity?: RunActivityView | null;
   /** 2026-09-26：任务开始时间戳——运行中任务卡「已跑 X 分钟」用；旧快照缺省。 */
@@ -1577,6 +1585,7 @@ export type FlowSnapshotView = {
   generation: number;
   phase: FlowPhase;
   activeRunId: string | null;
+  awaitingUser?: {runId:string;question:string;reason:string} | null;
   queuePaused: boolean;
   pending: FlowInputView[];
   timeline: FlowItemView[];
@@ -2612,6 +2621,8 @@ export type HemiVoiceBridge = {
     taskId: string,
     artifactId: string,
   ) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>;
+  /** 使用记录：跨会话总览消耗与请求历史。 */
+  getUsageHistory: (query: import('@shared/usage-history').UsageHistoryQuery) => Promise<import('@shared/usage-history').UsageHistoryResponse>;
   /** 019：拉起原生双工后端（失败回退浏览器链路）。 */
   startDuplex: () => Promise<DuplexStartResult>;
   /** 019：会话结束关停双工后端。 */

@@ -31,6 +31,8 @@ export function RunActivity({
     activity.phase !== "waiting-resource" && activity.jobs.length === 1
       ? activity.jobs[0]
       : null;
+  const quiet = singleJob && singleJob.endedAt == null
+    && now - (singleJob.lastOutputAt ?? singleJob.startedAt) >= 30_000;
   const title = singleJob
     ? normalizeCommandDescription(singleJob.description) || "后台命令"
     : activity.phase === "waiting-background"
@@ -77,7 +79,7 @@ export function RunActivity({
             {title}
           </span>
           {timeLabel ? (
-            <span className="h56-run-activity-time">{timeLabel}</span>
+            <span className="h56-run-activity-time">{timeLabel}{quiet ? " · 无新输出" : ""}</span>
           ) : null}
           <ChevronRight
             className="h56-run-activity-chevron"
@@ -104,6 +106,11 @@ export function RunActivity({
                 {job.lastOutputAt != null ? (
                   <p className="h56-background-output-time">
                     最近输出于 {elapsed(job.lastOutputAt, now)}前
+                  </p>
+                ) : null}
+                {job.endedAt == null && now - (job.lastOutputAt ?? job.startedAt) >= 30_000 ? (
+                  <p className="h56-run-activity-hint" aria-label="后台命令无新输出">
+                    已 {elapsed(job.lastOutputAt ?? job.startedAt, now)}未收到新输出，宿主仍在等待结果。
                   </p>
                 ) : null}
                 <p>最近输出</p>

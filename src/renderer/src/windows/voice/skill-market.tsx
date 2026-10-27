@@ -8,7 +8,10 @@ import {
 import type {
   InstalledSkill, SkillMarketItem, SkillMarketState, SkillsmpPreview, SkillsmpSkill, SkillsmpUpdateResponse,
 } from '@/shared/types';
+import type { HemiVoiceBridge } from '@shared/protocol';
 import './skill-market.css';
+
+export type SkillMarketApi = Pick<HemiVoiceBridge, 'getSkillState' | 'refreshSkillCatalog' | 'importLocalSkill' | 'installMarketSkill' | 'setSkillEnabled' | 'removeSkill' | 'readSkill' | 'revealSkill' | 'searchSkillsMp' | 'previewSkillsMp' | 'installSkillsMp' | 'checkSkillsMpUpdate'>;
 
 type Tab = 'discover' | 'builtin' | 'installed';
 type Selected =
@@ -244,14 +247,17 @@ function InstallBar({ phase, elapsed, installed, locked, onInstall, onManage }: 
   );
 }
 
-export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
+export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = window.hemiVoice, remote = false, initialTab = 'discover' }: {
+  api?: SkillMarketApi;
+  remote?: boolean;
+  initialTab?: Tab;
   onBack: () => void;
   pendingApproval?: boolean;
   /** fixtures 专用：预置技能页内部状态（mp-results / mp-preview / installed），产品代码不传。 */
   demo?: string;
 }) {
   const [state, setState] = useState<SkillMarketState | null>(null);
-  const [tab, setTab] = useState<Tab>('discover');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'stars' | 'recent'>('stars');
   const [searchBusy, setSearchBusy] = useState(false);
@@ -276,13 +282,13 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
 
   const reload = useCallback(async () => {
     try {
-      const next = await window.hemiVoice.getSkillState();
+      const next = await api.getSkillState();
       setState(next);
       setSearchResult((current) => current ?? next.mpSearch);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '技能列表读取失败');
     }
-  }, []);
+  }, [api]);
   useEffect(() => { void reload(); }, [reload]);
 
   const act = useCallback(async (label: string, action: () => Promise<{
@@ -313,7 +319,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     setSearchError('');
     setAutoWord(null);
     try {
-      const result = await window.hemiVoice.searchSkillsMp({ query: keyword, sortBy: order });
+      const result = await api.searchSkillsMp({ query: keyword, sortBy: order });
       if (result.ok) {
         lastQuery.current = keyword;
         setLiveSearch(true);
@@ -334,7 +340,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     } finally {
       setSearchBusy(false);
     }
-  }, []);
+  }, [api]);
 
   // 034 v5.1：开门面。每个会话首次打开市场，随机挑词拉一批热门技能——默认页不再
   // 是上次搜索的陈旧缓存。失败静默回落（有缓存显缓存，无缓存显推荐词引导），
@@ -344,7 +350,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     setSearchBusy(true);
     setSearchError('');
     try {
-      const result = await window.hemiVoice.searchSkillsMp({ query: word, sortBy: 'stars' });
+      const result = await api.searchSkillsMp({ query: word, sortBy: 'stars' });
       if (result.ok) {
         lastQuery.current = word;
         setLiveSearch(true);
@@ -360,12 +366,12 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     } finally {
       setSearchBusy(false);
     }
-  }, []);
+  }, [api]);
   useEffect(() => {
-    if (demo || recommendTried.current) return;
+    if (demo || tab !== 'discover' || recommendTried.current) return;
     recommendTried.current = true;
     void runRecommend(RECOMMEND_WORDS[Math.floor(Math.random() * RECOMMEND_WORDS.length)]);
-  }, [demo, runRecommend]);
+  }, [demo, tab, runRecommend]);
 
   // 034 v5（2026-10-09 用户裁决）：详情页用市场元数据秒开，安装点击后才拉来源——
   // 「读取来源文件（钉固定提交）→ 核对并保存」两阶段流水线，进度在安装条上给。
@@ -390,7 +396,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     }
     setPanel({ state: 'loading' });
     try {
-      const result = await window.hemiVoice.previewSkillsMp(skill.id);
+      const result = await api.previewSkillsMp(skill.id);
       if (!stillOn(skill.id)) return null;
       if (!result.ok || !result.preview) {
         setPanel({ state: 'error' });
@@ -407,7 +413,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
       }
       return null;
     }
-  }, [stillOn]);
+  }, [api, stillOn]);
 
   /** 安装流水线：读取来源（阶段一，产出钉提交与摘要）→ 核对并保存（阶段二）。 */
   const runInstall = useCallback(async (skill: SkillsmpSkill) => {
@@ -417,7 +423,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
       const preview = await loadPanel(skill);
       if (!preview) return;
       setInstallPhase('save');
-      const result = await window.hemiVoice.installSkillsMp({
+      const result = await api.installSkillsMp({
         skillsmpId: preview.skillsmpId,
         commit: preview.commit,
         bundleSha256: preview.bundleSha256,
@@ -438,20 +444,20 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     } finally {
       setInstallPhase('');
     }
-  }, [loadPanel, reload]);
+  }, [api, loadPanel, reload]);
 
   const runUpdateCheck = useCallback(async (installed: InstalledSkill) => {
     setUpdateCheck({ checking: true });
     setError('');
     try {
-      const result = await window.hemiVoice.checkSkillsMpUpdate(installed.id);
+      const result = await api.checkSkillsMpUpdate(installed.id);
       setUpdateCheck({ checking: false, ...result });
       if (!result.ok) setError(result.reason || '检查更新失败');
     } catch (cause) {
       setUpdateCheck(null);
       setError(cause instanceof Error ? cause.message : '检查更新失败');
     }
-  }, []);
+  }, [api]);
 
   // 安装阶段一的等待反馈：大技能或弱网可能要等十几秒，只给静态文案会被当成卡死。
   const [installElapsed, setInstallElapsed] = useState(0);
@@ -475,7 +481,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
       // 选未安装的条目（fixtures 的 nano-pdf 已预装，选中它吸底条会是更新态）。
       setQuery('pdf');
       void runSearch('pdf', 'stars').then(() => {
-        void window.hemiVoice.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }).then((result) => {
+        void api.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }).then((result) => {
           const skills = result.ok ? result.skills ?? [] : [];
           const skill = skills.find((entry) => entry.id === 'demo-excel-helper-skill-md') ?? skills[0];
           if (skill) {
@@ -487,13 +493,13 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     }
     if (demo === 'mp-detail') {
       // idle 详情页：只选中不拉来源（验「元数据秒开 + 安装流程说明」的排版）。
-      void window.hemiVoice.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }).then((result) => {
+      void api.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }).then((result) => {
         const skill = result.ok ? (result.skills ?? [])[0] : null;
         if (skill) select({ kind: 'mp', skill });
       }).catch(() => {});
     }
     if (demo === 'builtin') setTab('builtin');
-  }, [demo, runSearch, loadPanel]);
+  }, [api, demo, runSearch, loadPanel]);
   useEffect(() => {
     if (demo !== 'installed' || !state || selected) return;
     const item = state.installed.find((entry) => entry.origin === 'skillsmp') ?? state.installed[0];
@@ -506,7 +512,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
   const openSource = async (id: string) => {
     setBusy('读取原文');
     try {
-      const result = await window.hemiVoice.readSkill(id);
+      const result = await api.readSkill(id);
       if (!result.ok) setError(result.reason || '原文读取失败');
       else setSourceText(result.text ?? '');
     } catch (cause) {
@@ -584,7 +590,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
         title="导入本地技能"
         aria-label="导入本地技能"
         disabled={Boolean(busy)}
-        onClick={() => void act('导入本地技能', () => window.hemiVoice.importLocalSkill())}
+        onClick={() => void act('导入本地技能', () => api.importLocalSkill())}
       >
         <Plus aria-hidden="true" /><span className="h34-import-label">导入本地技能</span>
       </button>
@@ -614,9 +620,9 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
         ) : null}
       />
       <div className="h34-detail-actions">
-        <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => window.hemiVoice.setSkillEnabled(item.id, !item.enabled))}>{item.enabled ? '停用技能' : '启用技能'}</button>
+        <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => api.setSkillEnabled(item.id, !item.enabled))}>{item.enabled ? '停用技能' : '启用技能'}</button>
         <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void openSource(item.id)}>查看原文</button>
-        <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => window.hemiVoice.revealSkill(item.id))}><FolderOpen aria-hidden="true" /> 打开目录</button>
+        {!remote ? <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => api.revealSkill(item.id))}><FolderOpen aria-hidden="true" /> 打开目录</button> : null}
         <button type="button" className="h37-btn h37-btn-ghost h37-btn-danger" disabled={Boolean(busy)} onClick={() => setConfirmRemove(item.id)}><Trash2 aria-hidden="true" /> 卸载</button>
       </div>
       <FoldSection title="来源与完整性" hint={item.github ? item.github.repo : (item.origin === 'local' ? '本地' : '内置')}>
@@ -781,7 +787,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
             description={selectedBuiltin.description}
             cta={installedItem ? null : (
               <>
-                <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={Boolean(busy)} onClick={() => void act('安装技能', () => window.hemiVoice.installMarketSkill(selectedBuiltin.id))}>
+                <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={Boolean(busy)} onClick={() => void act('安装技能', () => api.installMarketSkill(selectedBuiltin.id))}>
                   {busy === '安装技能' && busySpinner ? <span className="h37-spinner" aria-hidden="true" /> : null}
                   {busy === '安装技能' ? '正在安装…' : '安装并启用'}
                 </button>
@@ -791,10 +797,10 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
           />
           {installedItem ? (
             <div className="h34-detail-actions">
-              {builtinUpdateAvailable ? <button type="button" className="h37-btn h37-btn-primary" disabled={Boolean(busy)} onClick={() => void act('更新技能', () => window.hemiVoice.installMarketSkill(selectedBuiltin.id))}>更新到 v{selectedBuiltin.version}</button> : null}
-              <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => window.hemiVoice.setSkillEnabled(installedItem.id, !installedItem.enabled))}>{installedItem.enabled ? '停用技能' : '启用技能'}</button>
+              {builtinUpdateAvailable ? <button type="button" className="h37-btn h37-btn-primary" disabled={Boolean(busy)} onClick={() => void act('更新技能', () => api.installMarketSkill(selectedBuiltin.id))}>更新到 v{selectedBuiltin.version}</button> : null}
+              <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => api.setSkillEnabled(installedItem.id, !installedItem.enabled))}>{installedItem.enabled ? '停用技能' : '启用技能'}</button>
               <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void openSource(installedItem.id)}>查看原文</button>
-              <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => window.hemiVoice.revealSkill(installedItem.id))}><FolderOpen aria-hidden="true" /> 打开目录</button>
+              {!remote ? <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => api.revealSkill(installedItem.id))}><FolderOpen aria-hidden="true" /> 打开目录</button> : null}
               <button type="button" className="h37-btn h37-btn-ghost h37-btn-danger" disabled={Boolean(busy)} onClick={() => setConfirmRemove(installedItem.id)}><Trash2 aria-hidden="true" /> 卸载</button>
             </div>
           ) : null}
@@ -885,7 +891,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     <section className="h34-list" aria-label="Hemi 内置技能目录">
       <div className="h34-toolbar-row">
         {localSearch('搜索名称或用途', '搜索内置技能')}
-        <button type="button" className="h37-btn h37-btn-ghost h37-btn-icon" aria-label="刷新内置目录" title="刷新内置目录" disabled={Boolean(busy)} onClick={() => void act('刷新目录', () => window.hemiVoice.refreshSkillCatalog())}><RefreshCw aria-hidden="true" /></button>
+        <button type="button" className="h37-btn h37-btn-ghost h37-btn-icon" aria-label="刷新内置目录" title="刷新内置目录" disabled={Boolean(busy)} onClick={() => void act('刷新目录', () => api.refreshSkillCatalog())}><RefreshCw aria-hidden="true" /></button>
       </div>
       <div className="h34-cache-note">Hemi 内置技能 · {filteredCatalog.length} 个技能</div>
       {!state && showSkeleton ? <SkeletonGrid count={3} /> : filteredCatalog.length ? (
@@ -942,8 +948,9 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
     </section>
   );
 
+  const MarketRoot = remote ? 'section' : 'main';
   return (
-    <main ref={scrollRef} className="h34-market" aria-label="技能市场" data-detail-open={detailOpen ? 'true' : 'false'}>
+    <MarketRoot ref={scrollRef} className="h34-market" aria-label="技能市场" data-detail-open={detailOpen ? 'true' : 'false'}>
       {topbarSlot ? createPortal(topbar, topbarSlot) : <div className="h34-inline-top">{topbar}</div>}
       <div className="h37-column h34-column" data-wide={detailOpen ? 'false' : 'true'}>
         {pendingApproval ? (
@@ -957,7 +964,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
         {tab === 'builtin' && state?.catalogError ? (
           <div className="h37-note h34-alert" data-tone="warn" role="status">
             <span>{state.catalogError}。当前显示{state.catalogSource === 'built-in' ? '应用内置目录' : `上次成功目录（${state.checkedAt ? fmtDateTime(state.checkedAt) : '时间未知'}）`}，已安装技能可继续使用。</span>
-            <button type="button" className="h37-link h34-note-action" disabled={Boolean(busy)} onClick={() => void act('刷新目录', () => window.hemiVoice.refreshSkillCatalog())}>重试</button>
+            <button type="button" className="h37-link h34-note-action" disabled={Boolean(busy)} onClick={() => void act('刷新目录', () => api.refreshSkillCatalog())}>重试</button>
           </div>
         ) : null}
         {error ? (
@@ -982,12 +989,12 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '' }: {
             <p>新任务将无法使用它。在途任务仍使用受理时的版本；本地导入的原文件夹不会被删除。</p>
             <div className="h37-dialog-foot">
               <button type="button" className="h37-btn h37-btn-secondary" onClick={() => setConfirmRemove(null)}>取消</button>
-              <button type="button" className="h37-btn h37-btn-danger-solid" onClick={() => { const id = confirmRemove; setConfirmRemove(null); setSelected(null); void act('卸载技能', () => window.hemiVoice.removeSkill(id)); }}>确认卸载</button>
+              <button type="button" className="h37-btn h37-btn-danger-solid" onClick={() => { const id = confirmRemove; setConfirmRemove(null); setSelected(null); void act('卸载技能', () => api.removeSkill(id)); }}>确认卸载</button>
             </div>
           </div>
         </div>
       ) : null}
       <button type="button" className="sr-only" onClick={onBack}>返回对话</button>
-    </main>
+    </MarketRoot>
   );
 }

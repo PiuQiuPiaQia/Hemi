@@ -83,6 +83,27 @@ function managerWith({ onTerminal = null, onSettled = null } = {}) {
 
 const done = (text) => ({ texts: [text], lastText: text, usages: [], toolNames: [], modelError: null, aborted: false });
 
+test('child stream reaches its own snapshot; reuse cannot append to the previous dispatch', async () => {
+  const { manager, fakes } = managerWith();
+  const first = await manager.spawn({ role: roles.get('fixer'), prompt: 'first dispatch', background: true, conversationId: 'c' });
+  await tick(); await tick();
+  fakes[0].emit('stream', { type: 'hemi_request_start' });
+  fakes[0].emit('stream', { type: 'thinking_delta', delta: 'FIRST_THINKING' });
+  assert.equal(manager.snapshot().tasks[0].progressText, '正在思考');
+  assert.match(JSON.stringify(manager.snapshot().tasks[0].conversation), /FIRST_THINKING/);
+  fakes[0].finish(done('FIRST_DONE'));
+  await manager.waitFor(first.taskId);
+  const frozen = manager.snapshot().tasks[0].conversation;
+  const second = await manager.spawn({ role: roles.get('fixer'), prompt: 'second dispatch', sessionId: first.sessionRef, background: true, conversationId: 'c' });
+  await tick(); await tick();
+  fakes[0].emit('stream', { type: 'text_delta', delta: 'SECOND_ONLY' });
+  assert.deepEqual(manager.snapshot().tasks[0].conversation, frozen);
+  assert.doesNotMatch(JSON.stringify(manager.snapshot().tasks[1].conversation), /FIRST_THINKING/);
+  assert.match(JSON.stringify(manager.snapshot().tasks[1].conversation), /SECOND_ONLY/);
+  await manager.stop(second.taskId);
+  manager.disposeAll();
+});
+
 test('子 agent 等后台命令/资源时不误判模型停摆，恢复后看门狗继续生效', async () => {
   let now = 1000;
   const timers = [], fake = fakeSession();
@@ -469,4 +490,21 @@ test('停摆看门狗：模型流式分片计入活动，只有流真停了才�
   fire(); // 看门狗在下一拍发现没有运行中的任务才自清
   assert.equal(timers.length, 0, '没有运行中的任务后看门狗应停掉');
   manager.disposeAll();
+});
+
+test('后台终态按调用身份收口，不清除正在执行的独立工具', async () => {
+  const {manager,fakes}=managerWith();
+  const spawned=await manager.spawn({role:roles.get('fixer'),prompt:'background plus read',background:true,conversationId:'c'});
+  await tick();await tick();const f=fakes[0];
+  f.emit('progress',{kind:'tool-start',tool:'bash',toolCallId:'push',args:{command:'push'}});
+  f.emit('progress',{kind:'tool-end',tool:'bash',toolCallId:'push',background:true,commandId:'job-push'});
+  assert.ok(manager.snapshot().tasks[0].log.some(item=>item.text.startsWith('已转后台：')));
+  assert.ok(!manager.snapshot().tasks[0].log.some(item=>item.text.startsWith('已完成：')));
+  assert.equal(manager.snapshot().tasks[0].recentToolCalls.length,0,'受理回执不作为已执行成功的核验证据');
+  f.emit('progress',{kind:'tool-start',tool:'read',toolCallId:'read',args:{path:'independent.txt'}});
+  f.emit('progress',{kind:'tool-end',tool:'bash',toolCallId:'push',commandId:'job-push',args:{command:'push'},text:'exit=7',isError:true});
+  assert.match(manager.snapshot().tasks[0].progressText,/读取/);
+  assert.ok(manager.snapshot().tasks[0].log.some(item=>item.text.startsWith('后台命令失败：')));
+  f.emit('progress',{kind:'tool-end',tool:'read',toolCallId:'read',text:'INDEPENDENT'});
+  f.finish(done('DONE'));assert.equal((await manager.waitFor(spawned.taskId)).outcome,'complete');manager.disposeAll();
 });

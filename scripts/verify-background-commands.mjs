@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 
 const runtime = process.env.HEMI_PLAYWRIGHT_MODULE ?? path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const { _electron } = await import(pathToFileURL(runtime).href);
-const mode = process.env.VITE_DEV_SERVER_URL ? 'dev' : 'built';
+const mode = process.env.VITE_DEV_SERVER_URL || process.env.HEMI_BACKGROUND_UI_MODE === 'dev' ? 'dev' : 'built';
 const evidence = path.resolve(`.visual/workflow/vision/background-commands/${mode}`);
 const userData = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-background-ui-')));
 const project = path.join(userData, 'independent-project');
@@ -31,17 +31,19 @@ const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   const body = JSON.parse(raw); requests.push(body);
   const messages = text(body.messages);
-  const marker = ['BACKGROUND_CANCEL', 'INDEPENDENT_B', 'RESOURCE_C', 'BACKGROUND_A'].find(key => messages.includes(key));
+  const marker = ['BACKGROUND_RESTART', 'BACKGROUND_CANCEL', 'INDEPENDENT_B', 'RESOURCE_C', 'BACKGROUND_A'].find(key => messages.includes(key));
   const completed = messages.includes('［后台命令完成');
   const called = body.messages.some(message => message.role === 'tool');
   let call, content;
   if (!body.tools?.length) content = '后台任务验证';
   else if (completed) content = 'BACKGROUND_A_RESUMED_ACTUAL_RESULT';
-  else if (called) content = marker === 'BACKGROUND_A' || marker === 'BACKGROUND_CANCEL' ? '后台命令已启动，完成后继续。' : `${marker}_DONE`;
+  else if (called) content = marker?.startsWith('BACKGROUND_') ? '后台命令已启动，完成后继续。' : `${marker}_DONE`;
   else if (marker === 'RESOURCE_C') call = { name: 'read', arguments: { path: path.join(userData, 'workspace/default/existing.txt') } };
   else call = { name: 'bash', arguments: marker === 'BACKGROUND_A' ? {
     command: `export HEMI_VERIFICATION=background\nprintf STARTED; printed=; until [ -f '${path.join(userData, 'release-a')}' ]; do if [ -z "$printed" ] && [ -f '${path.join(userData, 'progress-a')}' ]; then printf '\\nBUILD_IN_PROGRESS'; printed=1; fi; sleep 0.1; done; printf BACKGROUND_ACTUAL_RESULT`,
     description: commandDescription, yield_ms: 50,
+  } : marker === 'BACKGROUND_RESTART' ? {
+    command: `sleep 30; printf FORBIDDEN > '${path.join(userData, 'restart-late')}'`, run_in_background: true,
   } : marker === 'BACKGROUND_CANCEL' ? {
     command: `sleep 3; printf FORBIDDEN > '${path.join(userData, 'late')}'`, run_in_background: true,
   } : { command: 'printf INDEPENDENT_ACTUAL_RESULT' } };
@@ -60,7 +62,11 @@ fs.writeFileSync(path.join(userData, 'text-model-profiles.json'), JSON.stringify
   version: 3, defaultModelId: 'audit/main', lastConversationModelKey: 'audit/main',
   providers: [{ id: 'audit', name: '后台任务验证', api: 'openai-completions', baseUrl, models: [{ id: 'main', model: 'background-test', thinkingLevel: 'off', supportsVision: false }] }],
 }));
-let electron, page, rendererUrl, environment;
+let electron, page, rendererUrl, environment, rendererServer;
+const launch = () => _electron.launch({
+  executablePath: path.resolve('node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: ['.'],
+  env: { ...process.env, HEMI_USER_DATA_DIR: userData, HEMI_TEST_MIC_GRANT: '1', HEMI_LLM_API_KEY: 'TEST_ONLY', HEMI_LLM_BASE_URL: baseUrl, HEMI_LLM_MODEL: 'background-test' },
+});
 const flow = id => page.evaluate(id => window.hemiVoice.flowGetSnapshot(id), id);
 async function moveDevMonitor() {
   const handle = page.getByRole('button', { name: '移动性能监控', exact: true });
@@ -115,10 +121,12 @@ async function dispatch(id, marker, workspaceId) {
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
 }
 try {
-  electron = await _electron.launch({
-    executablePath: path.resolve('node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: ['.'],
-    env: { ...process.env, HEMI_USER_DATA_DIR: userData, HEMI_TEST_MIC_GRANT: '1', HEMI_LLM_API_KEY: 'TEST_ONLY', HEMI_LLM_BASE_URL: baseUrl, HEMI_LLM_MODEL: 'background-test' },
-  });
+  if(mode==='dev'&&!process.env.VITE_DEV_SERVER_URL){
+    const {createServer}=await import('vite');
+    rendererServer=await createServer({configFile:path.resolve('vite.config.ts'),cacheDir:path.join(userData,'vite-cache'),logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false}});
+    await rendererServer.listen();process.env.VITE_DEV_SERVER_URL=rendererServer.resolvedUrls.local[0];
+  }
+  electron = await launch();
   electron.process().stderr.on('data', data => fs.appendFileSync(path.join(evidence, 'stderr.log'), data));
   environment = await electron.evaluate(({ app }) => ({ app: app.getVersion(), electron: process.versions.electron, node: process.versions.node, platform: process.platform, arch: process.arch }));
   await wait(() => { page = electron.windows().find(p => /^(?:http|file):/.test(p.url()) && !new URL(p.url()).searchParams.has('mode')); return !!page; }, '主窗口');
@@ -231,6 +239,19 @@ try {
     }
     check('展示边界样本：多命令分别计时、超过一小时和旧数据缺字段，在三种宽度正常显示');
   } finally { await displayActivity(a, actualActivity); }
+  try {
+    await displayActivity(a, {...actualActivity,jobs:[{...actualActivity.jobs[0],startedAt:Date.now()-90_000,lastOutputAt:null,output:''}]});
+    for(const [width,height] of [[1440,900],[768,900],[375,812]]){
+      await resize(width,height);
+      assert.match(await page.locator('.h56-run-activity-head').innerText(),/无新输出/);
+      assert.ok(await page.locator('.h56-run-activity').evaluate(el=>el.scrollWidth<=el.clientWidth));
+      await page.locator('.h56-run-activity-head').click();
+      await page.getByLabel('后台命令无新输出').waitFor();
+      await snapshot(`quiet-background-${width}`);
+      await page.locator('.h56-run-activity-head').click();
+    }
+    check('无输出时明确展示等待时长，不把等待冒充真实进度；375/768/1440 无溢出');
+  } finally { await displayActivity(a, actualActivity); }
   await resize(1440);
   const b = 'conv-independent-background-b', c = 'conv-background-resource-c';
   await dispatch(b, 'INDEPENDENT_B', workspace.workspace.id);
@@ -240,18 +261,9 @@ try {
   assert.ok(JSON.stringify(bState.timeline).includes('INDEPENDENT_B_DONE'));
   check('后台 Shell 不阻塞其他会话和独立工作区真实命令');
   await dispatch(c, 'RESOURCE_C', 'default');
-  await wait(async () => { const state = await flow(c); return state.runs[state.activeRunId]?.activity?.phase === 'waiting-resource'; }, '同工作区资源排队');
-  await open('RESOURCE_C');
-  await page.locator('.h56-run-activity[data-phase="waiting-resource"]').waitFor();
-  assert.ok((await page.locator('.h56-run-activity').boundingBox()).height <= 36, '资源等待默认也只有一行');
-  assert.equal(await page.locator('.h56-run-activity details[open]').count(), 0, '切换会话不继承展开状态');
-  await page.locator('.h56-run-activity-head').click();
-  assert.ok((await page.locator('.h56-run-activity').innerText()).includes('另一个操作正在占用此工作区'));
-  assert.match(await page.locator('.h56-run-activity-time').innerText(), /^已等待 /);
-  assert.ok((await page.locator('.h56-run-activity').innerText()).includes(commandDescription));
-  assert.ok(!(await page.locator('.h56-run-activity').innerText()).includes('export '));
-  await snapshot('waiting-resource');
-  check('同工作区读写仍受协调，界面明确展示资源等待原因');
+  await wait(async () => (await flow(c)).phase==='idle', '同工作区独立文件读取');
+  assert.notEqual((await flow(a)).phase,'idle');
+  check('普通后台命令不锁整个工作区，同工作区独立文件读取可完成');
   fs.writeFileSync(path.join(userData, 'release-a'), 'done');
   await wait(async () => (await flow(a)).phase === 'idle' && (await flow(c)).phase === 'idle', '后台完成后原目标续跑');
   const resumed = requests.filter(r => r.tools?.length && text(r.messages).includes('［后台命令完成'));
@@ -259,7 +271,7 @@ try {
   assert.match(text(resumed[0].messages), /BACKGROUND_ACTUAL_RESULT/);
   assert.ok(JSON.stringify((await flow(a)).timeline).includes('BACKGROUND_A_RESUMED_ACTUAL_RESULT'));
   assert.equal((await page.evaluate(() => window.hemiVoice.listConversations())).sessions.find(s => s.id === a).status, null);
-  check('完成事件只唤醒原目标一次，读取真实结果并收口，释放工作区等待者');
+  check('完成事件只唤醒原目标一次，读取真实结果并收口');
   await page.getByRole('button', { name: '新建对话', exact: true }).click();
   const cancel = await submit('BACKGROUND_CANCEL');
   await page.locator('.h56-run-activity[data-phase="waiting-background"]').waitFor();
@@ -276,6 +288,33 @@ try {
   assert.equal(requests.length, count);
   assert.equal(await page.locator('.h56-run-activity').count(), 0);
   check('界面停止会回收真实后台进程，迟到完成不唤醒，等待面板消失');
+  await page.getByRole('button', { name: '新建对话', exact: true }).click();
+  const restart = await submit('BACKGROUND_RESTART');
+  await page.locator('.h56-run-activity[data-phase="waiting-background"]').waitFor();
+  const crashed = await flow(restart), rootRunId=crashed.activeRunId;
+  assert.equal(crashed.timeline.flatMap(item=>item.parts??[]).find(part=>part.tool==='bash').status,'running','后台受理不是工具完成');
+  await page.evaluate(id=>window.hemiVoice.flowCommand(id,{type:'send',input:{inputId:'restart-queue',text:'QUEUED_RESTART_INPUT'}}),restart);
+  await wait(async()=>JSON.parse(fs.readFileSync(path.join(userData,`runtime-v2/conversations/${restart}.json`),'utf8')).flow.pending.some(input=>input.inputId==='restart-queue'),'队列已持久化');
+  const modelCalls=requests.filter(body=>body.tools?.length).length;
+  const crashedProcess=electron.process();crashedProcess.kill('SIGKILL');
+  if(crashedProcess.exitCode===null&&crashedProcess.signalCode===null)await new Promise(resolve=>crashedProcess.once('exit',resolve));
+  electron=await launch();
+  await wait(()=>{page=electron.windows().find(p=>/^(?:http|file):/.test(p.url())&&!new URL(p.url()).searchParams.has('mode'));return Boolean(page);},'重启主窗口');
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.locator('textarea.text-composer-input').waitFor();
+  const recovered=await flow(restart);
+  assert.equal(recovered.phase,'idle');assert.equal(recovered.activeRunId,null);assert.equal(recovered.runs[rootRunId].outcome,'interrupted');
+  assert.equal(recovered.runs[rootRunId].activity,null);assert.equal(recovered.queuePaused,true);assert.equal(recovered.pending[0].inputId,'restart-queue');
+  assert.equal(recovered.timeline.flatMap(item=>item.parts??[]).find(part=>part.tool==='bash').status,'stopped');
+  assert.equal(requests.filter(body=>body.tools?.length).length,modelCalls,'重启不重放命令或自动发送排队输入');
+  assert.equal(await page.locator('.h56-run-activity').count(),0);assert.equal(await page.locator('.streaming-copy').count(),0);
+  assert.equal((await page.evaluate(()=>window.hemiVoice.listConversations())).sessions.find(s=>s.id===restart).status,null);
+  await page.getByText('应用已重启，此任务已中断。',{exact:false}).waitFor();
+  await wait(()=>JSON.parse(fs.readFileSync(path.join(userData,`runtime-v2/conversations/${restart}.json`),'utf8')).flow.phase==='idle','恢复后的唯一快照已保存');
+  await resize(1440);await snapshot('restart-interrupted');
+  await resize(375,812);await snapshot('restart-interrupted-375');
+  assert.equal(fs.existsSync(path.join(userData,'restart-late')),false);
+  check('真实进程崩溃重启：运行/工具/列表/磁盘一致中断，队列保留暂停，没有重放或假运行');
   assert.deepEqual(errors, []);
   const journal = JSON.parse(fs.readFileSync(path.join(userData, 'runtime-v2/run-journal.json'), 'utf8'));
   assert.ok(Object.values(journal.processes).every(process => !['active', 'unknown'].includes(process.state)));
@@ -291,5 +330,6 @@ try {
 } finally {
   fs.writeFileSync(path.join(evidence, 'report.json'), JSON.stringify({ mode, rendererUrl, head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), workingTree: true, node: process.version, platform: `${process.platform}/${process.arch}`, environment, layout, checks, errors }, null, 2));
   await electron?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  await rendererServer?.close();
   fs.rmSync(userData, { recursive: true, force: true });
 }

@@ -9,7 +9,7 @@ Windows x64 可作为 Bot 的 SSH 远端主机。桌面端沿用现有 Bot 入�
 - 本地账号目录可写，至少 512 MB 可用空间，可访问 Node 官方分发和 npm registry。
 - 账号可创建自身的 S4U 计划任务，并拥有“作为批处理作业登录”权限。组策略禁止时，安装报错并保留原组件。
 
-Windows 当前支持 x64。工作目录使用 `C:\Users\…` 一类本地盘绝对路径；安装前的目录浏览不接入 UNC 网络共享。Bot 仍是文件和命令执行环境，不提供远程桌面控制。
+Windows 当前支持 x64。工作目录使用 `C:\Users\…` 一类本地盘绝对路径；安装前的目录浏览不接入 UNC 网络共享。Bot 可通过独立的交互用户助手操作 Windows 应用，浏览器和其他能力见 [Bot 主机能力](bot-capabilities.md)。
 
 ## 安装与常驻
 
@@ -151,3 +151,5 @@ Windows 在握手声明 `capabilities.rpcStream: 1` 后，复用一个 SSH / Pow
 基线仍为 `4af7ccbe70f9ffcd13854a8868ca034825e6e76d` 加未提交工作树，macOS arm64 / Node 22.22.3 / Hemi Dev（Vite 5174），连接 Windows x64 / Node 22.22.3。生产桌面服务配合真实 Bot 的独立临时会话验证：创建 100 ms、缓存打开 6 ms、会话设置更新 89 ms、删除 106 ms，临时会话已清理。用户随后已在当前窗口发起自己的任务，未再对该会话切换模型或清理。没有重新执行全量测试，也没有在活动会话上做推理回归。
 
 证据位于 `.visual/workflow/bot-control-live/`：`initial-handshake.json`、`activation.json`、`activation.log`、`live-operations.json` 及相关复现脚本。本轮重点是实际加载与验收，非再次声明隔离测试已通过；没有提交、推送或发版。
+
+桌面无人值守时，可将当前账号已有的活动 RDP 会话交还控制台，避免依赖持续连接的 RDP 窗口。使用管理员 PowerShell 执行 [`scripts/windows-console-handoff.ps1`](../../scripts/windows-console-handoff.ps1)；这会立即断开当前远程窗口。腾讯云轻量 Windows 已完成移交后无 RDP 连接的原生桌面操作补验，详见 [Bot 主机能力验证记录](bot-capabilities.md#腾讯云轻量-windows-会话排查)。

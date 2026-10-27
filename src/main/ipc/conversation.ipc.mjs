@@ -393,6 +393,12 @@ export function registerConversationIpc() {
     return { conversationId, records: [...(session?.usageLedger ?? []), ...taskRows].filter(row => row.at < cutover).concat(canonical) };
   });
 
+  // 使用记录页：全局跨会话请求历史（journal 全量投影；from/to/query/status 影响统计，分页只切 records）。
+  ipcMain.handle(IPC.usage.getHistory, (_event, payload) => {
+    const options = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+    return getAgentRuntime().usageHistory(options);
+  });
+
   // 上下文容量快照：在途会话现场读；没有在途会话（刚启动/切会话）读档案里
   // 上次轮末的真实读数——环形在打开旧会话时立即可见，下一轮刷新。
   contextApi = {

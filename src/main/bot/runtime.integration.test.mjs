@@ -193,9 +193,11 @@ test(
     assert.ok(
       requests[1].tools.every(
         (t) =>
-          !/^ui_|screen_view|app_open|vision|browser/.test(t.function.name),
+          !/^ui_|screen_view|app_open|vision/.test(t.function.name) || process.platform === 'win32',
       ),
     );
+    assert.ok(requests[1].tools.some(tool => tool.function.name === 'browser_navigate'));
+    assert.ok(requests[1].tools.some(tool => tool.function.name === 'conversation_read'));
     assert.ok(detail.usage.length >= 3);
     assert.ok(detail.usage.every(call => call.modelName === 'fixture-model' && call.providerName === 'Fixture'), '真实 SDK 调用分别保存供应商名与型号');
     assert.equal(JSON.stringify(detail).includes('fixture-only-key'), false);

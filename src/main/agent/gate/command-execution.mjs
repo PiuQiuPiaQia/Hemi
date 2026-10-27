@@ -5,6 +5,7 @@ import {promisify} from 'node:util';
 import {StringDecoder} from 'node:string_decoder';
 import {commandDeadline} from './command-deadline.mjs';
 import {windowsCommandHelper, reapWindowsCommand} from './windows-command-job.mjs';
+import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
 const exec=promisify(execFile), pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const MAX_OUTPUT=8*1024*1024;
 
@@ -91,8 +92,14 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
 export { createCommandScope } from './command-scope.mjs';
 
 export function commandToolResult(out) {
+  // SDK 仅在整批工具均要求 terminate 时让出生成；同批独立工作仍正常执行并继续。
+  // 这是宿主接管等待，不是命令失败或根目标结束；外层 prompt 保留后台完成路径。
+  if (out.status === 'waiting-background') return {
+    content: [{ type: 'text', text: '占位等待命令未执行，已交由宿主等待当前目标的后台结果。后台工作尚未确认成功；收到完成通知后再继续。' }],
+    isError: false, terminate: true, details: out,
+  };
   if (out.status === 'background') return {
-    content: [{ type: 'text', text: `命令已转后台（${out.jobId}），仍属于当前目标。可继续做不依赖它的工作；无独立工作时结束本次回复，宿主会等待完成后自动唤醒你。不要用 sleep 或循环查询等待，也不要提前宣布整个目标完成。` }],
+    content: [{ type: 'text', text: `命令已转后台（${out.jobId}），仍属于当前目标。${BACKGROUND_WAIT_GUIDANCE}` }],
     isError: false, details: out,
   };
   const text = [out.stdout, out.stderr ? `stderr:\n${out.stderr}` : '',

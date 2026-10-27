@@ -11,6 +11,7 @@ import { atomicWriteWithin, openVerifiedRead } from './safe-path.mjs';
 import { runCommand, commandToolResult } from './command-execution.mjs';
 import { COMMAND_FOREGROUND_MS, COMMAND_TIMEOUT_MS } from './command-scope.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
+import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
 
 const MAX_READ_BYTES = 512 * 1024;
 export const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
@@ -253,7 +254,7 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
   pi.registerTool({
     name: 'bash',
     label: '执行命令',
-    description: '在会话工作目录执行本机 shell 命令，可联网。超过前台等待预算自动转后台，也可 run_in_background=true 立即后台执行。多个独立长命令分别调用 bash 并设 run_in_background=true，由宿主管理并行；不要手写 &/wait 拼接任务（cd 和变量赋值可能只在后台子 shell 生效）。后台完成后宿主自动投递退出状态与输出；先做独立工作，无事可做时结束本次回复等待通知，不用 sleep、true 或轮询等结果。命令及其子孙归属本次目标，父命令退出、停止或超时会清理整棵进程树；Start-Process、detached 或 & 不代表永久服务。需要常驻服务时使用用户授权的系统服务或计划任务管理生命周期，用有界就绪检查验证启动，不等待服务退出。危险操作仍经门控。',
+    description: `在会话工作目录执行本机 shell 命令，可联网。超过前台等待预算自动转后台，也可 run_in_background=true 立即后台执行。多个独立长命令分别调用 bash 并设 run_in_background=true，由宿主管理并行；不要手写 &/wait 拼接任务（cd 和变量赋值可能只在后台子 shell 生效）。${BACKGROUND_WAIT_GUIDANCE}命令及其子孙归属本次目标，父命令退出、停止或超时会清理整棵进程树；Start-Process、detached 或 & 不代表永久服务。需要常驻服务时使用用户授权的系统服务或计划任务管理生命周期，用有界就绪检查验证启动，不等待服务退出。危险操作仍经门控。`,
     parameters: {
       type: 'object',
       properties: {

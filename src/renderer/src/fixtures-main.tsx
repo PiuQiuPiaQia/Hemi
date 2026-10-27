@@ -17,6 +17,7 @@ import type {
 } from '@/shared/types';
 import { initialUiState } from '@/windows/voice/lib/voice-bridge';
 import { VoiceScreen } from '@/windows/voice/voice-screen';
+import { SubagentConversationFixture } from './fixtures/subagent-conversation';
 import { ThinkingBlock } from '@/windows/voice/thinking-block';
 import { projectFlowTimeline } from '@/windows/voice/lib/flow-timeline-view';
 import { WorkflowCard } from '@/windows/voice/workflow-card';
@@ -2308,6 +2309,9 @@ function activityIndicatorsScene(collapsed = false) {
 }
 
 const scenes: Record<string, () => React.ReactElement> = {
+  'subagent-conversation': () => <SubagentConversationFixture base={runningTask} render={snap => <VoiceScreen key={snap.taskId} {...screenProps({
+    currentConversationId: 'conv-fixture', sessionState: 'idle', callActive: false, transcripts: taskThread(snap), taskSnaps: taskSnapsOf(snap), taskState: bundleOf(snap), initialProcessTaskKey: snap.taskId!,
+  })} />} />,
   'activity-indicators': () => activityIndicatorsScene(),
   'activity-indicators-collapsed': () => activityIndicatorsScene(true),
   'conversation-virtual-human-input': () => <VirtualTranscriptFixture count={150} humanInput />,

@@ -63,16 +63,18 @@ export function reduceTurnParts(parts, event, now = Date.now()) {
       return [...closed, { type: 'tools', calls: [call] }];
     }
     case 'tool_end': {
-      const state = event.isError ? 'error' : 'done';
+      const state = event.background ? 'running' : event.stopped ? 'stopped' : event.isError ? 'error' : 'done';
       let hit = false;
       const next = list.map((part) => {
         if (hit || part.type !== 'tools') return part;
         const index = part.calls.findIndex((call) =>
-          call.state === 'running' && call.tool === event.tool && (event.toolCallId == null || call.id === event.toolCallId));
+          call.state === 'running' && call.tool === event.tool && (!event.background && event.commandId
+            ? call.commandId === event.commandId : (event.toolCallId == null || call.id === event.toolCallId)
+              && (!event.background || !event.commandId || !call.commandId || call.commandId === event.commandId)));
         if (index < 0) return part;
         hit = true;
         const calls = part.calls.slice();
-        calls[index] = { ...calls[index], state };
+        calls[index] = { ...calls[index], state, ...(event.background ? {background:true,commandId:event.commandId} : {}) };
         return { ...part, calls };
       });
       return hit ? next : list;

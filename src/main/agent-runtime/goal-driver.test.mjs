@@ -43,3 +43,26 @@ test('完成判断严格校验结构、证据、剩余项和下一步',()=>{
  for(const value of ['{}','OK',JSON.stringify({...complete,evidence:[]}),JSON.stringify({...complete,remaining:['未做']}),JSON.stringify({...next,nextAction:''})])assert.throws(()=>parseGoalVerdict(value));
  assert.throws(()=>goalPolicy({maxRequests:0}));
 });
+
+const awaiting = {status:'awaiting_user',question:'文件里写什么内容？',reason:'需要用户提供文件内容',evidence:['助手已询问文件内容'],remaining:['获得内容并写入文件'],nextAction:'等待用户答复'};
+test('等待用户答复独立落盘、重启保持等待；答复明确续接原目标且累计预算不清零',async t=>{
+ const {journal,dir}=await fixture(t,{maxRequests:3});await request(journal,'before');await finish(journal,'before');
+ await journal.checkGoal(owner);await journal.recordGoalCheck(owner,awaiting);await journal.finishRoot(owner,'awaiting_user');
+ assert.equal((await journal.root(owner)).status,'awaiting_user');await assert.rejects(request(journal,'while-waiting'),/挂起/);
+ await assert.rejects(journal.beginRoot(owner),/不能自行恢复/);
+ const restored=createRunJournal({dir});await restored.recover();assert.equal((await restored.root(owner)).goal.phase,'awaiting_user');
+ const reply={...owner,rootRunId:'reply'};await restored.beginRoot(reply);const goal=await restored.beginGoal(reply,'用户答复',goalPolicy({maxRequests:999}),{rootRunId:owner.rootRunId,inputId:'answer',answer:'写入测试内容'});
+ assert.equal(goal.id,owner.rootRunId);assert.equal(goal.objective,'完成请求');assert.equal(goal.requestOffset,1);assert.equal(goal.policy.maxRequests,3);assert.equal(goal.replies[0].inputId,'answer');assert.equal((await restored.root(owner)).status,'continued');
+ await request(restored,'after-1',reply);await finish(restored,'after-1');await request(restored,'after-2',reply);await finish(restored,'after-2');await assert.rejects(request(restored,'over',reply),/上限 3/);
+});
+test('澄清等待不能被其他会话、代次或第二次答复冒领',async t=>{
+ const {journal}=await fixture(t);await journal.checkGoal(owner);await journal.recordGoalCheck(owner,awaiting);await journal.finishRoot(owner,'awaiting_user');
+ for(const nextOwner of [{...owner,conversationId:'foreign',rootRunId:'foreign'},{...owner,generation:2,rootRunId:'new-generation'}]){
+  await journal.beginRoot(nextOwner);await assert.rejects(journal.beginGoal(nextOwner,'answer',goalPolicy(),{rootRunId:owner.rootRunId,inputId:'answer',answer:'x'}),/已变化/);
+ }
+ assert.equal((await journal.root(owner)).status,'awaiting_user');
+});
+test('awaiting_user 必须携带实际问题、证据和未完成事项',()=>{
+ assert.deepEqual(parseGoalVerdict(JSON.stringify(awaiting)),awaiting);
+ for(const patch of [{question:''},{question:undefined},{evidence:[]},{remaining:[]}])assert.throws(()=>parseGoalVerdict(JSON.stringify({...awaiting,...patch})));
+});

@@ -39,6 +39,10 @@ const METHODS = new Set([
   'file.resolve',
   'references',
   'skills',
+  'capabilities.inspect', 'capabilities.configure',
+  'context.windows', 'context.capture',
+  'skills.state', 'skills.refresh', 'skills.import', 'skills.install', 'skills.set-enabled', 'skills.remove', 'skills.read',
+  'skills.search', 'skills.preview', 'skills.mp-install', 'skills.check-update',
   'operation.get',
   'diagnostics',
   'pairing.status',
@@ -995,7 +999,7 @@ export function createBotDesktopService({
         return structuredClone(cache.details[params.id]);
       }
     }
-    if (params.id && ['flow.command', 'session.draft', 'session.update', 'permission.decide'].includes(method)) {
+    if (params.id && ['flow.command', 'session.draft', 'session.update', 'permission.decide', 'context.capture'].includes(method)) {
       const control = cache?.sessions.find(item => item.id === params.id)?.control;
       if (control?.ownerId === clientId && params.controlEpoch === undefined) params = {...params, controlEpoch: control.epoch};
     }

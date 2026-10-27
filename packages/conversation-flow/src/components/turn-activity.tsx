@@ -237,6 +237,12 @@ function ToolStep({ call }: { call: TurnToolCall }) {
         typeof call.args.command === "string" ? (
           <pre className="selectable">{call.args.command}</pre>
         ) : null}
+        {call.output ? (
+          <details className="turn-activity-output">
+            <summary>工具结果{call.outputTruncated ? '（节选）' : ''}</summary>
+            <pre className="selectable">{call.output}</pre>
+          </details>
+        ) : null}
       </div>
     </div>
   );

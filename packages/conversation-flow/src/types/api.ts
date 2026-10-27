@@ -112,6 +112,7 @@ export type TaskView = Pick<
       | "startedAt"
       | "endedAt"
       | "progressText"
+      | "conversation"
       | "readOnly"
       | "verifying"
       | "verified"
@@ -182,7 +183,7 @@ export interface MessageView {
   skills?: TranscriptItem["skills"];
   queuedForSend?: boolean;
   withdrawn?: boolean;
-  replyStatus?: "stopped";
+  replyStatus?: "stopped" | "awaiting-user";
   thinking?: TranscriptItem["thinking"];
   usage?: TranscriptItem["usage"];
   parts?: MessagePart[];

@@ -147,6 +147,7 @@ export function snapshotFromRecord(record, seq) {
     ...(record.rootRunId ? { rootRunId: record.rootRunId } : {}),
     ...(record.sessionRef ? { sessionRef: record.sessionRef, worklineId: record.worklineId, resumesTaskId: record.resumesTaskId } : {}),
     progressText: record.resultText ?? outcomeReason ?? '已结束',
+    conversation: record.conversation ?? null,
     /** 024：重建快照保留建档来源（会话载入后的通知静音判定不漂移）。 */
     inputSource: record.inputSource === 'text' ? 'text' : 'voice',
     readOnly: !acted,
@@ -407,12 +408,13 @@ export function createTaskHistory({ dir, log = null, maxRecords = MAX_RECORDS } 
    * verifications（append-only，重试总结不触碰）；018 过程记录（结构化工具
    * 耗时 + 审批等待）随终态入档。
    */
-  function finishRecord(taskId, { agent = null, agentTitle = null, toolCallId = null, rootRunId = null, sessionRef = null, worklineId = null, resumesTaskId = null, outcome, outcomeReason = null, resultText = null, resultVersion = null, bodySource = null, speechText = null, notices = null, sources = null, visitedUrls = null, fileChanges = null, fileDiffs = null, report = null, verification = null, taskResult = null, toolCalls = null, approvals = null, usageByModel = null, at = Date.now() }) {
+  function finishRecord(taskId, { agent = null, agentTitle = null, toolCallId = null, rootRunId = null, sessionRef = null, worklineId = null, resumesTaskId = null, outcome, outcomeReason = null, resultText = null, resultVersion = null, conversation = null, bodySource = null, speechText = null, notices = null, sources = null, visitedUrls = null, fileChanges = null, fileDiffs = null, report = null, verification = null, taskResult = null, toolCalls = null, approvals = null, usageByModel = null, at = Date.now() }) {
     const record = cache.get(taskId) ?? readRecordFile(taskId);
     if (!record || record.corrupt) return false;
     record.outcome = outcome;
     record.outcomeReason = outcomeReason;
     record.resultText = resultText;
+    if (conversation) record.conversation = conversation;
     // 056：子 agent 角色与发起它的 task 调用 id（重启后重建的快照据此原地显示在调用处）。
     if (typeof agent === 'string' && agent) record.agent = agent;
     if (typeof agentTitle === 'string' && agentTitle) record.agentTitle = agentTitle;

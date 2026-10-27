@@ -138,8 +138,9 @@ export function createConversationController({
 
   async function startRun({ input, source, fromPending = false }) {
     const runId = makeId(`run-${++seq.run}`);
+    const continuationOf = input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
     preparingAborted = false;
-    commit({ type: 'run-preparing', runId, source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
+    commit({ type: 'run-preparing', runId, continuationOf, source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
     try {
       // 受理先落最小快照再执行（契约 §8）：运行记录带 inputIds 保存输入身份；
       // 用户消息项在保存成功后才转正（失败回 pending 时时间线不留残影）。
@@ -158,7 +159,7 @@ export function createConversationController({
     }
     let started;
     try {
-      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, envelope: input, source });
+      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, continuationOf, envelope: input, source });
     } catch (error) {
       // 真实适配层在运行终态时已自行 applyFact 关闭运行（自闭合）——那种情况不重复收口。
       if (snapshot.activeRunId !== runId) {
@@ -225,7 +226,7 @@ export function createConversationController({
 
   /** 后台报告待处理（Q3 建议：非暂停时空闲自动转述；队列优先）。 */
   function maybeDrainReports() {
-    if (snapshot.phase !== 'idle' || snapshot.queuePaused || snapshot.pendingReports.length === 0) return;
+    if (snapshot.phase !== 'idle' || snapshot.awaitingUser || snapshot.queuePaused || snapshot.pendingReports.length === 0) return;
     const report = snapshot.pendingReports[0];
     commit({ type: 'report-consumed', taskId: report.taskId, resultVersion: report.resultVersion, generation: snapshot.generation });
     void startRun({ input: null, source: 'event' });
@@ -312,6 +313,15 @@ export function createConversationController({
 
   async function commandStop(command) {
     const reason = command.reason ?? 'stop';
+    if (snapshot.phase === 'idle' && snapshot.awaitingUser && reason === 'stop') {
+      const runId=snapshot.awaitingUser.runId;
+      if (command.targetRunId && command.targetRunId !== runId) return {ok:false,code:'run-changed'};
+      await runtime.cancelWaitingUser?.({conversationId,runId,generation:snapshot.generation});
+      commit({type:'user-wait-cancelled',runId,at:now(),generation:snapshot.generation});
+      commit({type:'queue-paused',generation:snapshot.generation});
+      await store.update(conversationId,{revision:snapshot.revision});
+      return {ok:true,disposition:'stopped',runId};
+    }
     const targetRunId = Object.hasOwn(command, 'targetRunId') ? command.targetRunId : snapshot.activeRunId;
     if (targetRunId !== snapshot.activeRunId) return { ok: false, code: 'run-changed' };
     if (reason === 'stop') {

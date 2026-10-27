@@ -6,13 +6,16 @@ import { modelFailure, requestWatchdog } from './model-failure.mjs';
 import { piModelOf, sdkThinkingLevelOf } from '../lib/pi-model.mjs';
 import { isSameCandidate } from '../lib/model-routing.mjs';
 import { createRequestImageProjector, isRequestMediaTooLarge } from './request-images.mjs';
+import { sanitizedUrl, sanitizeErrorText } from './usage-history.mjs';
 
 const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 const candidateIndex = provider => provider === 'hemi-fallback' ? 1 : /^hemi-fallback-\d+$/.test(provider) ? Number(provider.split('-').at(-1)) : 0;
 export function usageOf(message) {
   const usage = message?.usage;
-  if (!usage || !['input','output','cacheRead','cacheWrite'].some(key => Number(usage[key]) > 0)) return { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null };
-  return { uncachedInput: Number(usage.input) || 0, output: Number(usage.output) || 0, cacheRead: Number(usage.cacheRead) || 0, cacheWrite: Number(usage.cacheWrite) || 0 };
+  if (!usage || !['input','output','cacheRead','cacheWrite'].some(key => Number(usage[key]) > 0)) return { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null };
+  return { uncachedInput: Number(usage.input) || 0, output: Number(usage.output) || 0, cacheRead: Number(usage.cacheRead) || 0, cacheWrite: Number(usage.cacheWrite) || 0,
+    // reasoning 是 provider 明确报告的输出子集；未报告（undefined）保持 null，不当 0。
+    reasoning: usage.reasoning === undefined || usage.reasoning === null ? null : Number(usage.reasoning) || 0 };
 }
 
 /** 包住 SDK 共用 streamFunction，压缩同样经过这里；fetch 边界逐次记真实 HTTP 尝试。 */
@@ -73,7 +76,7 @@ export function controlledStream(stream, getExecution) {
             if (execution.cancelled?.() || signal.aborted) throw signal.reason ?? new DOMException('执行归属已失效', 'AbortError');
             const requestId = `request-${randomUUID()}`;
             const { apiKey: _secret, encryptedApiKey: _encrypted, ...publicCandidate } = candidate;
-            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
+            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, url: sanitizedUrl(url), cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
             catch (error) { boundaryFailure = error; throw error; }
             ids.push(requestId); attempts.set(requestId, { startedAt: Date.now() }); lastRequestId = requestId;
             try {
@@ -112,7 +115,12 @@ export function controlledStream(stream, getExecution) {
               } else {
                 watchdog.activity();
                 if (!resetSent) { execution.onRequestReset?.(); resetSent = true; }
-                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') responseStarted = true;
+                if ((event.type.endsWith('_delta') && event.delta) || event.type === 'toolcall_end') {
+                  responseStarted = true;
+                  // TTFT 基准：首个携带可见内容的流事件（非空 delta / toolcall_end），不是响应头或空事件。
+                  const current = attempts.get(lastRequestId);
+                  if (current && !current.firstOutputAt) current.firstOutputAt = Date.now();
+                }
                 output.push(event);
               }
             } } finally { if (signal.aborted) void Promise.resolve(iterator.return?.()).catch(() => {}); }
@@ -128,9 +136,13 @@ export function controlledStream(stream, getExecution) {
           for (const [position, requestId] of ids.entries()) {
             const last = position === ids.length - 1, meta = attempts.get(requestId);
             const recordedFailure = last ? failure : meta.status >= 400 ? modelFailure({ status: meta.status, message: `HTTP ${meta.status}` }) : null;
-            const recordedUsage = last ? tokenUsage : { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null };
+            const recordedUsage = last ? tokenUsage : { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null };
             const coverage = last && tokenUsage.uncachedInput !== null ? 'complete' : 'unknown';
-            await execution.journal.requestEnd(requestId, { tokenUsage: recordedUsage, coverage, error: recordedFailure?.message ?? null, failure: recordedFailure });
+            // 落盘边界统一脱敏：错误文本可能内嵌完整请求 URL（userinfo/query 带凭据）。
+            await execution.journal.requestEnd(requestId, { tokenUsage: recordedUsage, coverage,
+              error: sanitizeErrorText(recordedFailure?.message ?? null),
+              failure: recordedFailure ? { ...recordedFailure, message: sanitizeErrorText(recordedFailure.message) ?? '' } : recordedFailure,
+              firstOutputAt: meta.firstOutputAt ?? null });
             execution.onAttemptRecorded?.({ candidate, requestId, purpose, stopReason: recordedFailure ? 'error' : finalMessage?.stopReason,
               isError: Boolean(recordedFailure), coverage, tokenUsage: recordedUsage, startedAt: meta.startedAt, genMs: Date.now() - meta.startedAt });
           }

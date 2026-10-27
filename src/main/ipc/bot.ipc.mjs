@@ -12,6 +12,7 @@ import { stopDuplexHost } from './audio.ipc.mjs';
 import { stopAsrForBot } from './asr.ipc.mjs';
 import { publishUiState } from './ui.ipc.mjs';
 import { closeActiveTtsPlayback } from './tts.ipc.mjs';
+import {readSkillDirectory} from '../skills/skill-store.mjs';
 let service = null;
 export const getBotService = () => service;
 export function registerBotIpc() {
@@ -67,6 +68,14 @@ export function registerBotIpc() {
     service.candidatesDirectory(p.candidateId, p.path),
   );
   handle('bot:command', async (p) => {
+    if (p.method === 'skills.import-local') {
+      const identity = service.getState().binding?.instanceId;
+      if (!identity || p.params?.expectedInstanceId !== identity) throw new Error('Bot 连接已变化，请重新打开技能中心。');
+      const picked = await dialog.showOpenDialog(state.mainWindow, {title: '选择要导入 Bot 的技能文件夹', properties: ['openDirectory']});
+      if (picked.canceled || !picked.filePaths?.length) return {ok: true, cancelled: true};
+      const files = await readSkillDirectory(picked.filePaths[0]);
+      return service.command('skills.import', {...p.params, files});
+    }
     if (p.method !== 'diagnostics.export')
       return service.command(p.method, p.params);
     const local = service.getState(),

@@ -116,3 +116,21 @@ test('旧纯历史按版本统一迁移，覆盖用户身份齐全但助手骨�
   assert.equal(result.snapshot.historyVersion, 1);
   assert.equal(normalizeFlowHistory(result.snapshot, TURNS).changed, false);
 });
+
+test('restart closes run, tool and thinking from a single fact; repairs older interrupted snapshots idempotently', () => {
+  const flow={...bootstrapFlowFromTurns(TURNS,{conversationId:'restart'}),phase:'running',activeRunId:'live'};
+  flow.runs.live={runId:'live',startedAt:1,closedAt:null,outcome:null,activity:{phase:'waiting-background',jobs:[{id:'push'}]}};
+  flow.runs.old={runId:'old',closedAt:10,endedAt:null,outcome:'interrupted',activity:{phase:'running'}};
+  flow.timeline=[{kind:'assistant',runId:'old',parts:[{kind:'tool',status:'running',partId:'old-tool'}]},
+    {kind:'assistant',runId:'live',parts:[{kind:'thinking',partId:'thought',content:'kept',endedAt:null},{kind:'tool',status:'running',partId:'push'},{kind:'tool',status:'done',partId:'finished'}]}];
+  const next=restoreFlowSnapshot(flow);
+  assert.equal(next.phase,'idle');assert.equal(next.activeRunId,null);
+  assert.equal(next.runs.live.outcome,'interrupted');assert.equal(next.runs.live.endedAt,next.runs.live.closedAt);
+  assert.equal(next.runs.live.activity,null);assert.equal(next.runs.old.activity,null);
+  assert.equal(next.timeline[0].parts[0].status,'stopped');
+  assert.equal(next.timeline[1].parts[0].endedAt,next.runs.live.closedAt);
+  assert.equal(next.timeline[1].parts[1].status,'stopped');assert.equal(next.timeline[1].parts[2].status,'done');
+  assert.equal(next.timeline[1].parts.at(-1).kind,'notice');
+  assert.deepEqual(restoreFlowSnapshot(next),next);
+  assert.equal(flow.timeline[1].parts[1].status,'running');
+});

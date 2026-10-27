@@ -10,6 +10,7 @@ import path from 'node:path';
 import { diffTreeChanges, FILE_CHANGES_LIMITS, isGitRepo, mergeToolTouches, snapshotTree, unifiedDiffOf } from '../delivery/file-changes.mjs';
 import { BROWSER_ACT_TOOLS, BROWSER_READ_TOOLS, VISION_ACT_TOOLS, WEB_TOOLS } from './gate/policy.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
+import { createTaskConversation } from './task-conversation.mjs';
 
 /**
  * 056 · 子 agent 管理器（由 017～055 的 task-manager 收缩而来）。
@@ -193,6 +194,7 @@ export function createSubagentManager({
   let stateSeq = 0;
   let permissionTicker = null;
   let stallTicker = null;
+  let streamBroadcastTimer = null;
 
   // ---- 快照（渲染层任务卡；形状沿用 017 TaskStateSnapshot，退役字段给空值） ----
 
@@ -213,6 +215,7 @@ export function createSubagentManager({
       outcome: task.outcome,
       taskText: task.description || task.prompt,
       progressText: task.progressText,
+      conversation: task.conversation?.snapshot() ?? null,
       activity: task.activity ?? null,
       startedAt: task.startedAt ?? null,
       endedAt: task.endedAt ?? null,
@@ -286,8 +289,16 @@ export function createSubagentManager({
   }
 
   function broadcast() {
+    clearTimeout(streamBroadcastTimer);
+    streamBroadcastTimer = null;
     stateSeq += 1;
     emitter.emit('change', snapshot());
+  }
+
+  function broadcastStream() {
+    if (streamBroadcastTimer) return;
+    streamBroadcastTimer = setTimeout(broadcast, 100);
+    streamBroadcastTimer.unref?.();
   }
 
   function addLog(task, text) {
@@ -504,10 +515,13 @@ export function createSubagentManager({
   function handleProgress(task, event) {
     task.lastActivityAt = nowFn();
     if (task.phase === 'terminal') return;
+    task.conversation?.progress(event);
     if (event.kind === 'tool-start') {
       task.progressBase = TOOL_STEP_LABELS[event.tool] ?? '正在执行一步操作';
       task.progressText = task.progressBase;
-      task.activeTool = { tool: event.tool, startedAt: nowFn() };
+      task.toolExecutions ??= new Map();
+      task.activeTool = { tool: event.tool, toolCallId:event.toolCallId, args:event.args, startedAt: nowFn() };
+      task.toolExecutions.set(event.toolCallId ?? event.tool,task.activeTool);
       if (event.tool === 'write' || event.tool === 'edit') captureFileBefore(task, event.args?.path);
       task.lastAction = { tool: event.tool, args: event.args && typeof event.args === 'object' ? event.args : {}, at: nowFn() };
       if (['write', 'edit'].includes(event.tool) || VISION_ACT_TOOLS.includes(event.tool) || BROWSER_ACT_TOOLS.includes(event.tool)) {
@@ -515,16 +529,24 @@ export function createSubagentManager({
       }
       maybeNudgeBrowsing(task, event.tool);
     } else if (event.kind === 'tool-end') {
-      task.activeTool = null;
-      if (task.progressBase) task.progressText = task.progressBase;
+      const key=!event.background && event.commandId ? event.commandId : event.toolCallId ?? event.tool;
+      const execution=task.toolExecutions?.get(key);
+      if(event.background&&execution){
+        execution.background=true;
+        if(event.commandId){task.toolExecutions.delete(key);task.toolExecutions.set(event.commandId,execution);}
+      }
+      else task.toolExecutions?.delete(key);
+      task.activeTool=[...(task.toolExecutions?.values() ?? [])].find(item=>!item.background) ?? null;
+      task.progressBase = task.progressText = task.activeTool ? TOOL_STEP_LABELS[task.activeTool.tool] ?? '正在执行一步操作' : '等待模型继续';
       const endArgs = (event.args && typeof event.args === 'object' ? event.args : null)
+        ?? execution?.args
         ?? (task.lastAction?.tool === event.tool ? task.lastAction?.args ?? {} : {});
-      const startedAt = task.lastAction?.tool === event.tool && Number.isFinite(task.lastAction?.at) ? task.lastAction.at : null;
+      const startedAt = execution?.startedAt ?? (task.lastAction?.tool === event.tool && Number.isFinite(task.lastAction?.at) ? task.lastAction.at : null);
       const durationMs = startedAt != null ? Math.max(0, nowFn() - startedAt) : null;
       if (durationMs != null && durationMs >= SLOW_TOOL_LOG_MS) {
         log?.info?.(`慢工具 ${event.tool} ${fmtDuration(durationMs)}（${task.key}）`);
       }
-      task.recentToolCalls = [...(task.recentToolCalls ?? []), {
+      if (!event.background) task.recentToolCalls = [...(task.recentToolCalls ?? []), {
         tool: event.tool, startedAt, durationMs, isError: Boolean(event.isError),
         actionState: event.actionState ?? null, browser: event.browser ?? null,
         observationRef: event.observationRef ?? null, observationId: event.observationId ?? null,
@@ -533,11 +555,15 @@ export function createSubagentManager({
       }].slice(-TOOL_CALLS_KEEP);
       const durationNote = durationMs != null ? `（${fmtDuration(durationMs)}）` : '';
       const done = describeTool(event.tool, endArgs).replace(/^正在/, '');
-      if (event.isError) {
+      if (event.background) {
+        if (!task.activeTool) task.progressBase = task.progressText = '等待后台命令结果';
+        addLog(task, `已转后台：${done}；结果尚未确认。`);
+      } else if (event.isError) {
         const kind = classifyBlockText(event.text);
         if (kind === 'denied') task.pendingDenial = event.text;
         else if (kind === 'blocked') task.pendingBlock = event.text;
-        addLog(task, `操作未执行：${String(event.text).slice(0, 500)}`);
+        const label = event.commandId ? event.stopped ? '后台命令已停止' : '后台命令失败' : '操作未执行';
+        addLog(task, `${label}：${String(event.text).slice(0, 500)}`);
       } else if (event.actionState === 'not-executed') {
         const detail = String(event.text ?? '').trim().slice(0, 500);
         addLog(task, `操作未执行：${done}${detail ? `（${detail}）` : ''}${durationNote}`);
@@ -905,6 +931,7 @@ export function createSubagentManager({
         rootRunId: typeof rootRunId === 'string' && rootRunId ? rootRunId : null,
       };
       beginExecution(task, rootRunId);
+      task.conversation = createTaskConversation({ taskId: historyId, prompt: text, now: nowFn });
       if (previous) previous.session = null;
       tasks.set(key, task);
       addLog(task, `${role.title}（${role.name}）开始：${(task.description || text).slice(0, 80)}`);
@@ -943,10 +970,17 @@ export function createSubagentManager({
       // 模型正在流式输出（思考／正文／工具参数分片）也是活动：停摆看门狗只认工具事件会把
       // 读完资料后写长报告、或长思考的那一轮当成「模型流停摆」掐掉（10-19 t24 实录）。
       session.on('stream', event => {
-        if (tasks.get(task.key)?.session !== session) return;
+        if (tasks.get(task.key)?.session !== session || task.phase === 'terminal') return;
         if (event.type === 'hemi_request_start') task.modelRequestActive = true;
         if (event.type === 'hemi_request_end') task.modelRequestActive = false;
         if (task.phase === 'running') task.lastActivityAt = nowFn();
+        if (task.conversation?.stream(event)) {
+          if (!task.activeTool && task.phase === 'running' && !task.activity?.phase?.startsWith('waiting-')) {
+            task.progressBase = task.progressText = ['thinking_start', 'thinking_delta'].includes(event.type) ? '正在思考'
+              : event.type === 'text_delta' ? '正在回复' : '等待模型响应';
+          }
+          broadcastStream();
+        }
       });
       session.on('permission', (request) => { if (tasks.get(task.key)?.session === session) handlePermission(task, request); });
       session.on('model-call', (call) => { if (tasks.get(task.key)?.session === session) recordModelCall(task, call); });
@@ -1063,6 +1097,7 @@ export function createSubagentManager({
     task.endedAt = nowFn();
     task.activeTool = null;
     Object.assign(task, extras);
+    task.conversation?.finish({ report: task.resultText, stopped: outcome !== 'complete' });
     if (task.resultText) task.resultVersion = (task.resultVersion ?? 0) + 1;
     task.sources = (task.visitedUrls ?? []).slice(-12).map((url) => ({ url }));
     if (task.role.mode === 'run') {
@@ -1092,6 +1127,7 @@ export function createSubagentManager({
         outcomeReason: task.outcomeReason ?? null,
         resultText: task.resultText ?? null,
         resultVersion: task.resultVersion ?? 0,
+        conversation: task.conversation?.snapshot() ?? null,
         bodySource: task.resultText ? 'executor' : null,
         sources: task.sources,
         visitedUrls: task.visitedUrls,
@@ -1288,6 +1324,7 @@ export function createSubagentManager({
   }
 
   function disposeAll() {
+    clearTimeout(streamBroadcastTimer);
     stopPermissionTicker();
     stopStallTicker();
     for (const task of tasks.values()) {

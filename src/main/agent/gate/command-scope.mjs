@@ -4,6 +4,7 @@ import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 import { processBirth } from '../../agent-runtime/owned-processes.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
 import {commandDeadline, cleanupFailure, blockCommandCleanup} from './command-deadline.mjs';
+import { isBackgroundWaitCommand } from '../background-wait.mjs';
 
 export const COMMAND_FOREGROUND_MS = 10_000;
 export const COMMAND_TIMEOUT_MS = 30 * 60_000;
@@ -12,7 +13,7 @@ const sameOwner = (a, b) => a?.conversationId === b?.conversationId && a?.rootRu
 const outputTail = result => [result.stdout.slice(-2000), result.stderr.slice(-2000)].filter(Boolean).join('\n').slice(-2000);
 
 /** 进程属于目标而非一次 SDK 请求。后台只交还模型调用，取消/退出仍确认进程树清理。 */
-export function createCommandScope({ onChange = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000 } = {}) {
+export function createCommandScope({ onChange = () => {}, onSettled = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000 } = {}) {
   const active = new Set(), completed = [];
   let quarantine = null;
   const uncertain = (execution, message) => {
@@ -25,7 +26,7 @@ export function createCommandScope({ onChange = () => {}, now = Date.now, persis
     id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 8000),
     commandTruncated: record.command.length > 8000, description: record.description, lastOutputAt: record.lastOutputAt,
     startedAt: record.startedAt, endedAt: record.endedAt ?? null,
-    status: record.result?.status ?? (record.error ? 'failed' : 'running'),
+    status: record.error ? 'failed' : record.result?.status ?? 'running',
     code: record.result?.code ?? null, output: record.output,
   });
   const publish = () => onChange([...active].filter(r => r.background).map(view));
@@ -45,6 +46,10 @@ export function createCommandScope({ onChange = () => {}, now = Date.now, persis
     if (quarantine) throw quarantine;
     const scope = currentExecutionScope(), execution = scope?.execution;
     if (execution?.cancelled?.()) throw new DOMException('目标已停止', 'AbortError');
+    // 归属过滤与完成通知共用同一判定；占位等待不启动进程，也不取消已有工作。
+    if (backgroundFor(execution?.owner).length && isBackgroundWaitCommand(options.command, options.description)) {
+      return { status: 'waiting-background', code: null, cleanupConfirmed: true, actionState: 'not-executed' };
+    }
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -132,7 +137,10 @@ export function createCommandScope({ onChange = () => {}, now = Date.now, persis
       ready();
       options.signal?.removeEventListener('abort', onAbort);
       active.delete(record);
-      if (record.background) completed.push(record);
+      if (record.background) {
+        completed.push(record);
+        onSettled({...view(record), owner: record.owner, outputRef:record.outputRef, text: record.error?.message ?? commandToolResult(record.result).content[0].text});
+      }
       publish();
     });
     // 后台承诺仍由宿主等待/取消；detach 之后不能留下未处理的拒绝。

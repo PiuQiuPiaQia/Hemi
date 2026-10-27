@@ -208,6 +208,17 @@ test('setValue：wire 形状＝顶层 pid/window_id + element_token（真机核�
   assert.deepEqual(call[2], { element_token: 'tok-1', value: '新值', pid: 11, window_id: '99' });
 });
 
+test('explicit foreground keyboard delivery reaches the native wire without a background attempt', async () => {
+  const driver = fakeDriver(), bridge = bridgeWith(driver);
+  const text = await bridge.typeText({text: '中文🙂', pid: 11, windowId: '99', delivery: 'foreground'});
+  const key = await bridge.key({combo: 'ctrl+a', pid: 11, windowId: '99', delivery: 'foreground'});
+  const calls = driver.__calls.filter(call => call[0] === 'callTool');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].slice(1), ['type_text', {text: '中文🙂', pid: 11, window_id: '99', delivery_mode: 'foreground'}]);
+  assert.deepEqual(calls[1].slice(1), ['hotkey', {keys: ['ctrl', 'a'], pid: 11, window_id: '99', delivery_mode: 'foreground'}]);
+  assert.equal(text.hemiForeground, true);assert.equal(key.hemiForeground, true);
+});
+
 test('scroll：后台不可用 → callTool 前台升级一次并打标', async () => {
   const d = fakeDriver();
   d.__scrollRefuses = true;
@@ -262,4 +273,13 @@ test('dispose：shutdown + uniffiDestroy 收尾', async () => {
   const kinds = d.__calls.map(([n]) => n);
   assert.ok(kinds.includes('shutdown'));
   assert.ok(kinds.includes('uniffiDestroy'));
+});
+
+test('Windows exact element input uses native element tokens and never silently upgrades background scroll', async () => {
+  const d=fakeDriver(),b=createCuaBridge({loadSdk:()=>fakeSdk(),createDriver:()=>d,platform:'win32'});
+  await b.typeText({pid:11,windowId:'99',elementToken:'edit-token',text:'中文🙂'});
+  await b.key({pid:11,windowId:'99',elementToken:'edit-token',combo:'ctrl+a',delivery:'foreground'});
+  const wire=d.__calls.filter(([name])=>name==='callTool');assert.equal(wire[0][2].element_token,'edit-token');assert.equal(wire[0][2].delivery_mode,'background');assert.equal(wire[1][2].element_token,'edit-token');
+  d.__scrollRefuses='result';const r=await b.scroll({pid:11,windowId:'99',deltaY:-3});assert.equal(r.isError,true);
+  assert.equal(d.__calls.filter(([name])=>name==='callTool').length,2,'no foreground scroll fallback');
 });

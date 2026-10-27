@@ -10,8 +10,10 @@ import { createTaskFactPublisher } from '../services/task-fact-publisher.mjs';
 import { createPermissionService } from '../services/permission-service.mjs';
 import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 
-const TOOLS = ['context_read', 'task_read', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'bash', 'register_delivery'];
-const CLOUD_SYSTEM = `你是 Hemi，运行在用户的 ${process.platform === 'win32' ? 'Windows' : 'Linux'} 远端主机上。所有文件和命令都在这台主机执行。${process.platform === 'win32' ? 'bash 工具在此执行 Windows cmd.exe 命令，不是 POSIX bash；需要 PowerShell 时显式调用 powershell.exe -NoProfile -NonInteractive -Command。路径使用 Windows 绝对路径。' : ''}用用户的语言完成已授权的工作。没有本机桌面、麦克风、录屏、语音或浏览器能力；不能宣称已操作用户电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。`;
+const TOOLS = ['context_read', 'task_read', 'conversation_read', 'get_runtime_diagnostics', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'bash', 'register_delivery',
+  'browser_navigate', 'browser_extract', 'browser_tabs', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_act', 'web_search', 'web_extract',
+  'screen_view', 'ui_list', 'ui_click', 'ui_type', 'ui_key', 'ui_scroll', 'ui_tree', 'ui_act', 'app_open'];
+const CLOUD_SYSTEM = `你是 Hemi，运行在用户的 ${process.platform === 'win32' ? 'Windows' : 'Linux'} 远端主机上。所有文件、命令和浏览器操作都在这台主机执行，浏览器登录状态也属于这台主机。${process.platform === 'win32' ? 'bash 工具在此执行 Windows cmd.exe 命令，不是 POSIX bash；需要 PowerShell 时显式调用 powershell.exe -NoProfile -NonInteractive -Command。路径使用 Windows 绝对路径。桌面工具操作这台 Windows 主机已登录用户的桌面；会话锁定、注销或桌面助手不可用时如实报告，不能改为控制客户端电脑。Windows 快捷键使用 ctrl/alt/win，不使用 macOS 的 cmd。Windows 组合快捷键及包含 Emoji 等非 BMP 字符的键入使用 delivery="foreground"，让驱动短暂置前目标窗口后投递并恢复；用户明确要求全程后台时遵守该限制，改用可用的 UIA 语义操作或如实报告。动作结果须通过界面或目标应用的实际内容核对，不反复重放已生效的输入。' : '本主机不提供图形桌面控制。'}用用户的语言完成已授权的工作。没有麦克风、录音或语音能力；不能宣称已操作客户端电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。`;
 
 export async function validateCloudModel(config) {
   const temporary = await mkdtemp(
@@ -56,7 +58,7 @@ export async function validateCloudModel(config) {
 }
 
 /** Cloud host bindings only. Desktop and Bot share the same execution runtime. */
-export function createBotExecutor({dataDir, readEntries, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, goalPolicy = {}}) {
+export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy = {}}) {
   const active = new Map(), generations = new Map(), cancelledBeforeStart = new Set();
   const access = createPermissionService({dir: dataDir}), ready = access.load();
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
@@ -74,9 +76,12 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
   };
   const runtime = createAgentRuntime({
     userDataDir: dataDir, getProfiles: profilesFor, nativeMemory: true, goalPolicy, onGoalVerification:(id,call)=>recordUsage?.(id,call),
-    resolveCapabilities: async () => ({visionOn: false, browserOn: false, features: {vision: false, browser: false, web: false}}),
+    resolveCapabilities: () => capabilities.resolve(),
+    createBrowserClient: options => capabilities.createBrowserClient(options),
+    getSkillService: () => capabilities.skills,
+    loadArchiveSession: readConversation,
     getAccessService: () => access,
-    sessionOptions: {tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
+    sessionOptions: {desktopClient: desktop, tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
     appendSystem: [CLOUD_SYSTEM], permissionTimeoutMs: 0,
     loadArchiveAgent(id) {
       const owner = active.get(id);if (!owner) return null;
@@ -112,11 +117,12 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
   return {
     async run(spec, apply) {
       await ready;
-      const {conversationId, generation, runId, envelope} = spec;
+      const {conversationId, generation, runId, envelope, continuationOf} = spec;
       if (cancelledBeforeStart.delete(conversationId)) return {stopped: true};
       if (generations.has(conversationId) && generations.get(conversationId) !== generation) runtime.invalidate(conversationId);
       generations.set(conversationId, generation);
-      const ctx = {conversationId, generation, runId, policySnapshot: envelope.modelPolicySnapshot, workspace: envelope.workspaceSnapshot, inputSource: 'text', cancelled: false};
+      const ctx = {conversationId, generation, runId, continuationOf, policySnapshot: envelope.modelPolicySnapshot, workspace: envelope.workspaceSnapshot, inputSource: 'text', cancelled: false,
+        runtimeDiagnostics: () => ({ok: true, host: 'Bot', platform: process.platform, capabilities: capabilities.view()})};
       const owner = {spec, ctx, stopped: false, permissions: new Map(), deliveries: [], settled: Promise.withResolvers()};active.set(conversationId, owner);
       const projector = createRunPartProjector({runId, generation, inputId: envelope.inputId});
       const fact = event => {for (const value of projector.handle(event)) apply(value);};
@@ -147,13 +153,14 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
         if (ctx.cancelled) return {stopped: true};
         const result = await runtime.runRootTurn(conversationId, {userText: input.text, inputId: envelope.inputId, imageBlocks: input.images ?? []});
         await Promise.all(owner.deliveries);await runtime.persist(conversationId);
-        if (result.budgetLimited || (!result.aborted && !ctx.cancelled && !result.goalComplete)) throw Object.assign(new Error('任务尚未通过完成校验，已有成果已保留。'), {code:'goal-incomplete'});
-        outcome = result.aborted || ctx.cancelled ? 'stopped' : 'completed';
+        if (result.budgetLimited || (!result.aborted && !ctx.cancelled && !result.goalComplete && !result.waitingForUser)) throw Object.assign(new Error('任务尚未通过完成校验，已有成果已保留。'), {code:'goal-incomplete'});
+        outcome = result.aborted || ctx.cancelled ? 'stopped' : result.waitingForUser ? 'awaiting-user' : 'completed';
         for (const value of projector.finish({stopped: result.aborted || ctx.cancelled})) apply(value);
-        return {stopped: result.aborted || ctx.cancelled};
+        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser};
       } catch (error) {
         cleanupUnconfirmed = error.code === 'cleanup-unconfirmed';
         for (const value of projector.finish({error: owner.stopped ? null : error, stopped: owner.stopped})) apply(value);
+        error.flowReported = true;
         if (!owner.stopped || cleanupUnconfirmed) throw error;
         return {stopped: true};
       } finally {
@@ -165,6 +172,7 @@ export function createBotExecutor({dataDir, readEntries, saveEntries, onPermissi
         finally {if (active.get(conversationId) === owner) active.delete(conversationId);owner.settled.resolve();}
       }
     },
+    async cancelWaitingUser(id,runId) {await runtime.completeConversation(id,'stopped','用户停止等待答复',runId);},
     async stop(id) {
       const owner = active.get(id);
       if (!owner) {cancelledBeforeStart.add(id);return;}

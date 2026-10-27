@@ -21,6 +21,7 @@ test('runtime manifest identifies packaged source content and verifies the exact
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-component-build-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   for (const folder of ['src/main', 'src/shared', 'third-party']) await fs.mkdir(path.join(root, folder), {recursive: true});
+  await fs.cp(path.resolve(import.meta.dirname, '../../../extensions/chrome-extension'), path.join(root, 'extensions/chrome-extension'), {recursive: true});
   await fs.writeFile(path.join(root, 'src/main/example.mjs'), 'export const value = 1;\n');
   await fs.writeFile(path.join(root, 'third-party/example.bin'), Buffer.from([0, 13, 10, 255]));
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({version: '0.2.15', dependencies: {}}));
@@ -32,6 +33,7 @@ test('runtime manifest identifies packaged source content and verifies the exact
   const embedded = JSON.parse(execFileSync('tar', ['-xOf', output, './' + COMPONENT_MANIFEST], {encoding: 'utf8'}));
   assert.equal(first.build, embedded.build);
   assert.equal(first.archiveSha256, createHash('sha256').update(await fs.readFile(output)).digest('hex'));
+  for (const name of ['page-logic.js', 'page-operations.js']) assert.deepEqual(execFileSync('tar', ['-xOf', output, './extensions/chrome-extension/' + name]), await fs.readFile(path.join(root, 'extensions/chrome-extension', name)));
   await buildBotRuntime({root, output: path.join(root, 'same.tgz')});
   assert.equal(readComponentVersion(path.join(root, 'same.tgz.manifest.json')).build, first.build);
   const independent=path.join(root,'component-patch.tgz');
@@ -66,6 +68,7 @@ test('runtime includes a matching Windows supervisor binary and refuses stale na
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const gate=path.join(root,'src/main/agent/gate');
   for(const folder of [gate,path.join(root,'src/shared'),path.join(root,'third-party')])await fs.mkdir(folder,{recursive:true});
+  await fs.cp(path.resolve(import.meta.dirname, '../../../extensions/chrome-extension'), path.join(root, 'extensions/chrome-extension'), {recursive: true});
   const actual=path.resolve(import.meta.dirname,'../agent/gate');
   for(const extension of ['cs','exe','json'])await fs.copyFile(path.join(actual,'windows-command-job.'+extension),path.join(gate,'windows-command-job.'+extension));
   await fs.writeFile(path.join(root,'package.json'),JSON.stringify({version:'0.2.19',dependencies:{}}));

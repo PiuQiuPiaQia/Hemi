@@ -169,3 +169,23 @@ test('060：缺失 tool_end 的取消运行收口为 stopped，不残留 running
   assert.equal(facts[0].patch.status, 'stopped');
   assert.deepEqual(projector.finish({ stopped: true }), []);
 });
+
+test('后台受理保持工具执行中，只由实际终态收口，同一终态不重复投影', () => {
+  const p=createRunPartProjector({runId:'background'});
+  p.handle({kind:'tool_start',tool:'bash',toolCallId:'push'});
+  assert.equal(p.handle({kind:'tool_end',toolCallId:'push',background:true})[0].patch.status,'running');
+  assert.equal(p.handle({kind:'tool_end',toolCallId:'push',isError:true})[0].patch.status,'error');
+  assert.deepEqual(p.handle({kind:'tool_end',toolCallId:'push',background:true}),[]);
+  assert.deepEqual(p.handle({kind:'tool_end',toolCallId:'push'}),[]);
+});
+
+test('背景命令使用宿主命令身份，后续模型重复短调用ID不会错收口',()=>{
+  const p=createRunPartProjector({runId:'collision'});
+  const first=p.handle({kind:'tool_start',tool:'bash',toolCallId:'call-0'})[0].part.partId;
+  p.handle({kind:'tool_end',toolCallId:'call-0',background:true,commandId:'job-a'});
+  const second=p.handle({kind:'tool_start',tool:'bash',toolCallId:'call-0'})[0].part.partId;
+  const settled=p.handle({kind:'tool_end',toolCallId:'call-0',commandId:'job-a'});
+  assert.equal(settled[0].partId,first);assert.equal(settled[0].patch.status,'done');
+  assert.deepEqual(p.handle({kind:'tool_end',toolCallId:'call-0',commandId:'job-a'}),[]);
+  assert.equal(p.handle({kind:'tool_end',toolCallId:'call-0'})[0].partId,second);
+});

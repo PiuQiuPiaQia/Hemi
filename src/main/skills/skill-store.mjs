@@ -257,6 +257,11 @@ async function localFiles(sourceDir, relative = '') {
 }
 
 /** 主进程唯一 Skill 状态源。mutate 串行化安装/启停/移除，任务快照同步冻结。 */
+export async function readSkillDirectory(sourceDir) {
+  if (typeof sourceDir !== 'string' || !path.isAbsolute(sourceDir) || !(await lstat(sourceDir)).isDirectory()) failure('请选择有效的 Skill 文件夹');
+  const files = await localFiles(sourceDir);validateFiles(files);return files;
+}
+
 export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIAL_CATALOG_URL, log = null } = {}) {
   if (!root) throw new Error('Skill root 必填');
   const indexFile = path.join(root, 'index.json');
@@ -453,6 +458,14 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
         id, origin: 'market', marketId: item.id, version: item.version,
         author: item.author, sha: item.sha256, parsed,
       }), state: state() };
+    }),
+    /** A remote host receives the selected files, never a path on the client machine. */
+    importFiles: ({files, id = null}) => run(async () => {
+      const parsed = validateFiles(files);
+      if (id && !index.installed.some(item => item.id === id && item.origin === 'local')) failure('待更新的导入技能不存在');
+      const bytes = bundleBytesOf(parsed.files);
+      return {ok: true, skill: await publish({id: id ?? `local:${randomUUID()}`, origin: 'local',
+        version: '本地导入', author: '本地', sha: sha256(bytes), parsed}), state: state()};
     }),
     importDirectory: (sourceDir) => run(async () => {
       if (typeof sourceDir !== 'string' || !path.isAbsolute(sourceDir)) failure('请选择有效的 Skill 文件夹');

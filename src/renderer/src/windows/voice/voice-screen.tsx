@@ -164,6 +164,7 @@ type VoiceScreenProps = {
   contextBusy: boolean;
   contextError: string;
   onAttachContext: (kind: WorkContextAttachKind) => void;
+  remoteWindowContext?: boolean;
   onRefreshContext: (id: string) => void;
   onRemoveContext: (id: string) => void;
   errorMessage: string;
@@ -357,6 +358,7 @@ export function VoiceScreen({
   contextBusy,
   contextError,
   onAttachContext,
+  remoteWindowContext = false,
   onRefreshContext,
   onRemoveContext,
   errorMessage,
@@ -1134,7 +1136,7 @@ export function VoiceScreen({
                 tasksRunning={(taskState?.tasks ?? []).some((task) => task.phase !== 'terminal')}
                 toolbar={
                   <>
-                    <AttachmentAddButton busy={contextBusy} error={contextError} onAttach={onAttachContext} />
+                    <AttachmentAddButton busy={contextBusy} error={contextError} onAttach={onAttachContext} remoteWindowContext={remoteWindowContext} />
                     <span className="h37-tool-sep" aria-hidden="true" />
                     {/* 033：工作区——发送前可见当前任务在哪个目录工作（v2 默认优先）。 */}
                     {workspaceControl ?? <WorkspaceBar
@@ -1307,11 +1309,13 @@ function ContextChips({
 function AttachmentAddButton({
   busy,
   error,
-  onAttach
+  onAttach,
+  remoteWindowContext = false,
 }: {
   busy: boolean
   error: string
   onAttach: (kind: WorkContextAttachKind) => void
+  remoteWindowContext?: boolean
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -1324,6 +1328,7 @@ function AttachmentAddButton({
   }> = [
     { kind: 'file', label: '选中文件', hint: '图片、PDF、Word、Excel、PPT，添加到本条消息', icon: FileText },
   ]
+  if (remoteWindowContext) menuItems.push({kind: 'screenshot', label: 'Windows 窗口', hint: '选择 Bot 主机上的窗口，添加当前截图和界面文字', icon: ImageIcon})
 
   const hint = error || (busy ? '正在添加附件…' : '添加附件')
 

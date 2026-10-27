@@ -44,6 +44,7 @@ export type BotSession = {
   turnCount: number;
   status: 'queued' | 'running' | null;
   waitingPermission: boolean;
+  waitingForUser?: boolean;
   waitingResource?: boolean;
   blockedBy?: string[];
 };
@@ -90,6 +91,7 @@ export type BotBinding = {
   boundAt: number;
 };
 export type BotCache = {
+  hostCapabilities?: BotHostCapabilities;
   capabilities?: { nativeMemory?: number; botOAuth?: number };
   oauthAccounts?: Array<{ provider: OAuthProvider; connected: boolean }>;
   deviceAccess?: BotDeviceAccess;
@@ -189,6 +191,20 @@ export type BotModelSyncChange = {
   reason: string;
 };
 export type BotModelSyncPreview = { id: string; changes: BotModelSyncChange[] };
+export type BotHostCapabilities = {
+  platform: string;
+  browserEnabled: boolean;
+  computerUseEnabled: boolean;
+  computerUseSupported: boolean;
+  webSearchEnabled: boolean;
+  hasSearchKey: boolean;
+  browserActEnabled: boolean;
+  hasBrowserActKey: boolean;
+  browserActUrl: string;
+  browserActModel: string;
+  browser?: {executable: string | null; error: string};
+  desktop?: {available: boolean; sessionId?: number; sessionConnected?: boolean; connectionState?: number; note?: string; reason?: string};
+};
 export type BotMethod =
   | 'oauth.start'
   | 'oauth.state'
@@ -226,6 +242,22 @@ export type BotMethod =
   | 'file.resolve'
   | 'references'
   | 'skills'
+  | 'capabilities.inspect'
+  | 'capabilities.configure'
+  | 'context.windows'
+  | 'context.capture'
+  | 'skills.state'
+  | 'skills.refresh'
+  | 'skills.import'
+  | 'skills.import-local'
+  | 'skills.install'
+  | 'skills.set-enabled'
+  | 'skills.remove'
+  | 'skills.read'
+  | 'skills.search'
+  | 'skills.preview'
+  | 'skills.mp-install'
+  | 'skills.check-update'
   | 'models.sync'
   | 'models.diff'
   | 'models.save'

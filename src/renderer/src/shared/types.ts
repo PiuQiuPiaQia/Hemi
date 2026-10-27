@@ -118,7 +118,7 @@ export type TranscriptItem = {
    * 029：模型回复被用户主动停止——已收到的增量原位保留为未完成回复，
    * 不伪装成成功，也不显示为模型失败。仅 hemi 消息有效。
    */
-  replyStatus?: 'stopped';
+  replyStatus?: 'stopped' | 'awaiting-user';
   /**
    * 048：本条回应的思考全文与时长（主进程回合回执携带，随档案落盘可回看；
    * 中途停止的轮次由流式缓冲写回并标 interrupted）。不进模型上下文。
@@ -172,3 +172,11 @@ export type TtsConfigForm = {
 // IPC 协议类型（含 AsrEvent / UiState / Tts* 等）统一放在 src/shared/protocol.ts，
 // 这里 re-export 保持渲染层既有 '@/shared/types' 引用不变。
 export * from '@shared/protocol';
+export type {
+  UsageHistoryRecord,
+  UsageHistoryDailyStat,
+  UsageHistoryTotals,
+  UsageHistoryQuery,
+  UsageHistoryResponse,
+  UsageHistoryStatus,
+} from '@shared/usage-history';

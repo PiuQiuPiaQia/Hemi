@@ -8,6 +8,8 @@ import { BotButton, BotDialog } from './dialogs';
 import { BotModelsSettings } from './models-settings';
 import { BotPairing } from './pairing';
 import { useApplicationNavigation } from '../voice/lib/conversation-bridge';
+import {BotCapabilitiesSettings} from './capabilities-settings';
+import {BotSkillsSettings} from './skills-settings';
 import './styles.css';
 
 type Dialog = 'pairing' | 'address' | 'stop' | 'remove' | 'forget' | 'update';
@@ -116,6 +118,7 @@ function SettingsRow({
 function ConnectedBotSettings({ state }: { state: BotState }) {
   const api = window.hemiVoice.bot;
   const [screen, setScreen] = useState<Dialog | null>(null);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [host, setHost] = useState(state.binding?.host ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -186,6 +189,8 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
     forget: 'connection.forget',
     update: 'component.update',
   } as const;
+
+  if (skillsOpen) return <BotSkillsSettings state={state} onBack={() => setSkillsOpen(false)}/>;
 
   return (
     <div className="h37-enter">
@@ -272,6 +277,7 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
           </SettingsRow>
         </div>
       </section>
+      <BotCapabilitiesSettings state={state} onOpenSkills={() => setSkillsOpen(true)}/>
       <section className="h37-section">
         <div className="h37-section-head">
           <h3>移除连接</h3>

@@ -77,6 +77,7 @@ export function translateDriverError(e) {
     return new Error(`快照已过期或元素定位失败（${text}）：请重新 screen_view / ui_tree 拿最新快照再动作，不要重试旧坐标或旧 token`);
   }
   if (/permission|accessibility|screen.?recording|tcc|not.?authorized/i.test(`${errorCode} ${message}`)) {
+    if (process.platform === 'win32') return new Error(`Windows 桌面权限不足（${text}）：确认桌面助手与目标应用属于同一登录用户；前台操作需要桌面连接且未锁定，普通权限助手无法操作管理员窗口`);
     return new Error(`系统权限不足（${text}）：请到 系统设置 → 隐私与安全性，检查 Hemi 的「辅助功能」与「屏幕录制」授权后重试`);
   }
   if (/window|pid/i.test(`${errorCode} ${message}`) && /not|gone|exist|closed|invalid/i.test(`${errorCode} ${message}`)) {
@@ -108,8 +109,9 @@ export function describeToolResult(result) {
   if (result.isError) {
     return { actionState: 'not-executed', note: `${result.errorCode ?? 'error'}: ${result.text ?? ''}`.slice(0, 200) };
   }
-  if (result.action) return describeAction(result.action);
-  return { actionState: 'executed', note: '' };
+  const outcome = result.action ? describeAction(result.action) : {actionState: 'executed', note: ''};
+  if (result.hemiForeground && !outcome.note.includes('前台')) outcome.note = [outcome.note, '以前台方式执行（短暂置前目标窗口）'].filter(Boolean).join('；');
+  return outcome;
 }
 
 /** ToolResult/WindowStateOutput 的图片统一取出（base64 + mimeType）。 */
@@ -145,6 +147,7 @@ export function createCuaBridge({
   createDriver,
   timeoutMs = DRIVER_CALL_TIMEOUT_MS,
   nowFn = Date.now,
+  platform = process.platform,
 } = {}) {
   let sdkPromise = null;
   let driverPromise = null;
@@ -268,8 +271,10 @@ export function createCuaBridge({
       }, { signal });
     },
 
-    async typeText({ text, pid, windowId, signal }) {
+    async typeText({ text, pid, windowId, elementToken, delivery = 'background', signal }) {
       return call('type_text', async (d, opts) => {
+        const token = platform === 'win32' ? elementToken : undefined;
+        if (delivery === 'foreground' || token) return {...await d.callTool('type_text', JSON.stringify({text: String(text ?? ''), pid: Number(pid), window_id: String(windowId), ...(token ? {element_token: token} : {}), delivery_mode: delivery}), opts), ...(delivery === 'foreground' ? {hemiForeground: true} : {})};
         const s = await sdk();
         const input = { text: String(text ?? '') };
         if (pid != null && windowId != null) input.target = new s.ActionTarget.Window({ pid: Number(pid), windowId: BigInt(windowId) });
@@ -288,9 +293,13 @@ export function createCuaBridge({
       }), opts), { signal });
     },
 
-    async key({ combo, pid, windowId, signal }) {
+    async key({ combo, pid, windowId, elementToken, delivery = 'background', signal }) {
       const keys = parseCombo(combo);
       return call(keys.length > 1 ? 'hotkey' : 'press_key', async (d, opts) => {
+        const token = platform === 'win32' ? elementToken : undefined;
+        if (delivery === 'foreground' || token) return {...await d.callTool(keys.length > 1 ? 'hotkey' : 'press_key', JSON.stringify({
+          ...(keys.length > 1 ? {keys} : {key: keys[0]}), pid: Number(pid), window_id: String(windowId), ...(token ? {element_token: token} : {}), delivery_mode: delivery,
+        }), opts), ...(delivery === 'foreground' ? {hemiForeground: true} : {})};
         const s = await sdk();
         const input = keys.length > 1 ? { keys } : { key: keys[0] };
         if (pid != null && windowId != null) input.target = new s.ActionTarget.Window({ pid: Number(pid), windowId: BigInt(windowId) });
@@ -306,7 +315,7 @@ export function createCuaBridge({
      * 异常通道兜底（真机验收 2026-10-02：ZCode 窗口走的是结果通道）。
      * 前台像素动作要求会话先有带截图的快照——缺了就补拍一次再试。
      */
-    async scroll({ deltaY, x, y, pid, windowId, signal }) {
+    async scroll({ deltaY, x, y, pid, windowId, delivery = 'background', signal }) {
       const { direction, amount } = deltaYToScroll(deltaY);
       const wire = {
         x: x == null ? 100 : Math.round(Number(x)),
@@ -340,9 +349,13 @@ export function createCuaBridge({
       };
       let bg;
       try {
-        bg = await runBackground();
-        if (!(bg?.isError && isBgUnavailable(bg))) return bg;
+        if (delivery !== 'foreground') {
+          bg = await runBackground();
+          if (platform === 'win32') return bg;
+          if (!(bg?.isError && isBgUnavailable(bg))) return bg;
+        }
       } catch (e) {
+        if (platform === 'win32') throw e;
         if (!isBgUnavailable(e)) throw e;
       }
       const runForeground = () => call('scroll_foreground', async (d, opts) => d.callTool('scroll', JSON.stringify(wire), opts), { signal });
@@ -360,7 +373,7 @@ export function createCuaBridge({
         await this.windowState({ pid, windowId, includeScreenshot: true, signal });
         fg = await runForeground();
       }
-      return { ...fg, hemiEscalatedForeground: true };
+      return { ...fg, hemiEscalatedForeground: delivery !== 'foreground', hemiForeground: true };
     },
   };
 }

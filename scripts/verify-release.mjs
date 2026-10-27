@@ -14,6 +14,7 @@
  *   tag 缺省 = v + package.json version；--fix 才会动 release（抢救孤儿独有
  *   资产后删孤儿对象，不动 tag 与完整 release）；默认只报告。
  *   --no-smoke 跳过打包冒烟；--fresh 忽略缓存重新下载解包。
+ *   HEMI_RELEASE_VERIFY_CACHE_DIR 可指定缓存根目录（版本在其下单独存放）。
  *
  * 退出码非 0 = 验收未过。
  */
@@ -235,7 +236,9 @@ const winManifest = macOnly ? null : verifyManifest(WIN_MANIFEST);
 const IS_WIN = process.platform === 'win32';
 const zipAsset = macOnly ? release.assets.find((a) => a.name.endsWith('-mac.zip')) : null;
 // 产物缓存目录：mac 用 ~/Library/Caches，win 对齐 %LOCALAPPDATA%。
-const cacheDir = IS_WIN
+const cacheDir = process.env.HEMI_RELEASE_VERIFY_CACHE_DIR
+  ? path.join(path.resolve(process.env.HEMI_RELEASE_VERIFY_CACHE_DIR), tag)
+  : IS_WIN
   ? path.join(os.homedir(), 'AppData', 'Local', 'hemi-release-verify', tag)
   : path.join(os.homedir(), 'Library', 'Caches', 'hemi-release-verify', tag);
 mkdirSync(cacheDir, { recursive: true });

@@ -98,7 +98,8 @@ export function projectFlowTimeline(
     const recoveryPosition = item.kind === 'assistant' ? recoveries.get(item.itemId) : undefined;
     const archived = byId.get(item.kind === 'user' ? item.id : String((item as { legacyTurnId?: string }).legacyTurnId ?? ''));
     const isTailItem = tailItems.get(item.runId) === item;
-    const dependencies: unknown[] = [item, run, archived, isTailItem, recoveryPosition?.index, recoveryErrors.get(item.runId), ...filteredParts];
+    const waitingForUser = snapshot.awaitingUser?.runId === item.runId;
+    const dependencies: unknown[] = [item, run, archived, isTailItem, waitingForUser, recoveryPosition?.index, recoveryErrors.get(item.runId), ...filteredParts];
     for (const part of filteredParts) if (part.kind === 'delegation') {
       dependencies.push(callCounts.get(String(part.toolCallId ?? '')), snapshot.tasks[String(part.taskId ?? '')], ...(callSources.get(String(part.toolCallId ?? '')) ?? []));
     }
@@ -188,6 +189,7 @@ export function projectFlowTimeline(
           && !String(run.activity?.phase ?? '').startsWith('waiting-')
           && isTailItem && segment.parts.at(-1) === item.parts.at(-1),
         ...(run.outcome === 'stopped' ? { replyStatus: 'stopped' as const } : {}),
+        ...(waitingForUser && isTailItem && segment.parts.at(-1) === item.parts.at(-1) ? {replyStatus:'awaiting-user' as const} : {}),
         ...(legacy.legacyThinking ? { thinking: legacy.legacyThinking } : {}),
         ...(run.usage || legacy.legacyUsage ? { usage: (run.usage ?? legacy.legacyUsage) as TranscriptItem['usage'] } : {}),
       });

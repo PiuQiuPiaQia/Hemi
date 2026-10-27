@@ -910,7 +910,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         // 交付声明参数（files/sources）是小数组且宿主要捕获——原样透传；
         // 其余工具维持摘要口径（有界、不带大段正文）。
         args: event.tool === 'register_delivery' ? (event.args ?? {}) : summarizeArgs(event.args),
-        ...(event.kind === 'tool-start' ? {} : { isError: Boolean(event.isError) }),
+        ...(event.kind === 'tool-start' ? {} : { isError: Boolean(event.isError), background: Boolean(event.background), stopped: Boolean(event.stopped), commandId: event.commandId }),
       });
     };
     const calls = [];

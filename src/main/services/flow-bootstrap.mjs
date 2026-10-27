@@ -175,15 +175,38 @@ export function normalizeFlowHistory(flow, turns, { conversationId = flow?.conve
 export function restoreFlowSnapshot(flow) {
   if (!flow || typeof flow !== 'object') return null;
   const snapshot = structuredClone(flow);
-  if (snapshot.activeRunId) {
-    const run = snapshot.runs?.[snapshot.activeRunId];
-    if (run && !run.closedAt) {
+  const at = Date.now();
+  for (const run of Object.values(snapshot.runs ?? {})) {
+    if (!run.legacy && run.closedAt == null && (run.runId === snapshot.activeRunId || run.outcome == null)) {
       run.outcome = run.outcome ?? 'interrupted';
-      if (run.recovery && !['expired','recovered'].includes(run.recovery.phase)) run.recovery = { ...run.recovery, phase: 'stopped', nextRetryAt: null, summary: '应用重启，自动恢复已停止。' };
-      run.closedAt = Date.now();
+      run.closedAt = at;
     }
-    snapshot.activeRunId = null;
-    snapshot.phase = 'idle';
+    if (run.closedAt != null) {
+      run.endedAt ??= run.closedAt;
+      run.activity = null;
+      if (run.recovery && !['expired','recovered','stopped'].includes(run.recovery.phase)) run.recovery = { ...run.recovery, phase: 'stopped', nextRetryAt: null, summary: '应用重启，自动恢复已停止。' };
+    }
+  }
+  snapshot.activeRunId = null;
+  snapshot.phase = 'idle';
+  const notices = new Set(), interruptedTails = new Map();
+  for (const item of snapshot.timeline ?? []) {
+    const run = snapshot.runs?.[item.runId];
+    if (!run || run.closedAt == null) continue;
+    for (const part of item.parts ?? []) {
+      notices.add(part.partId);
+      if (['tool','delegation'].includes(part.kind) && part.status === 'running') part.status = 'stopped';
+      if (part.kind === 'thinking' && part.endedAt == null) {
+        part.endedAt = run.closedAt; part.interrupted = true;
+      }
+    }
+    if (item.kind === 'assistant' && run.outcome === 'interrupted') interruptedTails.set(item.runId,item);
+  }
+  for (const [runId,item] of interruptedTails) {
+    const partId = `${runId}:restart`;
+    if (notices.has(partId)) continue;
+    item.parts ??= [];
+    item.parts.push({partId,kind:'notice',level:'info',text:'应用已重启，此任务已中断。已有结果已保留，未确认完成的操作不会自动重跑。'});
   }
   snapshot.queuePaused = snapshot.pending?.length ? true : snapshot.queuePaused;
   if (Array.isArray(snapshot.pending)) {

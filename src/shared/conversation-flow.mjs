@@ -34,6 +34,7 @@ export function createFlowSnapshot({ conversationId, revision = 0, generation = 
     generation,
     phase: 'idle',
     activeRunId: null,
+    awaitingUser: null,
     queuePaused: false,
     pending: [],
     timeline: [],
@@ -296,8 +297,15 @@ export function applyFlowFact(snapshot, fact) {
       const next = { ...snapshot, revision: snapshot.revision + 1, pending };
       return { snapshot: next, patch: { kind: 'queue', pending }, applied: true };
     }
+    case 'user-wait-cancelled': {
+      if (snapshot.phase !== 'idle' || snapshot.awaitingUser?.runId !== fact.runId) return {snapshot,patch:null,applied:false,dropped:'stale-user-wait'};
+      const runs={...snapshot.runs,[fact.runId]:{...snapshot.runs[fact.runId],outcome:'stopped',cancelledAt:fact.at}};
+      const next={...snapshot,revision:snapshot.revision+1,awaitingUser:null,runs};
+      return {snapshot:next,patch:{kind:'multi',changes:[{kind:'meta',meta:metaOf(next)},{kind:'runs',runs}]},applied:true};
+    }
     case 'run-preparing': {
       if (snapshot.phase !== 'idle') return { snapshot, patch: null, applied: false, dropped: 'slot-busy' };
+      if (fact.continuationOf && snapshot.awaitingUser?.runId !== fact.continuationOf) return {snapshot,patch:null,applied:false,dropped:'stale-continuation'};
       const run = {
         runId: fact.runId,
         generation: snapshot.generation,
@@ -307,6 +315,7 @@ export function applyFlowFact(snapshot, fact) {
         endedAt: null,
         closedAt: null,
         outcome: null,
+        ...(fact.continuationOf ? {continuationOf:fact.continuationOf} : {}),
       };
       const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'preparing', activeRunId: fact.runId, runs: { ...snapshot.runs, [fact.runId]: run } };
       return { snapshot: next, patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] }, applied: true };
@@ -316,7 +325,7 @@ export function applyFlowFact(snapshot, fact) {
         return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
       }
       const run = { ...snapshot.runs[fact.runId], startedAt: snapshot.runs[fact.runId].startedAt ?? fact.at ?? null, modelUsed: fact.modelUsed ?? null };
-      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'running', runs: { ...snapshot.runs, [fact.runId]: run } };
+      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'running', awaitingUser:null, runs: { ...snapshot.runs, [fact.runId]: run } };
       return {
         snapshot: next,
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] },
@@ -366,16 +375,19 @@ export function applyFlowFact(snapshot, fact) {
     }
     case 'run-closed': {
       if (snapshot.activeRunId !== fact.runId) return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
+      if (fact.outcome === 'awaiting-user' && (!fact.waitingForUser?.question || snapshot.phase === 'stopping')) return {snapshot,patch:null,applied:false,dropped:'invalid-user-wait'};
       const run = {
         ...snapshot.runs[fact.runId],
         endedAt: fact.at ?? null,
         closedAt: fact.at ?? null,
         outcome: fact.outcome ?? 'unknown',
+        ...(fact.outcome === 'awaiting-user' ? {waitingForUser:fact.waitingForUser} : {}),
         ...(snapshot.runs[fact.runId].recovery && !['expired','recovered'].includes(snapshot.runs[fact.runId].recovery.phase) ? { recovery: { ...snapshot.runs[fact.runId].recovery, phase: fact.outcome === 'stopped' ? 'stopped' : 'failed', nextRetryAt: null } } : {}),
         activity: null,
         ...(fact.usage ? { usage: fact.usage } : {}),
       };
-      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'idle', activeRunId: null, runs: { ...snapshot.runs, [fact.runId]: run } };
+      const awaitingUser = fact.outcome === 'awaiting-user' ? {runId:fact.runId,...fact.waitingForUser} : snapshot.awaitingUser;
+      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'idle', activeRunId: null, awaitingUser, runs: { ...snapshot.runs, [fact.runId]: run } };
       return {
         snapshot: next,
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] },
@@ -475,7 +487,7 @@ export function applyFlowFact(snapshot, fact) {
       const artifacts = Object.fromEntries(Object.entries(snapshot.artifacts).filter(([, artifact]) => !removedTasks.has(artifact.taskId)));
       const permissions = Object.fromEntries(Object.entries(snapshot.permissions).filter(([, permission]) => !removedTasks.has(permission.taskId)));
       const pendingReports = snapshot.pendingReports.filter((report) => !removedTasks.has(report.taskId));
-      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, timeline, tasks, artifacts, permissions, pendingReports };
+      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, awaitingUser:null, timeline, tasks, artifacts, permissions, pendingReports };
       return {
         snapshot: next,
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'timeline', timeline },
@@ -489,7 +501,7 @@ export function applyFlowFact(snapshot, fact) {
 }
 
 function metaOf(snapshot) {
-  return { phase: snapshot.phase, activeRunId: snapshot.activeRunId, queuePaused: snapshot.queuePaused, generation: snapshot.generation };
+  return { phase: snapshot.phase, activeRunId: snapshot.activeRunId, awaitingUser:snapshot.awaitingUser ?? null, queuePaused: snapshot.queuePaused, generation: snapshot.generation };
 }
 
 /**

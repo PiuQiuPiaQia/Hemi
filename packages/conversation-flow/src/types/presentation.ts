@@ -84,7 +84,7 @@ export type TranscriptItem = {
    * 029：模型回复被用户主动停止——已收到的增量原位保留为未完成回复，
    * 不伪装成成功，也不显示为模型失败。仅 hemi 消息有效。
    */
-  replyStatus?: "stopped";
+  replyStatus?: "stopped" | "awaiting-user";
   /**
    * 048：本条回应的思考全文与时长（主进程回合回执携带，随档案落盘可回看；
    * 中途停止的轮次由流式缓冲写回并标 interrupted）。不进模型上下文。
@@ -117,6 +117,12 @@ export type TaskStateSnapshot = {
   taskText: string;
   /** 进度行文案（无总数时不伪造计数，R-13）。 */
   progressText: string;
+  /** Display-only messages of this dispatch; never injected into the parent's transcript. */
+  conversation?: {
+    revision: number;
+    truncated?: boolean;
+    messages: Array<{ id: string; author: 'user' | 'hemi'; text: string; createdAt: number; parts?: TurnPart[] }>;
+  } | null;
   /** 宿主的后台命令/资源等待事实，供任务详情和恢复投影使用。 */
   activity?: RunActivityView | null;
   /** 2026-09-26：任务开始时间戳——运行中任务卡「已跑 X 分钟」用；旧快照缺省。 */
@@ -588,6 +594,8 @@ export type TurnToolCall = {
   tool: string;
   args: Record<string, string | number | boolean>;
   state: "running" | "done" | "error" | "stopped";
+  output?: string;
+  outputTruncated?: boolean;
 };
 
 export type WorkflowExecutionModel =

@@ -87,7 +87,7 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
             });
             controller.restore(recovered.snapshot);
             // 恢复修复不是新结果：不增加未读、不变更排序时间、不重跑模型。
-            if (recovered.changed) void store.saveFlow(key, recovered.snapshot).catch(error => log?.warn?.(`flow 恢复写入失败：${error.message}`));
+            if (recovered.changed || JSON.stringify(record.flow) !== JSON.stringify(recovered.snapshot)) void store.saveFlow(key, recovered.snapshot).catch(error => log?.warn?.(`flow 恢复写入失败：${error.message}`));
           } else if (record?.turns?.length) {
             const bootstrapped = bootstrapFlowFromTurns(record.turns, { conversationId: key });
             if (bootstrapped) controller.restore(bootstrapped);

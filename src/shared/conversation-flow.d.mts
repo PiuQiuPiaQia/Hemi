@@ -30,7 +30,9 @@ export type FlowRunSummary = {
   startedAt: number | null;
   endedAt: number | null;
   closedAt: number | null;
-  outcome: 'completed' | 'partial' | 'stopped' | 'failed' | 'interrupted' | 'unknown' | null;
+  outcome: 'completed' | 'partial' | 'awaiting-user' | 'stopped' | 'failed' | 'interrupted' | 'unknown' | null;
+  continuationOf?: string;
+  waitingForUser?: {question:string;reason:string};
   modelUsed?: string | null;
   [key: string]: unknown;
 };
@@ -77,6 +79,7 @@ export type FlowSnapshot = {
   generation: number;
   phase: FlowPhase;
   activeRunId: string | null;
+  awaitingUser?: {runId:string;question:string;reason:string} | null;
   queuePaused: boolean;
   pending: Array<FlowInput & { state: FlowInputState }>;
   timeline: FlowItem[];
@@ -88,7 +91,7 @@ export type FlowSnapshot = {
 };
 
 export type FlowPatch =
-  | { kind: 'meta'; meta: { phase: FlowPhase; activeRunId: string | null; queuePaused: boolean; generation: number } }
+  | { kind: 'meta'; meta: { phase: FlowPhase; activeRunId: string | null; awaitingUser?: FlowSnapshot['awaitingUser']; queuePaused: boolean; generation: number } }
   | { kind: 'queue'; pending: FlowSnapshot['pending'] }
   | { kind: 'timeline'; timeline: FlowItem[] }
   | { kind: 'item-appended'; item: FlowItem }

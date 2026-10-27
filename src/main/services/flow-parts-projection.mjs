@@ -34,6 +34,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   let requestParts = [];
   /** toolCallId → { partId, kind } */
   const toolParts = new Map();
+  const backgroundParts = new Map();
   const nextId = (kind) => `${runId}:${kind}${(seq += 1)}`;
   const gen = () => ({ afterInputId, ...(generation == null ? {} : { generation }) });
 
@@ -114,14 +115,21 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         return facts;
       }
       case 'tool_end': {
-        const entry = toolParts.get(String(event.toolCallId ?? ''));
+        const callId = String(event.toolCallId ?? '');
+        const entry = !event.background && event.commandId
+          ? backgroundParts.get(event.commandId) : toolParts.get(callId);
         if (!entry) return facts;
-        toolParts.delete(String(event.toolCallId ?? ''));
+        if (event.background && event.commandId) {
+          backgroundParts.set(event.commandId,entry); toolParts.delete(callId);
+        } else if (!event.background) {
+          if(event.commandId)backgroundParts.delete(event.commandId);
+          else toolParts.delete(callId);
+        }
         facts.push({
           type: 'part-updated',
           runId,
           partId: entry.partId,
-          patch: { status: event.isError ? 'error' : 'done' },
+          patch: { status: event.background ? 'running' : event.stopped ? 'stopped' : event.isError ? 'error' : 'done' },
           ...gen(),
         });
         return facts;
@@ -133,10 +141,11 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
 
   /** 收口：失败补 notice（成功不加——正文 part 已完整）。 */
   function finish({ error = null, stopped = false } = {}) {
-    const facts = [...closeOpenParts(), ...[...toolParts.values()].map(({ partId }) => ({
+    const facts = [...closeOpenParts(), ...[...toolParts.values(),...backgroundParts.values()].map(({ partId }) => ({
       type: 'part-updated', runId, partId, patch: { status: stopped ? 'stopped' : 'error' }, ...gen(),
     }))];
     toolParts.clear();
+    backgroundParts.clear();
     if (!error && !(stopped && seq === 0)) return facts;
     const partId = nextId('n');
     return [...facts, {
@@ -173,6 +182,7 @@ export function projectTaskFact(snapshot, { generation = null } = {}) {
     outcomeReason: snap.outcomeReason ?? null,
     taskText: typeof snap.taskText === 'string' ? snap.taskText.slice(0, 400) : '',
     progressText: snap.progressText ?? null,
+    conversation: snap.conversation ?? null,
     activity: snap.activity ?? null,
     stageText: snap.stageText ?? null,
     readOnly: Boolean(snap.readOnly),

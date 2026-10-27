@@ -29,6 +29,7 @@ export type FlowSnapshotView = {
   generation: number;
   phase: FlowPhase;
   activeRunId: string | null;
+  awaitingUser?: {runId:string;question:string;reason:string} | null;
   queuePaused: boolean;
   pending: FlowInputView[];
   timeline: FlowItemView[];

@@ -190,6 +190,8 @@ export const IPC = {
   usage: {
     /** 048：会话用量账本（对话侧记录＋任务执行汇总合并）。 */
     getLedger: 'usage:get-ledger',
+    /** 使用记录页：全局跨会话请求历史（逐 HTTP attempt；筛选影响统计，分页只切 records）。 */
+    getHistory: 'usage:get-history',
     /** main → renderer：账本有新记录（对话轮结束、任务每次模型调用完成）。 */
     changed: 'usage:changed',
   },

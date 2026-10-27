@@ -6,6 +6,17 @@ import path from 'node:path';
 import { createFlowSnapshot } from '../../shared/conversation-flow.mjs';
 import { recoverConversationFlow } from './conversation-recovery.mjs';
 
+test('interrupted record cannot erase the newer child conversation from its persisted flow', () => {
+  const flow = createFlowSnapshot({ conversationId: 'c' });
+  const conversation = { revision: 2, messages: [{ id: 'm', author: 'hemi', text: 'partial' }] };
+  flow.timeline = [{ kind: 'assistant', runId: 'r', parts: [{ kind: 'delegation', toolCallId: 'call', taskId: 't' }] }];
+  flow.runs.r = { runId: 'r', closedAt: 10 };
+  flow.tasks.t = { taskId: 't', rootRunId: 'r', toolCallId: 'call', phase: 'running', conversation };
+  recoverConversationFlow(flow, { readTaskRecord: () => ({ taskId: 't', conversationId: 'c', rootRunId: 'r', toolCallId: 'call', interrupted: true }) });
+  assert.deepEqual(flow.tasks.t.conversation, conversation);
+  assert.equal(flow.tasks.t.phase, 'terminal');
+});
+
 test('旧任务终态和声明交付按保留调用恢复；幂等且不重跑、不复活撤回项', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-recover-'));
   try {
@@ -69,4 +80,19 @@ test('064：不同根目标复用短调用ID，恢复交付仍归原任务与原
   assert.deepEqual(Object.values(flow.artifacts).map(a=>[a.producerRunId,a.taskId]),[['r1','t0'],['r2','t1']]);
   assert.equal(flow.timeline[0].parts.at(-1).name,'t0.md');
   assert.equal(flow.timeline[1].parts.at(-1).name,'t1.md');
+});
+
+test('recovered child tasks and retained executions cannot retain live activity, permissions or spinning tools', () => {
+  const flow=createFlowSnapshot({conversationId:'restart'});
+  flow.runs.root={runId:'root',closedAt:20,outcome:'interrupted'};
+  const conversation={revision:1,messages:[{parts:[{type:'thinking',endedAt:null},{type:'tools',calls:[{id:'push',state:'running'},{id:'done',state:'done'}]}]}]};
+  flow.tasks.child={taskId:'child',rootRunId:'root',phase:'running',activity:{phase:'waiting-background'},permission:{id:'p'},conversation,
+    executions:{earlier:{phase:'terminal',outcome:'interrupted',activity:{phase:'running'},conversation:structuredClone(conversation)}}};
+  assert.equal(recoverConversationFlow(flow).changed,true);
+  const child=flow.tasks.child;assert.equal(child.phase,'terminal');assert.equal(child.outcome,'interrupted');assert.equal(child.activity,null);assert.equal(child.permission,null);
+  for(const value of [child,child.executions.earlier]){
+    assert.equal(value.activity,null);assert.equal(value.conversation.messages[0].parts[1].calls[0].state,'stopped');
+    assert.equal(value.conversation.messages[0].parts[1].calls[1].state,'done');assert.equal(value.conversation.messages[0].parts[0].endedAt,20);
+  }
+  assert.equal(recoverConversationFlow(flow).changed,false);
 });

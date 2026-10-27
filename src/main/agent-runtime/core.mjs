@@ -1,5 +1,6 @@
 import { sessionModelOptions } from '../agent/session-model-options.mjs';
 import { usageRecordsFromJournal } from './usage-ledger.mjs';
+import { projectUsageHistory } from './usage-history.mjs';
 import { currentExecutionScope } from './execution-scope.mjs';
 import { recoverOwnedProcesses } from './owned-processes.mjs';
 import os from 'node:os';
@@ -604,7 +605,7 @@ export function createAgentRuntime({
       if(onModelCall) { const write = Promise.resolve(onModelCall(record)); void write.catch(() => {}); usageWrites.push(write); }
     };
     const recordProgress=event=>{
-      if(event.kind==='tool-end'&&!event.isError&&event.actionState!=='not-executed')usedTools.add(event.tool);
+      if(event.kind==='tool-end'&&!event.background&&!event.isError&&event.actionState!=='not-executed')usedTools.add(event.tool);
       if(event.browser?.steps?.some(step=>step.status==='dispatched-unknown')) {
         externalOutcomeUnknown=true;waitingReason='外部操作回执丢失，请核对是否已完成；确认后才能继续，避免重复提交。';
         queueMicrotask(()=>{void main.requestHandoff();});
@@ -667,6 +668,7 @@ export function createAgentRuntime({
     await journal.beginRoot(owner, {policySnapshot:ctx.policySnapshot, workspace:ctx.workspace});
     try {
       const result = await driveGoal({journal, owner, objective:args.userText, policy:normalizeGoalPolicy(goalPolicy), signal:controller.signal,
+        continuation:ctx.continuationOf ? {rootRunId:ctx.continuationOf,inputId:args.inputId,answer:args.userText} : null,
         run: hostEvent => runOwnedTurn(entry, {...args, hostEvent, goalRound:true}),
         verify: (objective, evidence) => verifyGoalCompletion({execution:{...executionFor(ctx, ctx.modelPlan), actualCandidate:entry.actualCandidate}, objective, evidence, signal:controller.signal, onCall:call=>onGoalVerification?.(conversationId,call)}),
         evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
@@ -762,9 +764,9 @@ export function createAgentRuntime({
   async function completeConversation(conversationId, status, reason = null, rootRunId = null) {
     if (!rootRunId) throw new Error('收口缺少根目标身份');
     await journalReady;
-    const normalized = status === 'stopped' ? 'cancelled' : status;
+    const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status;
     const state = await journal.snapshot();
-    for (const root of Object.values(state.roots)) if (root.owner.conversationId === conversationId && root.owner.rootRunId === rootRunId && ['running','waiting','stopping'].includes(root.status)) await journal.finishRoot(root.owner, normalized, reason);
+    for (const root of Object.values(state.roots)) if (root.owner.conversationId === conversationId && root.owner.rootRunId === rootRunId && ['running','waiting','awaiting_user','stopping'].includes(root.status)) await journal.finishRoot(root.owner, normalized, reason);
     const entry = agents.get(conversationId);
     if (entry?.activeRootRunId === rootRunId) entry.activeRootRunId = null;
   }
@@ -778,6 +780,12 @@ export function createAgentRuntime({
   async function usageRecordsFor(conversationId) {
     await journalReady;
     return usageRecordsFromJournal(await journal.snapshot(), conversationId);
+  }
+
+  /** 使用记录页：全局跨会话请求历史（筛选影响统计，分页只切 records；口径见 usage-history.mjs）。 */
+  async function usageHistory(options = {}) {
+    await journalReady;
+    return projectUsageHistory(await journal.snapshot(), options);
   }
 
   function get(conversationId) {
@@ -876,5 +884,5 @@ export function createAgentRuntime({
     } finally {disposeAll();environment?.release();}
   }
 
-  return { isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
+  return { isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
 }

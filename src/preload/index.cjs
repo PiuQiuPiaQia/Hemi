@@ -424,6 +424,8 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   },
   // 048 会话用量账本：聚合查询 + 有新记录时的变更广播（重取聚合）。
   getUsageLedger: (conversationId) => ipcRenderer.invoke('usage:get-ledger', { conversationId }),
+  // 使用记录页：全局跨会话请求历史（from/to/query/status 筛选＋按日统计；分页只切 records）。
+  getUsageHistory: (options) => ipcRenderer.invoke('usage:get-history', options),
   onUsageChanged: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('usage:changed', listener);

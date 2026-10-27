@@ -4,6 +4,7 @@ import {confirmWorkflowLeave} from "./workflow-leave-guard";
 import {setAppearanceScene} from '@/appearance/scene';
 import type { ChatTurnReceipt, ConversationDeliverableView, ConversationTurnState, SkillSelectionView } from '@shared/protocol';
 import { retainedDeliverables } from './lib/retained-deliverables';
+import { UsageHistoryPage } from './usage-history-page';
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -291,6 +292,7 @@ export default function Home() {
   const [skillMarketOpen, setSkillMarketOpen] = useState(false);
   // 059：工作流页（与技能中心平级）；新会话/切会话时收回。
   const [workflowStudioOpen, setWorkflowStudioOpen] = useState(false);
+  const [usageHistoryOpen, setUsageHistoryOpen] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   // 013：仅响应首位说话人（默认关；仅通话模式生效）。
   // 013：仅响应首位说话人（2026-09-20 用户裁决：默认开）。
@@ -3591,7 +3593,7 @@ export default function Home() {
   useEffect(()=>{setAppearanceScene({appReady:!bootstrapping});if(bootstrapping||setupRequired||settingsOpen)setAppearanceScene({view:'other',inputActive:false});},[bootstrapping,setupRequired,settingsOpen]);
 
   const applicationPage: ApplicationPage = botOpen ? 'bot' : settingsOpen ? 'settings'
-    : skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : 'home';
+    : skillMarketOpen ? 'skills' : workflowStudioOpen ? 'workflows' : usageHistoryOpen ? 'usage' : 'home';
   const navigate = useCallback(async (next: ApplicationPage, settingsPage?: 'general' | 'models', settingsEnvironment?: 'local' | 'bot') => {
     if (navigationPendingRef.current || next === applicationPage) return;
     navigationPendingRef.current = true;
@@ -3610,6 +3612,7 @@ export default function Home() {
       setBotOpen(next === 'bot');
       setSkillMarketOpen(next === 'skills');
       setWorkflowStudioOpen(next === 'workflows');
+      setUsageHistoryOpen(next === 'usage');
       setSettingsOpen(next === 'settings');
       setSettingsTarget(next === 'settings' ? {
         page: settingsPage ?? 'general',
@@ -3624,6 +3627,7 @@ export default function Home() {
   }, [applicationPage, settingsOpen, stopSession, stopTtsPlayback]);
   const navigation = {page: applicationPage, navigate: (next: ApplicationPage, page?: 'general' | 'models', environment?: 'local' | 'bot') => void navigate(next, page, environment)};
   if (botOpen) return <ApplicationNavigationContext.Provider value={navigation}><BotPage onOpenSettings={(models=false, environment) => {void navigate('settings', models ? 'models' : 'general', environment ?? (models ? 'local' : 'bot'));}} /></ApplicationNavigationContext.Provider>;
+  if (usageHistoryOpen) return <ApplicationNavigationContext.Provider value={navigation}><UsageHistoryPage onClose={() => {setUsageHistoryOpen(false);}} /></ApplicationNavigationContext.Provider>;
 
   if (bootstrapping) {
     return (

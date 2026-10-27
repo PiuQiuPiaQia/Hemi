@@ -13,6 +13,7 @@ const equal = (left, right) => typeof left === 'string' && typeof right === 'str
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) && !['__proto__','constructor','prototype'].includes(value);
 const RPC = new Set(['snapshot','session.open','session.control','session.create','session.update','session.rename','session.remove','session.order','session.draft','flow.snapshot','flow.command','operation.get','permission.decide','directory.list','attachment.read','attachment.document','file.read','file.resolve','references','skills','agent-environment.inspect','agent-environment.read-file']);
 RPC.add('resource.stat');RPC.add('resource.chunk');
+for (const method of ['capabilities.inspect', 'context.windows', 'context.capture']) RPC.add(method);
 for(const operation of ['begin','chunk','status','complete','cancel'])RPC.add('attachment.upload.'+operation);
 
 export function deviceEndpoint(value) {

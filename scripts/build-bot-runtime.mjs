@@ -34,6 +34,10 @@ export async function buildBotRuntime({
     }
     for (const dir of ['src/main', 'src/shared'])
       await copy(path.join(root, dir), dir);
+    // The headless backend executes these same DOM operations as the extension.
+    await fs.cp(path.join(root, 'extensions/chrome-extension'), path.join(stage, 'extensions/chrome-extension'), {
+      recursive: true, filter: source => !path.basename(source).startsWith('._'),
+    });
     const app = JSON.parse(
       await fs.readFile(path.join(root, 'package.json'), 'utf8'),
     );
@@ -42,6 +46,7 @@ export async function buildBotRuntime({
     const names = [
       '@earendil-works/pi-ai',
       '@earendil-works/pi-coding-agent',
+      '@trycua/cua-driver',
       'pi-memory',
       'fflate',
       'unpdf',

@@ -4,6 +4,7 @@ import { ArrowDown, CheckCheck, ChevronRight, CircleAlert, MessageSquarePlus, Sq
 import { Markdown } from '@/shared/markdown';
 import type { TaskActionName, TaskStateSnapshot } from '@/shared/types';
 import { TaskArchiveSection, useTaskArchive } from '@/windows/voice/task-panel';
+import { TaskConversationFlow } from './task-conversation-flow';
 
 /**
  * 025 → 056：任务/子 agent 的执行过程（2026-10-15 用户裁决改版）。
@@ -11,7 +12,9 @@ import { TaskArchiveSection, useTaskArchive } from '@/windows/voice/task-panel';
  * （{kind:'process'}），对话流的角色行点击打开；Tab 行、收起与 Esc 由预览
  * 面板（file-preview）承担，这里只渲染过程本身。
  *
- * 过程可见性（056 用户反馈「看不到执行了什么」）：步骤标题就是动作本体
+ * 新子任务在右侧复用 ConversationFlow，按 SDK 顺序展示独立会话的思考、正文、
+ * 工具和结果；主对话只保留派单入口。旧档缺少 conversation 时保留日志时间线。
+ * 旧过程可见性（056 用户反馈「看不到执行了什么」）：步骤标题就是动作本体
  * （「读取 src/foo.mjs」而非「已完成」），单步耗时与时刻并排；运行中的一步
  * 用快照 progressText 单列；终态后在时间线下方交代报告全文（子 agent 报告
  * 即回传主 agent 的那份，12k 封顶）与核验结论。运行中持续接收进度并自动
@@ -31,7 +34,7 @@ function clock(at: number) {
 function stateLabelOf(snap: TaskStateSnapshot): string {
   if (snap.phase === 'waiting') return snap.permission ? '等待授权' : snap.progressText || '等待执行';
   if (snap.phase === 'stopping') return '停止中';
-  if (snap.phase !== 'terminal') return '进行中';
+  if (snap.phase !== 'terminal') return snap.progressText || '进行中';
   switch (snap.outcome) {
     case 'complete':
       return '已完成';
@@ -109,7 +112,7 @@ export function TaskProcessBody({
         </div>
       </header>
 
-      <dl className="h25-process-stats">
+      {!snap.conversation ? <dl className="h25-process-stats">
         <div>
           <dt>步骤</dt>
           <dd>{steps.length}</dd>
@@ -122,9 +125,9 @@ export function TaskProcessBody({
           <dt>授权</dt>
           <dd>{approvals}</dd>
         </div>
-      </dl>
+      </dl> : null}
 
-      <div
+      {snap.conversation ? <TaskConversationFlow key={snap.taskId ?? snap.key} snap={snap} /> : <div
         className="h25-process-body"
         ref={bodyRef}
         tabIndex={0}
@@ -205,7 +208,12 @@ export function TaskProcessBody({
             </button>
           </div>
         ) : null}
-      </div>
+      </div>}
+      {snap.conversation && archiveOpen ? (
+        <div className="h25-process-body">
+          <TaskArchiveSection snap={snap} record={archive} onResumed={onArchiveResumed} />
+        </div>
+      ) : null}
 
       <footer className="h25-process-foot">
         {snap.taskId && !archiveOpen && !inFlight ? (
@@ -213,7 +221,7 @@ export function TaskProcessBody({
             档案与续跑
           </button>
         ) : null}
-        <span className="h25-process-foot-note">时间为本机时间</span>
+        <span className="h25-process-foot-note">{snap.conversation ? '子任务独立对话' : '时间为本机时间'}</span>
         {!inFlight && onContinueDiscuss && snap.taskId ? (
           <button type="button" className="h37-btn h37-btn-ghost h37-btn-sm" onClick={() => onContinueDiscuss(snap)}>
             <MessageSquarePlus aria-hidden="true" />

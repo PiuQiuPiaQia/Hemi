@@ -553,3 +553,22 @@ test('new chats remember the last opened/selected model and always start in the 
   assert.equal((await f.req('session.open', { id: g.id, activate: false })).modelKey, other.modelKey, 'model choice survives restart and invalid selections');
   assert.equal((await f.req('session.open', { id: b.id, activate: false })).dir, custom, 'other chats keep their own directory');
 });
+
+test('crashed background run restores one authoritative idle state for detail, catalog and disk, preserving the paused queue', async t => {
+  const f=await fixture(t),session=await f.req('session.create');
+  await f.restart(async file=>{
+    const state=JSON.parse(await fs.readFile(file,'utf8')),flow=state.sessions[session.id].flow;
+    flow.phase='running';flow.activeRunId='crashed';
+    flow.runs.crashed={runId:'crashed',startedAt:1,closedAt:null,outcome:null,activity:{phase:'waiting-background',jobs:[{id:'push'}]}};
+    flow.timeline=[{kind:'assistant',runId:'crashed',parts:[{kind:'tool',partId:'push',status:'running'}]}];
+    flow.pending=[{inputId:'queued',state:'pending',text:'keep queued input'}];
+    await fs.writeFile(file,JSON.stringify(state));
+  });
+  const detail=await f.req('session.open',{id:session.id}),catalog=await f.req('snapshot');
+  assert.equal(detail.status,null);assert.equal(catalog.sessions.find(x=>x.id===session.id).status,null);
+  assert.equal(detail.flow.activeRunId,null);assert.equal(detail.flow.runs.crashed.activity,null);
+  assert.equal(detail.flow.timeline[0].parts[0].status,'stopped');assert.equal(detail.flow.queuePaused,true);
+  assert.equal(detail.flow.pending[0].text,'keep queued input');assert.equal(f.calls.length,0);
+  const disk=JSON.parse(await fs.readFile(path.join(f.root,'data/state.json'),'utf8'));
+  assert.deepEqual(disk.sessions[session.id].flow,detail.flow);
+});

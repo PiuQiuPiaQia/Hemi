@@ -97,6 +97,35 @@ test('Windows resident task settings keep interactive resource priority and unli
   assert.equal(value.instances, 'IgnoreNew');
 });
 
+test('Windows production desktop task uses the logged-in session and its desktop launcher argument', {skip: process.platform !== 'win32', timeout: 30000}, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-desktop-registration-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const taskName = 'HemiDesktopRegistration-' + path.basename(root);
+  const launcher = path.join(root, 'launcher.mjs'), resultFile = path.join(root, 'result.json');
+  await fs.writeFile(launcher, `import fs from 'node:fs';import {execFileSync} from 'node:child_process';fs.writeFileSync(${JSON.stringify(resultFile)},JSON.stringify({args:process.argv.slice(2),session:Number(execFileSync('powershell.exe',['-NoProfile','-Command','(Get-Process -Id '+process.pid+').SessionId'],{encoding:'utf8'}).trim())}));`);
+  const install = windowsInstallScript({nodeBin: process.execPath, runtimeNeeded: false}, {release: 'release-test', digest: 'a'.repeat(64)});
+  const definitions = ['trigger', 'settings', 'desktopAction', 'desktopPrincipal', 'desktopTriggers'].map(name => {
+    const line = install.match(new RegExp('^\\s*\\$' + name + ' = [^\\n]+', 'm'))?.[0];assert.ok(line, name);return line;
+  }).join('\n');
+  const registration = install.match(/^\s*Register-ScheduledTask -TaskName \$desktopTaskName -Action[^\n]+/m)?.[0];assert.ok(registration);
+  const quote = value => "'" + value.replaceAll("'", "''") + "'";
+  const source = powershellSource(`$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$desktopTaskName=${quote(taskName)};$node=${quote(process.execPath)};$launcher=${quote(launcher)};$networkEnv=${quote(path.join(root, 'network.env'))};$envProxyFlag=''
+try {
+${definitions}
+${registration}
+$task=Get-ScheduledTask -TaskName $desktopTaskName
+if($task.Principal.LogonType -ne 'Interactive' -or $task.Settings.Priority -ne 4){throw 'Incorrect desktop task principal or priority'}
+if(@($task.Triggers).Count -ne 2){throw 'Missing desktop task triggers'}
+Start-ScheduledTask -TaskName $desktopTaskName
+for($i=0;$i -lt 100 -and -not (Test-Path -LiteralPath ${quote(resultFile)});$i++){Start-Sleep -Milliseconds 100}
+if(-not (Test-Path -LiteralPath ${quote(resultFile)})){throw 'Desktop task did not execute in the logged-in session'}
+} finally {Stop-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue;Unregister-ScheduledTask -TaskName $desktopTaskName -Confirm:$false -ErrorAction SilentlyContinue}`);
+  await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')]);
+  const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
+  assert.deepEqual(result.args, ['desktop']);assert.ok(result.session > 0);
+});
+
 test('Windows dependency installation inherits the Bot network file before npm starts', {skip: process.platform !== 'win32'}, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-network-install-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));

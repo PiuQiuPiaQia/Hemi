@@ -499,3 +499,10 @@ test('067 缓存命中也参与交付去重，删除前一个入口后后一个�
   assert.deepEqual(project({ ...f, revision: 6 }).transcripts.map(t => t.id), ['one']);
   assert.deepEqual(project({ ...f, timeline: [two] }).transcripts.map(t => t.id), ['two']);
 });
+
+test('clarification has a neutral waiting reply status; cached projection clears it when the answer starts',()=>{
+ const item={itemId:'question',kind:'assistant',runId:'r',parts:[{partId:'q',kind:'text',content:'文件里写什么？'}]};
+ const waiting={...snapshot([item]),runs:{r:{closedAt:50,outcome:'awaiting-user'}},awaitingUser:{runId:'r',question:'文件里写什么？',reason:'缺少内容'}};
+ const project=createFlowTimelineProjector();const row=project(waiting).transcripts[0];assert.equal(row.replyStatus,'awaiting-user');assert.notEqual(row.kind,'error');assert.equal(row.streaming,false);
+ const answered=project({...waiting,awaitingUser:null}).transcripts[0];assert.equal(answered.replyStatus,undefined);assert.equal(answered.text,row.text);
+});

@@ -1,4 +1,4 @@
-import { Bot, MessageCircle, Settings, Sparkles, Workflow, type LucideIcon } from 'lucide-react';
+import { Activity, Bot, MessageCircle, Settings, Sparkles, Workflow, type LucideIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { SkinPicker } from '@/components/skin-picker';
 import { UpdateButton } from './update-button';
@@ -13,6 +13,7 @@ export function NavRail({
   homePreviewProps,
   onShowSkills,
   onShowWorkflows,
+  onShowUsage,
   onOpenSettings,
 }: {
   page: ApplicationPage;
@@ -20,6 +21,7 @@ export function NavRail({
   homePreviewProps?: Pick<ComponentProps<'button'>, 'id' | 'aria-controls' | 'aria-expanded' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
   onShowSkills?: () => void;
   onShowWorkflows?: () => void;
+  onShowUsage?: () => void;
   onOpenSettings?: () => void;
 }) {
   const navigation = useApplicationNavigation();
@@ -61,11 +63,12 @@ export function NavRail({
           {item('home', '对话', MessageCircle, onShowHome)}
           {navigation ? item('bot', 'Bot', Bot) : null}
         </div>
-        {navigation || onShowSkills || onShowWorkflows ? <>
+        {navigation || onShowSkills || onShowWorkflows || onShowUsage ? <>
           <div className="h24-navrail-divider" aria-hidden="true" />
           <div className="h24-navrail-group" role="group" aria-label="扩展工具">
             {navigation || onShowSkills ? item('skills', '技能中心', Sparkles, onShowSkills) : null}
             {navigation || onShowWorkflows ? item('workflows', '工作流', Workflow, onShowWorkflows) : null}
+            {navigation || onShowUsage ? item('usage', '使用记录', Activity, onShowUsage) : null}
           </div>
         </> : null}
       </div>

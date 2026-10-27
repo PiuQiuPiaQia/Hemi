@@ -4,6 +4,22 @@ import { normalizeRemotePath, remoteDeliveryDenied, resolveDeliveryTargetPath } 
 import { projectTaskFact } from './flow-parts-projection.mjs';
 import { conversationArtifactId, previewKindOf } from './conversation-deliverables.mjs';
 
+function closeRecoveredTask(task, at) {
+  let changed = false, conversationChanged = false;
+  if (task.activity) {task.activity=null;changed=true;}
+  if (task.permission) {task.permission=null;changed=true;}
+  for (const message of task.conversation?.messages ?? []) for (const part of message.parts ?? []) {
+    if (part.type === 'thinking' && part.endedAt == null) {
+      part.endedAt=task.endedAt ?? at;part.interrupted=true;conversationChanged=true;
+    }
+    if (part.type === 'tools') for (const call of part.calls ?? []) {
+      if (call.state === 'running') {call.state='stopped';conversationChanged=true;}
+    }
+  }
+  if (conversationChanged) task.conversation.revision=(task.conversation.revision ?? 0)+1;
+  return changed || conversationChanged;
+}
+
 /** 仅恢复仍留在时间线中的调用；任务档案是终态与旧交付的证据，不执行任何工作。 */
 export function recoverConversationFlow(snapshot, { readTaskRecord = () => null, workspaceDir = null } = {}) {
   let changed = false;
@@ -23,9 +39,12 @@ export function recoverConversationFlow(snapshot, { readTaskRecord = () => null,
       && record.toolCallId === task.toolCallId && anchor;
     const terminal = matches && (record.endedAt != null || record.interrupted);
     const archived = terminal ? projectTaskFact(snapshotFromRecord(record, 0)).task : null;
+    // The last streamed snapshot can be newer than the interrupted task-history record.
+    if (archived && !archived.conversation && task.conversation) archived.conversation = task.conversation;
     if (task.phase !== 'terminal' || (archived && (task.outcome !== archived.outcome || task.endedAt !== archived.endedAt))) {
       const recovered = archived ?? {
-        ...task, phase: 'terminal', outcome: 'interrupted', permission: null,
+        ...task, phase: 'terminal', outcome: 'interrupted', permission: null, activity: null,
+        endedAt: task.endedAt ?? snapshot.runs?.[task.rootRunId]?.closedAt ?? Date.now(),
         outcomeReason: '应用重启，旧任务已中断；没有继续执行。',
       };
       snapshot.tasks[id] = { ...task, ...recovered, executions: { ...task.executions,
@@ -35,12 +54,18 @@ export function recoverConversationFlow(snapshot, { readTaskRecord = () => null,
     }
     // 续用子会话的每次调用也有独立展示位置；旧执行不能保留假 running。
     for (const [call, execution] of Object.entries(snapshot.tasks[id].executions ?? {})) {
-      if (execution.phase === 'terminal') continue;
+      if (execution.phase === 'terminal') {
+        changed=closeRecoveredTask(execution,snapshot.runs?.[task.rootRunId]?.closedAt ?? Date.now()) || changed;
+        continue;
+      }
       snapshot.tasks[id].executions[call] = archived && call === record.toolCallId ? archived : {
         ...execution, phase: 'terminal', outcome: 'interrupted', permission: null,
         outcomeReason: '应用重启，旧执行已中断。',
       };
       changed = true;
+    }
+    for (const execution of [snapshot.tasks[id],...Object.values(snapshot.tasks[id].executions ?? {})]) {
+      changed=closeRecoveredTask(execution,snapshot.runs?.[task.rootRunId]?.closedAt ?? Date.now()) || changed;
     }
     if (!matches) continue;
     const owner = anchor.item;

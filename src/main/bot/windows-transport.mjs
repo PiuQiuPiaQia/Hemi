@@ -20,6 +20,7 @@ const rootScript = String.raw`
 $root = Join-Path $env:USERPROFILE '.local\share\hemi-bot'
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $taskName = 'HemiBot-' + $sid
+$desktopTaskName = $taskName + '-Desktop'
 `;
 
 export const windowsRootSetupScript = rootScript + String.raw`
@@ -120,15 +121,22 @@ function Write-Active($value) {
 }
 function Restore-Bot {
   Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  Stop-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue
   $previous = Join-Path $root 'previous.json'
   if (Test-Path -LiteralPath $previous) {
     Write-Active (Get-Content -LiteralPath $previous -Encoding UTF8 -Raw | ConvertFrom-Json)
     $xml = Join-Path $root 'previous-task.xml'
     if (Test-Path -LiteralPath $xml) { Register-ScheduledTask -TaskName $taskName -Xml ([IO.File]::ReadAllText($xml)) -Force | Out-Null }
+    $desktopXml = Join-Path $root 'previous-desktop-task.xml'
+    if (Test-Path -LiteralPath $desktopXml) {
+      Register-ScheduledTask -TaskName $desktopTaskName -Xml ([IO.File]::ReadAllText($desktopXml)) -Force | Out-Null
+      Start-ScheduledTask -TaskName $desktopTaskName
+    } else { Unregister-ScheduledTask -TaskName $desktopTaskName -Confirm:$false -ErrorAction SilentlyContinue }
     Enable-ScheduledTask -TaskName $taskName | Out-Null
     Start-ScheduledTask -TaskName $taskName
   } else {
     Disable-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Out-Null
+    Unregister-ScheduledTask -TaskName $desktopTaskName -Confirm:$false -ErrorAction SilentlyContinue
   }
 }
 `;
@@ -182,6 +190,9 @@ try {
   $oldXml = Join-Path $root 'previous-task.xml'
   if (Test-Path -LiteralPath $oldXml) { Remove-Item -LiteralPath $oldXml }
   if ($oldTask) { [IO.File]::WriteAllText($oldXml, (Export-ScheduledTask -TaskName $taskName)) }
+  $oldDesktopXml = Join-Path $root 'previous-desktop-task.xml'
+  Remove-Item -LiteralPath $oldDesktopXml -ErrorAction SilentlyContinue
+  if (Get-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue) { [IO.File]::WriteAllText($oldDesktopXml, (Export-ScheduledTask -TaskName $desktopTaskName)) }
   $launcher = Join-Path $root 'windows-launcher.mjs'
   Copy-Item -LiteralPath (Join-Path $release 'src\main\bot\windows-launcher.mjs') -Destination $launcher -Force
   $envProxyFlag = ''
@@ -198,11 +209,21 @@ try {
   try { Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null }
   catch { throw ('无法创建常驻计划任务，请检查账号的“作为批处理作业登录”权限与计划任务策略：' + $_.Exception.Message) }
   try {
+    # The resident S4U service has no interactive desktop. A separate task runs
+    # only in this user's logged-in session and serves the authenticated pipe.
+    $desktopAction = New-ScheduledTaskAction -Execute $node -Argument ($envProxyFlag + '--env-file-if-exists="' + $networkEnv + '" "' + $launcher + '" desktop') -WorkingDirectory $env:USERPROFILE
+    $desktopPrincipal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
+    $desktopTriggers = @((New-ScheduledTaskTrigger -AtLogOn -User $sid), $trigger)
+    Register-ScheduledTask -TaskName $desktopTaskName -Action $desktopAction -Trigger $desktopTriggers -Principal $desktopPrincipal -Settings $settings -Force | Out-Null
+    Stop-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue
+    for ($i=0; $i -lt 50 -and (Get-ScheduledTask -TaskName $desktopTaskName).State -eq 'Running'; $i++) { Start-Sleep -Milliseconds 100 }
+    if ((Get-ScheduledTask -TaskName $desktopTaskName).State -eq 'Running') { throw '旧桌面助手未能停止，已保留原安装' }
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     for ($i=0; $i -lt 50 -and (Get-ScheduledTask -TaskName $taskName).State -eq 'Running'; $i++) { Start-Sleep -Milliseconds 100 }
     if ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') { throw '旧 Bot 进程未能停止，已保留原安装' }
     Write-Active @{release=$release;node=$node}
     Start-ScheduledTask -TaskName $taskName
+    Start-ScheduledTask -TaskName $desktopTaskName
   } catch { Restore-Bot; throw }
 } finally { $lock.Dispose() }
 `;
@@ -223,8 +244,9 @@ if ($task.Settings.Priority -ne 4) {
   Set-ScheduledTask -TaskName $taskName -Settings $task.Settings | Out-Null
 }
 Enable-ScheduledTask -TaskName $taskName | Out-Null
-Start-ScheduledTask -TaskName $taskName`
-    : 'Disable-ScheduledTask -TaskName $taskName | Out-Null\nStop-ScheduledTask -TaskName $taskName');
+Start-ScheduledTask -TaskName $taskName
+if (Get-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue) {Enable-ScheduledTask -TaskName $desktopTaskName | Out-Null;Start-ScheduledTask -TaskName $desktopTaskName}`
+    : 'Disable-ScheduledTask -TaskName $taskName | Out-Null\nStop-ScheduledTask -TaskName $taskName\nif (Get-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue) {Disable-ScheduledTask -TaskName $desktopTaskName | Out-Null;Stop-ScheduledTask -TaskName $desktopTaskName}');
 }
 
 export function windowsRoot(home) { return path.win32.join(home, '.local', 'share', 'hemi-bot'); }
