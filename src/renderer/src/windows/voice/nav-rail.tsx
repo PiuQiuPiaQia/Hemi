@@ -1,6 +1,7 @@
 import { Bot, MessageCircle, Settings, Sparkles, Workflow, type LucideIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { SkinPicker } from '@/components/skin-picker';
+import { UpdateButton } from './update-button';
 import { useApplicationNavigation, type ApplicationPage } from './lib/conversation-bridge';
 
 /** Global destinations stay in the same order in every runtime and page.
@@ -70,6 +71,7 @@ export function NavRail({
       </div>
       <div className="h24-navrail-spacer" aria-hidden="true" />
       <div className="h24-navrail-group h24-navrail-tools" role="group" aria-label="应用偏好">
+        <UpdateButton />
         <SkinPicker />
         {item('settings', '设置', Settings, onOpenSettings)}
       </div>

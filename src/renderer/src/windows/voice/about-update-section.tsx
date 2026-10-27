@@ -1,37 +1,29 @@
-import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { BrandIcon } from '@/components/brand-icon';
 
-import type { UpdaterState } from '@shared/protocol';
+import { runUpdaterAction, useUpdater, type UpdaterAction } from './lib/use-updater';
 import { openExternal } from '@/shared/open-external';
 import { HEMI_RELEASES_PAGE_URL } from '@/shared/types';
 
 /**
- * 044 设置页·关于与更新（通用页）。自包含：自己读状态、订阅广播、触发动作。
+ * 设置页与侧栏共用更新快照和操作锁；后台服务负责下载和安装。
  * 状态机在主进程 updater 服务；这里只按 phase 出文案与主按钮：
  *   idle/not-available/error → 检查更新；available → 下载更新；
  *   downloading → 进度；downloaded → 重启并更新（退出时也会自动装上）。
  * 开发实例（supported=false）只展示版本与说明，不出按钮。
  */
 export function AboutUpdateSection() {
-  const [state, setState] = useState<UpdaterState | null>(null);
-
-  useEffect(() => {
-    void window.hemiVoice?.updaterGetState().then(setState).catch(() => {});
-    const unsubscribe = window.hemiVoice?.onUpdaterChanged(setState);
-    return () => unsubscribe?.();
-  }, []);
+  const { state, operation, error } = useUpdater();
 
   const phase = state?.phase ?? 'idle';
   const version = state?.currentVersion ?? '';
   const supported = state?.supported ?? true;
 
-  const run = (action: () => Promise<unknown> | undefined) => {
-    void Promise.resolve(action()).catch(() => {});
-  };
+  const run = (action: UpdaterAction) => { void runUpdaterAction(action); };
 
   let statusText: string;
-  let actionButton: React.ReactNode = null;
+  let actionButton: ReactNode = null;
   if (!supported) {
     statusText = state?.unsupportedReason === 'dev'
       ? '这是开发实例，不支持自动更新；装上正式安装包后可以在这里检查。'
@@ -52,7 +44,8 @@ export function AboutUpdateSection() {
           <button
             type="button"
             className="h37-btn h37-btn-primary"
-            onClick={() => run(() => window.hemiVoice?.updaterDownload())}
+            disabled={Boolean(operation)}
+            onClick={() => run('download')}
           >
             下载更新
           </button>
@@ -74,9 +67,10 @@ export function AboutUpdateSection() {
           <button
             type="button"
             className="h37-btn h37-btn-primary"
-            onClick={() => run(() => window.hemiVoice?.updaterInstall())}
+            disabled={Boolean(operation)}
+            onClick={() => run('install')}
           >
-            重启并更新
+            {operation === 'install' ? '正在重启…' : '重启并更新'}
           </button>
         );
         break;
@@ -105,7 +99,7 @@ export function AboutUpdateSection() {
           <span className="h37-row-text">
             {/* P2：行标题直接报版本（原「版本与更新」与分组标题重复、版本号挂在组头右侧） */}
             <b>{version ? `Hemi ${version}` : 'Hemi'}</b>
-            <span>{statusText}</span>
+            <span role={error ? 'alert' : undefined}>{error || statusText}</span>
           </span>
           {actionButton ? <span className="h37-row-end">{actionButton}</span> : null}
         </div>
@@ -130,12 +124,14 @@ export function AboutUpdateSection() {
   );
 }
 
-function CheckButton({ run }: { run: (action: () => Promise<unknown> | undefined) => void }) {
+function CheckButton({ run }: { run: (action: UpdaterAction) => void }) {
+  const { operation } = useUpdater();
   return (
     <button
       type="button"
       className="h37-btn h37-btn-secondary"
-      onClick={() => run(() => window.hemiVoice?.updaterCheck())}
+      disabled={Boolean(operation)}
+      onClick={() => run('check')}
     >
       检查更新
     </button>

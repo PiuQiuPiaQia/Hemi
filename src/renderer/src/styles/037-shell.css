@@ -214,6 +214,51 @@ html.kb-nav .compact-shell .h24-navrail-item:focus-visible {
   outline: 0;
 }
 
+.compact-shell .h24-update-slot,
+.compact-shell .h24-update-button {
+  position: relative;
+}
+.compact-shell .h24-navrail-item.h24-update-button {
+  color: var(--accent-text);
+}
+.compact-shell .h24-update-button[data-phase='error'] { color: var(--danger); }
+.compact-shell .h24-update-button[aria-disabled='true'] { cursor: default; }
+.compact-shell .h24-update-dot {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  width: var(--sp-4);
+  height: var(--sp-4);
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+.compact-shell .h24-update-progress {
+  display: grid;
+  place-items: center;
+  width: var(--sp-32);
+  height: var(--sp-32);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.compact-shell .h24-update-progress svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke-width: 2;
+}
+.compact-shell .h24-update-track { stroke: var(--line); }
+.compact-shell .h24-update-arc { stroke: currentColor; stroke-linecap: round; }
+.compact-shell .h24-update-spinner { display: inline-flex; animation: conversation-status-spin 1.2s linear infinite; }
+html.kb-nav .compact-shell .h24-navrail-item.h24-update-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .compact-shell .h24-update-spinner { animation: none; }
+}
+
 /* —— 会话栏 —— */
 .compact-shell .h24-sidebar {
   gap: 0;
