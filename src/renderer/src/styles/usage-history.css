@@ -148,7 +148,7 @@
   font-size: var(--fs-12);
   font-weight: var(--fw-medium);
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   transition: all var(--dur-1) linear;
 }
 
@@ -280,7 +280,7 @@
   border-radius: var(--r-xs);
   background: transparent;
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   transition: all var(--dur-1) linear;
 }
 
@@ -338,7 +338,7 @@
 
 .h37-usage-row {
   border-bottom: 1px solid var(--line);
-  cursor: pointer;
+  cursor: default;
   transition: background-color var(--dur-1) linear;
 }
 
@@ -346,7 +346,7 @@
   background: var(--bg-hover);
 }
 
-.h37-usage-row:focus-visible {
+html.kb-nav .h37-usage-row:focus-visible {
   outline: 2px solid var(--accent-text);
   outline-offset: -2px;
 }
