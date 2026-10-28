@@ -176,7 +176,6 @@ export interface MessageView {
   taskFrozen?: boolean;
   inputSource?: "voice" | "text";
   editedAt?: number;
-  pendingDelivery?: boolean;
   editDraft?: TranscriptItem['editDraft'];
   attachments?: TranscriptItem["attachments"];
   references?: TranscriptItem["references"];

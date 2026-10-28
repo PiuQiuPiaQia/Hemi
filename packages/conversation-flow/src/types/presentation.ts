@@ -34,8 +34,6 @@ export type TranscriptItem = {
   inputSource?: "voice" | "text";
   /** 024 消息编辑：用户消息被编辑的时间戳（存在即显示「已编辑」）。 */
   editedAt?: number;
-  /** Local submission preview; never stored as a delivered Host message. */
-  pendingDelivery?: boolean;
   /** Restore a rejected edit without replacing its authoritative message text. */
   editDraft?: { revision: string; text: string };
   /**

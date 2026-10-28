@@ -84,7 +84,18 @@ WebSocket 使用 20 秒心跳检测断开的连接；SSH 流含心跳并设接�
 
 空闲离开会话立即释放。任务尚在执行时保留占用，离开标记使任务结束后释放；空闲且连接失效的占用最长 60 秒后过期。已有队列编辑在抢占时保留未提交草稿、解除旧设备编辑锁并暂停队列，交给新占用者明确处理。占用状态为 Host 进程内状态，重启后重新获取，不回放旧写请求。
 
-发送和编辑重发在本机立即预显示，云端按输入 ID 接替；客户端不写预测时间线。错误和不明回执仍保留内容、按原操作身份查证，不能用重复执行恢复界面。原有输入 ID、会话代次和队列版本校验继续使用，本轮新增的并发历史尾部检查已撤下，所有设备写权限由占用机制统一处理。
+发送和编辑重发与 PC 本机会话一致：消息上屏、历史裁剪和排队位置只取 Host 事实，不再按本机操作预显示气泡或预测裁剪。待受理时保留输入框内容，成功回执只清理对应版本的草稿，期间新输入仍保留。错误和不明回执保留内容、按原操作身份查证，不能用重复执行恢复界面。输入 ID、会话代次和队列版本校验继续使用，设备写权限由占用机制统一处理。
+
+重连读取不取得会话占用。本机待保存草稿记录写入时的占用代次，仅在原设备、原代次仍有效时自动同步；其他端占用、占用释放或重新取得后保留本机草稿，显式继续编辑才绑定新代次。上传期间发生抢占时刷新占用事实，保留草稿并维持 Bot 在线。草稿内容版本检查仍防止同一设备的迟到保存覆盖新草稿。
+
+2026-10-28 验证：`e34326c4dc68a0b3f9df7e5091e98a8e5b7ece7f` 加本次工作区修改，macOS arm64／Node 22.22.3，使用临时隔离数据目录。执行：
+
+- `node --test packages/conversation-flow/test/conversation.test.mjs src/main/bot/desktop-service.test.mjs src/main/bot/realtime.test.mjs src/main/bot/session-control.test.mjs`：87 项通过，包括同占用代次草稿版本冲突、重新抢占后首次编辑保存及上传竞态。
+- `npm run build:sdk`、`npm run typecheck`、`npm run build:renderer`、`npm run build --workspace @hemi/mobile`、`node scripts/check-spacing.mjs` 和本次文件的 `git diff --check` 通过。
+- `node scripts/verify-bot-send-feedback.mjs`：实际 Electron／IPC／Bot Host／控制器，开发与构建 renderer 各 4 项通过。覆盖受理前保留草稿、不预测历史、抢占后迟到拒绝及未知回执不重发。
+- `node scripts/verify-mobile-send-queue.mjs`：实际移动 renderer／Bot Host／控制器，开发与构建各 8 项通过。覆盖空闲与忙碌发送、FIFO 派发、撤回、继续、离线及回执恢复；375／414／768／1440 视口无横向溢出或 renderer 错误。
+
+新草稿用例使用真实认证设备身份和实际 Desktop Service／Host，实现边界只替换网络与模型。截图及日志汇总在 `.visual/workflow/bot-send-authority/`，界面报告在 `.visual/workflow/vision-report-bot-send-authority.md`。本次未发布、未部署生产服务、未覆盖安装实体手机；SSH 网络、原生 TLS 桥和模型执行仍使用隔离夹具。
 
 验证基准：`750e4c374d27e62723946a58db1e5ef597859ad3` 加工作区修改，macOS arm64／Node 22.22.3。全量 `node scripts/run-tests.mjs` 1789 项、移动端 30 项通过；最终 Host 占用／附件／桌面服务专项 28 项通过。SDK、桌面类型检查、桌面与移动 renderer 构建、spacing／diff 检查通过。
 

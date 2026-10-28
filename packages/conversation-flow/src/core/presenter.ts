@@ -1,6 +1,6 @@
 import type { FlowActionHandler, MessageView } from '../types/api.js';
 import type { TranscriptItem } from '../types/presentation.js';
-import type { FlowInputView, FlowSnapshotView } from './protocol.js';
+import type { FlowSnapshotView } from './protocol.js';
 import type { ConversationClient, ConversationClientState } from './conversation.js';
 import { createFlowTimelineProjector } from './flow-timeline-view.js';
 import { retryInput } from './turn-retry.js';
@@ -10,65 +10,23 @@ export function messageViewFromTranscript(item: TranscriptItem): MessageView {
     ...item, author: item.author === 'hemi' ? 'assistant' : 'user', task: item.taskSnap,
     runId: item.flow?.runId, inputId: item.flow?.inputId, itemId: item.flow?.itemId, partIds: item.flow?.partIds,
     revision: String(item.editedAt ?? item.createdAt),
-    actions: { edit: item.author === 'user' && item.kind !== 'task' && !item.pendingDelivery, retry: item.kind === 'error', stop: true, preview: true },
+    actions: { edit: item.author === 'user' && item.kind !== 'task', retry: item.kind === 'error', stop: true, preview: true },
   };
 }
 
-/** One optimistic projection for every host; the authoritative queue is never changed locally. */
+/** Messages and history cuts come only from the Host, just like the local PC timeline. */
 export function createConversationTranscriptPresenter() {
   const project = createFlowTimelineProjector();
-  const observed = new Set<string>();
-  const rewindPreviews = new Set<string>();
   return (snapshot: FlowSnapshotView | null, archive: TranscriptItem[] = [], delivery?: Pick<ConversationClientState, 'operations' | 'connection'>): TranscriptItem[] => {
     if (!snapshot) return [];
     let messages = project(snapshot, archive).transcripts;
-    const known = new Set([...snapshot.timeline.filter(item => item.kind === 'user').map(item => item.id), ...snapshot.pending.map(input => input.inputId)]);
-    const blocked = delivery?.operations.some(operation => operation.state === 'unknown');
-    const operationIds = new Set(delivery?.operations.map(operation => operation.id));
-    for (const id of observed) if (!operationIds.has(id)) observed.delete(id);
-    for (const id of rewindPreviews) if (!operationIds.has(id)) rewindPreviews.delete(id);
     for (const operation of delivery?.operations ?? []) {
-      const rewind = operation.command.type === 'rewind';
-      if (!rewind && operation.command.type !== 'send') continue;
-      const input = operation.command.input as Partial<FlowInputView> | undefined;
-      if (!input?.inputId) continue;
-      // Cutting history and starting its replacement are separate Host facts.
-      // Keep the existing preview between them until a new run identifies its input.
-      const awaitingReplacement = rewindPreviews.has(operation.id) && operation.state === 'sending' && snapshot.phase === 'idle'
-        && !Object.values(snapshot.runs).some(run => (run.generation ?? snapshot.generation) === snapshot.generation);
-      const ownRewind = rewind && operation.generation !== null && snapshot.generation === operation.generation + 1
-        && (awaitingReplacement || Object.values(snapshot.runs).some(run => (run.inputIds as string[] | undefined)?.includes(input.inputId!)));
-      if (operation.generation !== null && operation.generation !== snapshot.generation && !ownRewind) continue;
-      if (known.has(input.inputId)) {observed.add(operation.id); continue;}
-      if (observed.has(operation.id)) continue;
-      if (rewind && operation.state === 'rejected') {
-        messages = messages.map(item => item.id === operation.command.targetInputId
-          ? {...item, editDraft: {revision: operation.id, text: input.text ?? ''}} : item);
-        continue;
-      }
-      // Bridge the journal/receipt/snapshot gap without inventing a Host queue entry.
-      // Uncertain or rejected deliveries keep their existing recovery UI and draft.
-      if (operation.state !== 'accepted' && (delivery?.connection !== 'online' || blocked
-        || !['waiting', 'sending'].includes(operation.state) || operation.result?.ok === false)) continue;
-      if (operation.state === 'accepted' && operation.result?.revision !== undefined && snapshot.revision >= operation.result.revision) continue;
-      if (rewind && !ownRewind) {
-        const cut = messages.findIndex(item => item.author === 'user' && item.id === operation.command.targetInputId);
-        if (cut < 0) continue;
-        rewindPreviews.add(operation.id);
-        messages = messages.slice(0, cut);
-      }
-      known.add(input.inputId);
-      const message: TranscriptItem = {id: input.inputId, author: 'user', text: input.text ?? '',
-        createdAt: operation.createdAt ?? 0, inputSource: input.inputSource ?? 'text', pendingDelivery: true,
-        attachments: input.attachmentViews, references: input.references, skills: input.skills};
-      // A preparing run is published before its input is durably delivered. Its waiting
-      // row already exists, so place that input before its own reply, not after it.
-      const replyIndex = messages.findIndex(row => {
-        const inputIds = row.flow?.runId && snapshot.runs[row.flow.runId]?.inputIds;
-        return row.author === 'hemi' && Array.isArray(inputIds) && inputIds.includes(input.inputId);
-      });
-      if (replyIndex < 0) messages.push(message);
-      else messages.splice(replyIndex, 0, message);
+      if (operation.command.type !== 'rewind' || operation.state !== 'rejected'
+        || operation.generation !== snapshot.generation) continue;
+      const input = operation.command.input as {text?: string} | undefined;
+      // Recover an unsuccessful edit without changing delivered history.
+      messages = messages.map(item => item.id === operation.command.targetInputId
+        ? {...item, editDraft: {revision: operation.id, text: input?.text ?? ''}} : item);
     }
     return messages;
   };

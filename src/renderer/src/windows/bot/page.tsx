@@ -144,11 +144,9 @@ export function BotPage({
     : emptyDraft();
   void draftVersion;
   const draftToken = `bot-draft:${id}:${draft.revision}`;
-  const hidingSubmittedDraft = conversation.operations.some(operation => operation.draftToken === draftToken && ['waiting', 'sending'].includes(operation.state));
-  const composerDraft = hidingSubmittedDraft ? {...emptyDraft(), revision: draft.revision} : draft;
   const attachments = current?.attachments ?? [],
     selectedAttachments = attachments.filter((a) =>
-      composerDraft.attachmentIds.includes(a.attachmentId),
+      draft.attachmentIds.includes(a.attachmentId),
     );
   const uploadJob = uploadJobs[id ?? ''];
   const uploading = uploadJob?.phase === 'uploading';
@@ -804,8 +802,8 @@ export function BotPage({
               retryTurnBlocked={
                 blocked ? '恢复连接并启动 Bot 后重试' : undefined
               }
-              textDraft={composerDraft.text}
-              onTextDraftChange={(text) => {if (occupied) return; changeDraft(hidingSubmittedDraft ? {text, attachmentIds: [], references: [], skills: []} : {text}); if (!control) void acquireControl();}}
+              textDraft={draft.text}
+              onTextDraftChange={(text) => {if (occupied) return; changeDraft({text}); if (!control) void acquireControl();}}
               onTextSend={() => void send()}
               onStopModelTurn={() =>
                 void command({ type: 'stop' }).catch((e) =>
@@ -860,8 +858,8 @@ export function BotPage({
                 .reverse()}
               mentionConversationId={id}
               mentionWorkspaceId={id}
-              draftReferences={composerDraft.references}
-              draftSkills={composerDraft.skills}
+              draftReferences={draft.references}
+              draftSkills={draft.skills}
               onAddReference={(r) =>
                 changeDraft({
                   references: [
@@ -882,7 +880,7 @@ export function BotPage({
                 changeDraft({ skills })
               }
               queueState={queue}
-              queueStoppedIdle={Boolean(queueStoppedIdle(flow))}
+              queueStoppedIdle={!sending && !unknownSend && Boolean(queueStoppedIdle(flow))}
               onContinueStoppedTask={() => void send('继续任务')}
               onWithdrawQueued={(inputId) =>
                 void command({ type: 'withdrawInput', inputId }).catch((e) =>

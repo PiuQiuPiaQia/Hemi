@@ -388,7 +388,7 @@ test('explicitly retrying a draft after storage recovery uses the original queue
   const pending=f.client.sendDraft();await tick();
   const state=f.client.getSnapshot();
   assert.equal(state.operations[0].id,id);assert.equal(state.operations[0].state,'sending');
-  assert.equal(createConversationPresenter()(state.snapshot,[],state)[0].text,'retry same input');
+  assert.deepEqual(createConversationPresenter()(state.snapshot,[],state), [], 'a retry still awaits Host delivery');
   receipt.resolve({ok:true});assert.equal((await pending).ok,true);
   assert.equal(f.client.getSnapshot().operations.length,1);f.client.dispose();
 });
@@ -436,18 +436,17 @@ test('online submission retains its draft without showing a queue before the Hos
   release(); f.client.dispose();
 });
 
-test('online messages bridge command acceptance and snapshot delivery without duplicates', async () => {
+test('messages await Host delivery even when the command receipt arrives first', async () => {
   const receipt = deferred(), f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
   const present = createConversationPresenter();
   const messages = () => {const state = f.client.getSnapshot(); return present(state.snapshot, [], state);};
   await f.client.start(); f.client.draft.setText('show immediately');
   const pending = f.client.sendDraft(); await tick();
   const inputId = f.client.getSnapshot().operations[0].command.input.inputId;
-  assert.deepEqual(messages().map(message => [message.id, message.text]), [[inputId, 'show immediately']]);
-  assert.equal(messages()[0].actions.edit, false);
+  assert.deepEqual(messages(), [], 'sending must not fabricate a delivered message');
   receipt.resolve({ok: true}); await pending;
   assert.equal(f.client.draft.getSnapshot().text, '');
-  assert.equal(messages().length, 1, 'receipt before snapshot must not remove the message');
+  assert.deepEqual(messages(), [], 'a receipt alone does not put a message on the timeline');
   f.set(snapshot({revision: 1, timeline: [{kind: 'user', id: inputId, text: 'show immediately', runId: 'run', inputSource: 'text'}]}));
   assert.equal(messages().length, 1);
   assert.equal(messages()[0].id, inputId);
@@ -457,7 +456,7 @@ test('online messages bridge command acceptance and snapshot delivery without du
   f.client.dispose();
 });
 
-test('preparing-run status stays after its optimistic input through delivery and first output', () => {
+test('preparing and delivered inputs follow the same Host timeline as the local PC', () => {
   const present = createConversationPresenter();
   const input = {inputId: 'new-input', text: 'new message'};
   const delivery = {connection: 'online', operations: [{id: 'send', generation: 1, state: 'sending', command: {type: 'send', input}}]};
@@ -465,9 +464,9 @@ test('preparing-run status stays after its optimistic input through delivery and
   const preparing = snapshot({revision: 1, phase: 'preparing', activeRunId: 'new-run', timeline: history,
     runs: {'new-run': {inputIds: [input.inputId], startedAt: 10}}});
   const waitingId = 'new-run:a:new-input';
-  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', waitingId]);
   delivery.operations[0].state = 'accepted';
-  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
+  assert.deepEqual(present(preparing, [], delivery).map(row => row.id), ['previous-input', waitingId]);
   const delivered = {...preparing, revision: 2, timeline: [...history, {kind: 'user', id: input.inputId, text: input.text, runId: 'new-run'}]};
   assert.deepEqual(present(delivered, [], delivery).map(row => row.id), ['previous-input', input.inputId, waitingId]);
   const output = {...delivered, revision: 3, phase: 'running', timeline: [...delivered.timeline,
@@ -477,25 +476,25 @@ test('preparing-run status stays after its optimistic input through delivery and
   assert.equal(rows.at(-1).text, 'reply');
 });
 
-test('a new optimistic send does not move the status belonging to an earlier active input', () => {
+test('busy submissions never appear as messages before the Host queues them', () => {
   const present = createConversationPresenter();
   const active = snapshot({phase: 'running', activeRunId: 'active',
     timeline: [{kind: 'user', id: 'current', text: 'current input', runId: 'active'}], runs: {active: {inputIds: ['current']}}});
   const delivery = {connection: 'online', operations: [{id: 'send-next', generation: 1, state: 'sending',
     command: {type: 'send', input: {inputId: 'next', text: 'next input'}}}]};
-  assert.deepEqual(present(active, [], delivery).map(row => row.id), ['current', 'active:a:current', 'next']);
+  assert.deepEqual(present(active, [], delivery).map(row => row.id), ['current', 'active:a:current']);
   assert.deepEqual(present({...active, revision: 1, pending: [{inputId: 'next', text: 'next input', state: 'pending'}]}, [], delivery).map(row => row.id),
     ['current', 'active:a:current']);
 });
 
-test('Host queue takes over optimistic messages and unknown delivery restores recovery without replay', async () => {
+test('queued and uncertain submissions never flash a user message or replay', async () => {
   const receipt = deferred(), f = fixture({transport: {command: () => receipt.promise}, client: {requestTimeoutMs: 5000}});
   const present = createConversationPresenter();
   const messages = () => {const state = f.client.getSnapshot(); return present(state.snapshot, [], state);};
   await f.client.start(); f.client.draft.setText('keep recoverable');
   const pending = f.client.sendDraft(); await tick();
   const inputId = f.client.getSnapshot().operations[0].command.input.inputId;
-  assert.equal(messages().length, 1);
+  assert.deepEqual(messages(), []);
   f.set(snapshot({revision: 1, pending: [{inputId, text: 'keep recoverable', state: 'pending'}]}));
   assert.deepEqual(messages(), [], 'the actual queue must not also appear as a user bubble');
   f.set(snapshot({revision: 2}));
@@ -524,7 +523,7 @@ test('offline and rejected sends stay drafts; outgoing attachments keep their id
   f.client.draft.setAttachments([attachment]); await f.client.sendDraft();
   assert.deepEqual(messages(), []);
   f.lifecycle('online'); await tick(); await tick();
-  assert.deepEqual(messages()[0].attachments, [attachment]);
+  assert.deepEqual(messages(), [], 'reconnecting does not deliver the attachment');
   receipt.resolve({ok: false, code: 'denied', message: 'Rejected for verification'});
   await f.client.flushQueue();
   assert.deepEqual(messages(), []);
@@ -555,30 +554,28 @@ test('connection-aware queue preserves offline outbox without duplicating uncert
   f.client.dispose();
 });
 
-test('rewind preview, rollback and cross-device generations use the shared transcript presenter', () => {
+test('rewind waits for Host history cuts and preserves a rejected edit without a local replacement', () => {
   const present = createConversationTranscriptPresenter();
-  const user = (id, text) => ({kind: 'user', id, text, runId: id + '-run', inputSource: 'text', attachmentIds: [], deliveredAt: 1});
+  const user = (id, text) => ({kind: 'user', id, text, runId: id + '-run', inputSource: 'text', deliveredAt: 1});
   const original = snapshot({timeline: [user('prefix', '保留'), user('original', '旧问题'),
     {kind: 'assistant', itemId: 'answer', runId: 'original-run', afterInputId: 'original', parts: [{partId: 'text', kind: 'text', content: '旧回答'}]}]});
-  const operation = {id: 'rewind-request', state: 'sending', generation: 1, createdAt: 2,
-    command: {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: '新问题', attachmentViews: [{attachmentId: 'file', name: 'a.txt', status: 'ready'}]}}};
+  const operation = {id: 'rewind-request', state: 'sending', generation: 1,
+    command: {type: 'rewind', targetInputId: 'original', input: {inputId: 'replacement', text: '新问题'}}};
   const state = {operations: [operation], connection: 'online'};
   const before = structuredClone(original);
   const rows = present(original, [], state);
-  assert.deepEqual(rows.map(item => item.id), ['prefix', 'replacement']);
-  assert.equal(rows[1].pendingDelivery, true);
-  assert.equal(rows[1].attachments[0].attachmentId, 'file');
-  assert.deepEqual(original, before, 'preview never changes authoritative history');
+  assert.deepEqual(rows.map(item => item.id), ['prefix', 'original', 'answer']);
+  assert.deepEqual(original, before);
   const rejected = present(original, [], {...state, operations: [{...operation, state: 'rejected'}]});
   assert.equal(rejected.find(item => item.id === 'original').editDraft.text, '新问题');
   assert.ok(rejected.some(item => item.text === '旧回答'));
-  const cut = snapshot({generation: 2, revision: 1, timeline: [user('prefix', '保留')],
-    runs: {'original-run': {runId: 'original-run', generation: 1, inputIds: ['original'], outcome: 'stopped'}}});
-  assert.deepEqual(present(cut, [], state).map(item => item.id), ['prefix', 'replacement'], 'replacement stays visible between the cut and new run');
-  const own = snapshot({generation: 2, revision: 2, runs: {run: {runId: 'run', inputIds: ['replacement']}}});
-  assert.ok(present(own, [], state).some(item => item.id === 'replacement'));
-  const remote = snapshot({generation: 2, revision: 2, timeline: [user('remote', '另一台设备')], runs: {run: {runId: 'run', inputIds: ['remote']}}});
-  assert.deepEqual(present(remote, [], state).map(item => item.id), ['remote']);
+  const cut = snapshot({generation: 2, revision: 1, timeline: [user('prefix', '保留')]});
+  assert.deepEqual(present(cut, [], state).map(item => item.id), ['prefix']);
+  const delivered = {...cut, revision: 2, timeline: [...cut.timeline, user('replacement', '新问题')]};
+  assert.deepEqual(present(delivered, [], state).map(item => item.id), ['prefix', 'replacement']);
+  const remote = snapshot({generation: 2, timeline: [user('original', '其他端的新内容')]});
+  const stale = present(remote, [], {...state, operations: [{...operation, state: 'rejected'}]});
+  assert.equal(stale[0].editDraft, undefined, 'rejected edits cannot cross a rewind generation');
 });
 
 test('submission freezes the host lease and stop target before asynchronous initialization', async () => {

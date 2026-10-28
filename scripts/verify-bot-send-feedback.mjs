@@ -108,10 +108,9 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
       await resize(1440);
       const input = page.getByRole('textbox', {name: '输入消息', exact: true});
       const send = page.getByRole('button', {name: '发送消息', exact: true});
-      await hold(); await input.fill('新消息立即出现'); const start = Date.now(); await send.click();
-      await bubble('新消息立即出现').waitFor(); result.timings.sendDisplayMs = Date.now() - start;
-      const newSend = await held('新消息立即出现');
-      assert.equal(await input.inputValue(), ''); assert.equal(await bubble('新消息立即出现').count(), 1);
+      await hold(); await input.fill('新消息等待云端受理'); await send.click();
+      const newSend = await held('新消息等待云端受理');
+      assert.equal(await input.inputValue(), '新消息等待云端受理'); assert.equal(await bubble('新消息等待云端受理').count(), 0);
       assert.equal((await snapshot(id)).timeline.some(item => item.kind === 'user' && item.id === newSend.command.input.inputId), false);
       assert.equal(await page.getByText('正在发送…', {exact: true}).count(), 0);
       assert.equal(await send.isDisabled(), true);
@@ -120,23 +119,23 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
       await page.emulateMedia({colorScheme: 'dark'}); await shot('pending-dark-preference'); await page.emulateMedia({colorScheme: 'light'});
       await release(); await wait(() => live.get(id)?.spec.envelope.inputId === newSend.command.input.inputId);
       await finish(id, '新消息回答'); await page.getByText('新消息回答', {exact: true}).waitFor();
-      assert.equal(await input.inputValue(), '发送过程中输入的新草稿'); assert.equal(await bubble('新消息立即出现').count(), 1);
-      check('new send displays before Host acceptance, keeps newer typing and becomes one authoritative message');
+      assert.equal(await input.inputValue(), '发送过程中输入的新草稿'); assert.equal(await bubble('新消息等待云端受理').count(), 1);
+      check('new send retains its draft before Host acceptance, keeps newer typing and becomes one authoritative message');
 
       await hold(); await bubble('原问题').locator('..').getByRole('button', {name: '编辑这条消息', exact: true}).click();
-      const edit = page.getByRole('textbox', {name: '编辑消息', exact: true}); await edit.fill('编辑后立即出现');
-      const editStart = Date.now(); await page.getByRole('button', {name: '重新发送', exact: true}).click();
-      await bubble('编辑后立即出现').waitFor(); result.timings.editDisplayMs = Date.now() - editStart;
-      const resend = await held('编辑后立即出现');
-      assert.equal(await edit.count(), 0); assert.equal(await page.getByText('原回答', {exact: true}).count(), 0);
+      const edit = page.getByRole('textbox', {name: '编辑消息', exact: true}); await edit.fill('编辑后等待云端受理');
+      await page.getByRole('button', {name: '重新发送', exact: true}).click();
+      const resend = await held('编辑后等待云端受理');
+      assert.equal(await edit.count(), 0); assert.equal(await page.getByText('原回答', {exact: true}).count(), 1);
+      assert.equal(await bubble('编辑后等待云端受理').count(), 0);
       assert.ok((await snapshot(id)).timeline.some(item => item.kind === 'assistant' && item.parts.some(part => part.content === '原回答')));
       await shot('pending-edit');
       await release(); await wait(() => live.get(id)?.spec.envelope.inputId === resend.command.input.inputId);
       await finish(id, '编辑后的回答'); await page.getByText('编辑后的回答', {exact: true}).waitFor();
-      assert.equal(await bubble('编辑后立即出现').count(), 1);
+      assert.equal(await bubble('编辑后等待云端受理').count(), 1);
       assert.equal(runs.filter(run => run.envelope.inputId === resend.command.input.inputId).length, 1);
       assert.equal(await input.inputValue(), '发送过程中输入的新草稿');
-      check('edit leaves its editor immediately, previews locally and executes its stable input once');
+      check('edit retains delivered history until the Host cuts it and executes its stable input once');
 
       const acquired = await request('session.control', {id, action: 'acquire'});
       assert.equal(acquired.ok, false, 'opening or reading must not silently take the active editor');
@@ -175,7 +174,7 @@ child.stdin.end(raw);child.stdout.pipe(process.stdout);child.on('exit',code=>pro
       await page.getByRole('button', {name: '核对提交结果', exact: true}).waitFor();
       assert.equal(await input.inputValue(), '结果不明时不自动重发');
       assert.equal(runs.filter(run => run.envelope.inputId === uncertain.command.input.inputId).length, 0);
-      check('unknown outcomes remove only the local preview, retain the draft and query receipts without replay');
+      check('unknown outcomes retain the draft and query receipts without a fabricated message or replay');
       assert.deepEqual(result.errors, []);
     } catch (error) {result.failure = error.stack; await shot('failure').catch(() => {}); throw error;}
     finally {await release(); await app.close(); app = null;}

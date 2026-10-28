@@ -39,7 +39,7 @@ async function fixture(t, extra = {}) {
       existing: true,
       bot: { ...hello, configured: true },
     }),
-    rpc: async (_target, method, p) => {
+    rpc: async (_target, method, p, options) => {
       rpcMethods.push(method);
       if (!network)
         throw Object.assign(new Error('test disconnected'), {
@@ -47,8 +47,9 @@ async function fixture(t, extra = {}) {
         });
       // Windows exercises the actual desktop service and Host state. The remote
       // Linux /bin/sh initialization probe is the only substituted OS boundary.
+      await extra.beforeRpc?.(host, method, p, options);
       const result = process.platform === 'win32' && method === 'initialize.verify'
-        ? {ok: true} : await host.request(method, p);
+        ? {ok: true} : await host.request(method, p, extra.authenticated ? {clientId: options?.clientId} : undefined);
       if (process.platform === 'win32' && method === 'handshake') result.configured = true;
       if (method === 'snapshot' && snapshotGate) {
         const gate = snapshotGate; snapshotGate = null;
@@ -265,7 +266,7 @@ test('a lost manual-add receipt reconciles after restart without persisting or r
   assert.equal(f.client.getState().syncStatus.phase, 'confirmed');
   assert.equal(f.client.getState().cache.models.filter(model => model.model === 'pending-model').length, 1);
 });
-test('offline drafts persist separately and reconcile into their original cloud conversation after restart', async (t) => {
+test('offline drafts survive restart without acquiring a session merely to upload them', async (t) => {
   const f = await fixture(t),
     session = await f.client.command('session.create');
   await f.client.command('session.open', { id: session.id });
@@ -295,7 +296,102 @@ test('offline drafts persist separately and reconcile into their original cloud 
     instanceId: f.hello.instanceId,
     id: session.id,
   });
-  assert.equal(remote.draft.text, 'offline work');
+  assert.equal(remote.draft.text, '');
+  assert.equal(f.client.getState().online, true);
+  assert.equal(f.client.getState().cache.sessions.find(item => item.id === session.id).control, null);
+});
+test('reconnect uploads an offline draft only under its original authenticated writer lease', async t => {
+  const f = await fixture(t, {authenticated: true});
+  const {id} = await f.client.command('session.create');
+  await f.client.command('session.open', {id});
+  const {control} = await f.client.command('session.control', {id, action: 'acquire'});
+  f.setNetwork(false); await f.client.refresh();
+  await f.client.command('session.draft', {id, revision: 1, text: 'same lease'});
+  f.setNetwork(true); await f.client.refresh();
+  assert.equal(f.client.getState().online, true);
+  const remote = await f.host.request('session.open', {instanceId: f.hello.instanceId, id});
+  assert.equal(remote.draft.text, 'same lease');
+  assert.equal(remote.control.epoch, control.epoch);
+});
+test('same-lease draft version conflicts preserve local edits without repeating rejected uploads', async t => {
+  const f = await fixture(t, {authenticated: true});
+  const {id} = await f.client.command('session.create');
+  await f.client.command('session.open', {id});
+  await f.client.command('session.control', {id, action: 'acquire'});
+  f.setNetwork(false); await f.client.refresh();
+  await f.client.command('session.draft', {id, revision: 1, text: 'offline edit'});
+  await f.host.request('session.draft', {instanceId: f.hello.instanceId, requestId: 'newer-same-writer', id, revision: 3, text: 'newer saved edit'},
+    {clientId: f.client.getState().clientId});
+  f.setNetwork(true); await f.client.refresh();
+  const before = f.rpcMethods.filter(method => method === 'session.draft').length;
+  await f.client.refresh();
+  const state = f.client.getState();
+  assert.equal(state.online, true);
+  assert.equal(state.cache.details[id].draft.text, 'offline edit');
+  assert.equal(state.cache.details[id].draft.revision, 3);
+  assert.equal(f.rpcMethods.filter(method => method === 'session.draft').length, before);
+  await f.client.command('session.draft', {id, revision: 4, text: 'resolved edit'});
+  assert.equal((await f.host.request('session.open', {instanceId: f.hello.instanceId, id})).draft.text, 'resolved edit');
+});
+for (const ownership of ['peer', 'released', 'reacquired']) test(`reconnect preserves a draft after its writer lease is ${ownership} without a stale upload`, async t => {
+  const f = await fixture(t, {authenticated: true});
+  const {id} = await f.client.command('session.create');
+  await f.client.command('session.open', {id});
+  const {control} = await f.client.command('session.control', {id, action: 'acquire'});
+  f.setNetwork(false); await f.client.refresh();
+  await f.client.command('session.draft', {id, revision: 1, text: 'local work'});
+  const request = (method, params, clientId = 'phone') => f.host.request(method, {instanceId: f.hello.instanceId, id, ...params}, {clientId});
+  if (ownership === 'released') await request('session.control', {action: 'release', controlEpoch: control.epoch}, f.client.getState().clientId);
+  else {
+    await request('session.control', {action: 'takeover'});
+    await request('session.draft', {requestId: 'peer-draft', text: 'phone work', revision: 4});
+    if (ownership === 'reacquired') await request('session.control', {action: 'takeover'}, f.client.getState().clientId);
+  }
+  const before = f.rpcMethods.filter(method => method === 'session.draft').length;
+  f.setNetwork(true); await f.client.refresh(); await f.client.refresh();
+  const state = f.client.getState();
+  assert.equal(state.online, true);
+  assert.equal(state.cache.details[id].draft.text, 'local work');
+  assert.equal(state.cache.details[id].draft.controlEpoch, undefined, 'local lease metadata is not an editable draft field');
+  assert.equal(f.rpcMethods.filter(method => method === 'session.draft').length, before);
+  assert.equal(state.cache.sessions.find(item => item.id === id).control?.ownerId,
+    ownership === 'released' ? undefined : ownership === 'peer' ? 'phone' : state.clientId);
+  const remote = await request('session.open', {});
+  assert.equal(remote.draft.text, ownership === 'released' ? '' : 'phone work');
+  if (ownership === 'peer') {
+    await f.client.command('session.control', {id, action: 'takeover'});
+    assert.equal((await request('session.open', {})).draft.text, 'phone work', 'takeover alone does not replay old content');
+    const revision = f.client.getState().cache.details[id].draft.revision + 1;
+    assert.equal(revision, 5, 'the next local edit starts after the current Host draft version');
+    await f.client.command('session.draft', {id, revision, text: 'explicit new edit'});
+    assert.equal((await request('session.open', {})).draft.text, 'explicit new edit');
+  }
+});
+test('a takeover racing reconnect draft upload adopts the new owner and keeps the Bot online', async t => {
+  let takeover = false;
+  const f = await fixture(t, {authenticated: true, async beforeRpc(host, method, params) {
+    if (!takeover || method !== 'session.draft') return;
+    takeover = false;
+    await host.request('session.control', {instanceId: params.instanceId, id: params.id, action: 'takeover'}, {clientId: 'phone'});
+    await host.request('session.draft', {instanceId: params.instanceId, requestId: 'race-peer-draft', id: params.id, revision: 5, text: 'peer draft'}, {clientId: 'phone'});
+  }});
+  const {id} = await f.client.command('session.create');
+  await f.client.command('session.open', {id});
+  await f.client.command('session.control', {id, action: 'acquire'});
+  f.setNetwork(false); await f.client.refresh();
+  await f.client.command('session.draft', {id, revision: 1, text: 'keep local'});
+  f.setNetwork(true); takeover = true;
+  await f.client.refresh();
+  let state = f.client.getState();
+  assert.equal(state.online, true);
+  assert.equal(state.cache.sessions.find(item => item.id === id).control.ownerId, 'phone');
+  assert.equal(state.cache.details[id].draft.text, 'keep local');
+  assert.equal(state.cache.details[id].draft.revision, 5);
+  const before = f.rpcMethods.filter(method => method === 'session.draft').length;
+  await f.client.refresh();
+  state = f.client.getState();
+  assert.equal(state.online, true);
+  assert.equal(f.rpcMethods.filter(method => method === 'session.draft').length, before);
 });
 test('manual disconnect does not auto-reconnect, stale instance and unknown sessions cannot save drafts', async (t) => {
   const f = await fixture(t);
@@ -467,22 +563,24 @@ test('lost model sync receipt remains visible across restart and reconciles with
 });
 
 test('conflicting offline drafts are retained without repeated cloud writes; an explicit edit resolves them', async (t) => {
-  const f = await fixture(t),
+  const f = await fixture(t, {authenticated: true}),
     a = await f.client.command('session.create');
   await f.client.command('session.open', { id: a.id });
+  await f.client.command('session.control', {id: a.id, action: 'acquire'});
   await f.client.command('connection.disconnect');
   await f.client.command('session.draft', {
     id: a.id,
     text: 'local draft',
     revision: 1,
   });
+  await f.host.request('session.control', {instanceId: f.hello.instanceId, id: a.id, action: 'takeover'}, {clientId: 'phone'});
   await f.host.request('session.draft', {
     instanceId: f.hello.instanceId,
     requestId: 'remote-draft',
     id: a.id,
     text: 'other client',
     revision: 2,
-  });
+  }, {clientId: 'phone'});
   await f.client.command('connection.reconnect');
   assert.match(f.client.getState().error, /草稿/);
   assert.equal(
@@ -499,6 +597,7 @@ test('conflicting offline drafts are retained without repeated cloud writes; an 
       .revision,
     before,
   );
+  await f.client.command('session.control', {id: a.id, action: 'takeover'});
   await f.client.command('session.draft', {
     id: a.id,
     text: 'resolved draft',

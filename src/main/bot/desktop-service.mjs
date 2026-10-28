@@ -115,6 +115,8 @@ export function createBotDesktopService({
   if (syncStatus?.phase === 'sending')
     syncStatus = { ...syncStatus, phase: 'unknown' };
   let localDrafts = localJson(draftsFile, { instanceId: null, items: {} });
+  // Lease metadata stays in the local journal, never in an editable BotDraft.
+  function localDraftView({controlEpoch, conflict, ...draft}) {return draft;}
   let retryCount = 0,
     retryAt = 0,
     retryBlocked = false;
@@ -279,7 +281,7 @@ export function createBotDesktopService({
     if (value.detail) details[value.detail.id] = value.detail;
     for (const [id, draft] of Object.entries(localDrafts.items)) {
       if (!value.sessions.some(session => session.id === id)) delete localDrafts.items[id];
-      else if (details[id]) details[id].draft = draft;
+      else if (details[id]) details[id].draft = localDraftView(draft);
     }
     if (method === 'session.create' && details[result.id]) activeId = result.id;
     if (method === 'session.remove' && activeId === params.id) activeId = null;
@@ -316,7 +318,7 @@ export function createBotDesktopService({
           if(cache?.bootId===frame.bootId && previous?.flow?.revision>value.detail.flow.revision)value.detail.flow=previous.flow;
           details[value.detail.id]=value.detail;
         }
-        for(const [key,draft] of Object.entries(localDrafts.items))if(details[key])details[key].draft=draft;
+        for(const [key,draft] of Object.entries(localDrafts.items))if(details[key])details[key].draft=localDraftView(draft);
         cache={...value,details,detailRevisions:{},selectedId:activeId,syncedAt:Date.now()};delete cache.detail;
       } else if(frame.type==='flow'){
         const detail=cache?.details?.[frame.id];
@@ -365,7 +367,7 @@ export function createBotDesktopService({
         const canReuse =
           !Object.keys(localDrafts.items).length &&
           syncStatus?.phase !== 'unknown';
-        const snapshot = await direct('snapshot', {
+        let snapshot = await direct('snapshot', {
           ...(target ? { id: target } : {}),
           revision: canReuse
             ? target
@@ -421,20 +423,45 @@ export function createBotDesktopService({
           }
           const detail = details[id];
           if (!detail) continue;
+          const control = snapshot.sessions.find(session => session.id === id)?.control;
+          // Reconnecting is a read. Only the same writer lease may flush an
+          // offline draft; an explicit new edit can bind it to a new lease.
+          if (control?.ownerId !== clientId || !draft.controlEpoch || draft.controlEpoch !== control.epoch) {
+            detail.draft = localDraftView({...draft, revision: Math.max(draft.revision, detail.draft?.revision ?? 0)});
+            draftConflict = '会话占用已变更，本机草稿已保留；取得占用并继续编辑后可保存。';
+            continue;
+          }
           if (draft.conflict) {
-            detail.draft = draft;
+            detail.draft = localDraftView(draft);
             draftConflict =
               '云端草稿已有其他更新，本机草稿已保留；继续编辑后可保存。';
             continue;
           }
-          const ack = await direct('session.draft', { id, ...draft });
+          let ack;
+          try {
+            ack = await direct('session.draft', { id, ...draft });
+          } catch (e) {
+            if (e.code !== 'conflict') throw e;
+            // A takeover can race the upload after the snapshot above. Adopt
+            // the new owner without misclassifying a write rejection as offline.
+            snapshot = await direct('snapshot', {...(target ? {id: target} : {}), revision: -1});
+            if (stale()) return getState();
+            if (snapshot.instanceId !== identity) fail('Bot 身份不同，已停止连接。', 'conflict');
+            if (snapshot.detail) details[snapshot.detail.id] = snapshot.detail;
+            if (details[id]) {
+              const retained = localDrafts.items[id] ?? draft;
+              details[id].draft = localDraftView({...retained, revision: Math.max(retained.revision, details[id].draft?.revision ?? 0)});
+            }
+            draftConflict = '会话占用已变更，本机草稿已保留；取得占用并继续编辑后可保存。';
+            continue;
+          }
           if (stale()) return getState();
           if (ack.ok) {
             if (localDrafts.items[id] === draft) delete localDrafts.items[id];
-            detail.draft = localDrafts.items[id] ?? ack.draft;
+            detail.draft = localDrafts.items[id] ? localDraftView(localDrafts.items[id]) : ack.draft;
           } else {
             if (localDrafts.items[id] !== draft) {
-              detail.draft = localDrafts.items[id];
+              detail.draft = localDrafts.items[id] ? localDraftView(localDrafts.items[id]) : ack.draft;
               continue;
             }
             localDrafts.items[id] = {
@@ -442,7 +469,7 @@ export function createBotDesktopService({
               conflict: true,
               revision: Math.max(draft.revision, ack.draft.revision),
             };
-            detail.draft = localDrafts.items[id];
+            detail.draft = localDraftView(localDrafts.items[id]);
             draftConflict =
               '云端草稿已有其他更新，本机草稿已保留，请核对后再编辑。';
           }
@@ -964,6 +991,7 @@ export function createBotDesktopService({
         fail('会话不属于当前 Bot。', 'missing');
       const latest =
         localDrafts.items[params.id] ?? cache.details[params.id]?.draft;
+      const control = cache.sessions.find(session => session.id === params.id)?.control;
       if (latest && params.revision < latest.revision)
         return { ok: false, code: 'conflict', draft: latest };
       localDrafts.instanceId = binding.instanceId;
@@ -973,12 +1001,13 @@ export function createBotDesktopService({
         references: params.references ?? [],
         skills: params.skills ?? [],
         attachmentIds: params.attachmentIds ?? [],
+        controlEpoch: params.controlEpoch ?? (control?.ownerId === clientId ? control.epoch : undefined),
       };
       atomicJson(draftsFile, localDrafts);
       if (cache?.details[params.id])
-        cache.details[params.id].draft = localDrafts.items[params.id];
+        cache.details[params.id].draft = localDraftView(localDrafts.items[params.id]);
       publish();
-      if (!online) return { ok: true, local: true };
+      if (!online || (control && control.ownerId !== clientId)) return { ok: true, local: true };
     }
 
     if (!online) fail('连接已断开，草稿保留；请重新连接后操作。', 'offline');

@@ -87,11 +87,11 @@ try {
           window.__sendQueueFrames.push([...document.querySelectorAll('.h24-queue-text')].map(node => node.textContent));
         }).observe(document, {childList: true, subtree: true, characterData: true});
       });
-      holdSend = true; await input.fill('空闲发送直接上屏'); await send.click(); await wait(() => !!releaseSend);
-      assert.equal(await input.inputValue(), '');
+      holdSend = true; await input.fill('空闲发送等待受理'); await send.click(); await wait(() => !!releaseSend);
+      assert.equal(await input.inputValue(), '空闲发送等待受理');
       assert.equal(await send.isDisabled(), true);
       assert.equal(await page.locator('.h24-queue-tray').count(), 0);
-      await page.locator('.h24-user-bubble').filter({hasText: '空闲发送直接上屏'}).waitFor();
+      assert.equal(await page.locator('.h24-user-bubble').filter({hasText: '空闲发送等待受理'}).count(), 0);
       assert.equal(await page.getByText('正在发送…', {exact: true}).count(), 0);
       assert.equal((await call('flow.snapshot', {id})).timeline.length, 0);
       for (const width of [375, 414, 768, 1440]) {
@@ -101,18 +101,18 @@ try {
       }
       await input.fill('发送过程中输入的新草稿');
       holdSend = false; releaseSend(); releaseSend = null;
-      await page.locator('.h24-user-bubble').filter({hasText: '空闲发送直接上屏'}).waitFor();
+      await page.locator('.h24-user-bubble').filter({hasText: '空闲发送等待受理'}).waitFor();
       await wait(() => runs.length === 1);
       assert.equal(await input.inputValue(), '发送过程中输入的新草稿');
-      assert.equal(await page.locator('.h24-user-bubble').filter({hasText: '空闲发送直接上屏'}).count(), 1);
+      assert.equal(await page.locator('.h24-user-bubble').filter({hasText: '空闲发送等待受理'}).count(), 1);
       assert.ok((await page.evaluate(() => window.__sendQueueFrames)).every(items => items.length === 0), 'idle send flashed a queue');
       assert.equal(runs.length, 1);
-      check('slow idle send immediately shows one message and clears its input without a sending notice; acceptance preserves newer typing');
+      check('slow idle send retains its draft until Host acceptance with no fabricated message or queue; acceptance preserves newer typing');
 
       holdSend = true; await input.fill('忙碌时才进入队列'); await send.click(); await wait(() => !!releaseSend);
       assert.equal(await page.locator('.h24-queue-tray').count(), 0);
-      assert.equal(await input.inputValue(), '');
-      await page.locator('.h24-user-bubble').filter({hasText: '忙碌时才进入队列'}).waitFor();
+      assert.equal(await input.inputValue(), '忙碌时才进入队列');
+      assert.equal(await page.locator('.h24-user-bubble').filter({hasText: '忙碌时才进入队列'}).count(), 0);
       holdSend = false; releaseSend(); releaseSend = null;
       await page.locator('.h24-queue-text').filter({hasText: '忙碌时才进入队列'}).waitFor();
       assert.equal((await call('flow.snapshot', {id})).pending.length, 1);
@@ -122,7 +122,7 @@ try {
       await page.locator('.h24-user-bubble').filter({hasText: '忙碌时才进入队列'}).waitFor();
       await page.locator('.h24-queue-tray').waitFor({state: 'hidden'});
       const accepted = await call('flow.snapshot', {id});
-      assert.deepEqual(accepted.timeline.filter(item => item.kind === 'user').map(item => item.text), ['空闲发送直接上屏', '忙碌时才进入队列']);
+      assert.deepEqual(accepted.timeline.filter(item => item.kind === 'user').map(item => item.text), ['空闲发送等待受理', '忙碌时才进入队列']);
       check('actual busy queue stays visible until FIFO dispatch, then becomes exactly one user message');
 
       await input.fill('排队后撤回不会变回消息'); await send.click();
@@ -131,7 +131,7 @@ try {
       await page.getByRole('button', {name: '撤回这条', exact: true}).click();
       await page.locator('.h24-queue-tray').waitFor({state: 'hidden'});
       assert.equal(await page.locator('.h24-user-bubble').filter({hasText: '排队后撤回不会变回消息'}).count(), 0);
-      check('withdrawing a Host-queued input does not resurrect its optimistic message');
+      check('withdrawing a Host-queued input does not fabricate a message');
 
       await page.getByRole('button', {name: '停止任务', exact: true}).click();
       const resume = page.getByRole('button', {name: '继续任务', exact: true});
@@ -146,13 +146,13 @@ try {
       }
       await page.setViewportSize({width: 375, height: 812});
       holdSend = true; await resume.click(); await wait(() => !!releaseSend);
-      await page.locator('.h24-user-bubble').filter({hasText: /^继续$/}).waitFor();
+      assert.equal(await page.locator('.h24-user-bubble').filter({hasText: /^继续$/}).count(), 0);
       assert.equal(await resume.count(), 0, 'a slow continue must not leave a second continue action');
       await shot('continuing-375');
       holdSend = false; releaseSend(); releaseSend = null;
       await wait(() => runs.length === 3);
       await page.getByRole('button', {name: '停止任务', exact: true}).waitFor();
-      check('stopped task offers one continue action outside and above the composer; clicking immediately shows its message and resumes once');
+      check('stopped task offers one continue action outside the composer and waits for Host delivery before showing its message');
 
       networkDown = true; await page.evaluate(() => window.dispatchEvent(new Event('offline')));
       await input.fill('离线消息仍然可见'); await send.click();
