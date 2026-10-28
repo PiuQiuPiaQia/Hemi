@@ -13,6 +13,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { retryingRenameSync } from '../lib/rename-retry.mjs';
+
+const replaceSessionFile = retryingRenameSync((from, to) => renameSync(from, to));
 
 // 循环规避：snapshotFromRecord 从 task-history 引入（会话修复只依赖其纯函数面）。
 import { snapshotFromRecord } from './task-history.mjs';
@@ -481,7 +484,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     const target = sessionPath(record.id);
     const tmp = `${target}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(record, null, 2), 'utf8');
-    renameSync(tmp, target); // 同目录 rename：原子替换（对齐 task-history D-1）
+    replaceSessionFile(tmp, target); // 同目录原子替换；重试 Windows 瞬态文件占用
   }
 
   function readSessionFile(id) {

@@ -15,6 +15,11 @@ function roles(template) {
 
 const WEB_ROLES = ['reload', 'forceReload', 'toggleDevTools', 'resetZoom', 'zoomIn', 'zoomOut'];
 
+/** 子菜单项的骨架（role 优先，其次 separator 等 type），用于整组精确比对。 */
+function itemKeys({ submenu }) {
+  return submenu.map(({ role, type }) => role ?? type);
+}
+
 test('安装包 mac 菜单：无重载/DevTools/缩放，保留编辑与退出', () => {
   const template = buildAppMenuTemplate({ platform: 'darwin', appName: 'Hemi', devTools: false });
   const all = roles(template);
@@ -33,9 +38,27 @@ test('开发实例：额外挂「开发」组（重载、DevTools、缩放）', 
 test('非 mac 安装包不挂菜单（不出窗口菜单栏）；开发实例照挂且无应用组', () => {
   assert.equal(buildAppMenuTemplate({ platform: 'win32', appName: 'Hemi', devTools: false }), null);
   const dev = buildAppMenuTemplate({ platform: 'win32', appName: 'Hemi', devTools: true });
-  assert.ok(!roles(dev).includes('quit'));
+  assert.ok(!dev.some((menu) => menu.label === 'Hemi'), '不应有应用组');
   assert.ok(!roles(dev).includes('front'));
   assert.ok(roles(dev).includes('toggleDevTools'));
+});
+
+test('非 mac 开发实例：窗口菜单补分隔符＋退出（close 拦截 hide 外的真实退出入口）', () => {
+  const dev = buildAppMenuTemplate({ platform: 'win32', appName: 'Hemi', devTools: true });
+  const windowMenu = dev.at(-1);
+  assert.equal(windowMenu.label, '窗口');
+  assert.deepEqual(itemKeys(windowMenu), ['minimize', 'zoom', 'separator', 'close', 'separator', 'quit']);
+  assert.equal(windowMenu.submenu.at(-1).label, '退出 Hemi');
+  assert.equal(roles(dev).filter((role) => role === 'quit').length, 1);
+});
+
+test('mac：退出只挂在应用菜单，窗口菜单不重复添加 quit', () => {
+  const template = buildAppMenuTemplate({ platform: 'darwin', appName: 'Hemi', devTools: false });
+  const quits = template.flatMap((menu) => menu.submenu.filter((item) => item.role === 'quit'));
+  assert.equal(quits.length, 1);
+  assert.equal(quits[0].label, '退出 Hemi');
+  assert.ok(template[0].submenu.includes(quits[0]), 'quit 应在应用菜单');
+  assert.deepEqual(itemKeys(template.at(-1)), ['minimize', 'zoom', 'separator', 'close', 'separator', 'front']);
 });
 
 test('页内导航一律拦下；https 交外链白名单，其余协议直接丢弃', () => {

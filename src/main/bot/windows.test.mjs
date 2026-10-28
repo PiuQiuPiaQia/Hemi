@@ -194,7 +194,7 @@ test('persistent PowerShell forwards a small UTF-8 request before stdin closes',
   assert.deepEqual(await received.promise, input);
 });
 
-test('real resident Host starts through the cross-platform control channel and rejects a duplicate Host', {timeout:20000}, async t => {
+test('real resident Host starts through the cross-platform control channel and rejects a duplicate Host', {timeout:90000}, async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-resident-'))), dataDir = path.join(root,'data');
   const env = {...process.env, HEMI_BOT_DATA_DIR:dataDir, HEMI_BOT_ISOLATED_TEST:'1'};
   const entry = path.join(import.meta.dirname,'cli.mjs');
@@ -202,7 +202,9 @@ test('real resident Host starts through the cross-platform control channel and r
   let errors='';child.stderr.on('data',chunk=>errors+=chunk);
   t.after(async()=>{if(child.exitCode===null){const ended=once(child,'exit');child.kill('SIGTERM');await ended;}await fs.rm(root,{recursive:true,force:true});});
   let hello, token, socket;
-  for(let i=0;i<200;i++){
+  // Windows cold imports can take tens of seconds; bound elapsed time, not retries.
+  const deadline=Date.now()+60000;
+  while(Date.now()<deadline){
     try{token=controlToken(dataDir);socket=botControlEndpoint(dataDir,process.platform,token);hello=await rpc({method:'handshake'},{socket,token,timeoutMs:500});break;}
     catch{if(child.exitCode!==null)throw new Error(errors);await delay(25);}
   }
@@ -236,7 +238,7 @@ test('the real CLI preserves UTF-8 split across stdin and control-pipe chunks', 
 });
 
 test('Windows pre-install directory browser executes the real PowerShell path handling', {skip:process.platform!=='win32'}, async t => {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),"hemi 中文'目录-"));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),"hemi 中文'目录-")));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await fs.mkdir(path.join(root,'中文 folder'));
   const runner={async exec({command}){try{const result=await exec('cmd.exe',['/d','/s','/c',command],{encoding:'buffer',windowsHide:true});return{code:0,stdout:result.stdout,stderr:result.stderr.toString()};}catch(e){return{code:e.code,stdout:e.stdout,stderr:e.stderr.toString()};}}};

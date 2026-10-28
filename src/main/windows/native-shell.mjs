@@ -4,7 +4,9 @@
  * - 应用菜单：不设菜单时 Electron 挂默认菜单，安装包里 ⌘R 重载页面、⌥⌘I 开
  *   DevTools、⌘+/- 缩放整页。这里只保留应用/编辑/窗口三组（编辑组保证输入框
  *   里拷贝粘贴撤销可用）；重载、DevTools、缩放只在开发实例出现。非 mac 的
- *   安装包不挂菜单（Windows 菜单挂在窗口上会多出一条菜单栏）。
+ *   安装包不挂菜单（Windows 菜单挂在窗口上会多出一条菜单栏）。退出：mac 在
+ *   「应用」菜单；非 mac 开发实例没有应用组，且主窗口 close 被拦截成 hide，
+ *   「窗口」菜单的退出是唯一真实退出入口。
  * - 页内导航：拖文件进窗口、点普通 <a href> 都会把整窗导航走（file:// 预览
  *   或外站），一律拦下；https 链接按外链白名单交给系统浏览器，与
  *   setWindowOpenHandler 同口径。
@@ -71,7 +73,11 @@ export function buildAppMenuTemplate({ platform, appName, devTools }) {
       { role: 'zoom', label: '缩放' },
       { type: 'separator' },
       { role: 'close', label: '关闭窗口' },
-      ...(isMac ? [{ type: 'separator' }, { role: 'front', label: '前置全部窗口' }] : []),
+      ...(isMac
+        ? [{ type: 'separator' }, { role: 'front', label: '前置全部窗口' }]
+        // 非 mac 没有「应用」菜单，且主窗口 close 被拦截成 hide——「窗口」菜单的
+        // 退出是唯一真实退出入口（只在开发实例出现；安装包整体不挂菜单）。
+        : [{ type: 'separator' }, { role: 'quit', label: `退出 ${appName}` }]),
     ],
   });
   return template;

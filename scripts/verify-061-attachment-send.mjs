@@ -8,8 +8,9 @@ import path from 'node:path';
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 
-const runtime = process.env.HEMI_PLAYWRIGHT_MODULE ?? path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
-const { _electron } = await import(pathToFileURL(runtime).href);
+const runtime = process.env.HEMI_PLAYWRIGHT_MODULE;
+const { _electron } = await import(runtime ? pathToFileURL(path.resolve(runtime)).href : 'playwright-core');
+const { default: electronBinary } = await import('electron');
 const mode = process.env.VITE_DEV_SERVER_URL ? 'dev' : 'built';
 const evidence = path.resolve(`.visual/workflow/vision/061-send-${mode}`);
 const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-061-send-'));
@@ -51,7 +52,7 @@ fs.writeFileSync(path.join(ud, 'text-model-profiles.json'), JSON.stringify({
 let electron, page, rendererUrl;
 try {
   electron = await _electron.launch({
-    executablePath: path.resolve('node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: ['.'],
+    executablePath: electronBinary, args: ['.'],
     env: { ...process.env, HEMI_USER_DATA_DIR: ud, HEMI_TEST_MIC_GRANT: '1', HEMI_LLM_API_KEY: 'TEST_ONLY', HEMI_LLM_BASE_URL: baseUrl, HEMI_LLM_MODEL: 'attachment-test' },
   });
   electron.process().stderr.on('data', data => fs.appendFileSync(path.join(evidence, 'stderr.log'), data));

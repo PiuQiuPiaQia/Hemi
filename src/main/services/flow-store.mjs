@@ -15,6 +15,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { retryingRenameSync } from '../lib/rename-retry.mjs';
 
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -31,7 +32,8 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
     mkdir: (p) => fs.mkdirSync(p, { recursive: true }),
     readFile: (p) => fs.readFileSync(p, 'utf8'),
     writeFile: (p, data) => fs.writeFileSync(p, data, 'utf8'),
-    rename: (a, b) => fs.renameSync(a, b),
+    // Keep the merge/commit synchronous while retrying transient Windows locks.
+    rename: retryingRenameSync((a, b) => fs.renameSync(a, b)),
     unlink: (p) => fs.unlinkSync(p),
   };
 

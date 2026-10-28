@@ -28,6 +28,7 @@ import {
   createFloatingSurface,
   finishFloatingDrag,
   setFloatingDragState,
+  reconcileFloatingVisibility,
   showFloatingOrbIfNeeded,
   startVisibilityPolling,
   stopVisibilityPolling,

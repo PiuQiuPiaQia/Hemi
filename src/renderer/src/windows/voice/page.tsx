@@ -79,6 +79,7 @@ import { VoiceScreen } from '@/windows/voice/voice-screen';
 import { useConversationFlow } from '@/windows/voice/lib/use-conversation-flow';
 import { deriveModelBusy } from '@/windows/voice/lib/turn-busy';
 import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
+import { createConversationResume, DRAFT_NEW_KEY } from '@/windows/voice/lib/conversation-resume';
 import {createDraftPersistence, projectConversationQueue, queueStoppedIdle as isQueueStoppedIdle} from '@hemi/conversation-flow/core';
 import { createFlowTimelineProjector } from '@/windows/voice/lib/flow-timeline-view';
 import { RemotePasswordDialog } from '@/windows/voice/remote-password-dialog';
@@ -369,7 +370,7 @@ export default function Home() {
   // v1「未发送内容跨新建保留」口径退役；槽只在冷启动无会话时恢复（见启动段），
   // 未发送内容不因重启丢。输入防抖落盘；切换和卸载从草稿模型同步取快照冲刷，
   // 不依赖 React effect 更新后的 ref；从队列取回的消息也按普通草稿保存。
-  const DRAFT_NEW_KEY = 'draft-new';
+  const [conversationResume] = useState(() => createConversationResume(window.localStorage));
   const draftLoadRef = useRef<Promise<void>>(Promise.resolve());
   const draftPersistenceRef = useRef<ReturnType<typeof createDraftPersistence> | null>(null);
   useEffect(() => {
@@ -386,11 +387,13 @@ export default function Home() {
   }, [composerDraft]);
   const flushDraft = useCallback(() => { void draftPersistenceRef.current?.flush(); }, []);
   const loadDraftFor = useCallback((key: string) => {
+    conversationResume.remember(key);
     draftLoadRef.current = draftPersistenceRef.current?.activate(key) ?? Promise.resolve();
-  }, []);
+  }, [conversationResume]);
   const clearDraftFor = useCallback((key: string) => {
+    conversationResume.remember(key);
     draftLoadRef.current = draftPersistenceRef.current?.activate(key, 'clear') ?? Promise.resolve();
-  }, []);
+  }, [conversationResume]);
   /** 026 R-10：「继续讨论」带回的任务级追问对象（输入区 chip；发送/移除清除）。 */
   const [discussContext, setDiscussContext] = useState<{ taskId: string; title: string } | null>(null);
   /** 026 R-10：聚焦输入框的信号（递增触发 TextComposer focus）。 */
@@ -1413,6 +1416,8 @@ export default function Home() {
       conversationIdRef.current = createConversationId();
       setConversationId(conversationIdRef.current);
     }
+    // Attachments allocate the conversation before runTurn; remember that identity too.
+    conversationResume.remember(conversationIdRef.current);
     return conversationIdRef.current;
   }, []);
 
@@ -1798,6 +1803,7 @@ export default function Home() {
     if (!conversationIdRef.current) {
       conversationIdRef.current = createConversationId();
       setConversationId(conversationIdRef.current);
+      conversationResume.remember(conversationIdRef.current);
       draftLoadRef.current = draftPersistenceRef.current?.activate(conversationIdRef.current, 'preserve') ?? Promise.resolve();
       const title = cleanTitleSource(messages.at(-1)?.content ?? '').trim();
       if (title) setConversationTitle(title.slice(0, 24));
@@ -2787,6 +2793,7 @@ export default function Home() {
    */
   const handleConversationRemoved = useCallback((id: string) => {
     if (conversationIdRef.current !== id) return;
+    conversationResume.remember(DRAFT_NEW_KEY);
     draftLoadRef.current = draftPersistenceRef.current?.activate(DRAFT_NEW_KEY, 'clear', {discardPrevious: true}) ?? Promise.resolve();
     navigationSeqRef.current += 1;
     navigationTargetRef.current = null;
@@ -3155,7 +3162,7 @@ export default function Home() {
       window.hemiVoice.getTextModelConfig(),
       window.hemiVoice.getTtsConfig(),
       window.hemiVoice.getOnboardingState(),
-      window.hemiVoice.getLastConversation().catch(() => null),
+      conversationResume.restore(window.hemiVoice).catch(() => null),
     ])
       .then(([config, permission, preferences, modelConfig, ttsConfig, onboardingState, lastConversation]) => {
         updateConfigForm({
