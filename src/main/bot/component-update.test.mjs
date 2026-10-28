@@ -10,7 +10,7 @@ import {createBotDesktopService} from './desktop-service.mjs';
 const wait = async fn => {const end = performance.now() + 6000; while (!await fn()) {assert.ok(performance.now() < end, 'timed out'); await new Promise(setImmediate);}};
 async function fixture(t, remote = {version: '0.2.14', build: 'b'.repeat(64)}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-component-update-'));
-  const local = {version: '0.2.15', build: 'a'.repeat(64)}, live = new Map();
+  const local = {version: '0.2.15.1', build: 'a'.repeat(64)}, live = new Map();
   const host = await createBotHost({dataDir: path.join(root, 'cloud'), defaultDir: path.join(root, 'workspace'), validateModel: async () => {}, executorFactory: () => ({
     run(spec) {return new Promise(resolve => live.set(spec.conversationId, resolve));},
     async stop(id) {live.get(id)?.({stopped: true});}, async close() {for (const resolve of live.values()) resolve({stopped: true});},
@@ -95,6 +95,12 @@ test('a PC carrying an older release keeps the newer cloud component', async t =
   await f.desktop.command('component.ensure-current');
   assert.equal(f.installs, 0);
   assert.equal(f.desktop.getState().componentStatus.remoteVersion, '0.3.0');
+});
+test('component revision advances under the same application version', async t => {
+  const f=await fixture(t,{version:'0.2.15.0',build:'b'.repeat(64)});
+  await f.desktop.command('component.ensure-current');
+  assert.equal(f.installs,1);
+  assert.equal(f.desktop.getState().binding.componentVersion.version,'0.2.15.1');
 });
 test('automatic update waits for real Host work, then updates without changing the conversation', async t => {
   t.mock.timers.enable({apis: ['Date', 'setTimeout'], now: Date.now()});

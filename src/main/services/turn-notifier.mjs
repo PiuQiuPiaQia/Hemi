@@ -19,6 +19,7 @@ const OUTCOME_LABEL = {
   completed: '任务已完成',
   partial: '任务部分完成',
   failed: '任务未完成',
+  blocked: '任务受阻',
 };
 
 /**

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
-const terminal = new Set(['completed','partial','failed','cancelled','interrupted','continued']);
+const terminal = new Set(['completed','partial','failed','blocked','cancelled','interrupted','continued']);
 const suspended = root => root?.status === 'awaiting_user' || (root?.kind === 'workflow' && root.status === 'waiting');
 const owns = (root, owner) => root && root.owner.conversationId === owner.conversationId && root.owner.rootRunId === owner.rootRunId && root.owner.generation === owner.generation;
 const initial = () => ({ version: 2, roots: {}, dispatches: {}, tasks: {}, inbox: {}, requests: {}, observations: {}, processes: {} });
@@ -131,6 +131,7 @@ export function createRunJournal({ dir }) {
       const root = s.roots[owner.rootRunId];
       if (!root || JSON.stringify(root.owner) !== JSON.stringify(owner)) throw new Error('根目标身份已失效');
       if (terminal.has(root.status)) return root;
+      if (status === 'blocked' && (root.goal?.phase !== 'blocked' || root.goal.verifications.at(-1)?.status !== 'blocked')) throw new Error('缺少目标阻塞的校验事实');
       if (status === 'awaiting_user') {
         if (root.goal?.phase !== 'awaiting_user') throw new Error('缺少等待用户答复的校验事实');
         root.status='awaiting_user';root.suspendedAt=Date.now();return root;
@@ -139,7 +140,7 @@ export function createRunJournal({ dir }) {
         status = 'partial'; reason ??= root.goal?.reason ?? '目标尚未通过完成校验';
       }
       if (root.goal && status !== 'completed' && root.goal.phase !== 'blocked' && root.goal.phase !== 'budget_limited') Object.assign(root.goal, {phase: status === 'cancelled' ? 'cancelled' : 'interrupted', reason});
-      root.status = status; root.reason = reason; root.terminalAt = Date.now();
+      root.status = status; root.reason = reason ?? (status === 'blocked' ? root.goal.reason : null); root.terminalAt = Date.now();
       if (status !== 'completed') for (const item of Object.values(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') item.state = 'obsolete';
       return root;
     }),
@@ -216,7 +217,7 @@ export function createRunJournal({ dir }) {
       if (!owns(root, owner) || terminal.has(root.status) || suspended(root)) throw new Error('根目标已停止或挂起，禁止新请求');
       const sourceRootId = root.sourceRootRunId ?? owner.rootRunId;
       const source = s.roots[sourceRootId];
-      if (root.kind === 'auxiliary' && source && ['cancelled','failed','interrupted','continued','awaiting_user'].includes(source.status)) throw new Error('所属目标已停止或等待答复，禁止辅助请求');
+      if (root.kind === 'auxiliary' && source && ['cancelled','failed','blocked','interrupted','continued','awaiting_user'].includes(source.status)) throw new Error('所属目标已停止或等待答复，禁止辅助请求');
       if (s.requests[request.requestId]) throw new Error('重复请求身份');
       if (request.purpose === BUDGET_SUMMARY_PURPOSE) {
         if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || !root.requestLimitReached || root.budgetSummary?.state !== 'preparing') throw new Error('任务总结机会不可用');

@@ -118,6 +118,27 @@ test('完整运行收口回收网页；清理未完成时下一轮不能重开�
   assert.equal(cleanups, 2); assert.equal(requests.length, 2);
 });
 
+test('宿主管理目标时跨 SDK 回合保留页面；空闲取消也等待页面真正回收', async t => {
+  const { make } = await fixture(t);
+  let cleanups = 0, release;
+  const started = Promise.withResolvers();
+  const session = make({ browserLifecycle: 'goal', browserBridge: { async endSession() {
+    cleanups++;
+    if (cleanups > 1) return;
+    started.resolve();
+    await new Promise(resolve => { release = resolve; });
+  } } });
+  await session.prompt('等待用户确认');
+  await session.prompt('用户已手动完成验证');
+  assert.equal(cleanups, 0);
+  let cancelled = false;
+  const stopping = session.abort().then(() => { cancelled = true; });
+  await started.promise;
+  assert.equal(cancelled, false);
+  release(); await stopping;
+  assert.equal(cleanups, 1);
+});
+
 test('网页清理期间收到子 agent 通知：清理后真正触发事件回合，不滞留在空闲 followUp', async (t) => {
   const { requests, make } = await fixture(t);
   let releaseCleanup, started;
@@ -254,7 +275,8 @@ test('取消后台目标后清理进程与待通知结果，不唤醒或污染�
 test('生产运行时：后台错误在原生落盘后进入请求，同一根预算记账且重启不重跑命令', localCommands, async t => {
   const { createAgentRuntime } = await import('../agent-runtime/core.mjs');
   const { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } = await import('../agent-runtime/model-policy.mjs');
-  const { requests, root, model } = await fixture(t, (_body, index) => {
+  const { requests, root, model } = await fixture(t, (body, index) => {
+    if (JSON.stringify(body.messages).includes('［Hemi 目标完成校验］')) return { content: JSON.stringify({status:'complete',reason:'本轮要求已执行并读回实际后台结果',evidence:['后台失败 exit=7 已投递且后续独立命令完成'],remaining:[],nextAction:''}) };
     if (index === 1) return { tool_calls: [bashCall('production-background',
       'printf one >> executions.txt; sleep 0.1; printf PRODUCTION_BACKGROUND_FAILURE >&2; exit 7', { run_in_background: true })] };
     if (index === 2) return { tool_calls: [bashCall('production-independent', 'sleep 0.3; printf INDEPENDENT_DONE')] };
@@ -276,12 +298,13 @@ test('生产运行时：后台错误在原生落盘后进入请求，同一根�
   try {
     await runtime.obtain(context);
     const result = await runtime.runRootTurn(context.conversationId, { userText: 'Verify production background completion' });
-    assert.equal(result.lastText, 'DONE'); assert.equal(result.budgetLimited, undefined); assert.equal(result.modelError, null);
-    assert.equal(requests.length, 3, '三次正常请求即可完成，通知不另占一次总结或唤醒请求');
+    assert.equal(result.lastText, 'DONE'); assert.equal(result.goalComplete, true); assert.equal(result.modelError, null);
+    assert.equal(requests.length, 4, '三次执行请求和一次独立完成校验，通知不另占执行请求');
     assert.match(JSON.stringify(requests[2].body.messages), /exit=7/);
     const state = await runtime.journal.snapshot();
     const rows = Object.values(state.requests);
-    assert.equal(rows.length, 3);
+    assert.equal(rows.length, 4);
+    assert.equal(rows.filter(row => row.purpose === 'goal-verification').length, 1);
     assert.ok(rows.every(row => row.owner.rootRunId === context.runId));
     assert.equal(state.roots[context.runId].requestLimitReached, undefined);
     const failed = Object.values(state.processes).find(process => process.toolCallId === 'production-background');
@@ -297,7 +320,7 @@ test('生产运行时：后台错误在原生落盘后进入请求，同一根�
     runtime = createAgentRuntime(options);
     const resumed = await runtime.obtain({ ...context, runId: 'run-background-resumed', cancelled: false });
     const next = await runtime.runRootTurn(context.conversationId, { userText: 'Continue after restart' });
-    assert.equal(next.lastText, 'DONE'); assert.equal(requests.length, 4);
+    assert.equal(next.lastText, 'DONE'); assert.equal(next.goalComplete, true); assert.equal(requests.length, 6);
     assert.equal(backgroundEntries((await resumed.exportEntries()).entries).length, 1);
     assert.equal(fs.readFileSync(path.join(root, 'executions.txt'), 'utf8'), 'one');
     await runtime.completeConversation(context.conversationId, 'completed', null, 'run-background-resumed');

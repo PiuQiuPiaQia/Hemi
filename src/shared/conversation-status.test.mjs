@@ -27,7 +27,7 @@ test('列表只显示真实主运行和后台任务；确认及停止屏障仍�
 });
 
 test('收口、失败、停止、中断都不显示终态图标', () => {
-  for (const outcome of ['completed', 'failed', 'stopped', 'interrupted']) {
+  for (const outcome of ['completed', 'failed', 'blocked', 'stopped', 'interrupted']) {
     assert.equal(conversationStatus({ phase: 'idle', runs: { newest: { startedAt: 20, outcome } } }, { live: true }), null);
   }
   assert.equal(conversationStatus(null), null);
@@ -42,7 +42,7 @@ test('重启读取档案不把旧运行和后台任务显示为仍在执行', ()
 
 test('仅新的成功／失败结果产生持久未读，旧档和重复保存不误报', () => {
   for (const source of ['user', 'queue', 'event']) {
-    for (const outcome of ['completed', 'failed']) {
+    for (const outcome of ['completed', 'failed', 'blocked']) {
       const run = { runId: 'r1', source, outcome, closedAt: 10 };
       const flow = { runs: { r1: run } };
       const next = withConversationUnread({ flow: { runs: {} } }, flow, 100);

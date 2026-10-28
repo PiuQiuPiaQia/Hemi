@@ -376,12 +376,14 @@ export function applyFlowFact(snapshot, fact) {
     case 'run-closed': {
       if (snapshot.activeRunId !== fact.runId) return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
       if (fact.outcome === 'awaiting-user' && (!fact.waitingForUser?.question || snapshot.phase === 'stopping')) return {snapshot,patch:null,applied:false,dropped:'invalid-user-wait'};
+      if (fact.outcome === 'blocked' && (typeof fact.blocked?.reason !== 'string' || !fact.blocked.reason.trim() || snapshot.phase === 'stopping')) return {snapshot,patch:null,applied:false,dropped:'invalid-blocked-result'};
       const run = {
         ...snapshot.runs[fact.runId],
         endedAt: fact.at ?? null,
         closedAt: fact.at ?? null,
         outcome: fact.outcome ?? 'unknown',
         ...(fact.outcome === 'awaiting-user' ? {waitingForUser:fact.waitingForUser} : {}),
+        ...(fact.outcome === 'blocked' ? {blocked:structuredClone(fact.blocked)} : {}),
         ...(snapshot.runs[fact.runId].recovery && !['expired','recovered'].includes(snapshot.runs[fact.runId].recovery.phase) ? { recovery: { ...snapshot.runs[fact.runId].recovery, phase: fact.outcome === 'stopped' ? 'stopped' : 'failed', nextRetryAt: null } } : {}),
         activity: null,
         ...(fact.usage ? { usage: fact.usage } : {}),

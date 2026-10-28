@@ -31,6 +31,7 @@ test('文案：会话标题优先，正文带结果口径与输入摘要；多�
   assert.equal(completionBody({ outcome: 'completed', preview: '整理下载文件夹' }), '任务已完成：整理下载文件夹');
   assert.equal(completionBody({ outcome: 'failed', preview: '' }), '任务未完成');
   assert.equal(completionBody({ outcome: 'partial', preview: '先归档\n再统计' }), '任务部分完成：先归档 再统计');
+  assert.equal(completionBody({ outcome: 'blocked', preview: '外部资源不可用' }), '任务受阻：外部资源不可用');
   assert.equal(completionBody({ outcome: 'completed', preview: 'x'.repeat(200) }).length, '任务已完成：'.length + 80);
   assert.equal(completionBody({ outcome: 'completed', preview: 'a', count: 3 }), '3 个任务已结束');
 });

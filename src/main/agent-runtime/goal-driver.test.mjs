@@ -4,13 +4,39 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createRunJournal,GOAL_VERIFICATION_PURPOSE} from './run-journal.mjs';
-import {goalPolicy,parseGoalVerdict} from './goal-driver.mjs';
+import {goalPolicy,parseGoalVerdict,goalRunOutcome,driveGoal} from './goal-driver.mjs';
 const owner={conversationId:'goal-test',rootRunId:'root',generation:1};
 const next={status:'continue',reason:'成果还缺少最后验证',evidence:['已安装依赖'],remaining:['验证成果'],nextAction:'运行剩余验证'};
 const complete={status:'complete',reason:'实际结果已验证',evidence:['实际测试成功且符合请求'],remaining:[],nextAction:''};
+test('PC 和 Bot 区分已完成、受阻、等待用户和已停止的共享运行结果',()=>{
+ assert.equal(goalRunOutcome({goalComplete:true}),'completed');
+ assert.equal(goalRunOutcome({waitingForUser:{question:'内容是什么？'}}),'awaiting-user');
+ assert.equal(goalRunOutcome({aborted:true}),'stopped');
+ assert.equal(goalRunOutcome(null,{cancelled:true}),'stopped');
+ assert.equal(goalRunOutcome({blocked:{reason:'外部资源尚不可用'}}),'blocked');
+ assert.equal(goalRunOutcome({blocked:{reason:'外部资源尚不可用'}},{cancelled:true}),'stopped');
+ for(const result of [{blocked:{}},{blocked:{reason:' '}},{blocked:{reason:'资源不可用'},goalComplete:true},{blocked:{reason:'资源不可用'},budgetLimited:true},{blocked:{reason:'资源不可用'},waitingForUser:{question:'等待答复'}}])assert.throws(()=>goalRunOutcome(result),{code:'goal-incomplete'});
+ for(const result of [null,{}, {budgetLimited:true,goalComplete:true}])assert.throws(()=>goalRunOutcome(result),{code:'goal-incomplete'});
+});
 async function fixture(t,options={}){const dir=await mkdtemp(path.join(os.tmpdir(),'hemi-goal-journal-'));t.after(()=>rm(dir,{recursive:true,force:true}));const journal=createRunJournal({dir});await journal.beginRoot(owner,{policySnapshot:{budgets:{maxRequestsPerRun:2}}});await journal.beginGoal(owner,'完成请求',goalPolicy({maxRequestsPerRound:2,...options}));return{journal,dir};}
 const request=(journal,id,who=owner,purpose='main')=>journal.requestStart(who,{requestId:id,role:'main',purpose},2);
 const finish=(journal,id)=>journal.requestEnd(id,{error:null});
+test('blocked 正常返回结构化结果；终态保留原因、禁止旧动作，重启不复活并可接收新目标',async t=>{
+ const {journal,dir}=await fixture(t),aux={...owner,rootRunId:'blocked-aux'};
+ await journal.beginRoot(aux,{kind:'auxiliary',sourceRootRunId:owner.rootRunId});
+ await assert.rejects(journal.finishRoot(owner,'blocked'),/缺少目标阻塞/);
+ const verdict={status:'blocked',reason:'已核对外部资源仍不可用',evidence:['实际命令返回资源不可用'],remaining:['资源恢复后完成工作'],nextAction:'请恢复外部资源后继续'};
+ let calls=0;
+ const result=await driveGoal({journal,owner,objective:'完成请求',policy:goalPolicy(),signal:new AbortController().signal,
+  run:async()=>{calls++;return{texts:['外部资源不可用'],requests:1};},verify:async()=>verdict,evidence:async()=>'',persist:async()=>{}});
+ assert.equal(calls,1);assert.equal(result.goalComplete,false);assert.equal(result.budgetLimited,false);
+ assert.deepEqual(result.blocked,{reason:verdict.reason,evidence:verdict.evidence,remaining:verdict.remaining,nextAction:verdict.nextAction});
+ await journal.finishRoot(owner,goalRunOutcome(result));assert.equal((await journal.root(owner)).status,'blocked');assert.equal((await journal.root(owner)).reason,verdict.reason);
+ await assert.rejects(request(journal,'old-action'),/已停止/);await assert.rejects(request(journal,'aux-action',aux,'title'),/所属目标已停止/);
+ const restored=createRunJournal({dir});await restored.recover();const root=await restored.root(owner);
+ assert.equal(root.status,'blocked');assert.equal(root.goal.phase,'blocked');assert.equal(root.goal.reason,verdict.reason);
+ const nextOwner={...owner,rootRunId:'explicit-next'};await restored.beginRoot(nextOwner);await restored.beginGoal(nextOwner,'用户的新请求',goalPolicy());
+});
 test('主子和辅助共享每段额度；单段触顶可校验一次，持久续跑不重置总预算',async t=>{
  const {journal}=await fixture(t,{maxRequests:3});const child={...owner,taskId:'child'},aux={...owner,rootRunId:'aux'};
  await journal.beginRoot(aux,{kind:'auxiliary',sourceRootRunId:owner.rootRunId});

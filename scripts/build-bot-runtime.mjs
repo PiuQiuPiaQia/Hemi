@@ -4,15 +4,20 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
-import {COMPONENT_MANIFEST} from '../src/main/bot/component-version.mjs';
+import {COMPONENT_MANIFEST, formatComponentVersion} from '../src/main/bot/component-version.mjs';
 import { fileURLToPath } from 'node:url';
 import {readWindowsCommandArtifact} from '../src/main/agent/gate/windows-command-job.mjs';
 const exec = promisify(execFile);
 export async function buildBotRuntime({
   root = path.resolve(import.meta.dirname, '..'),
   output = path.join(root, 'build/hemi-bot-runtime.tgz'),
-  componentVersion = null,
+  componentVersion,
 } = {}) {
+  if (componentVersion !== undefined) throw new Error('请通过 bot-component-version.json 的 revision 维护组件版本，不支持临时版本覆盖。');
+  // Both packaging paths use the application version plus a Bot revision.
+  const app = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+  const {revision} = JSON.parse(await fs.readFile(path.join(root, 'bot-component-version.json'), 'utf8'));
+  const version = formatComponentVersion(app.version, revision);
   const temporaryOutput = output + '.' + randomUUID() + '.tmp';
   const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-package-'));
   try {
@@ -38,11 +43,6 @@ export async function buildBotRuntime({
     await fs.cp(path.join(root, 'extensions/chrome-extension'), path.join(stage, 'extensions/chrome-extension'), {
       recursive: true, filter: source => !path.basename(source).startsWith('._'),
     });
-    const app = JSON.parse(
-      await fs.readFile(path.join(root, 'package.json'), 'utf8'),
-    );
-    const version = componentVersion ?? app.version;
-    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Bot 组件版本号无效');
     const names = [
       '@earendil-works/pi-ai',
       '@earendil-works/pi-coding-agent',

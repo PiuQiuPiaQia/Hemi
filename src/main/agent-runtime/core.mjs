@@ -119,7 +119,7 @@ export function createAgentRuntime({
   onEventTurn,
   getSkillService = () => null,
   nativeMemory = false,
-  goalPolicy = null,
+  goalPolicy = {},
   onGoalVerification = null,
   getWorkspaceService = () => null,
   getWorkflowService = null,
@@ -432,6 +432,7 @@ export function createAgentRuntime({
         executionContext: executionFor(turn, turn.modelPlan),
         sessionSource,
         mode: 'run',
+        browserLifecycle: 'goal',
         features: caps.features,
         extensionConfig: caps.extensionConfig,
         browserBridge: caps.browserOn
@@ -545,7 +546,7 @@ export function createAgentRuntime({
   function evictLRU(keep) {
     if (agents.size <= MAX_RESIDENT) return;
     const candidates = [...agents.entries()]
-      .filter(([id, entry]) => id !== keep && !entry.activeRootRunId && !entry.agent?.isBusy())
+      .filter(([id, entry]) => id !== keep && !entry.activeRootRunId && !entry.waitingForUser && !entry.agent?.isBusy())
       .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
     for (const [id, entry] of candidates) {
       if (agents.size <= MAX_RESIDENT) break;
@@ -660,7 +661,6 @@ export function createAgentRuntime({
   }
   async function runRootTurn(conversationId, args) {
     const entry = agents.get(conversationId);
-    if (!goalPolicy) return runOwnedTurn(entry, args);
     if (!entry || entry.ctx.cancelled) throw new Error('目标已停止');
     const ctx = entry.ctx, owner = ownerOf(ctx), controller = new AbortController();
     entry.goalController = controller; entry.activeRootRunId = owner.rootRunId;
@@ -674,7 +674,11 @@ export function createAgentRuntime({
         evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
         persist: () => entry.agent.persistExecution(),
       });
-      if (result.completionText) await entry.agent.recordGoalCompletion(result.completionText, controller.signal);
+      if (result.completionText) {
+        await entry.agent.recordGoalCompletion(result.completionText, controller.signal);
+        result.texts = [...result.texts, result.completionText];
+        result.lastText = result.completionText;
+      }
       return result;
     } finally { if (entry.goalController === controller) { entry.goalController = null; entry.activeRootRunId = null; } }
   }
@@ -765,9 +769,14 @@ export function createAgentRuntime({
     if (!rootRunId) throw new Error('收口缺少根目标身份');
     await journalReady;
     const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status;
-    const state = await journal.snapshot();
-    for (const root of Object.values(state.roots)) if (root.owner.conversationId === conversationId && root.owner.rootRunId === rootRunId && ['running','waiting','awaiting_user','stopping'].includes(root.status)) await journal.finishRoot(root.owner, normalized, reason);
+    let root = (await journal.snapshot()).roots[rootRunId];
+    if (root?.owner.conversationId !== conversationId) return;
+    if (['running','waiting','awaiting_user','stopping'].includes(root.status)) root = await journal.finishRoot(root.owner, normalized, reason);
     const entry = agents.get(conversationId);
+    if (entry?.ctx.runId === rootRunId) {
+      entry.waitingForUser = root.status === 'awaiting_user';
+      if (!entry.waitingForUser) await entry.agent.reclaimBrowserPages();
+    }
     if (entry?.activeRootRunId === rootRunId) entry.activeRootRunId = null;
   }
 

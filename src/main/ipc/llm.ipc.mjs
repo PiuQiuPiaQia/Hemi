@@ -10,6 +10,7 @@ import { resolveLightModel } from '../lib/light-model.mjs';
 import { describeModelError, isSameCandidate } from '../lib/model-routing.mjs';
 import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
 import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
+import { goalRunOutcome } from '../agent-runtime/goal-driver.mjs';
 import { createConversationTurns } from '../services/conversation-turns.mjs';
 import { finalizeTurnParts, hasNonTextParts } from '../../shared/turn-parts.mjs';
 import { buildTurnContextBlock, buildWorkspaceTurnBlock } from '../services/text-model.mjs';
@@ -243,6 +244,12 @@ export function getAgentRuntime() {
     onEventTurn: handleEventTurn,
     getSkillService,
     nativeMemory: true,
+    onGoalVerification: (conversationId, call) => {
+      if (call.usageDetail) recordConversationUsage(conversationId, {
+        source: 'chat', modelKey: call.modelKey, modelName: call.providerName,
+        requestedModel: call.model, ...call.usageDetail, at: call.at,
+      });
+    },
     getWorkspaceService,
     getWorkflowService,
     history: runtimeDeps?.history ?? null,
@@ -360,7 +367,7 @@ function createLlmFlowRuntime(conversationId) {
 
   return {
     freezeInput: input => freezeAcceptedInput({ store: getProfiles(), workspaceService: getWorkspaceService(), input }),
-    async start({ runId, envelope, source }) {
+    async start({ runId, envelope, source, continuationOf }) {
       // 059：workflow-start 结构化输入走宿主 workflow 分派器（S3a）——不进 executeChatTurn，
       // 不造用户文字回合；卡片事实由 router 经 part-updated 更新在同一 partId 上；
       // 终态自闭合与 chat 分支同一收口语义（run-settled＋run-closed）。
@@ -447,6 +454,7 @@ function createLlmFlowRuntime(conversationId) {
       try {
         const result = await executeChatTurn(payload ?? { conversationId }, {
           runId,
+          continuationOf,
           // 057：用户轮派发即落档——原始 envelope 经参数交给内胆，在 obtain 之后落档
           //（先于 obtain 落档会让首回合建新 agent 时从档案 turns 种子带上这条
           // 未回答用户轮，prompt 再供给一次＝同文双写，2026-10-15 真机钓出）。
@@ -479,15 +487,17 @@ function createLlmFlowRuntime(conversationId) {
             if ((event?.kind === 'tool_start' && event.tool === 'task') || ['recovery','request-reset'].includes(event?.kind)) flushFacts();
           },
         });
-        for (const fact of projector.finish()) bufferFact(fact);
+        for (const fact of projector.finish({blocked:result.blocked})) bufferFact(fact);
         flushFacts();
         await Promise.allSettled(pendingDeliveries);
         controller.applyFact({ type: 'run-settled', runId, at: Date.now(), generation });
         // 057 S3：回执用量随运行收口进快照（渲染层派生回执的用量标签同一来源）。
-        const hasArtifacts = Object.values(controller.getSnapshot().artifacts).some(artifact => artifact.producerRunId === runId || artifact.producers?.some(producer => producer.runId === runId));
-        const outcome = result?.budgetLimited ? (hasArtifacts ? 'partial' : 'failed') : 'completed';
-        await runtime?.completeConversation(conversationId, outcome, result?.budgetLimited ? '执行请求已达上限，已提供任务总结' : null, runId);
-        controller.applyFact({ type: 'run-closed', runId, outcome, at: Date.now(), generation, usage: result?.usage ?? null });
+        const outcome = goalRunOutcome(result);
+        await runtime?.completeConversation(conversationId, outcome, null, runId);
+        controller.applyFact({ type: 'run-closed', runId, outcome, at: Date.now(), generation, usage: result?.usage ?? null,
+          ...(result.waitingForUser ? {waitingForUser: result.waitingForUser} : {}),
+          ...(result.blocked ? {blocked:result.blocked} : {}),
+        });
         completeInput(envelope?.inputId, null, result);
         return { modelUsed: result?.usage?.requestedModel ?? null, result, aborted: false };
       } catch (error) {
@@ -551,6 +561,9 @@ function createLlmFlowRuntime(conversationId) {
     async retryRecovery({ runId, recoveryId }) {
       if (controllerOf().getSnapshot().activeRunId !== runId) return { ok: false, code: 'run-changed' };
       return { ok: Boolean(runtime?.get(conversationId)?.retryConnection(recoveryId)) };
+    },
+    async cancelWaitingUser({ runId }) {
+      await getAgentRuntime().completeConversation(conversationId, 'stopped', '用户停止等待答复', runId);
     },
     async withdraw({input}) {
       if(input.workflow)await workflowFlowRouter?.withdraw?.(input.workflow);
@@ -727,7 +740,7 @@ function mapCommandError(result, fallbackMessage) {
 
 // ================================================================ chat 执行内胆（056 原样，调度已上移控制器）
 
-async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope = null, dispatchMeta = {}, runId = null } = {}) {
+async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope = null, dispatchMeta = {}, runId = null, continuationOf = null } = {}) {
   const turnId = Number(payload?.turnId) || 0;
   const turnStartedAt = Date.now();
   const conversationId = typeof payload?.conversationId === 'string' && payload.conversationId
@@ -840,12 +853,13 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
       generation: flowService?.controllerFor(conversationId).getSnapshot().generation ?? 0,
       // 060 R-22：本回合主运行 id——子 agent spawn 记归属，插队停止按根目标取消。
       runId: typeof runId === 'string' && runId ? runId : null,
+      continuationOf,
       runtimeDiagnostics: () => ({ ok: true, current: runtimeDiagnostic, recent: getConversationDiagnostics(conversationId) }),
     };
     lastTurnCtx.set(conversationId, ctx);
 
-    // 同会话抢占：begin 已作废旧回合令牌，这里再收掉旧主 agent 运行（防僵尸循环）。
-    await agentRuntime.abort(conversationId).catch(() => {});
+    // 用户答复续接等待中的目标，必须保留原页面。其它输入仍收掉旧运行，防止抢占后留下僵尸循环。
+    if (!continuationOf) await agentRuntime.abort(conversationId).catch(() => {});
     const agent = await agentRuntime.obtain(ctx);
     // 057：用户轮派发即落档（dispatchEnvelope＝控制器的派发 envelope，含 inputId/附件视图）。
     if (dispatchEnvelope) persistUserTurn(conversationId, dispatchEnvelope, dispatchMeta);
@@ -980,6 +994,9 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           ...(thinkingText || thinkingMs ? { thinking: { text: thinkingText, durationMs: thinkingMs } } : {}),
           ...(calls.length ? { usage: usageOfTurn() } : {}),
           toolNames: run.toolNames,
+          goalComplete: run.goalComplete,
+          ...(run.waitingForUser ? {waitingForUser: run.waitingForUser} : {}),
+          ...(run.blocked ? {blocked:run.blocked} : {}),
           ...(run.budgetLimited ? { budgetLimited: true } : {}),
         };
       },

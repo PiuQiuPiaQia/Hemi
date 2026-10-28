@@ -94,6 +94,15 @@ test('思考收口后正文另起 part；finish 失败补 notice、成功不加'
   assert.match(notice[0].part.text, /模型超时/);
 });
 
+test('目标受阻显示普通说明，真实工具错误仍保留错误状态',()=>{
+ const projector=createRunPartProjector({runId:'blocked'});
+ projector.handle({kind:'tool_start',tool:'bash',toolCallId:'resource-check'});
+ const failed=projector.handle({kind:'tool_end',toolCallId:'resource-check',isError:true});assert.equal(failed[0].patch.status,'error');
+ const result=projector.finish({blocked:{reason:'外部资源不可用',nextAction:'恢复资源后继续'}});
+ assert.equal(result.length,1);assert.equal(result[0].part.kind,'notice');assert.equal(result[0].part.level,'info');assert.match(result[0].part.text,/外部资源不可用/);
+ assert.deepEqual(projector.finish(),[]);
+});
+
 test('错误详情保留超过旧 300 字限制的诊断，超长响应明确标记截断', () => {
   const projector = createRunPartProjector({ runId: 'detail' });
   const diagnostic = `Connection error. ${'上游故障'.repeat(200)}END_OF_DIAGNOSTIC`;

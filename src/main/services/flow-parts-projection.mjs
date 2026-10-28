@@ -140,20 +140,20 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   }
 
   /** 收口：失败补 notice（成功不加——正文 part 已完整）。 */
-  function finish({ error = null, stopped = false } = {}) {
+  function finish({ error = null, stopped = false, blocked = null } = {}) {
     const facts = [...closeOpenParts(), ...[...toolParts.values(),...backgroundParts.values()].map(({ partId }) => ({
       type: 'part-updated', runId, partId, patch: { status: stopped ? 'stopped' : 'error' }, ...gen(),
     }))];
     toolParts.clear();
     backgroundParts.clear();
-    if (!error && !(stopped && seq === 0)) return facts;
+    if (!error && !blocked && !(stopped && seq === 0)) return facts;
     const partId = nextId('n');
     return [...facts, {
       type: 'part-appended',
       runId,
       part: { partId, kind: 'notice', level: error ? 'error' : 'info', text: error
         ? boundedErrorDetail(error)
-        : '本任务已停止。' },
+        : blocked && !stopped ? `任务受阻：${blocked.reason}${blocked.nextAction ? '\n'+blocked.nextAction : ''}` : '本任务已停止。' },
       ...gen(),
     }];
   }
@@ -216,7 +216,7 @@ export function buildFlowFactsBlock(snapshot, { inputSource = 'text', runId = nu
   const lines = [];
   lines.push(`【本轮事实锚点】（宿主在本轮输入时冻结的内部运行事实；后续状态以新消息和工具结果为准。面向用户说明实际结果，不主动复述本块、内部编号或标签；用户明确询问诊断信息时可据实解释）`);
   lines.push(`- 本轮任务以当前用户消息原文为准（${inputSource === 'voice' ? '语音' : '文字'}来源），本块只记录状态，不补充或改写用户指令。指代结合本轮问题与已知结果理解；含义不清且影响执行时澄清，不把孤立数字或单词擅自对应到历史选项。`);
-  const uncertain = Object.values(snapshot.runs ?? {}).filter(run => run.runId !== runId && ['interrupted','failed','partial'].includes(run.outcome));
+  const uncertain = Object.values(snapshot.runs ?? {}).filter(run => run.runId !== runId && ['interrupted','failed','partial','blocked'].includes(run.outcome));
   if (uncertain.length) {
     lines.push('- 下列旧目标已经结束或中断，不是当前待办；未确认完成的动作要先核对实际结果，不自动重试、恢复或重放旧指令。只有用户明确的新目标才能开始新的工作。');
     for (const previous of uncertain.slice(-5)) lines.push(`  旧目标 ${previous.runId}：${previous.outcome}；已完成事实保留，未确认部分不能当作成功。`);

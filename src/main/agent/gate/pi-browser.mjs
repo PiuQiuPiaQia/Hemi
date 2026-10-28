@@ -46,7 +46,7 @@ import { buildState, createJevClient } from './jev-client.mjs';
 export { BROWSER_ACT_TOOLS } from './policy.mjs';
 
 // 自定义系统提示词会绕过 SDK 的 tool promptGuidelines，宿主必须显式保留这条。
-export const BROWSER_TASK_GUIDANCE = '普通网页任务（访问网站、点击、填写、读取）必须使用本次已声明的 browser_* 工具，页面由 Hemi 统一负责后台执行、任务分组、虚拟鼠标和结束回收。首次 browser_navigate 用 taskTitle 概括一个简短任务名（例如“对比三款轻薄本”），同一任务后续页面沿用此名，不用角色名、编号或整句指令。不要通过 bash 另启 Chrome、连接已有浏览器调试端口，或自建 Playwright/Puppeteer 会话来绕开该通道；缺少所需浏览器能力时如实说明。开发项目自身的本地浏览器测试仍按项目规范执行。除非用户明确要求，不要激活或切换到浏览器前台。';
+export const BROWSER_TASK_GUIDANCE = '普通网页任务（访问网站、点击、填写、读取）必须使用本次已声明的 browser_* 工具，页面由 Hemi 统一负责后台执行、任务分组、虚拟鼠标和结束回收。主会话需要用户确认、登录或手动完成人机验证时，明确请求用户操作并等待，页面会保留；用户回复后先读取原页面核对状态，不重复导航或提交。主目标完成、取消或失败终止后才回收页面。首次 browser_navigate 用 taskTitle 概括一个简短任务名（例如“对比三款轻薄本”），同一任务后续页面沿用此名，不用角色名、编号或整句指令。不要通过 bash 另启 Chrome、连接已有浏览器调试端口，或自建 Playwright/Puppeteer 会话来绕开该通道；缺少所需浏览器能力时如实说明。开发项目自身的本地浏览器测试仍按项目规范执行。除非用户明确要求，不要激活或切换到浏览器前台。';
 
 /** 桥端口段与报忙探测随桥单例（browser-bridge-service）；此处仅为 config 缺省引用。 */
 export { BRIDGE_PORTS, detectOtherHubs } from '../../services/browser-bridge-service.mjs';
@@ -204,7 +204,7 @@ export default function hemiBrowser(pi, { config = {}, bridge: injectedBridge = 
     promptSnippet: 'browser_navigate：自动选择扩展或无头浏览器打开网页，可 read=true 同时读取正文',
     promptGuidelines: [
       'browser_* 自动优先选择已连接的 Chrome 扩展，未连接时使用 Hemi 管理的独立无头浏览器。无头浏览器使用独立登录状态，不能假定已登录；遇登录页如实说明。同一任务保持所选后端，扩展断连回退后需重新导航和观察，不要直接重复提交之前的动作。不要用 ui_* 屏幕工具操作浏览器页面。',
-      '完整运行结束（含停止、失败）后，宿主会回收本任务的浏览器页面；需要交付的结果请在回答／报告中保留网址。只为换网址时复用当前页，确需并行对照才用 newTab，不把临时页面当长期工作区。',
+      '主目标完成、取消或失败终止后，宿主回收本任务的浏览器页面；等待用户确认或手动操作期间保留页面。需要交付的结果请在回答／报告中保留网址。只为换网址时复用当前页，确需并行对照才用 newTab，不把临时页面当长期工作区。',
       NAV_DIRECT_LINE,
       '目的是打开网址并读内容时传 read:true，可同时给 selector/maxChars；已经返回所需正文就直接使用，不再重复 browser_extract。需要交互或局部重读时保留独立 browser_extract。读取失败若已打开页面，只重读当前页，不重复导航。',
       BROWSER_TASK_GUIDANCE,

@@ -213,6 +213,7 @@ export function createMainAgent({
     callAnchor: id => session.callAnchor(id),
     steer: (text) => session.steer(text),
     abort: async () => { const pending = summary; pending?.controller.abort(); await session.abort(); await pending?.promise.catch(() => {}); },
+    reclaimBrowserPages: () => session.reclaimBrowserPages(),
     requestHandoff: () => summary ? summary.promise.then(() => {}, () => {}) : session.requestHandoff(),
     isDisposed: () => session.isDisposed(),
     recordGoalStop: ({ runId, reason, inputs }) => session.appendContextFact('hemi_goal_stopped', [

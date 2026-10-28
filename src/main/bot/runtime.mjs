@@ -2,6 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createAgentRuntime } from '../agent-runtime/core.mjs';
+import { goalRunOutcome } from '../agent-runtime/goal-driver.mjs';
 import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
 import { resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
@@ -58,7 +59,7 @@ export async function validateCloudModel(config) {
 }
 
 /** Cloud host bindings only. Desktop and Bot share the same execution runtime. */
-export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy = {}}) {
+export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy}) {
   const active = new Map(), generations = new Map(), cancelledBeforeStart = new Set();
   const access = createPermissionService({dir: dataDir}), ready = access.load();
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
@@ -153,10 +154,9 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         if (ctx.cancelled) return {stopped: true};
         const result = await runtime.runRootTurn(conversationId, {userText: input.text, inputId: envelope.inputId, imageBlocks: input.images ?? []});
         await Promise.all(owner.deliveries);await runtime.persist(conversationId);
-        if (result.budgetLimited || (!result.aborted && !ctx.cancelled && !result.goalComplete && !result.waitingForUser)) throw Object.assign(new Error('任务尚未通过完成校验，已有成果已保留。'), {code:'goal-incomplete'});
-        outcome = result.aborted || ctx.cancelled ? 'stopped' : result.waitingForUser ? 'awaiting-user' : 'completed';
-        for (const value of projector.finish({stopped: result.aborted || ctx.cancelled})) apply(value);
-        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser};
+        outcome = goalRunOutcome(result, {cancelled: ctx.cancelled});
+        for (const value of projector.finish({stopped: result.aborted || ctx.cancelled, blocked:outcome==='blocked'?result.blocked:null})) apply(value);
+        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser,blocked:outcome==='blocked'?result.blocked:null};
       } catch (error) {
         cleanupUnconfirmed = error.code === 'cleanup-unconfirmed';
         for (const value of projector.finish({error: owner.stopped ? null : error, stopped: owner.stopped})) apply(value);

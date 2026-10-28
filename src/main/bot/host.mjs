@@ -92,7 +92,7 @@ export async function createBotHost({
   dataDir,
   defaultDir = path.join(os.homedir(), 'hemi-workspace'),
   executorFactory = createBotExecutor,
-  goalPolicy = {},
+  goalPolicy,
   validateModel = validateCloudModel,
   allowLoopbackModels = false,
   editLeaseMs = 60000,
@@ -342,12 +342,14 @@ export async function createBotHost({
         generation: job.spec.generation,
         at: Date.now(),
       });
+      const stopped=result?.stopped || job.controller.getSnapshot().phase === 'stopping';
       job.controller.applyFact({
         type: 'run-closed',
         runId: job.spec.runId,
         generation: job.spec.generation,
-        outcome: result?.stopped ? 'stopped' : result?.waitingForUser ? 'awaiting-user' : 'completed',
+        outcome: stopped ? 'stopped' : result?.waitingForUser ? 'awaiting-user' : result?.blocked ? 'blocked' : 'completed',
         ...(result?.waitingForUser ? {waitingForUser:result.waitingForUser} : {}),
+        ...(result?.blocked ? {blocked:result.blocked} : {}),
         at: Date.now(),
       });
     } catch (error) {

@@ -188,6 +188,7 @@ function usageDetailOf(message) {
  * @param {object} [options.features] { vision, browser, web }
  * @param {object} [options.extensionConfig] { web, browser }
  * @param {object|null} [options.browserBridge] 应用级浏览器桥的会话侧客户端
+ * @param {'run'|'goal'} [options.browserLifecycle] 主目标由宿主判定完成后回收；独立会话默认在运行结束回收
  * @param {boolean} [options.nativeMemory] 主会话直接加载官方 pi-memory；子会话不加载
  * @param {Array<{path: string}>} [options.skills] Skill 目录（含 SKILL.md）；读面按只读租约豁免
  * @param {boolean} [options.loadContextFiles] 加载 cwd 向上的 AGENTS.md/CLAUDE.md
@@ -218,6 +219,7 @@ export function createHemiSession({
   features = {},
   extensionConfig = {},
   browserBridge = null,
+  browserLifecycle = 'run',
   desktopClient = null,
   nativeMemory = false,
   skills = [],
@@ -704,9 +706,9 @@ export function createHemiSession({
             else if (finished.texts.length || finished.modelError) emitter.emit('settled', finished);
             resolveHandoff();
           };
-          // SDK 会话跨轮保活，任务网页不能跟着常驻。只在整个 run 收口后清本客户端；
-          // 不在 turn_end 清页（模型还可能继续读页面），不影响其他后台子 agent。
-          if (browserBridge?.endSession) {
+          // 主目标可能继续执行或等待用户接管；SDK 停止生成不代表目标已经完成。
+          // 独立会话仍在运行收口时回收，受管主会话由宿主终态显式回收。
+          if (browserBridge?.endSession && (browserLifecycle !== 'goal' || abortRequested || disposed || event.aborted)) {
             void reclaimBrowserPages().then(finish);
           } else finish();
           break;
@@ -1035,7 +1037,7 @@ export function createHemiSession({
     abortRequested = true;
     cancelPendingInteractions();
     await ensurePromise?.catch(() => {});
-    if (!session || disposed) { await commands.abort(); await browserCleanup; return; }
+    if (!session || disposed) { await commands.abort(); await reclaimBrowserPages(); return; }
     clearTimeout(stallTimer);
     releasePermissions();
     try {
@@ -1046,7 +1048,7 @@ export function createHemiSession({
     } finally {
       session?.clearQueue();
       await commands.abort();
-      await browserCleanup;
+      await reclaimBrowserPages();
     }
   }
 
@@ -1145,7 +1147,7 @@ export function createHemiSession({
         } catch (error) { log?.warn?.(`[${label}] ${error.message}`); }
         finally { clearTimeout(timer); }
       }
-      } finally {dispose();}
+      } finally {dispose(); await browserCleanup;}
     })();
     return closePromise;
   }
@@ -1183,6 +1185,7 @@ export function createHemiSession({
     followUp,
     notify,
     abort,
+    reclaimBrowserPages,
     requestHandoff,
     respondPermission,
     exportEntries,

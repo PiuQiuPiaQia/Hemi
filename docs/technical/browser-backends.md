@@ -13,7 +13,7 @@
 
 `playwright-core@1.64.1` 只负责启动和控制，不随应用分发浏览器程序。自动发现本机 Chrome、Edge 或 Chromium（macOS 也支持 Brave 和 Chrome Canary），以及 Playwright 已安装的 Chromium。非标准位置可通过 `HEMI_BROWSER_EXECUTABLE` 指定程序。
 
-无头实例以临时配置启动，每个任务使用独立 BrowserContext，Cookie 和页面互相隔离，不读取或复制个人 Chrome 配置。任务完成、停止或超时会回收其上下文；最后一个任务结束时关闭无头进程。Hemi 退出时统一清理。无头模式不会自动获得日常浏览器的登录状态。
+无头实例以临时配置启动，每个任务使用独立 BrowserContext，Cookie 和页面互相隔离，不读取或复制个人 Chrome 配置。主目标完成、取消或失败终止时回收其上下文；等待用户确认或手动操作期间保留页面。最后一个任务结束时关闭无头进程。Hemi 退出时统一清理。无头模式不会自动获得日常浏览器的登录状态。
 
 扩展和无头后端共用 `extensions/chrome-extension/page-operations.js` 的 DOM 操作与 Jev v2 快照／引用动作。引用表位于隔离世界，导航撤销旧引用，相同 dispatchId 不重复执行。所有工具仍使用现有权限门控，未另开桌面控制路径。工作流能力检查接受任一浏览器后端。
 
@@ -21,13 +21,33 @@
 
 扩展按任务建立后台窗口和 Chrome 原生标签组，组名使用任务摘要，颜色按任务稳定分配。占位页不进入标签组。导航及后续操作会选中任务窗口内正在操作的页面，不调用窗口聚焦；分组创建时显式指定任务窗口，避免 Chrome 默认把后台标签移到当前用户窗口。使用 [Chrome Tabs / Tab Groups API](https://developer.chrome.com/docs/extensions/reference/api/tabGroups)，扩展从 0.3.3 起需要 `tabGroups` 权限。
 
-任务完成、停止或失败收口时关闭整个任务窗口及占位页；网页自行打开的标签也在回收范围内。跨窗口弹出页按 opener 记账、单独关闭；主窗口被手动关闭后再打开任务，也保留旧弹出页的回收记录。并行任务和普通 Chrome 窗口不受影响。手动关闭最后一个任务内容页时，纯占位窗口立即关闭。关闭失败保留归属，供后续收尾重试。
+主目标完成、取消或失败终止时关闭整个任务窗口及占位页；等待用户确认、登录或手动完成人机验证时保留页面。网页自行打开的标签也在回收范围内。跨窗口弹出页按 opener 记账、单独关闭；主窗口被手动关闭后再打开任务，也保留旧弹出页的回收记录。并行任务和普通 Chrome 窗口不受影响。手动关闭最后一个任务内容页时，纯占位窗口立即关闭。关闭失败保留归属，供后续收尾重试。
 
 不再保留旧版的两个空闲窗口。扩展重连时回收已登记的遗留任务和旧窗口池；存储记录缺失时仅凭占位页清理完全空闲的窗口，不认领包含普通页面的未知窗口。独立弹出窗口保留网站原有布局，不强制挪回主窗口；其中的任务页面仍随任务回收。
 
 虚拟鼠标通过 CDP 的真实指针/输入坐标更新，显示移动位置和点击反馈，并保留最后操作位置供用户查看；导航或任务回收时释放。页面边缘翻转图标而不偏移动作坐标。装饰使用隔离世界与 closed Shadow DOM，`pointer-events:none` 且 `aria-hidden`，不拦截点击、不增加快照候选，也不进入提取的正文；支持减少动态效果与深浅色页面。
 
 已安装扩展需要在 Chrome 扩展管理页重新加载 0.3.5；Hemi Dev 需重启以加载新工具参数与模型规则。应用本身没有在此次修改中发布新版本。
+
+### 2026-10-28 等待用户时保留任务页面
+
+主会话的 `agent_settled` 只表示 SDK 本段停止生成，不再触发浏览器回收。目标自动续跑及 `awaiting_user` 保留同一浏览器客户端和页面，由 `completeConversation` 在目标终态回收；独立子会话仍按原来的运行收口清理。浏览器规则和目标校验明确将用户确认、登录及手动人机验证归为等待用户操作。
+
+桌面 IPC 在续接等待中的目标时跳过原先无条件的旧运行取消，避免用户刚回复就关掉原页面。空闲取消仍显式等待浏览器清理。收尾校对当前根身份，旧根的迟到收尾不能关闭新根页面；等待用户的驻留会话也不因 LRU 淘汰而提前关页。关闭整个会话时等待页面清理结束，避免同客户端重建与旧清理交错。
+
+验证基于 `dcac29084a1d6c74bea53c2066f2619f966a1c23` 加本次及原有未提交工作区；macOS 26.5.1 arm64、Node 22.22.3、Electron 44.0.0（内置 Node 24.18.1）。使用全新 `HEMI_USER_DATA_DIR` 和 Chrome for Testing 配置，本机脚本化模型、本机合成人机验证页面，无个人账号和真实验证码。
+
+```sh
+node --test src/main/agent-runtime/browser-goal-lifecycle.test.mjs src/main/agent/hemi-session.test.mjs src/main/agent-runtime/root-goal.test.mjs src/main/agent-runtime/goal-driver.test.mjs src/main/agent/gate/pi-browser.test.mjs src/main/services/browser-bridge-service.test.mjs
+node --test src/main/ipc/llm-ipc-scope.test.mjs src/main/ipc/llm-turn-deltas.test.mjs src/main/bot/goal-continuation.test.mjs src/main/services/conversation-controller.test.mjs src/main/services/conversation-controller.race.test.mjs
+npm run build:renderer
+node scripts/verify-browser-goal-lifecycle.mjs
+node scripts/verify-browser-goal-lifecycle.mjs --dev
+```
+
+定向测试分别 75 项和 62 项通过，渲染器构建通过。构建版和 Vite 开发版分别通过 16 项真实联调：实际输入框发送 → 桌面 IPC → 目标校验 → Pi SDK → 浏览器桥 → 导出扩展 → Chrome 页面。覆盖确认等待、手动操作、保留原页面输入、回复后仅提取原页面（导航仅一次）、完成回收、等待时取消，以及其它等待任务和普通窗口保留。报告和截图位于 `.visual/workflow/vision/browser-goal-lifecycle/{built,dev}/`。
+
+未执行全量测试、Windows/Linux 真机、真实网站验证码或安装版更新。本次没有发版；应用退出仍统一回收页面，不跨应用重启保留现场。
 
 ### 2026-10-26 验证
 

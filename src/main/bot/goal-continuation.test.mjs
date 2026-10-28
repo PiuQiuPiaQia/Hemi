@@ -19,8 +19,8 @@ async function fixture(t, mode, goalPolicy={}) {
     let content,tool;
     if(checking){
       checks++;
-      if(mode==='cancel')await new Promise(resolve=>{releaseCheck=resolve;});
-      content=mode==='invalid'?'not json':JSON.stringify(verdict(mode==='blocked'?'blocked':mode==='no-progress'||mode==='round-limit'||!await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null)?'continue':'complete'));
+      if(mode==='cancel'||mode==='cancel-blocked')await new Promise(resolve=>{releaseCheck=resolve;});
+      content=mode==='invalid'?'not json':JSON.stringify(verdict(mode==='blocked'||mode==='cancel-blocked'?'blocked':mode==='no-progress'||mode==='round-limit'||!await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null)?'continue':'complete'));
     } else {
       generated++;
       if(mode==='background-chunk') {
@@ -35,7 +35,9 @@ async function fixture(t, mode, goalPolicy={}) {
         else content='文件已写入，任务完成。';
       } else
       if(mode==='chunk' && generated===1)tool={id:'read-initial',type:'function',function:{name:'ls',arguments:'{"path":"."}'}};
-      else if(generated===1 || mode==='no-progress'||mode==='round-limit'||mode==='invalid'||mode==='blocked'||mode==='cancel')content='我会继续完成，文件尚未写入。';
+      else if(mode==='blocked' && !body.messages.some(message=>message.role==='tool'))tool={id:'external-resource',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "process.stderr.write('EXTERNAL_RESOURCE_UNAVAILABLE');process.exit(23)"`,yield_ms:1000})}};
+      else if(mode==='blocked')content='已核对命令输出，外部资源尚不可用；请恢复资源后继续。';
+      else if(generated===1 || mode==='no-progress'||mode==='round-limit'||mode==='invalid'||mode==='cancel'||mode==='cancel-blocked')content='我会继续完成，文件尚未写入。';
       else if(!await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null))tool={id:randomUUID(),type:'function',function:{name:'write',arguments:JSON.stringify({path:'proof.txt',content:'goal proof'})}};
       else content='文件已写入，任务完成。';
     }
@@ -44,15 +46,16 @@ async function fixture(t, mode, goalPolicy={}) {
     res.end('data: [DONE]\n\n');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const host=await createBotHost({dataDir,defaultDir:workspace,goalPolicy,allowLoopbackModels:true,validateModel:async()=>{}});
+  const hostOptions={dataDir,defaultDir:workspace,goalPolicy,allowLoopbackModels:true,validateModel:async()=>{}};
+  let host=await createBotHost(hostOptions);
   const {instanceId}=await host.request('handshake');const call=(method,p={})=>host.request(method,{instanceId,requestId:randomUUID(),...p});
   t.after(async()=>{releaseCheck?.();await host.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});});
   await call('model.sync',{models:[{modelKey:'test/goal',providerId:'test',name:'Goal fixture',model:'goal-fixture',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});
   const {id}=await call('session.create');
-  const send=()=>call('flow.command',{id,command:{type:'send',input:{inputId:'goal-input',text:'写入 proof.txt，内容为 goal proof'}}});
+  const send=(inputId='goal-input')=>call('flow.command',{id,command:{type:'send',input:{inputId,text:'写入 proof.txt，内容为 goal proof'}}});
   const flow=()=>call('flow.snapshot',{id});
   const journal=async()=>JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
-  return {host,call,id,send,flow,journal,root,workspace,requests,get checks(){return checks;},release:()=>releaseCheck?.()};
+  return {host,call,id,send,flow,journal,root,workspace,requests,get checks(){return checks;},release:()=>releaseCheck?.(),async restart(){await host.close();host=await createBotHost(hostOptions);}};
 }
 
 test('real Bot/SDK automatically continues an unfinished answer under one input and verifies the actual file', {timeout:45000}, async t=>{
@@ -71,7 +74,24 @@ test('shared request chunk exhausts, rolls forward durably, and preserves the or
   assert.equal(root.status,'completed',JSON.stringify(root.goal));assert.equal(root.goal.phase,'complete');assert.equal(root.goal.verifications.length,2);assert.equal(root.goal.limitHistory.length,1);assert.equal(root.goal.requestOffset,1);assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');
 });
 
-for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['blocked',{},'goal-blocked'],['no-progress',{noProgressRounds:3},'goal-no-progress'],['round-limit',{maxRounds:2,noProgressRounds:5},'goal-budget-limit']])test(`real Bot leaves ${mode} task incomplete and records its reason`,{timeout:45000},async t=>{
+test('real Bot/SDK delivers a failing command to the main agent and closes blocked without an error notice', {timeout:45000}, async t=>{
+ const f=await fixture(t,'blocked');await f.send();
+ const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});
+ const run=Object.values(flow.runs)[0],root=(await f.journal()).roots[run.runId];
+ assert.equal(run.outcome,'blocked');assert.equal(root.status,'blocked');assert.equal(root.goal.phase,'blocked');assert.equal(run.blocked.reason,root.goal.reason);
+ const parts=flow.timeline.flatMap(x=>x.parts??[]);assert.equal(parts.filter(p=>p.kind==='notice'&&p.level==='error').length,0);
+ assert.equal(parts.filter(p=>p.kind==='notice'&&p.level==='info').length,1);assert.ok(parts.some(p=>p.kind==='tool'&&p.status==='error'));
+ assert.ok(f.requests.some(body=>body.tools?.length&&body.messages.some(message=>message.role==='tool'&&JSON.stringify(message).includes('EXTERNAL_RESOURCE_UNAVAILABLE'))),'main agent must consume the actual command failure');
+ assert.equal((await f.call('handshake')).activeJobs,0);assert.equal(flow.activeRunId,null);
+ const ownedRequestCount=Object.values((await f.journal()).requests).filter(row=>row.owner.rootRunId===run.runId).length;
+ await f.restart();await wait(100);const restored=await f.flow(),restoredJournal=await f.journal();
+ assert.equal(Object.values(restoredJournal.requests).filter(row=>row.owner.rootRunId===run.runId).length,ownedRequestCount);
+ assert.equal(restored.runs[run.runId].outcome,'blocked');assert.equal(restoredJournal.roots[run.runId].status,'blocked');
+ await f.send('explicit-next-input');const next=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length===2?v:null;});
+ assert.ok(Object.values(next.runs).every(r=>r.outcome==='blocked'));assert.equal(next.timeline.filter(x=>x.kind==='user').length,2);
+});
+
+for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['no-progress',{noProgressRounds:3},'goal-no-progress'],['round-limit',{maxRounds:2,noProgressRounds:5},'goal-budget-limit']])test(`real Bot leaves ${mode} task incomplete and records its reason`,{timeout:45000},async t=>{
   const f=await fixture(t,mode,policy);await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});
   assert.equal(Object.values(flow.runs)[0].outcome,'failed');const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
   assert.notEqual(root.status,'completed');assert.equal(root.goal.phase,mode==='round-limit'?'budget_limited':'blocked');assert.ok(root.goal.reason);
@@ -79,8 +99,8 @@ for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['blo
   if(mode==='no-progress')assert.equal(f.checks,3);
 });
 
-test('stop during completion verification rejects a late success and never starts a continuation', {timeout:45000}, async t=>{
-  const f=await fixture(t,'cancel');await f.send();await until(()=>f.checks===1);
+for(const mode of ['cancel','cancel-blocked'])test(`stop during completion verification rejects late ${mode==='cancel-blocked'?'blocked':'success'} and never starts a continuation`, {timeout:45000}, async t=>{
+  const f=await fixture(t,mode);await f.send();await until(()=>f.checks===1);
   await f.call('flow.command',{id:f.id,command:{type:'stop'}});f.release();
   const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'?v:null;});
   assert.equal(Object.values(flow.runs)[0].outcome,'stopped');await wait(100);assert.equal(f.checks,1);

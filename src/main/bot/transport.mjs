@@ -393,7 +393,7 @@ fi
           const bot = await rpc(host, 'handshake');
           if (
             bot.protocol !== BOT_PROTOCOL ||
-            (expected && bot.componentVersion?.build !== expected.build) ||
+            (expected && (bot.componentVersion?.build !== expected.build || bot.componentVersion?.version !== expected.version)) ||
             (info.bot && bot.instanceId !== info.bot.instanceId)
           )
             fail('安装后的协议或实例身份不兼容。', 'unsupported');

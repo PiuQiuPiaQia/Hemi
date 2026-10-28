@@ -64,6 +64,18 @@ test('a recovery before first output anchors to the current delivered input', ()
   assert.deepEqual(result.snapshot.runs['run-1'].recovery.anchor, {itemId: 'run-1:a:in-1', afterPartId: null});
 });
 
+test('blocked 保留结构化原因、释放运行槽；无原因及停止后的迟到阻塞不能收口',()=>{
+ const setup=prepared();
+ assert.equal(setup.apply({type:'run-closed',runId:'run-1',outcome:'blocked'}).applied,false);
+ const blocked={reason:'已确认外部资源不可用',nextAction:'等待资源恢复'};
+ const result=setup.apply({type:'run-closed',runId:'run-1',outcome:'blocked',blocked,at:30});
+ assert.equal(result.applied,true);assert.equal(result.snapshot.phase,'idle');assert.equal(result.snapshot.activeRunId,null);
+ assert.equal(result.snapshot.runs['run-1'].outcome,'blocked');assert.deepEqual(result.snapshot.runs['run-1'].blocked,blocked);
+ blocked.reason='changed';assert.notEqual(result.snapshot.runs['run-1'].blocked.reason,'changed');
+ const stopping=prepared();stopping.apply({type:'run-stopping',runId:'run-1',reason:'stop'});
+ assert.equal(stopping.apply({type:'run-closed',runId:'run-1',outcome:'blocked',blocked,at:40}).applied,false);
+});
+
 test('快照初值：schemaVersion/四态空闲/空集合', () => {
   const snapshot = createFlowSnapshot({ conversationId: 'c0' });
   assert.equal(snapshot.schemaVersion, FLOW_SCHEMA_VERSION);
