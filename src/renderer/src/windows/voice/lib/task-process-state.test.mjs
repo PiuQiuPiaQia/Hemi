@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { processStepsOf, taskElapsedMs, formatDuration } from './task-process-state.ts';
 
+test('Bot 子任务只有独立对话、没有旧 log 时仍可打开运行中与已完成详情', () => {
+  const snap = { phase: 'running', startedAt: 1000, progressText: '正在执行命令', conversation: {messages: []} };
+  assert.equal(processStepsOf(snap).at(-1).title, '正在执行命令');
+  assert.equal(taskElapsedMs(snap, 4000), 3000);
+  assert.deepEqual(processStepsOf({...snap, phase: 'terminal'}), []);
+  assert.equal(taskElapsedMs({...snap, phase: 'terminal', endedAt: 5000}, 6000), 4000);
+  assert.equal(taskElapsedMs({phase: 'terminal'}, 6000), null);
+  assert.equal(taskElapsedMs({...snap, phase: 'terminal'}, 6000), null);
+});
+
 test('超时、拒绝与未执行画异常；之后真实成功仍为成功', () => {
   const steps = processStepsOf({ phase: 'terminal', log: [
     { at: 1, text: '已允许（持续）：Terminal' },

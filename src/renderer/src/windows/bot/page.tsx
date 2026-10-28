@@ -18,6 +18,7 @@ import type {
   ThinkingLevel,
   UsageRecord,
   OAuthLoginState,
+  TaskStateSnapshot,
 } from '@shared/protocol';
 import { VoiceScreen } from '../voice/voice-screen';
 import { NavRail } from '../voice/nav-rail';
@@ -91,6 +92,10 @@ export function BotPage({
     [composerFocusToken, setComposerFocusToken] = useState(0);
   const queueTakingRef = useRef(false);
   const [queueTaking, setQueueTaking] = useState(false);
+  const [connectionAction, setConnectionAction] = useState<'connection.reconnect' | 'service.start' | null>(null);
+  const connectionWork = useRef(false);
+  const [controlPending, setControlPending] = useState<string[]>([]);
+  const [actionNotice, setActionNotice] = useState('');
   const {copy: copyRecovery, toastNode: recoveryToast} = useClipboardCopy();
   const stateRef = useRef(state),
     idRef = useRef(id),
@@ -100,7 +105,7 @@ export function BotPage({
     draftTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const openSettingsRef = useRef(onOpenSettings);
   openSettingsRef.current = onOpenSettings;
-  const controlWork = useRef<Promise<boolean> | null>(null);
+  const controlWork = useRef(new Map<string, Promise<boolean>>());
   stateRef.current = state;
   idRef.current = id;
   const bridge = useMemo(
@@ -129,6 +134,8 @@ export function BotPage({
   const current = currentDetail?.id === id ? currentDetail : null;
   const flow = conversation.snapshot ?? current?.flow ?? null;
   const control = state.cache?.sessions.find(session => session.id === id)?.control;
+  const controlKey = `${state.binding?.instanceId}:${id}`;
+  const takingControl = controlPending.includes(controlKey);
   const occupied = Boolean(control && control.ownerId !== state.clientId);
   const queued = state.cache?.sessions.find(session => session.id === id)?.status === 'queued';
   const transcripts = useMemo(
@@ -139,6 +146,15 @@ export function BotPage({
     },
     [flow, project, queued, conversation.operations, conversation.connection],
   );
+  const taskSnaps = useMemo(() => {
+    const tasks: Record<string, TaskStateSnapshot> = {};
+    for (const item of transcripts) {
+      const task = item.taskSnap;
+      const key = task?.taskId ?? task?.key;
+      if (task && key && !item.taskFrozen) tasks[key] = task;
+    }
+    return tasks;
+  }, [transcripts]);
   const draft = id
     ? (drafts.current.get(id) ?? current?.draft ?? emptyDraft())
     : emptyDraft();
@@ -235,6 +251,25 @@ export function BotPage({
     },
     [api],
   );
+  async function connect(method: 'connection.reconnect' | 'service.start' = 'connection.reconnect') {
+    if (connectionWork.current || stateRef.current.busy) return;
+    const instance = stateRef.current.binding?.instanceId;
+    connectionWork.current = true;
+    setConnectionAction(method);
+    setError('');
+    setActionNotice('');
+    try {
+      const next = await call<BotState>(method);
+      if (!alive.current || instance !== stateRef.current.binding?.instanceId) return;
+      if (!next.online) setError(next.error || '连接仍未恢复，请检查服务器网络后重试。');
+      else setActionNotice(method === 'service.start' ? 'Bot 已启动并连接' : '已重新连接 Bot');
+    } catch (e) {
+      if (alive.current && instance === stateRef.current.binding?.instanceId) setError(message(e));
+    } finally {
+      connectionWork.current = false;
+      if (alive.current) setConnectionAction(null);
+    }
+  }
   useEffect(() => {
     if (!state.binding || !state.online) return;
     let disposed = false;
@@ -533,13 +568,25 @@ export function BotPage({
   async function acquireControl(takeover = false) {
     if (!id || !state.online) return false;
     if (!takeover && control?.ownerId === state.clientId) return true;
-    if (controlWork.current) return controlWork.current;
-    controlWork.current = (async () => {try {
+    const key = controlKey;
+    const instance = state.binding?.instanceId;
+    const isCurrent = () => alive.current && idRef.current === id && stateRef.current.binding?.instanceId === instance;
+    const pending = controlWork.current.get(key);
+    if (pending) return pending;
+    setControlPending(current => [...current, key]);
+    if (takeover) {setError(''); setActionNotice('');}
+    const promise = (async () => {try {
       const result = await call<{ok: boolean; message?: string}>('session.control', {id, action: takeover ? 'takeover' : 'acquire'});
+      if (!isCurrent()) return false;
       if (!result.ok) {setError(result.message ?? '会话已被占用，请先抢占会话。'); return false;}
+      if (takeover) setActionNotice('已取得会话控制权，可以继续编辑和发送');
       setError(''); return true;
-    } catch (error) {setError(message(error)); return false;}})().finally(() => {controlWork.current = null;});
-    return controlWork.current;
+    } catch (error) {if (isCurrent()) setError(message(error)); return false;}})().finally(() => {
+      controlWork.current.delete(key);
+      if (alive.current) setControlPending(current => current.filter(item => item !== key));
+    });
+    controlWork.current.set(key, promise);
+    return promise;
   }
   const queue = projectConversationQueue(flow, conversation.operations, conversation.connection);
   const usage: UsageRecord[] = (current?.usage ?? []).map((c) => ({
@@ -645,15 +692,17 @@ export function BotPage({
             </p>
           </div>
           <BotButton
+            loading={!!connectionAction}
+            disabled={!!state.busy}
             onClick={() =>
-              void call(
+              void connect(
                 state.cache?.enabled === false
                   ? 'service.start'
                   : 'connection.reconnect',
-              ).catch((e) => setError(message(e)))
+              )
             }
           >
-            {state.cache?.enabled === false ? '启动 Bot' : '重新连接'}
+            {connectionAction ? connectionAction === 'service.start' ? '正在启动…' : '正在连接…' : state.cache?.enabled === false ? '启动 Bot' : '重新连接'}
           </BotButton>
         </StatusNotice>
       )}
@@ -661,11 +710,11 @@ export function BotPage({
         <StatusNotice>
           <strong>任务执行已停用</strong>
           <BotButton
-            onClick={() =>
-              void call('service.start').catch((e) => setError(message(e)))
-            }
+            loading={!!connectionAction}
+            disabled={!!state.busy}
+            onClick={() => void connect('service.start')}
           >
-            启动 Bot
+            {connectionAction ? '正在启动…' : '启动 Bot'}
           </BotButton>
         </StatusNotice>
       )}
@@ -676,7 +725,7 @@ export function BotPage({
         </StatusNotice>
       )}
       {occupied ? <StatusNotice title="会话已被占用" detail="另一台设备正在使用此会话。抢占后，你可以继续编辑和发送。"
-        actions={<><BotButton primary disabled={!state.online || sending} onClick={() => void acquireControl(true)}>抢占会话</BotButton>
+        actions={<><BotButton primary loading={takingControl} disabled={!state.online || sending || !!state.busy} onClick={() => void acquireControl(true)}>{takingControl ? '正在抢占…' : '抢占会话'}</BotButton>
           {recoveryText ? <BotButton onClick={() => void copyRecovery(recoveryText, '已复制保留的消息')}>复制保留的内容</BotButton> : null}</>}/> : null}
       {operationError && !unknownSend && !(occupied && operationError.includes('会话已被')) ? <StatusNotice role="alert"><span>{operationError}</span>
         {recoveryText ? <BotButton onClick={() => void copyRecovery(recoveryText, '已复制保留的消息')}>复制保留的内容</BotButton> : null}
@@ -743,6 +792,7 @@ export function BotPage({
             api={api} instanceId={state.syncStatus.instanceId} requestId={state.syncStatus.requestId}
           /> : null}
           {recoveryToast}
+          {actionNotice ? createPortal(<TimedToast key={actionNotice} icon={<Check aria-hidden="true"/>} onExpire={() => setActionNotice('')}>{actionNotice}</TimedToast>, document.body) : null}
           {state.binding && current ? (
             <VoiceScreen
               key={`conversation:${state.binding.instanceId}`}
@@ -783,7 +833,7 @@ export function BotPage({
               transcripts={transcripts}
               timelineGeneration={flow?.generation ?? 0}
               taskState={null}
-              taskSnaps={{}}
+              taskSnaps={taskSnaps}
               onTaskAction={() =>
                 void command({ type: 'stop' }).catch((e) =>
                   setError(message(e)),
@@ -939,14 +989,11 @@ export function BotPage({
                       <div className="h-bot-welcome-actions">
                         {(state.stoppedConfirmed || state.cache?.enabled === false) && <BotButton
                           primary
+                          loading={!!connectionAction}
                           disabled={!!state.busy}
-                          onClick={() =>
-                            void call('service.start').catch((e) =>
-                              setError(message(e)),
-                            )
-                          }
+                          onClick={() => void connect('service.start')}
                         >
-                          启动 Bot
+                          {connectionAction ? '正在启动…' : '启动 Bot'}
                         </BotButton>}
                         <BotButton primary={needsModel} disabled={!!state.busy} onClick={() => onOpenSettings(needsModel, 'bot')}>
                           {needsModel ? '配置模型与账号' : 'Bot 设置'}
@@ -954,14 +1001,11 @@ export function BotPage({
                         {!state.online && (showConnectionWarning || state.cache?.enabled === false) && (
                           <BotButton
                             primary={!state.stoppedConfirmed && state.cache?.enabled !== false}
+                            loading={!!connectionAction}
                             disabled={!!state.busy}
-                            onClick={() =>
-                              void call('connection.reconnect').catch((e) =>
-                                setError(message(e)),
-                              )
-                            }
+                            onClick={() => void connect()}
                           >
-                            重新连接
+                            {connectionAction ? '正在连接…' : '重新连接'}
                           </BotButton>
                         )}
                       </div>

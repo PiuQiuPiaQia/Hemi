@@ -1,4 +1,4 @@
-import {ErrorState, LoadingState} from '@hemi/ui';
+import {ErrorBoundary, ErrorState, LoadingState} from '@hemi/ui';
 import {ResourceContent} from '@hemi/conversation-flow/resources';
 import {useConversationBridge,useConversationEnvironment,useConversationOnline} from './lib/conversation-bridge';
 import {Dialog as PreviewDialog} from '@base-ui/react/dialog';
@@ -817,6 +817,7 @@ export function FilePreviewPanel({
         <WorkflowDefinitionPreview workflowId={activeTab.workflowId} revision={activeTab.revision} />
       ) : isProcessTab ? (
         processSnap ? (
+          <ErrorBoundary resetKey={`${processSnap.conversationId}:${processSnap.taskId ?? processSnap.key}`} fallback={(_error, reset) => <ErrorState className="h24-preview-body" title="任务详情暂时无法显示" description="可以重试打开详情，或收起面板继续使用会话。"><button type="button" className="h37-btn h37-btn-secondary" onClick={reset}>重试打开详情</button></ErrorState>}>
           <TaskProcessBody
             snap={processSnap}
             onAction={onTaskAction}
@@ -825,6 +826,7 @@ export function FilePreviewPanel({
               if (activeTab) handleClose(previewTabKey(activeTab));
             }}
           />
+          </ErrorBoundary>
         ) : (
           <div className="h24-preview-body">
             <p className="h24-preview-status">这个任务的过程现在看不到（可能已随会话结束）。</p>

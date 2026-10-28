@@ -71,19 +71,26 @@ export function BotDialog({
 }
 export function BotButton({
   primary = false,
+  loading = false,
+  children,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean; loading?: boolean }) {
   return (
     <button
       type="button"
       {...props}
+      disabled={props.disabled || loading}
+      aria-busy={loading || undefined}
       className={
         'h-bot-btn' +
         (primary ? ' primary' : '') +
         ' ' +
         (props.className ?? '')
       }
-    />
+    >
+      {loading ? <i className="h37-spinner" aria-hidden="true" /> : null}
+      {children}
+    </button>
   );
 }
 export function BotFolderPicker({host, initial, defaultDir, recent=[], load, onPick, onClose, online=true}: {

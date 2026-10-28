@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { ArrowDown } from "lucide-react";
+import {TimedToast} from '@hemi/ui';
 import type {
   ConversationFlowHandle,
   ConversationFlowProps,
@@ -20,6 +21,7 @@ import {
   useFlow,
   useFlowClock,
   useFlowAction,
+  FlowPortal,
 } from "../host/context.js";
 import { scopeKey, ok } from "../host/runtime.js";
 import { taskSnapshot, transcript } from "../presentation/view.js";
@@ -60,7 +62,7 @@ function ConversationFlowBody({
   schemaVersion = 1,
 }: ConversationFlowProps) {
   const { runtime } = useFlow();
-  const { perform, busy, error } = useFlowAction();
+  const { perform, busy, error, errorId } = useFlowAction();
   const [editingId, setEditingId] = useState<string | null>(
     state?.editingMessageId ?? null,
   );
@@ -378,13 +380,15 @@ function ConversationFlowBody({
             readOnly={state?.readOnly}
             canEdit={editAllowed && runtime.actionable}
             onStartEdit={(id) => {
-              setEditingId(id);
               if (state?.editingMessageId !== undefined)
-                open({
+                void perform({
                   type: "message.edit-state",
                   targetId: id,
                   state: "begin",
+                }).then(result => {
+                  if (result.ok && !runtime.disposed) setEditingId(id);
                 });
+              else setEditingId(id);
             }}
             onCancelEdit={() => {
               setEditingId(null);
@@ -513,7 +517,7 @@ function ConversationFlowBody({
           <div className="h37-perm-frost" aria-hidden="true" />
         ) : null}
       </div>
-      {error ? (
+      {error && state?.transientActionErrors ? <FlowPortal><TimedToast key={errorId} layout="touch" tone="error" duration={6000}>{error}</TimedToast></FlowPortal> : error ? (
         <p role="status" className="h62-deliverable-error">
           {error}
         </p>

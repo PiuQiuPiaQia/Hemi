@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
+import {dependencySourcePath} from './lib/dependency-source-path.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const checkOnly = process.argv.includes('--check');
@@ -42,8 +43,7 @@ for (const id of [...ids].sort()) {
     dir = path.dirname(dir);
   }
   if (!manifest) throw new Error(`Missing package metadata: ${id}`);
-  const relative = slash(path.relative(root, dir));
-  if (relative.startsWith('../')) throw new Error('Dependency resolves outside the checkout');
+  const relative = dependencySourcePath(root, dir);
   const key = `${manifest.name}@${manifest.version}`;
   let record = packages.get(key);
   if (!record) {
@@ -72,7 +72,7 @@ for (const id of [...ids].sort()) {
       record.notices.push({ source: licenseSource, upstream: 'https://github.com/Pomax/bezierjs/blob/4e767299184ab4079dc8d7c970020103db14f431/LICENSE.md', sha256: sha256(bytes), text: bytes.toString('utf8') });
     }
   }
-  record.modules.push(slash(path.relative(root, filename)));
+  record.modules.push(dependencySourcePath(root, filename));
 }
 
 // Tailwind resolves @import itself, so these styles are not represented in JS

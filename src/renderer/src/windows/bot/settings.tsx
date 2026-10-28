@@ -120,12 +120,12 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
   const [screen, setScreen] = useState<Dialog | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [host, setHost] = useState(state.binding?.host ?? '');
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<BotMethod | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [componentMenuOpen, setComponentMenuOpen] = useState(false);
   const componentMenuRef = useRef<HTMLButtonElement>(null);
-  const busy = pending || !!state.busy;
+  const busy = !!pending || !!state.busy;
   const instanceId = state.binding!.instanceId;
   const call = async <T = unknown,>(method: BotMethod, params?: Record<string, unknown>) => {
     const request = { ...params, expectedInstanceId: instanceId };
@@ -136,18 +136,20 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
     return reply.result;
   };
   async function perform(method: BotMethod, params?: Record<string, unknown>) {
-    setPending(true);
+    if (busy) return;
+    setPending(method);
     setError('');
     setNotice('');
     try {
-      const result = await call<{ cancelled?: boolean }>(method, params);
+      const result = await call<{ cancelled?: boolean; online?: boolean; error?: string }>(method, params);
+      if (method === 'connection.reconnect' && !result.online) throw new Error(result.error || '连接仍未恢复，请检查服务器网络后重试。');
       setScreen(null);
       if (method === 'component.ensure-current') return;
-      if (!result?.cancelled) setNotice(method === 'diagnostics.export' ? '诊断已导出' : '已完成');
+      if (!result?.cancelled) setNotice(method === 'diagnostics.export' ? '诊断已导出' : method === 'connection.reconnect' ? '已重新连接 Bot' : '已完成');
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作未能确认，请重新连接核对。');
     } finally {
-      setPending(false);
+      setPending(null);
     }
   }
   const action = (label: string, onClick: () => void, offline = false) => (
@@ -220,7 +222,7 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
           >
             {state.online
               ? action('断开连接', () => void perform('connection.disconnect'))
-              : action('重新连接', () => void perform('connection.reconnect'))}
+              : <BotButton loading={pending === 'connection.reconnect'} disabled={busy} onClick={() => void perform('connection.reconnect')}>{pending === 'connection.reconnect' ? '正在连接…' : '重新连接'}</BotButton>}
           </SettingsRow>
           <SettingsRow
             title="默认空间"

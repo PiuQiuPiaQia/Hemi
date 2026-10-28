@@ -70,6 +70,7 @@ export function flowPartsToTranscriptParts(
           status: String(part.status ?? 'starting'),
           ...(typeof part.completedCount === 'number' ? {completedCount:part.completedCount,totalCount:Number(part.totalCount)} : {}),
           ...(typeof part.currentNodeId === 'string' && part.currentNodeId ? { currentNodeId: part.currentNodeId } : {}),
+          ...(part.nodes && typeof part.nodes === 'object' && !Array.isArray(part.nodes) ? { nodes: part.nodes as Extract<TurnPart, {type:'workflow-card'}>['card']['nodes'] } : {}),
           ...(part.values && typeof part.values === 'object' ? { values: part.values as Record<string, unknown> } : {}),
           ...(Array.isArray(part.issues) ? { issues: part.issues as Array<{ code: string; message: string; field?: string }> } : {}),
           ...(typeof part.ready === 'boolean' ? { ready: part.ready } : {}),

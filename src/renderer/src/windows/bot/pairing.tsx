@@ -143,7 +143,7 @@ export function BotPairing({state, call, onClose, onBack}: {state: BotState; cal
   const locked=busy || !!state.busy || !state.online || !!uncertain;
   return <BotDialog title="连接新设备" busy={busy} onClose={()=>void close()} footer={<><BotButton disabled={busy} onClick={()=>void close(true)}>Bot 设置</BotButton><BotButton disabled={busy} onClick={()=>void close()}>完成</BotButton></>}>
     <p className="h-bot-host"><Smartphone size={14} aria-hidden="true"/>{state.binding?.host}</p>
-    {!state.online ? <div role="status"><p>PC 连接已断开，恢复连接后才能签发或确认设备。</p><BotButton disabled={busy} onClick={()=>void reconnect()}>重新连接</BotButton><BotButton disabled={busy} onClick={hide}>隐藏配对页</BotButton><p className="h-bot-small">旧二维码已隐藏，未完成的邀请到期后失效。</p></div> : null}
+    {!state.online ? <div role="status"><p>PC 连接已断开，恢复连接后才能签发或确认设备。</p><BotButton loading={busy} onClick={()=>void reconnect()}>{busy ? '正在连接…' : '重新连接'}</BotButton><BotButton disabled={busy} onClick={hide}>隐藏配对页</BotButton><p className="h-bot-small">旧二维码已隐藏，未完成的邀请到期后失效。</p></div> : null}
     {desktopOutdated ? <p role="alert">PC 后台仍是旧版本，请完全退出 Hemi 后重新启动，再打开设备连接。</p> : unsupported ? <div><p>云端组件尚不支持设备配对，请先维护云端组件。</p><BotButton disabled={busy || !state.online} onClick={()=>void perform('component.update')}>维护云端组件</BotButton></div> : !status ? <p role="status">正在读取设备连接状态…</p> : <>
       {!status.enabled ? <>
         <p>{busy ? '正在准备当前 Bot 的连接二维码…' : '将当前 Bot 连接到手机，扫码后即可申请连接。'}</p>

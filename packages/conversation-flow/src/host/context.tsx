@@ -109,7 +109,8 @@ export function FlowPortal({ children }: { children: ReactNode }) {
 export function useFlowAction() {
   const { runtime } = useFlow();
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [failure, setFailure] = useState<{message: string; id: number} | null>(null);
+  const errorSequence = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -120,17 +121,17 @@ export function useFlowAction() {
   const perform = useCallback(
     async (action: FlowAction) => {
       setBusy(true);
-      setError("");
+      setFailure(null);
       const result = await runtime.action(action);
       if (mounted.current && !runtime.disposed) {
         setBusy(false);
-        if (!result.ok) setError(result.error.message);
+        if (!result.ok) setFailure({message: result.error.message, id: ++errorSequence.current});
       }
       return result;
     },
     [runtime],
   );
-  return { perform, busy, error, actionable: runtime.actionable };
+  return { perform, busy, error: failure?.message ?? '', errorId: failure?.id ?? 0, actionable: runtime.actionable };
 }
 export function useClipboardCopy() {
   const { runtime } = useFlow();

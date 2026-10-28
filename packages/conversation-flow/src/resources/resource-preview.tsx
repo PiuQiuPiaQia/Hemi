@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppWindow, Download, FileText, Share2 } from 'lucide-react';
 import { ResourceContent } from './resource-content.js';
-import type { ConversationFlowHost, FlowScope, HostContext, ResourceActionView, ResourceLease, ResourceRef } from '../types/api.js';
+import { Markdown } from '../shared/markdown.js';
+import type { ConversationFlowHost, FlowScope, HostContext, ResourceActionView, ResourceLease, ResourceRef, ResourceDocument } from '../types/api.js';
 import { ResourceProgressView } from './resource-progress.js';
 import { IDLE_PROGRESS } from './progress.js';
 import type { ResourceTransfers } from './progress.js';
@@ -12,7 +13,9 @@ export type ResourcePreviewRequest = {
     href?: string;
     name?: string;
 };
-export function ResourcePreview({ host, scope, request, onClose, returnFocus, transfers }: {
+export function ResourcePreview({ host, scope, request, onClose, returnFocus, transfers, renderDocument, onLocalLink }: {
+    onLocalLink?(href: string): void;
+    renderDocument?(source: ResourceDocument, name: string): ReactNode;
     transfers?: ResourceTransfers;
     host: ConversationFlowHost;
     scope: FlowScope;
@@ -100,7 +103,7 @@ export function ResourcePreview({ host, scope, request, onClose, returnFocus, tr
     const name = lease?.metadata?.name ?? request.name ?? '文件预览', content = lease?.content;
     return <Sheet returnFocus={returnFocus} title={name} onClose={onClose} footer={actions.length ? <div className="resource-actions" aria-busy={busy}>{actions.map(action => <button type="button" className="secondary-button" key={action.id} disabled={busy || !!action.disabledReason} title={action.disabledReason} onClick={() => void perform(action.id)}>{action.kind === 'save' ? <Download size={17}/> : action.kind === 'share' ? <Share2 size={17}/> : <AppWindow size={17}/>}<span>{action.label}</span></button>)}{busy ? <ResourceProgressView progress={progress}/> : null}{actionError ? <p role="alert">{actionError}</p> : null}</div> : undefined}>
     <div className="resource-preview-content">
-      {loading ? <ResourceProgressView progress={progress}/> : error ? <ErrorState className="resource-preview-error" illustration={<FileText size={28} aria-hidden="true"/>} description={error} actions={[{label:'重试',className:'text-button',onAction:refresh}]}/> : content ? <ResourceContent content={content.kind === 'url' ? { kind: 'image', url: content.url } : { kind: content.mimeType === 'text/markdown' ? 'markdown' : 'text', text: content.text }} name={name} onImageError={() => setError('图片解码失败，可尝试系统预览')}/> : null}
+      {loading ? <ResourceProgressView progress={progress}/> : error ? <ErrorState className="resource-preview-error" illustration={<FileText size={28} aria-hidden="true"/>} description={error} actions={[{label:'重试',className:'text-button',onAction:refresh}]}/> : content?.kind === 'document' ? renderDocument?.(content.source, name) ?? <ResourceContent content={{kind:'text',text:content.source.text??'请使用系统预览查看这份文档。'}} name={name}/> : content ? <ResourceContent content={content.kind === 'url' ? { kind: content.mimeType.startsWith('video/') ? 'video' : 'image', url: content.url } : { kind: content.mimeType === 'text/markdown' ? 'markdown' : 'text', text: content.text }} name={name} renderMarkdown={text => <Markdown text={text} onLocalLink={onLocalLink}/>} onImageError={() => setError('媒体加载失败，可尝试系统预览')}/> : null}
     </div>
     {!loading && !error && transfers ? <div className="resource-preview-tools"><button type="button" className="text-button" disabled={busy} onClick={refresh}>刷新</button></div> : null}
   </Sheet>;
