@@ -91,6 +91,48 @@ test('installNativeShell：设菜单（null 也显式设，盖掉默认菜单）
   assert.equal(contents.listenerCount('will-navigate'), 1);
 });
 
+test('Windows 开发实例：菜单自动隐藏（Alt 唤起），不占顶栏高度', () => {
+  const app = new EventEmitter();
+  const Menu = {
+    buildFromTemplate: (template) => ({ template }),
+    setApplicationMenu: () => {},
+  };
+  installNativeShell({
+    app, Menu, platform: 'win32', appName: 'Hemi', devTools: true, openExternal: async () => {},
+  });
+
+  const window = {
+    autoHideMenuBar: false,
+    menuBarVisible: true,
+    setAutoHideMenuBar(value) { this.autoHideMenuBar = value; },
+    setMenuBarVisibility(value) { this.menuBarVisible = value; },
+  };
+  app.emit('browser-window-created', {}, window);
+  assert.equal(window.autoHideMenuBar, true);
+  assert.equal(window.menuBarVisible, false);
+});
+
+test('macOS 和 Windows 安装包：不设置 autoHideMenuBar', () => {
+  for (const { platform, devTools } of [
+    { platform: 'darwin', devTools: true },
+    { platform: 'darwin', devTools: false },
+    { platform: 'win32', devTools: false },
+  ]) {
+    const app = new EventEmitter();
+    const Menu = {
+      buildFromTemplate: (template) => ({ template }),
+      setApplicationMenu: () => {},
+    };
+    installNativeShell({ app, Menu, platform, appName: 'Hemi', devTools, openExternal: async () => {} });
+
+    const window = {
+      setAutoHideMenuBar: () => { throw new Error('不应调用 setAutoHideMenuBar'); },
+      setMenuBarVisibility: () => { throw new Error('不应调用 setMenuBarVisibility'); },
+    };
+    app.emit('browser-window-created', {}, window);
+  }
+});
+
 test('键盘导航开关：mac 读 AppleKeyboardUIMode 第 2 位，未设置＝关；Windows 恒开', () => {
   const prefs = (value) => ({
     getUserDefault: (key, type) => {

@@ -1,0 +1,98 @@
+/* Windows desktop host chrome only. Keep shared SDK and macOS layouts unchanged. */
+
+/* Windows 窗口控制区避让：使用 WCO API 精确计算系统按钮占用，后备 138px。
+   titlebar-area-x 是可拖拽区起点，titlebar-area-width 是可拖拽区宽度，
+   右侧剩余宽度 = 100vw - x - width 即为系统按钮实际宽度。 */
+html[data-platform='win32'] {
+  --win-caption-fallback: 138px;
+  --win-caption-inset: max(
+    var(--win-caption-fallback),
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - var(--win-caption-fallback))))
+  );
+}
+
+/* 顶栏基础：明确设置高度 52px（与主进程 WINDOWS_TITLE_BAR_HEIGHT_PX 一致），
+   右侧留出系统按钮宽度 + 16px 边距。 */
+html[data-platform='win32'] :is(.compact-shell, .settings-shell, .setup-shell) .app-bar {
+  height: 52px;
+  padding-left: var(--sp-16);
+  padding-right: calc(var(--win-caption-inset) + var(--sp-16));
+  background: var(--bg-canvas);
+}
+
+/* h24-shell（主窗口 / 设置页）：顶栏采用 grid 布局，左侧 padding 归零。 */
+html[data-platform='win32'] .compact-shell.h24-shell .app-bar {
+  padding-left: 0;
+}
+
+/* 品牌区（红绿灯区 + 品牌标识 / 抽屉按钮）：左侧留 16px 让位红绿灯。 */
+html[data-platform='win32'] .compact-shell.h24-shell .brand-row {
+  padding-left: var(--sp-16);
+}
+
+/* 标题区：允许弹性收缩，超长裁切显示省略号。 */
+html[data-platform='win32'] .app-bar-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+html[data-platform='win32'] .compact-shell.h24-shell .h24-conversation-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧动作区：禁止收缩，移除额外 padding（已在 app-bar 统一处理）。 */
+html[data-platform='win32'] .app-bar .bar-actions {
+  padding-right: 0;
+  flex-shrink: 0;
+}
+
+/* ≤880px 窄窗：顶栏改用紧凑的 3 列 grid（品牌 / 标题 / 动作），缩小间距。 */
+@media (max-width: 880px) {
+  html[data-platform='win32'] .compact-shell.h24-shell .app-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--sp-8);
+  }
+
+  html[data-platform='win32'] .compact-shell.h24-shell .brand-row {
+    padding-left: var(--sp-12);
+    padding-right: 0;
+  }
+
+  /* 设置页窄窗：没有 leading 控件，品牌区隐藏，标题区左侧补图标栏宽度 + 边距。
+     避免空列占用空间导致标题挤压。 */
+  html[data-platform='win32'] .compact-shell.h24-shell[data-page='settings'] .app-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-left: calc(48px + var(--sp-16)); /* 48px = --h24-navrail-w */
+  }
+
+  html[data-platform='win32'] .compact-shell.h24-shell[data-page='settings'] .brand-row {
+    display: none;
+  }
+
+  html[data-platform='win32'] .compact-shell.h24-shell .app-bar-title {
+    padding-left: 0;
+  }
+
+  html[data-platform='win32'] .compact-shell.h24-shell[data-page='settings'] .app-bar-title {
+    padding-left: 0;
+  }
+}
+
+/* 技能市场页：品牌区只留图标栏宽度（48px），标题区从红绿灯右侧（约 74px）
+   开始，避免标题被红绿灯遮挡。 */
+html[data-platform='win32'] .compact-shell.h24-shell[data-market-open='true'] .app-bar-title {
+  padding-left: 44px; /* 让开红绿灯右缘（74px）与品牌区右缘（48px）之间的空隙 */
+}
+
+/* 宽窗设置页（≥881px）：品牌区整格使用二级栏底色（与主页会话栏同一做法），
+   红绿灯不压分隔线。覆盖 037-settings.css 中设置态的画布底。 */
+@media (min-width: 881px) {
+  html[data-platform='win32'] .compact-shell.h24-shell.h37-settings-shell[data-page='settings'] .brand-row {
+    padding-left: 88px; /* 红绿灯让位 */
+    border-right: 1px solid var(--line);
+    background: var(--bg-rail);
+  }
+}

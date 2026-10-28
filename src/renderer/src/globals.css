@@ -4,5 +4,6 @@
 @import '@hemi/ui/styles/native.css';
 @import './tokens.css';
 @import '@hemi/conversation-flow/styles/globals.css';
+@import './styles/windows-chrome.css';
 @source '../../../packages/ui/src';
 @source '../../../packages/conversation-flow/src';

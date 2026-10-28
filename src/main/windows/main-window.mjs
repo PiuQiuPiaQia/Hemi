@@ -7,9 +7,10 @@ import { createLogger } from '../lib/logger.mjs';
 import { BRAND_NAME, isSmokeTest, state } from '../state.mjs';
 import { loadRenderer } from './loader.mjs';
 import { requestAppearanceShow, waitForAppearance } from './appearance-window.mjs';
-import { getAppearanceService } from '../services/appearance-instance.mjs';
+import { getAppearanceService, onAppearanceCommit } from '../services/appearance-instance.mjs';
 import { getSkin } from '../../shared/appearance/skins.mjs';
 import { mainWindowSizeFor } from './main-window-size.mjs';
+import { attachWindowsWindowRepaint, buildWindowsTitleBarOverlay } from './windows-chrome.mjs';
 import { createWindowStateStore, restoreBounds, SAVE_DEBOUNCE_MS } from './window-state-store.mjs';
 import { markCurrentCaptionRead } from '../services/caption-read-state.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
@@ -98,6 +99,9 @@ export async function createMainWindow() {
       restoreMaximized = saved.maximized === true;
     }
   }
+  const skin = getSkin(getAppearanceService().getSnapshot().preference.skinId);
+  const isMac = process.platform === 'darwin';
+  const isWin = process.platform === 'win32';
   state.mainWindow = new BrowserWindow({
     ...bounds,
     // 024 全页面重构：对话优先布局自带响应式（≤880px 侧栏收抽屉），
@@ -113,12 +117,18 @@ export async function createMainWindow() {
     fullscreenable: false,
     title: BRAND_NAME,
     icon: appIconPath,
-    backgroundColor: getSkin(getAppearanceService().getSnapshot().preference.skinId).windowBackground,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    backgroundColor: skin.windowBackground,
+    // Windows titleBarOverlay：集成系统标题栏控件到 52px 应用顶栏，回收垂直空间。
+    // overlay 底色保持全透明（ZCode 经验），顶栏背景由渲染层自绘（windows-chrome.css），
+    // 避免 resize／换肤窗口期两层底色错位；macOS 保持 hiddenInset + 红绿灯悬浮；Linux 保持 default。
+    titleBarStyle: isMac ? 'hiddenInset' : (isWin ? 'hidden' : 'default'),
+    ...(isWin ? { titleBarOverlay: buildWindowsTitleBarOverlay(skin) } : {}),
     // 红绿灯与 52px 顶栏（2026-10-03 用户裁决自 62 调低，渲染层
     // --hemi-topbar-h）的中线对齐：灯钮高 ~12px，y = 26 - 6 = 20；
     // x 与设计稿一致（左内边距 22），品牌区从 88px 起。
-    trafficLightPosition: { x: 22, y: 20 },
+    ...(isMac ? {
+      trafficLightPosition: { x: 22, y: 20 },
+    } : {}),
     webPreferences: {
       preload: preloadPath,
       backgroundThrottling: false,
@@ -128,6 +138,19 @@ export async function createMainWindow() {
     },
   });
   const mainWindow = state.mainWindow;
+
+  // Windows：titleBarOverlay 符号色运行时跟随皮肤（底色恒透明，无需跟随）；
+  // 另接 resized/show 双帧重绘兜底（ZCode 经验：WCO 窗口偶发最后一帧不重绘，
+  // 隐藏到悬浮球后恢复、手动拉伸结束时尤为明显）。
+  if (isWin) {
+    attachWindowsWindowRepaint(mainWindow);
+    const unsubscribe = onAppearanceCommit((snapshot) => {
+      if (mainWindow.isDestroyed()) return;
+      const currentSkin = getSkin(snapshot.preference.skinId);
+      mainWindow.setTitleBarOverlay(buildWindowsTitleBarOverlay(currentSkin));
+    });
+    mainWindow.once('closed', unsubscribe);
+  }
 
   // 尺寸/位置保留：拖拽/缩放期间防抖落盘（getNormalBounds 在最大化时存还原
   // 尺寸）；真退出（close 不再被拦截）立即补存一次，覆盖防抖未到期的尾段调整。

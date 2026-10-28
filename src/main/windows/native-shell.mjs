@@ -133,7 +133,15 @@ export function readFullKeyboardAccess({ platform, systemPreferences }) {
  */
 export function installNativeShell({ app, Menu, platform, appName, devTools, openExternal }) {
   const template = buildAppMenuTemplate({ platform, appName, devTools });
-  Menu.setApplicationMenu(template ? Menu.buildFromTemplate(template) : null);
+  const menu = template ? Menu.buildFromTemplate(template) : null;
+  Menu.setApplicationMenu(menu);
+  // Windows 开发实例：菜单自动隐藏（Alt 唤起），保留退出入口，不占顶栏高度。
+  if (platform === 'win32' && devTools && menu) {
+    app.on('browser-window-created', (_event, window) => {
+      window.setAutoHideMenuBar(true);
+      window.setMenuBarVisibility(false);
+    });
+  }
   app.on('web-contents-created', (_event, contents) => {
     guardNavigation(contents, { openExternal });
   });
