@@ -32,7 +32,7 @@ const DURATION_NOTE = /（(\d+(?:\.\d+)?(?:ms|s|min))）$/;
 
 export function processStepsOf(snap: TaskStateSnapshot): ProcessStep[] {
   const inFlight = snap.phase !== 'terminal';
-  const log = snap.log;
+  const log = snap.log ?? [];
   const START_TITLES = new Set(['任务开始', '任务开始执行']);
   const steps: ProcessStep[] = [];
   for (let index = 0; index < log.length; index += 1) {
@@ -100,8 +100,8 @@ export function formatDuration(ms: number): string {
 
 /** 任务耗时：startedAt 到真正终态（含总结）；旧档缺省末条日志。 */
 export function taskElapsedMs(snap: TaskStateSnapshot, now: number): number | null {
-  const startedAt = snap.startedAt ?? snap.log[0]?.at;
+  const startedAt = snap.startedAt ?? snap.log?.[0]?.at;
   if (!startedAt) return null;
-  const end = snap.phase === 'terminal' ? snap.endedAt ?? snap.log[snap.log.length - 1]?.at : now;
+  const end = snap.phase === 'terminal' ? snap.endedAt ?? snap.log?.at(-1)?.at : now;
   return end && end > startedAt ? end - startedAt : null;
 }

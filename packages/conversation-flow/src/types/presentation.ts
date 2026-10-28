@@ -573,6 +573,7 @@ export type TurnPart =
         title: string;
         status: string;
         currentNodeId?: string;
+        nodes?: Record<string, {status?: string; error?: string; outputs?: Record<string, unknown>; log?: Array<{at: number; tool: string; kind: string; isError?: boolean}>}>;
         completedCount?: number;
         totalCount?: number;
         waitingReason?: string;

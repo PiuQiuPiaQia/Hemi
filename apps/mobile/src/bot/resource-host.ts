@@ -1,5 +1,5 @@
 import {createResourceCache, IDLE_PROGRESS, type ResourceProgress} from './resource-cache';
-import type {ConversationFlowHost,FlowResult,HostContext,ResourceRef,ResourceLease} from '@hemi/conversation-flow';
+import type {ConversationFlowHost,FlowResult,HostContext,ResourceRef,ResourceLease,ResourceDocument} from '@hemi/conversation-flow';
 export interface MobileResourceFiles {
   begin(input:{name:string;size:number;sha256:string}):Promise<{id:string}>;
   append(input:{id:string;offset:number;base64:string}):Promise<void>;
@@ -25,7 +25,7 @@ export function createBotResources({environmentId,request,files,now}:{environmen
     if(!['deliverable','attachment','link'].includes(value.kind)||typeof(value.kind==='attachment'?value.attachmentId:value.artifactId)!=='string'||value.conversationId&&value.conversationId!==context.scope.conversationId||value.environmentId&&value.environmentId!==environmentId)throw new Error('文件不属于当前对话');
     return value;
   }
-  const params=(value:Target,context:HostContext)=>({id:context.scope.conversationId,kind:value.kind,artifactId:value.artifactId,attachmentId:value.attachmentId});
+  const params=(value:Target,context:HostContext)=>({id:context.scope.conversationId,kind:value.kind,artifactId:value.artifactId,attachmentId:value.attachmentId,...(value.kind==='link'?{path:value.path}:{})});
   async function stat(value:Target,context:HostContext) {
     const info=await request<Stat>('resource.stat',params(value,context),context.signal);
     if(info.ok!==true||!Number.isSafeInteger(info.size)||info.size<0||info.size>20*1024*1024||!/^[a-f0-9]{64}$/.test(info.sha256)||typeof info.name!=='string'||!info.version||!Number.isInteger(info.chunkSize)||info.chunkSize<1)throw new Error('Bot 文件元数据无效');
@@ -42,20 +42,27 @@ export function createBotResources({environmentId,request,files,now}:{environmen
     context.signal.throwIfAborted();
   }
   type Cached={info?:Stat;blob?:Blob;content?:ResourceLease['content']};
-  const cache=createResourceCache<Cached>({now,sizeOf:value=>(value.blob?.size??0)+(value.content?.kind==='text'?value.content.text.length*2:value.content?.kind==='url'?value.content.url.length*2:0)});
+  const documentBytes=(source:ResourceDocument)=>(source.bytes?.byteLength??0)+((source.text?.length??0)+(source.textError?.length??0))*2+(source.sheets?.reduce((total,sheet)=>total+sheet.rows.reduce((rows,row)=>rows+row.reduce((cells,cell)=>cells+((cell.address?.length??0)+(cell.value?.length??0)+(cell.formula?.length??0))*2+64,0),0),0)??0);
+  const cache=createResourceCache<Cached>({now,sizeOf:value=>(value.blob?.size??0)+(value.content?.kind==='text'?value.content.text.length*2:value.content?.kind==='url'?value.content.url.length*2:value.content?.kind==='document'?documentBytes(value.content.source):0)});
   const key=(scope:HostContext['scope'],ref:ResourceRef)=>{const value=target(ref,{scope,signal:new AbortController().signal,requestId:''});return JSON.stringify([scope.environmentId,scope.conversationId,scope.generation,value.kind,value.artifactId??value.attachmentId,value.kind==='link'?value.path:undefined,ref.version]);};
   const get=async(ref:ResourceRef,context:HostContext)=>{
     const value=target(ref,context),identity=key(context.scope,ref);
     return cache.get(identity,context.signal,async(signal,report)=>{
       const own={...context,signal};report({phase:'checking',received:0});
-      if(value.kind==='link'){
-        const content=await request<{ok:boolean;text?:string;dataUrl?:string;markdown?:boolean;message?:string}>('file.read',{...params(value,own),path:value.path,textOnly:true},signal);
+      let info:Stat;
+      try{info=await stat(value,own);}
+      catch(error){
+        signal.throwIfAborted();
+        if(value.kind!=='link'||!['invalid','unsupported'].includes((error as {code?:string}).code??''))throw error;
+        // Older deployed Bots support file.read links but not link resources yet.
+        const content=await request<{ok:boolean;text?:string;dataUrl?:string;markdown?:boolean;message?:string}>('file.read',{...params(value,own),textOnly:true},signal);
+        signal.throwIfAborted();
         if(!content.ok)throw new Error(content.message??'文件读取失败');
         if(content.dataUrl)return{content:{kind:'url',url:content.dataUrl,mimeType:'image/*'}};
         if(content.text==null)throw Object.assign(new Error(content.message??'此格式请使用系统预览'),{code:'unsupported'});
         return{content:{kind:'text',text:content.text,mimeType:content.markdown?'text/markdown':'text/plain'}};
       }
-      const info=await stat(value,own),parts:Uint8Array<ArrayBuffer>[]=[];
+      const parts:Uint8Array<ArrayBuffer>[]=[];
       await chunks(value,info,own,async base64=>{parts.push(Uint8Array.from(atob(base64),c=>c.charCodeAt(0)));},report);
       report({phase:'verifying',received:info.size,total:info.size});
       const blob=new Blob(parts,{type:info.mimeType}),hash=await crypto.subtle.digest('SHA-256',await blob.arrayBuffer());
@@ -80,16 +87,24 @@ export function createBotResources({environmentId,request,files,now}:{environmen
       try {
         const value=target(ref,context),entry=await get(ref,context),info=entry.info;
         let content=entry.content,release=()=>{};
-        if(entry.blob&&info?.mimeType.startsWith('image/')){
+        if(entry.blob&&(info?.mimeType.startsWith('image/')||info?.mimeType.startsWith('video/'))){
           context.signal.throwIfAborted();const url=URL.createObjectURL(entry.blob);content={kind:'url',url,mimeType:info.mimeType};release=()=>URL.revokeObjectURL(url);
         }else if(purpose==='thumbnail')return unsupported('此文件没有图片缩略图');
         else if(!content&&entry.blob&&info){
           if(/\.(txt|md|markdown|mdx|json|csv|tsv|xml|html?|css|[cm]?jsx?|tsx?|py|sh|ya?ml|toml|ini|log|sql)$/i.test(info.name))content={kind:'text',text:await entry.blob.text(),mimeType:/\.(md|markdown)$/i.test(info.name)?'text/markdown':'text/plain'};
           else if(/\.(pdf|docx|xlsx|pptx)$/i.test(info.name)){
-            const parsed=await request<{ok:boolean;kind:string;text?:string;message?:string}>(value.kind==='attachment'?'attachment.read':'file.read',{...params(value,context),textOnly:true},context.signal);
-            if(parsed.ok&&parsed.text!=null)content={kind:'text',text:parsed.text,mimeType:'text/plain'};
+            const format=info.name.split('.').at(-1)!.toLowerCase() as ResourceDocument['format'];
+            let parsed:{ok:boolean;text?:string;message?:string};
+            try{parsed=await request(value.kind==='attachment'?'attachment.read':'file.read',{...params(value,context),textOnly:true},context.signal);}
+            catch(error){context.signal.throwIfAborted();if(format==='xlsx')throw error;parsed={ok:false,message:error instanceof Error?error.message:'这份文档暂时无法提取文字，请查看原文。'};}
+            const source:ResourceDocument={format,...(parsed.ok?{text:parsed.text}:{textError:parsed.message??'这份文档暂时无法提取文字，请查看原文。'})};
+            if(format==='xlsx') {
+              const original=await request<{ok:boolean;sheets?:ResourceDocument['sheets'];document?:{sheets?:ResourceDocument['sheets']}}>(value.kind==='attachment'?'attachment.document':'file.read',{...params(value,context)},context.signal);
+              if(original.ok)source.sheets=original.sheets??original.document?.sheets;
+            } else source.bytes=new Uint8Array(await entry.blob.arrayBuffer());
+            content={kind:'document',source};
           }
-          if(content?.kind==='text'&&/\.(pdf|docx|xlsx|pptx)$/i.test(info.name)&&content.text.length*2<=4*1024*1024){entry.content=content;cache.reweigh(key(context.scope,ref));}
+          if(content?.kind==='document'){entry.content=content;cache.reweigh(key(context.scope,ref));}
         }
         context.signal.throwIfAborted();
         if(!content)return unsupported('此文件暂不支持在线预览，可以使用系统预览、保存或分享');

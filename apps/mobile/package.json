@@ -32,7 +32,11 @@
     "lucide-react": "1.31.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "@hemi/ui": "file:../../packages/ui"
+    "@hemi/ui": "file:../../packages/ui",
+    "fflate": "0.8.3",
+    "unpdf": "1.9.1",
+    "docx-preview": "0.4.0",
+    "@aiden0z/pptx-renderer": "1.2.4"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.3",

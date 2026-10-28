@@ -38,6 +38,8 @@ export interface ConversationClientState {
   connection: ReplicaConnection;
   operations: readonly ConversationOperation[];
   error: string;
+  /** Offline history is optional; cache failures never block conversation operations. */
+  cacheNotice?: string;
 }
 
 export function createConversation({ scope, transport, storage, lifecycle, makeId = () => crypto.randomUUID(), requestTimeoutMs = 15000, pollIntervalMs = transport.subscribe ? 0 : 2000 }: {
@@ -188,7 +190,8 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       if (storage?.snapshots) {
         const captured = structuredClone(snapshot);
         snapshotWrites = snapshotWrites.then(() => storage.snapshots!.save(identity, captured))
-          .catch(() => { update({ error: '历史缓存未能保存，当前对话仍保留在内存' }); });
+          .then(() => {if (state.cacheNotice) update({cacheNotice: ''});})
+          .catch(() => { update({ cacheNotice: '暂时无法保存离线聊天记录，当前对话仍可正常使用。' }); });
       }
     },
     onConnection: connection => { update({ connection }); if (connection === 'online') void reconcileUnknown().then(flushQueue); },
@@ -298,8 +301,8 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     }));
     const restoreCache = storage?.snapshots ? storage.snapshots.load(identity).then(cached => {
       if (disposed || !cached) return;
-      if (!replica.restore(cached)) update({ error: '历史缓存版本或身份不匹配，已忽略' });
-    }).catch(() => { update({ error: '历史缓存读取失败，将重新同步' }); }) : Promise.resolve();
+      if (!replica.restore(cached)) update({ cacheNotice: '正在更新本机聊天记录，已有消息不会丢失。' });
+    }).catch(() => { update({ cacheNotice: '本机聊天记录暂时无法读取，连接后会自动重新加载。' }); }) : Promise.resolve();
     await Promise.all([initialize(), persistence?.activate(identity.conversationId), restoreCache]);
     hydrated = true;
     if (!disposed && !suspended) await replica.refresh();

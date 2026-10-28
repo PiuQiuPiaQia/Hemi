@@ -7,7 +7,8 @@ import {createConversationActionHandler, createConversationPresenter, projectCon
 import {useConnectionWarning, useConversation} from '@hemi/conversation-flow/react';
 import {ConversationFlowProvider, PermissionRequestCard, TurnQueueTray} from '@hemi/conversation-flow/parts';
 import {Composer} from './composer';
-import {ResourcePreview, type MobilePreview} from './components/resource-preview';
+import {PreviewDrawer} from './components/preview-drawer';
+import {previewTarget, taskArtifactReference, type MobilePreviewTarget} from './preview';
 import {ComposerAttachments} from './components/composer-attachments';
 import brandMark from './assets/hemi-mark.svg';
 import type {MobileConversation, MobileSessionPatch, MobileWorkspace, MobileWorkspaceSnapshot} from './workspace';
@@ -76,12 +77,14 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   const client = workspace.getClient(item.id), state = useConversation(client), snapshot = state.snapshot;
   const [drawer, setDrawer] = useState(false), [panel, setPanel] = useState<Panel>(null);
   const [selectionPortal, setSelectionPortal] = useState<HTMLDivElement|null>(null);
-  const [preview,setPreview]=useState<MobilePreview|null>(null);
+  const [preview,setPreview]=useState<MobilePreviewTarget|null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const queueTakingRef = useRef(false);
   const [composerFocusToken, setComposerFocusToken] = useState(0);
   const [toast, setToast] = useTransientMessage<string>();
+  const [cacheNotice, setCacheNotice] = useTransientMessage<string>(6000);
+  useEffect(() => setCacheNotice(state.cacheNotice || null), [state.cacheNotice, setCacheNotice]);
   const [submittingRevision, setSubmittingRevision] = useState<number | null>(null);
   const [settingsError,setSettingsError]=useState('');
   const [selection, setSelection] = useState<MobileSessionPatch | null>(null);
@@ -104,17 +107,38 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   const submitting = submittingRevision === state.draft.revision;
   const unknown = state.operations.some(operation => operation.state === 'unknown');
   const recovering = Object.values(snapshot?.runs ?? {}).some(run => ['waiting', 'offline', 'connecting'].includes(run.recovery?.phase ?? ''));
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  const openPreview = useCallback((next: MobilePreviewTarget) => {
+    if (!previewRef.current) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previewRef.current = next;
+    setPreview(next);
+  }, []);
   const onAction = useMemo<FlowActionHandler>(() => {
-    const ordinary = createConversationActionHandler(client, workspace.onAction ?? (async () => ({ok: false, error: {code: 'unsupported', message: '移动端尚未接入此操作'}})));
+    const ordinary = createConversationActionHandler(client, workspace.onAction ?? (async () => ({ok: false, error: {code: 'unsupported', message: '这项操作暂时无法在手机完成，请在电脑端操作。'}})));
     return async (action, context) => {
-      if(action.type==='preview.open'&&action.target==='resource') {
-        if(context.signal.aborted)return{ok:false,error:{code:'cancelled',message:'对话已切换'}};
-        returnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;
-        setPreview({ref:action.resource,href:action.href,name:action.name});
-        return{ok:true,value:{receipt:'completed'}};
+      if (action.type === 'preview.open') {
+        if (context.signal.aborted) return {ok: false, error: {code: 'cancelled', message: '对话已切换'}};
+        const next = previewTarget(action)!;
+        if (next.kind === 'resource') {
+          const location = taskArtifactReference(next.request.ref);
+          if (location) {
+            const flow = client.getSnapshot().snapshot;
+            const artifact = (flow?.tasks[location.taskId]?.artifacts as Array<{id?:string;artifactId?:string;path?:string;name?:string}> | undefined)?.find(artifact => (artifact.id ?? artifact.artifactId) === location.artifactId);
+            if (flow?.artifacts[location.artifactId]) next.request = {ref: {id: `deliverable:${location.artifactId}`, version: '0'}, name: artifact?.name};
+            else if (artifact?.path) next.request = {href: artifact.path, name: artifact.name};
+            else return {ok: false, error: {code: 'not-found', message: '这份子任务产物暂时无法读取，请核对最新状态。'}};
+          }
+        }
+        openPreview(next);
+        return {ok: true, value: {receipt: 'completed'}};
       }
       if (occupied && !(action.type === 'message.edit-state' && action.state === 'cancel'))
         return {ok: false, error: {code: 'conflict', message: '会话已被占用，请先抢占会话。'}};
+      if (action.type === 'task.stop') {
+        openPreview(previewTarget(action)!);
+        return {ok: true, value: {receipt: 'completed'}};
+      }
       if (action.type === 'message.edit-state' && action.state === 'begin') {
         try {await workspace.acquireControl?.(item.id);} catch(error) {return {ok: false, error: {code: 'conflict', message: error instanceof Error ? error.message : '会话已被占用'}};}
       }
@@ -123,7 +147,7 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
       if (action.type === 'message.edit' && result.ok) setEditing(null);
       return result;
     };
-  }, [client, workspace, item.id, occupied]);
+  }, [client, workspace, item.id, occupied, openPreview]);
   const command = async (value: Record<string, unknown>) => {
     const result = await client.sendCommand(value);
     if (!result.ok && result.code !== 'unknown') setToast(result.message ?? '操作未完成，请核对当前状态');
@@ -194,13 +218,14 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
   return <UiProvider portal={selectionPortal}><div className="navigation-stage">
     <div className={`app-surface ${drawer ? 'drawer-is-open' : ''}`} inert={drawer || panel || preview ? true : undefined} onClickCapture={event => {const trigger = (event.target as HTMLElement).closest('button'); if (trigger) returnFocus.current = trigger;}} onTouchStart={edgeStart} onTouchEnd={edgeEnd} onTouchCancel={() => {edge.current = null;}}>
         <header className="app-topbar chat-topbar"><IconButton label="打开对话列表" aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}><Menu size={18}/></IconButton><button type="button" className="topbar-title title-button" aria-label="选择模型" aria-haspopup="dialog" aria-expanded={panel==='model'} disabled={offline||(saving&&!selection)} onClick={() => setPanel('model')}><strong>{item.title}</strong><small><span>{modelName}</span><ChevronDown size={12}/></small></button><DirectoryControlButton layout="touch" label={`工作目录：${item.directory}`} title={item.directory} disabled={offline||saving} aria-haspopup="dialog" aria-expanded={panel==='folder'} onClick={()=>setPanel('folder')}/></header>
+        {cacheNotice ? <StatusNotice layout="touch" variant="note" actions={<button type="button" onClick={() => setCacheNotice(null)}>关闭提示</button>}>{cacheNotice}</StatusNotice> : null}
         {showConnectionWarning ? <StatusNotice layout="touch" icon={<WifiOff size={18} aria-hidden="true"/>} actions={workspace.reconnect ? <button type="button" onClick={() => void reconnect()}>恢复连接</button> : null}>Bot 连接已断开</StatusNotice> : null}
         {queued && !offline ? <StatusNotice layout="touch" icon={<Clock3 size={18} aria-hidden="true"/>} title={item.waitingResource ? '等待资源' : '排队中'} detail={item.waitingResource ? activeTask ? `「${activeTask.title}」正在使用同一资源，相关操作结束后会自动继续。` : '同一资源正在使用中，相关操作结束后会自动继续。' : activeTask ? `「${activeTask.title}」${activeTask.status === 'waiting' ? '正在等待确认' : '正在执行'}，结束后会自动开始。` : '消息已受理，轮到后会自动开始。'} actions={activeTask ? <button type="button" onClick={() => select(activeTask.id)}>查看当前任务</button> : null}/> : null}
         {unknown ? <StatusNotice layout="touch" title="正在确认消息是否已发送" detail="网络中断过，正在自动确认。原文已保留，请勿重复发送。"/> : null}
         {occupied ? <StatusNotice layout="touch" title="会话已被占用" detail="另一台设备正在使用。抢占后可以继续编辑和发送。" actions={<button type="button" disabled={offline || saving} onClick={() => {setSaving(true);void workspace.acquireControl?.(item.id,true).catch(error=>setToast(error instanceof Error?error.message:'未能抢占会话')).finally(()=>setSaving(false));}}>抢占会话</button>}/> : null}
         {(!offline || showConnectionWarning) && (catalog.error || state.error) ? <StatusNotice layout="touch" variant="inline">{catalog.error || state.error}</StatusNotice> : null}
         {catalog.permissions?.filter(permission=>permission.conversationId===item.id).map(permission=><PermissionRequestCard key={permission.id} layout="touch" request={permission} disabled={offline||saving||!workspace.decidePermission} onChooseOption={value=>{setSaving(true);void workspace.decidePermission?.(permission.id,value).catch(()=>setToast('确认结果待核对，请恢复连接后刷新。')).finally(()=>setSaving(false));}}/>)}
-        <section className="conversation-frame" aria-label="消息记录" style={{display: messages.length ? undefined : 'none'}}><ConversationFlow scope={scope} messages={messages} host={host} onAction={onAction} active={!drawer && !panel && !preview} state={{busy, readOnly: occupied, editingMessageId: editing, retryBlocked: offline ? '恢复连接后重试' : undefined, runActivity: snapshot?.runs[snapshot.activeRunId ?? '']?.activity ?? undefined}}/></section>
+        <section className="conversation-frame" aria-label="消息记录" style={{display: messages.length ? undefined : 'none'}}><ConversationFlow scope={scope} messages={messages} host={host} onAction={onAction} active={!drawer && !panel && !preview} state={{busy, readOnly: occupied, transientActionErrors: true, editingMessageId: editing, retryBlocked: offline ? '恢复连接后重试' : undefined, runActivity: snapshot?.runs[snapshot.activeRunId ?? '']?.activity ?? undefined}}/></section>
         {!messages.length ? <StateView as="section" className="empty-chat" kind={state.connection==='connecting'?'loading':'empty'} illustration={<img className="welcome-mark" src={brandMark} alt=""/>} titleAs="h1" title={state.connection==='connecting'?'正在读取对话…':'今天想做什么？'}/> : null}
         {!queue.items.length ? queueTray : null}
         <Composer readOnly={occupied} busy={busy} offline={offline} blocked={occupied || unknown || recovering || saving || picking || submitting || uploads.length>0} hasAttachments={state.draft.attachments.length>0} addBlocked={occupied || offline || picking || submitting || !workspace.attachmentsAvailable || state.draft.attachments.length+uploads.length>=3} stopBlocked={occupied || unknown} text={state.draft.text} onText={text => {if(occupied)return;if(!item.control)void workspace.acquireControl?.(item.id).catch(error=>setToast(error instanceof Error?error.message:'会话已被占用'));client.draft.setText(text);}} onSend={() => void send()} onStop={() => {void command({type: 'stop', targetRunId: snapshot?.activeRunId});}} onAdd={() => setPanel('attachment')} focusToken={composerFocusToken} controls={<>
@@ -212,7 +237,7 @@ function ConnectedConversation({workspace, catalog, item, onExit, onLicenses}: {
           {offline && queue.items.some(item => item.operationId) ? <StatusNotice layout="touch" variant="note">尚未发送到 Bot</StatusNotice> : null}
         </Composer>
     </div>
-    {preview ? <ConversationFlowProvider part scope={scope} host={host} onAction={onAction}><ResourcePreview host={host} transfers={workspace.resourceTransfers} scope={scope} request={preview} returnFocus={returnFocus.current} onClose={()=>setPreview(null)}/></ConversationFlowProvider> : null}
+    {preview ? <PreviewDrawer onSelect={openPreview} target={preview} messages={messages} scope={scope} host={host} transfers={workspace.resourceTransfers} onAction={onAction} readOnly={occupied} offline={offline} returnFocus={returnFocus.current} onClose={() => setPreview(null)} onStop={async runId => {if (!runId || runId !== snapshot?.activeRunId) {setToast('这条子任务已不属于当前执行，请核对最新状态。'); return false;} const result = await command({type: 'stop', targetRunId: runId}); return result.ok;}}/> : null}
     {drawer ? <ConversationDrawer onRename={workspace.rename?((id,title)=>workspace.rename!(id,title)):undefined} onRemove={workspace.remove?((id)=>workspace.remove!(id)):undefined} returnFocus={returnFocus.current} items={catalog.items} activeId={item.id} botName={catalog.botName} offline={offline} onSelect={select} onNew={() => void create()} onSettings={() => {setDrawer(false); setPanel('settings');}} onClose={() => setDrawer(false)}/> : null}
     <ModelSelectorControl layout="touch" showTrigger={false} models={modelOptions} selected={selectedModel} onSelect={model=>{void updateSettings({model});}} saving={saving&&!selection} offline={offline} error={settingsError} open={panel==='model'} onOpenChange={open=>open?setPanel('model'):closePanel()} returnFocus={returnFocus.current}/>
     {panel === 'folder' ? <DirectoryPanel returnFocus={returnFocus.current} workspace={workspace} path={item.directory} defaultPath={catalog.defaultDirectory} recent={catalog.recentDirectories??[]} saving={saving} offline={offline} error={settingsError} onClose={closePanel} onSelect={directory=>void updateSettings({directory})}/> : null}

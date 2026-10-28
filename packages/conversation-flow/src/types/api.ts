@@ -46,9 +46,17 @@ export interface ResourceLease {
   metadata?: { name?: string; size?: number };
   content:
     | { kind: "text"; text: string; mimeType: string }
-    | { kind: "url"; url: string; mimeType: string };
+    | { kind: "url"; url: string; mimeType: string }
+    | { kind: 'document'; source: ResourceDocument };
   release(): void;
 }
+export type ResourceDocument = {
+  format: 'pdf' | 'docx' | 'xlsx' | 'pptx';
+  bytes?: Uint8Array;
+  sheets?: Array<{name: string; rows: Array<Array<{address: string; value: string; formula?: string}>>; truncated: boolean}>;
+  text?: string;
+  textError?: string;
+};
 export interface ResourceActionView {
   id: string;
   kind: "save" | "share" | "reveal" | "open-with";
@@ -113,6 +121,7 @@ export type TaskView = Pick<
       | "endedAt"
       | "progressText"
       | "conversation"
+      | "activity"
       | "readOnly"
       | "verifying"
       | "verified"
@@ -199,6 +208,8 @@ export interface PermissionView {
   readOnly?: boolean;
 }
 export interface FlowSurfaceState {
+  /** Mobile hosts can show action failures as a short-lived toast. */
+  transientActionErrors?: boolean;
   readOnly?: boolean;
   loading?: boolean;
   notice?: string;

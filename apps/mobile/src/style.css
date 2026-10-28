@@ -8,7 +8,7 @@
   --s10:40px; --s11:44px; --s12:48px; --s14:56px; --s16:64px;
   --text-small:12px; --text-label:13px; --text-ui:14px; --text-body:14px;
   --text-heading:16px; --text-large:22px; --text-input:16px;
-  --r-control:12px; --r-panel:24px; --r-composer:22px; --drawer-width:min(82%,336px); --connection-width:408px;
+  --r-control:12px; --r-panel:24px; --r-composer:22px; --drawer-width:min(82%,336px); --connection-width:408px; --task-detail-height:60dvh;
   font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Segoe UI',sans-serif;
   color:var(--m-ink); background:var(--m-paper); font-synthesis:none; -webkit-font-smoothing:antialiased;
 }
@@ -37,6 +37,15 @@ h1,h2,h3,p{margin:0}svg{flex-shrink:0}input,textarea{min-width:0}textarea{resize
 .title-button{height:var(--s11)}
 
 .conversation-frame{display:flex;flex:1;min-height:0;min-width:0}.conversation-frame>.hcf-root{width:100%}
+.task-detail-heading{margin-bottom:var(--s3);overflow-wrap:anywhere}.task-detail-heading>p{margin-top:var(--s2);font-size:var(--text-label);color:var(--m-muted)}
+.task-detail-conversation{height:var(--task-detail-height);flex:none}
+.task-detail-files{display:flex;flex-wrap:wrap;gap:var(--s2);margin-bottom:var(--s3)}
+.resource-preview-content{--ink:var(--m-ink);--line:var(--m-line);--h24-muted:var(--m-muted);--bg-canvas:var(--m-paper);--bg-surface:var(--m-white)}
+.resource-preview-content .h-doc-controls button,.resource-preview-content .h-doc-sheet-tabs button{min-height:var(--s11);min-width:var(--s11)}
+.resource-preview-content .h-doc-viewport{max-height:var(--task-detail-height)}
+.workflow-drawer-content{display:flex;flex-direction:column;gap:var(--s3);overflow-wrap:anywhere}
+.workflow-drawer-content dl{display:grid;gap:var(--s2);font-size:var(--text-ui)}.workflow-drawer-content dd{margin:var(--s1) 0 0;white-space:pre-wrap}
+.workflow-drawer-steps{border-block:1px solid var(--m-line)}
 .navigation-stage [data-hemi-conversation-flow]{--fs-15:var(--text-body);--hcf-message-action-size:var(--s7)}
 .conversation-frame .h56-run-activity{flex-shrink:0;margin:0 var(--s3) var(--s2);font-size:var(--text-label)}
 .conversation-frame .h56-run-activity-head{min-height:var(--s11);padding:var(--s2) var(--s3)}

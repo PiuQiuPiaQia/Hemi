@@ -5,6 +5,40 @@ const { createConversation, createComposerDraft, createDraftPersistence, createF
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const scope = { environmentId: 'test-bot', conversationId: 'same' };
+
+test('history cache failure is an optional notice; successful caching never clears an operation failure', async t => {
+  let failCache = true, rejectCommand = false;
+  const f = fixture({storage: {snapshots: {async load() {return null;}, async save() {if (failCache) throw new Error('quota');}}},
+    transport: {async command() {return rejectCommand ? {ok: false, code: 'failed', message: '操作被拒绝'} : {ok: true};}}});
+  t.after(() => f.client.dispose());
+  await f.client.start(); await tick();
+  assert.match(f.client.getSnapshot().cacheNotice, /离线聊天记录/);
+  assert.equal(f.client.getSnapshot().error, '');
+  f.client.draft.setText('缓存失败仍可发送');
+  assert.equal((await f.client.sendDraft()).ok, true);
+  rejectCommand = true;
+  await f.client.sendCommand({type: 'stop'});
+  assert.equal(f.client.getSnapshot().error, '操作被拒绝');
+  failCache = false; f.set(snapshot({revision: 1})); await tick();
+  assert.equal(f.client.getSnapshot().cacheNotice, '');
+  assert.equal(f.client.getSnapshot().error, '操作被拒绝');
+});
+
+test('unreadable or foreign history caches are replaced by authoritative history without blocking a draft', async t => {
+  for (const cached of [new Error('invalid JSON'), snapshot({conversationId: 'foreign'})]) {
+    const notices = [];
+    const f = fixture({storage: {snapshots: {async load() {if (cached instanceof Error) throw cached; return cached;}, async save() {}}}});
+    t.after(() => f.client.dispose());
+    f.client.subscribe(() => {if (f.client.getSnapshot().cacheNotice) notices.push(f.client.getSnapshot().cacheNotice);});
+    f.client.draft.setText('保留草稿');
+    await f.client.start(); await tick();
+    assert.ok(notices.length > 0);
+    assert.equal(f.client.getSnapshot().snapshot.conversationId, 'same');
+    assert.equal(f.client.getSnapshot().cacheNotice, '');
+    assert.equal(f.client.getSnapshot().error, '');
+    assert.equal(f.client.draft.getSnapshot().text, '保留草稿');
+  }
+});
 const snapshot = (extra = {}) => ({ schemaVersion: 1, conversationId: 'same', revision: 0, generation: 1, phase: 'idle', activeRunId: null,
   queuePaused: false, pending: [], timeline: [], runs: {}, tasks: {}, artifacts: {}, permissions: {}, pendingReports: [], ...extra });
 function fixture(options = {}) {

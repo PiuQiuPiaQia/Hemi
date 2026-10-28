@@ -1657,6 +1657,11 @@ export async function createBotHost({
   const resourceFiles=createResourceFiles({resolve:async p=>{
     const session=requireSession(p.id);
     if(p.kind==='deliverable')return readOwnedFile(session,p.artifactId);
+    if(p.kind==='link') {
+      const file=await readLinkedFile(session,fileLinkPath(session,p.path).absolute);
+      if(file.id!==p.artifactId)fail('文件链接不属于当前会话或原文件已变化。','missing');
+      return file;
+    }
     if(p.kind!=='attachment')fail('文件资源类型无效。');
     const attachment=session.attachments[p.attachmentId];
     if(!attachment)fail('附件不存在或不属于当前会话。','missing');
