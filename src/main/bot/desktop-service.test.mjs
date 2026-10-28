@@ -6,7 +6,7 @@ import os from 'node:os';
 import net from 'node:net';
 import { createBotHost } from './host.mjs';
 import { createBotDesktopService } from './desktop-service.mjs';
-async function fixture(t) {
+async function fixture(t, extra = {}) {
   const root = await fs.realpath(
     await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-desktop-')),
   );
@@ -25,7 +25,7 @@ async function fixture(t) {
     dataDir: path.join(root, 'cloud/data'),
     defaultDir: path.join(root, 'cloud/workspace'),
     validateModel: async () => {},
-    executorFactory: () => ({async run() {return {};}, async stop() {}, async close() {}}),
+    executorFactory: extra.executorFactory ?? (() => ({async run() {return {};}, async stop() {}, async close() {}})),
   });
   const hello = await host.request('handshake');
   let network = true,
@@ -64,6 +64,10 @@ async function fixture(t) {
     },
     control: async () => ({ ok: true }),
   };
+  if(extra.realtime)transport.watch=async(_target,params,{signal,onEvent,clientId})=>{
+    const stop=host.watch(params,onEvent,undefined,{clientId});
+    try{await new Promise(resolve=>{signal.addEventListener('abort',resolve,{once:true});if(signal.aborted)resolve();});}finally{stop();}
+  };
   const profiles = {
     list: async () => ({
       providers: [
@@ -81,6 +85,7 @@ async function fixture(t) {
     runner: {},
     profiles,
     transport,
+    onConversationResult:extra.onConversationResult,
   };
   let client = createBotDesktopService(options);
   const selected = await client.connect({ host: 'fixture-cloud' });
@@ -560,4 +565,19 @@ test('a send receipt returns without waiting for a second catalog SSH round trip
     assert.equal(result.ok, true);
     await gate.started;
   } finally { gate.release(); }
+});
+
+
+test('真实 Host 事件流保留后台等待状态，等待用户只提醒一次，重连不重播旧提醒',async t=>{
+ let finish;const notifications=[];
+ const f=await fixture(t,{realtime:true,onConversationResult:info=>notifications.push(info),executorFactory:()=>({
+  async run(spec,emit){emit({type:'run-activity',runId:spec.runId,generation:spec.generation,activity:{runId:spec.runId,phase:'waiting-background',since:Date.now(),jobs:[{id:'job',command:'work',status:'running',startedAt:Date.now(),endedAt:null,output:''}],resources:[]}});await new Promise(r=>{finish=r;});return {waitingForUser:{question:'请提供所需信息',reason:'等待用户'}};},
+  async stop(){finish?.();},async close(){finish?.();}
+ })});
+ const {id}=await f.client.command('session.create');await f.client.command('session.open',{id});
+ const wait=async(fn)=>{for(let i=0;i<200;i++){if(await fn())return;await new Promise(r=>setTimeout(r,10));}assert.fail('stream did not settle');};
+ await f.client.command('flow.command',{id,command:{type:'send',input:{inputId:'waiting-input',text:'执行任务'}}});
+ await wait(()=>f.client.getState().cache.sessions.find(x=>x.id===id)?.status==='waiting');
+ finish();await wait(()=>notifications.length===1);assert.equal(notifications[0].outcome,'awaiting-user');
+ await f.client.refresh();await f.restart();await new Promise(r=>setTimeout(r,50));assert.equal(notifications.length,1);
 });

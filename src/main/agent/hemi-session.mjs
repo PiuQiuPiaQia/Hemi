@@ -242,6 +242,7 @@ export function createHemiSession({
   log,
   initTimeoutMs = INIT_TIMEOUT_MS,
   stallTimeoutMs = STALL_TIMEOUT_MS,
+  backgroundQuietReviewMs = 60000,
   permissionTimeoutMs = undefined,
   abortGraceMs = ABORT_GRACE_MS,
 }) {
@@ -412,6 +413,7 @@ export function createHemiSession({
     if (disposed) return;
     touchStallWatchdog();
     emitter.emit('activity', {
+      runId:runtimeExecution?.owner?.rootRunId,
       phase: waitingForBackground ? 'waiting-background' : resourceWaits.size ? 'waiting-resource' : 'running',
       since: backgroundWaitSince ?? [...resourceWaits.values()][0]?.since ?? null,
       jobs: backgroundJobs,
@@ -427,7 +429,7 @@ export function createHemiSession({
     if (!acknowledgedCommands.delete(job.id)) pendingCommandEnds.set(job.id,event);
     else emitter.emit('progress',event);
   }
-  const commands = createCommandScope({ onChange: jobs => { backgroundJobs = jobs; publishActivity(); }, onSettled:commandEnded });
+  const commands = createCommandScope({quietReviewMs:backgroundQuietReviewMs, onChange: jobs => { backgroundJobs = jobs; publishActivity(); }, onSettled:commandEnded });
   const interactive = getInteractiveResourceCoordinator();
   const leases = new Map();
   const releaseInteraction = callId => {
@@ -781,7 +783,7 @@ export function createHemiSession({
         noTools: 'builtin',
         // Keep the original lightweight file tools; qmd search is outside Hemi's loadout.
         ...(nativeMemory ? { excludeTools: ['memory_search', 'memory_status'] } : {}),
-        ...(Array.isArray(tools) ? { tools } : {}),
+        ...(Array.isArray(tools) ? { tools:tools.includes('bash')&&!remoteInfo?[...new Set([...tools,'job_list','job_output','job_kill'])]:tools } : {}),
       });
       if (routing) {
         const virtual = created.modelRuntime.getModel('hemi-routing', 'auto');
@@ -965,10 +967,21 @@ export function createHemiSession({
         waitingForBackground = true;
         backgroundWaitSince = Date.now();
         publishActivity();
-        let events;
-        try { events = await commands.waitForCompletion(execution?.owner); }
+        let update;
+        try { update = await commands.waitForUpdate(execution?.owner); }
         finally { waitingForBackground = false; backgroundWaitSince = null; publishActivity(); }
         if (disposed || abortRequested || execution?.cancelled?.() || runtimeExecution !== execution) break;
+        if (update.kind === 'review') {
+          if (quotaHold) continue;
+          append(await promptOnce('',{hostEvent:{customType:'hemi_background_command_review',content:[
+            '［后台命令状态观察 · 属于原目标，不是新用户目标］',
+            update.requested?'用户请求检查当前进展。':'后台命令长时间没有新输出，请核验当前进展并简短说明实际情况。',
+            JSON.stringify(update.jobs),
+            '静默不能证明卡死或失败。可用 job_output 读取实际输出、用只读诊断核验；根据证据继续等待、停止不再需要的命令，或向用户提出明确的接手请求。不要重复启动原命令、伪造进度、刷新硬截止时间或通过连续查询空转。',
+          ].join('\n')}}));
+          await persistExecution();continue;
+        }
+        const events=update.events;
         if (!events.length) continue;
         // hostEvent 不创建用户目标、不重置备用或预算；命令结果按原归属只消费一次。
         if (quotaHold) {
@@ -1181,6 +1194,15 @@ export function createHemiSession({
     setExecutionContext: value => { runtimeExecution = value; },
     persistExecution,
     prompt,
+    backgroundCommand: async ({action,jobId,from,waitMs=0}) => {
+      const owner=runtimeExecution?.owner;
+      if(disposed || runtimeExecution?.cancelled?.())throw new Error('当前目标已停止');
+      if(action==='list')return commands.list(owner);
+      if(action==='read')return commands.read(owner,jobId,{from,waitMs});
+      if(action==='stop')return commands.stop(owner,jobId);
+      if(action==='review')return {accepted:commands.requestReview(owner)};
+      throw new Error('不支持的后台命令操作');
+    },
     steer,
     followUp,
     notify,

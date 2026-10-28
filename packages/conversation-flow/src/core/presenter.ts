@@ -91,6 +91,7 @@ export function createConversationActionHandler(client: ConversationClient, fall
     const snapshot = client.getSnapshot().snapshot;
     if (action.type === 'message.edit-state') return { ok: true, value: { receipt: 'completed' } };
     if (action.type === 'recovery.retry') command = { type: 'retryRecovery', targetRunId: action.runId, recoveryId: action.recoveryId };
+    else if (action.type === 'background.command') command = {type:'backgroundCommand',targetRunId:action.targetId,action:action.action,jobId:action.jobId,from:action.from};
     else if (action.type === 'run.stop') command = { type: 'stop', targetRunId: action.targetId || snapshot?.activeRunId };
     else if (action.type === 'message.edit') {
       const source = snapshot?.timeline.find(item => item.kind === 'user' && item.id === action.targetId);
@@ -104,6 +105,6 @@ export function createConversationActionHandler(client: ConversationClient, fall
     } else return fallback ? fallback(action, context) : { ok: false, error: { code: 'unsupported', message: '宿主尚未提供此操作' } };
     const result = await client.sendCommand(command);
     if (!result.ok) return { ok: false, error: { code: result.code === 'unknown' ? 'unknown' : result.code === 'offline' ? 'offline' : 'failed', message: result.message ?? '操作未完成' } };
-    return { ok: true, value: { receipt: result.disposition === 'local-queued' ? 'accepted' : 'completed' } };
+    return { ok: true, value: { receipt: result.disposition === 'local-queued' ? 'accepted' : 'completed',data:result.data } };
   };
 }

@@ -1,3 +1,6 @@
+import {useMemo} from 'react';
+import {useConversationBridge,useConversationEnvironmentId} from './lib/conversation-bridge';
+import type {FlowActionHandler} from '@hemi/conversation-flow';
 import type { RunActivityView } from "@shared/protocol";
 import {
   ConversationFlowProvider,
@@ -10,25 +13,38 @@ import { useAppearance } from "@/appearance/use-appearance";
 export function RunActivity({
   activity,
   active = true,
+  conversationId,
+  generation,
+  readOnly,
 }: {
   activity?: RunActivityView | null;
+  conversationId?: string | null;
+  generation?: number;
+  readOnly?: boolean;
   active?: boolean;
 }) {
+  const bridge=useConversationBridge(),environmentId=useConversationEnvironmentId();
+  const onAction=useMemo<FlowActionHandler>(()=>async(action)=>{
+    if(action.type!=='background.command'||!conversationId)return {ok:false,error:{code:'unsupported',message:'当前会话不可操作'}};
+    const result=await bridge.flowCommand(conversationId,{type:'backgroundCommand',targetRunId:action.targetId,action:action.action,jobId:action.jobId,from:action.from},{requestId:action.requestId,generation:generation??null});
+    return result.ok?{ok:true,value:{receipt:'completed',data:result.data}}:{ok:false,error:{code:'failed',message:result.message??'任务状态已变化'}};
+  },[bridge,conversationId,generation]);
   const { tokens, container } = useDesktopFlowAppearance();
   const { activity: visibility } = useAppearance();
   return (
     <div ref={container} className="contents">
       <ConversationFlowProvider
         part
+        onAction={onAction}
         scope={{
-          environmentId: "desktop",
-          conversationId: "run-summary",
-          generation: "1",
+          environmentId,
+          conversationId:conversationId??"run-summary",
+          generation:String(generation??1),
         }}
         appearance={{ tokens }}
         active={active && visibility.visible}
       >
-        <SDKRunActivity activity={activity} />
+        <SDKRunActivity activity={activity} readOnly={readOnly} />
       </ConversationFlowProvider>
     </div>
   );

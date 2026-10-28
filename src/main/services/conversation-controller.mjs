@@ -455,6 +455,12 @@ export function createConversationController({
     async command(command) {
       switch (command.type) {
         case 'send': return commandSend(command);
+        case 'backgroundCommand': {
+          if(snapshot.activeRunId!==command.targetRunId || snapshot.phase==='stopping')return {ok:false,code:'run-changed'};
+          if(!['list','read','review','stop'].includes(command.action))return {ok:false,code:'unsupported'};
+          try {return {ok:true,data:await runtime.backgroundCommand?.({runId:command.targetRunId,action:command.action,jobId:command.jobId,from:command.from})};}
+          catch(error){return {ok:false,code:'failed',message:error.message};}
+        }
         case 'retryRecovery': {
           const run = snapshot.runs[snapshot.activeRunId];
           if (!run || command.targetRunId !== run.runId || command.recoveryId !== run.recovery?.id || !['waiting','offline'].includes(run.recovery.phase)) return { ok: false, code: 'run-changed' };

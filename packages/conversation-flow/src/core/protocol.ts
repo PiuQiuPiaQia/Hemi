@@ -112,6 +112,7 @@ export type ConversationDeliverableView = {
 };
 
 export type FlowCommandResult = {
+  data?: {text?:string;next?:number;total?:number;lossy?:boolean;accepted?:boolean};
   ok: boolean;
   code?: string;
   disposition?: string;

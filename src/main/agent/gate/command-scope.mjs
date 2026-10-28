@@ -1,3 +1,4 @@
+import { CommandOutput } from './command-output.mjs';
 import { randomUUID } from 'node:crypto';
 import { runCommand, commandToolResult } from './command-execution.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
@@ -13,8 +14,11 @@ const sameOwner = (a, b) => a?.conversationId === b?.conversationId && a?.rootRu
 const outputTail = result => [result.stdout.slice(-2000), result.stderr.slice(-2000)].filter(Boolean).join('\n').slice(-2000);
 
 /** 进程属于目标而非一次 SDK 请求。后台只交还模型调用，取消/退出仍确认进程树清理。 */
-export function createCommandScope({ onChange = () => {}, onSettled = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000 } = {}) {
-  const active = new Set(), completed = [];
+export function createCommandScope({ onChange = () => {}, onSettled = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000, quietReviewMs = 60000, maxQuietReviews = 3 } = {}) {
+  const active = new Set(), completed = [], recordsById = new Map();
+  let wake = Promise.withResolvers(), reviewRequest = null;
+  const changed = () => { wake.resolve(); wake = Promise.withResolvers(); };
+  let reviewOwner = null, reviews = 0;
   let quarantine = null;
   const uncertain = (execution, message) => {
     quarantine = cleanupFailure(message);
@@ -25,6 +29,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   const view = record => ({
     id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 8000),
     commandTruncated: record.command.length > 8000, description: record.description, lastOutputAt: record.lastOutputAt,
+    deadlineAt:record.commandDeadlineAt, outputBytes:record.log.total, earliestOutput:record.log.total-record.log.bytes,
     startedAt: record.startedAt, endedAt: record.endedAt ?? null,
     status: record.error ? 'failed' : record.result?.status ?? 'running',
     code: record.result?.code ?? null, output: record.output,
@@ -37,7 +42,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     for (const record of ready) completed.splice(completed.indexOf(record), 1);
     const failure = ready.find(r => r.error);
     if (failure) throw failure.error;
-    return ready.map(record => ({ ...view(record), outputRef: record.outputRef,
+    return ready.filter(record => !record.collected).map(record => ({ ...view(record), outputRef: record.outputRef,
       text: commandToolResult(record.result).content[0].text.slice(-12_000),
     }));
   };
@@ -55,21 +60,24 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     options.signal?.addEventListener('abort', onAbort, { once: true });
     if (options.signal?.aborted) controller.abort();
     const record = {
-      id: `command-${randomUUID()}`, controller, owner: execution?.owner,
+      id: `command-${randomUUID()}`, controller, execution, owner: execution?.owner,
       toolCallId: scope?.toolCallId, command: options.command, startedAt: now(),
       description: normalizeCommandDescription(options.description), lastOutputAt: null,
-      background: false, output: '', promise: null, settled: false,
+      background: false, output: '', promise: null, settled: false, log:new CommandOutput(), reviewedAtOutput:null,
+      commandDeadlineAt:now()+(options.timeoutMs>0?options.timeoutMs:COMMAND_TIMEOUT_MS),
       deadlineAt: now()+(options.timeoutMs>0?options.timeoutMs:COMMAND_TIMEOUT_MS)+settleTimeoutMs,
     };
     const token = randomUUID();
     let registered = false, ready;
     const started = new Promise(resolve => { ready = resolve; });
     let lastProgress = 0, progressTimer;
-    active.add(record);
+    active.add(record);recordsById.set(record.id,record);
+    for(const [id,old] of recordsById) if(recordsById.size>64 && old.settled && !completed.includes(old))recordsById.delete(id);
     record.promise = runCommand({ ...options, signal: controller.signal, ownerToken: token,
       onOutput: result => {
-        record.output = outputTail(result);
-        record.lastOutputAt = now();
+        record.log.append(result.channel,result.chunk);
+        record.output = record.log.tail(2000);
+        record.lastOutputAt = now();changed();
         options.onOutput?.(result);
         if (record.background) {
           const remaining = 1000 - (now() - lastProgress);
@@ -132,7 +140,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       return record.result;
     }).catch(error => { record.error = error; if(error.code==='cleanup-unconfirmed')uncertain(execution,error.message); throw error; }).finally(() => {
       clearTimeout(progressTimer);
-      record.settled = true;
+      record.settled = true;changed();
       record.endedAt = now();
       ready();
       options.signal?.removeEventListener('abort', onAbort);
@@ -173,8 +181,61 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     };
   }
 
+  const find = (owner, id) => {
+    const record = recordsById.get(id);
+    if (!record || !sameOwner(record.owner,owner)) throw new Error('命令不存在或不属于当前目标');
+    return record;
+  };
+  const inspect = (owner,id,options={}) => {
+    const record=find(owner,id), output=record.log.read(options.from,options.maxBytes);
+    if(options.collect && record.settled) record.collected=true;
+    return {...view(record),...output,cleanupConfirmed:record.result?.cleanupConfirmed??false};
+  };
   return {
     run,
+    list: owner => [...recordsById.values()].filter(r=>sameOwner(r.owner,owner)&&r.background).map(view),
+    inspect,
+    async read(owner,id,{waitMs=0,signal,...options}={}) {
+      const record=find(owner,id);
+      if(waitMs>0 && !record.settled) {
+        let timer,abort;
+        try {await Promise.race([record.promise,new Promise(resolve=>{timer=setTimeout(resolve,Math.min(waitMs,30000));}),new Promise((_,reject)=>{abort=()=>reject(new DOMException('读取已取消','AbortError'));signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();})]);}
+        finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+      }
+      signal?.throwIfAborted();
+      return inspect(owner,id,options);
+    },
+    async stop(owner,id) {
+      const record=find(owner,id);
+      if(!record.settled)record.controller.abort();
+      try{await commandDeadline(record.promise,settleTimeoutMs,'命令停止未能确认');}
+      catch(error){throw uncertain(record.execution,error.message);}
+      return inspect(owner,id);
+    },
+    requestReview(owner) {
+      if(![...active].some(r=>sameOwner(r.owner,owner)&&r.background))return false;
+      reviewRequest=owner;changed();return true;
+    },
+    async waitForUpdate(owner) {
+      if(!sameOwner(reviewOwner,owner)){reviewOwner=owner;reviews=0;if(!sameOwner(reviewRequest,owner))reviewRequest=null;}
+      while(true){
+        const pending=backgroundFor(owner);
+        if(pending.some(r=>r.settled)||!pending.length)return {kind:'settled',events:takeCompleted(owner)};
+        const due=pending.filter(r=>r.reviewedAtOutput!==(r.lastOutputAt??r.startedAt));
+        const quiet=quietReviewMs>0 && reviews<maxQuietReviews && due.some(r=>now()-(r.lastOutputAt??r.startedAt)>=quietReviewMs);
+        if(reviewRequest||quiet){
+          const requested=Boolean(reviewRequest);reviewRequest=false;reviews++;
+          for(const r of pending)r.reviewedAtOutput=r.lastOutputAt??r.startedAt;
+          return {kind:'review',requested,jobs:pending.map(view)};
+        }
+        const deadlines=pending.map(r=>r.deadlineAt-now());
+        if(quietReviewMs>0&&reviews<maxQuietReviews)deadlines.push(...due.map(r=>quietReviewMs-(now()-(r.lastOutputAt??r.startedAt))));
+        const ms=Math.max(1,Math.min(...deadlines));let timer;
+        try{await Promise.race([wake.promise,Promise.race(pending.map(r=>r.promise)),new Promise(resolve=>{timer=setTimeout(resolve,ms);})]);}
+        finally{clearTimeout(timer);}
+        if(pending.some(r=>!r.settled&&now()>r.deadlineAt))throw uncertain(pending.find(r=>!r.settled)?.execution,'后台命令结果未能确认，已阻止继续执行');
+      }
+    },
     takeCompleted,
     hasBackground: owner => backgroundFor(owner).length > 0,
     async waitForCompletion(owner) {

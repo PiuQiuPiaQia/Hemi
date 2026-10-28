@@ -93,9 +93,10 @@ test('real Bot/SDK delivers a failing command to the main agent and closes block
 
 for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['no-progress',{noProgressRounds:3},'goal-no-progress'],['round-limit',{maxRounds:2,noProgressRounds:5},'goal-budget-limit']])test(`real Bot leaves ${mode} task incomplete and records its reason`,{timeout:45000},async t=>{
   const f=await fixture(t,mode,policy);await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});
-  assert.equal(Object.values(flow.runs)[0].outcome,'failed');const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
-  assert.notEqual(root.status,'completed');assert.equal(root.goal.phase,mode==='round-limit'?'budget_limited':'blocked');assert.ok(root.goal.reason);
-  const notices=flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice');assert.ok(notices.some(part=>/未完成|未确认完成|总预算/.test(part.text)));
+  assert.equal(Object.values(flow.runs)[0].outcome,mode==='invalid'?'failed':'partial');const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
+  assert.notEqual(root.status,'completed');assert.equal(root.goal.phase,mode==='round-limit'?'budget_limited':mode==='invalid'?'failed':'no_progress');assert.ok(root.goal.reason);
+  const notices=flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice');assert.ok(notices.some(part=>/未完成|未确认完成|预算|进展/.test(part.text)));
+  assert.equal(notices.filter(p=>p.level==='error').length,mode==='invalid'?1:0);
   if(mode==='no-progress')assert.equal(f.checks,3);
 });
 

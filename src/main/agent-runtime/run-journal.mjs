@@ -80,8 +80,8 @@ export function createRunJournal({ dir }) {
         if (!previous || previous.owner.conversationId !== owner.conversationId || previous.owner.generation !== owner.generation
           || previous.status !== 'awaiting_user' || previous.goal?.phase !== 'awaiting_user' || !continuation.inputId || typeof continuation.answer !== 'string') throw new Error('等待答复的目标已变化，不能续接');
         const used = goalRequests(s,previous);
-        if (previous.goal.round >= previous.goal.policy.maxRounds || used >= previous.goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code:'goal-budget-limit'});
-        root.goal = {...structuredClone(previous.goal),id:goalIdentity(previous),phase:'active',round:previous.goal.round+1,requestOffset:used,
+        const budgetExhausted=previous.goal.round >= previous.goal.policy.maxRounds || used >= previous.goal.policy.maxRequests;
+        root.goal = {...structuredClone(previous.goal),id:goalIdentity(previous),phase:'active',round:previous.goal.round+1,requestOffset:used,budgetExhausted,
           replies:[...(previous.goal.replies ?? []),{inputId:continuation.inputId,text:continuation.answer,runId:owner.rootRunId}],continuedFrom:continuation.rootRunId};
         delete root.goal.waitingForUser;
         Object.assign(previous,{status:'continued',continuedBy:owner.rootRunId,terminalAt:Date.now()});
@@ -139,7 +139,7 @@ export function createRunJournal({ dir }) {
       if (status === 'completed' && ((root.requestLimitReached && !root.goal) || (root.goal && root.goal.phase !== 'complete'))) {
         status = 'partial'; reason ??= root.goal?.reason ?? '目标尚未通过完成校验';
       }
-      if (root.goal && status !== 'completed' && root.goal.phase !== 'blocked' && root.goal.phase !== 'budget_limited') Object.assign(root.goal, {phase: status === 'cancelled' ? 'cancelled' : 'interrupted', reason});
+      if (root.goal && status !== 'completed' && !['blocked','budget_limited','no_progress','failed'].includes(root.goal.phase)) Object.assign(root.goal, {phase: status === 'cancelled' ? 'cancelled' : 'interrupted', reason});
       root.status = status; root.reason = reason ?? (status === 'blocked' ? root.goal.reason : null); root.terminalAt = Date.now();
       if (status !== 'completed') for (const item of Object.values(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') item.state = 'obsolete';
       return root;

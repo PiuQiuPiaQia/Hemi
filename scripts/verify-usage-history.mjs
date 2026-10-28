@@ -29,7 +29,7 @@ const wait = async (read, label) => {
 };
 try {
   vite = await createServer({configFile: path.join(repo, 'vite.config.ts'), cacheDir: path.join(root, 'vite'),
-    logLevel: 'error', server: {host: '127.0.0.1', port: 0}});
+    logLevel: 'error', server: {host: '127.0.0.1', port: 0, strictPort: false}});
   await vite.listen();
   for (const mode of process.env.HEMI_VERIFY_MODE ? [process.env.HEMI_VERIFY_MODE] : ['dev', 'built']) {
     const profile = path.join(root, mode);
@@ -82,6 +82,94 @@ try {
     await page.getByRole('button', {name: '清除搜索', exact: true}).click();
     await page.getByRole('combobox', {name: '状态', exact: true}).selectOption('all');
     await wait(async () => await page.locator('.h37-usage-row').count() === 50, 'clear filters');
+
+    // 验证数字格式化：K/M/B 单位，避免1000K，精确值在 title
+    const firstCell = page.locator('.h37-usage-td-right').first();
+    const cellText = await firstCell.innerText();
+    const cellTitle = await firstCell.getAttribute('title');
+    assert.ok(cellText.match(/^\d+$|^\d+\.?\d*[KMB]$|^—$/), 'number format uses K/M/B');
+    assert.ok(!cellText.includes('1000K') && !cellText.includes('1000M'), 'no 1000K or 1000M');
+    if (cellTitle && cellTitle !== '—') {
+      const numericTitle = Number(cellTitle.replace(/,/g, ''));
+      assert.ok(!isNaN(numericTitle), 'title shows precise number');
+    }
+    result.checks.push('number formatting: compact K/M/B units, no 1000K, precise title');
+
+    // 写入新的真实 journal 记录，再从主进程发出真实 IPC 广播。
+    const firstRowBefore = await page.locator('.h37-usage-row').first().innerText();
+    await page.evaluate(() => {
+      window.__usageChangedReceived = false;
+      const unsubscribe = window.hemiVoice.onUsageChanged(() => {
+        window.__usageChangedReceived = true;
+        unsubscribe();
+      });
+    });
+    await app.evaluate(async ({BrowserWindow}, moduleUrl) => {
+      const vm = process.getBuiltinModule('node:vm');
+      const {getAgentRuntime} = await new vm.Script(`import(${JSON.stringify(moduleUrl)})`, {
+        importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
+      }).runInThisContext();
+      const runtime = getAgentRuntime();
+      const owner = {conversationId: 'isolated-refresh', rootRunId: 'isolated-refresh-root', generation: 0};
+      await runtime.journal.beginRoot(owner);
+      await runtime.journal.requestStart(owner, {requestId: 'request-refresh-check', role: 'main', purpose: 'main',
+        actualModel: {model: 'manual-refresh-fixture', api: 'openai-completions'}}, 5);
+      await runtime.journal.requestEnd('request-refresh-check', {httpStatus: 200,
+        tokenUsage: {uncachedInput: 100, output: 20, cacheRead: 0, cacheWrite: 0}});
+      await runtime.journal.finishRoot(owner, 'completed');
+      globalThis.__usageHistoryVerificationCalls = 0;
+      const original = runtime.usageHistory;
+      runtime.usageHistory = async options => {
+        globalThis.__usageHistoryVerificationCalls += 1;
+        // 让按钮禁用状态可观测，查询和投影仍调用实际服务。
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return original(options);
+      };
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('usage:changed', {conversationId: owner.conversationId});
+    }, pathToFileURL(path.join(repo, 'src/main/ipc/llm.ipc.mjs')).href);
+    await wait(() => page.evaluate(() => window.__usageChangedReceived), 'real usageChanged broadcast');
+    await page.waitForTimeout(300);
+    const firstRowAfter = await page.locator('.h37-usage-row').first().innerText();
+    assert.equal(firstRowAfter, firstRowBefore, 'data unchanged after usageChanged event');
+    assert.equal(await app.evaluate(() => globalThis.__usageHistoryVerificationCalls), 0, 'broadcast does not query history');
+    result.checks.push('no auto-refresh: usageChanged event does not refresh data');
+
+    // 验证手动刷新按钮：点击后loading状态出现并消失
+    const refreshButton = page.getByRole('button', {name: '刷新数据', exact: true});
+    assert.ok(await refreshButton.isVisible(), 'refresh button exists');
+
+    await refreshButton.click();
+    assert.equal(await refreshButton.isDisabled(), true, 'refresh disables duplicate clicks while loading');
+
+    // 等待刷新完成
+    await wait(async () => !(await refreshButton.isDisabled()), 'refresh completes');
+
+    await wait(async () => (await page.locator('.h37-usage-row').first().innerText()).includes('manual-refresh-fixture'), 'new journal record rendered');
+    assert.equal(await app.evaluate(() => globalThis.__usageHistoryVerificationCalls), 1, 'manual refresh queries the real service once');
+
+    result.checks.push('manual refresh: button triggers reload, shows loading state, prevents double-click');
+
+    // 验证热力图 Tooltip（鼠标悬浮）
+    const heatmapCell = page.locator('.h37-usage-heatmap-cell').first();
+    await heatmapCell.hover();
+    await page.waitForSelector('.h37-tooltip', {timeout: 1000});
+    const tooltipText = await page.locator('.h37-tooltip').innerText();
+    assert.ok(tooltipText.includes('202') && (tooltipText.includes('请求') || tooltipText.includes('tokens')), 'heatmap tooltip shows date and metric');
+    await page.mouse.move(0, 0); // 移开鼠标
+    await page.waitForSelector('.h37-tooltip', {state: 'hidden', timeout: 1000});
+    result.checks.push('heatmap tooltip: custom component with date/metric, hide on mouse leave');
+
+    // 验证热力图 Tooltip（键盘 focus 和 Escape）
+    await heatmapCell.focus();
+    await page.waitForSelector('.h37-tooltip', {timeout: 1000});
+    assert.ok(await page.locator('.h37-tooltip').isVisible(), 'tooltip visible on keyboard focus');
+    const tooltipId = await page.locator('.h37-tooltip').getAttribute('id');
+    const ariaDescribedby = await heatmapCell.getAttribute('aria-describedby');
+    assert.ok(tooltipId && ariaDescribedby === tooltipId, 'tooltip has id and aria-describedby linkage');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.h37-tooltip', {state: 'hidden', timeout: 1000});
+    result.checks.push('heatmap tooltip: keyboard focus support, aria-describedby, Escape dismisses');
+
     for (const width of [1440, 768, 375]) {
       await app.evaluate(({BrowserWindow}, width) => {
         const win = BrowserWindow.getAllWindows().find(win => !new URL(win.webContents.getURL()).searchParams.has('mode'));
@@ -93,6 +181,13 @@ try {
       const screenshot = mode + '-' + width + '.png';
       await page.screenshot({path: path.join(output, screenshot), animations: 'disabled'});
       result.screenshots.push(screenshot);
+      await heatmapCell.hover();
+      await page.locator('.h37-tooltip').waitFor();
+      const tooltipScreenshot = mode + '-' + width + '-tooltip.png';
+      await page.screenshot({path: path.join(output, tooltipScreenshot), animations: 'disabled'});
+      result.screenshots.push(tooltipScreenshot);
+      await page.mouse.move(0, 0);
+      await page.locator('.h37-tooltip').waitFor({state: 'hidden'});
     }
     assert.deepEqual(result.errors, []);
     console.log('PASS ' + mode + ': ' + result.checks.join('; '));

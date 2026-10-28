@@ -254,6 +254,7 @@ export type TaskOutcome =
   | "reportfailed";
 
 export type RunActivityView = {
+  runId?: string;
   phase: "running" | "waiting-background" | "waiting-resource";
   since: number | null;
   jobs: Array<{
@@ -263,6 +264,7 @@ export type RunActivityView = {
     description?: string;
     commandTruncated?: boolean;
     lastOutputAt?: number | null;
+    deadlineAt?: number; outputBytes?: number; earliestOutput?: number;
     startedAt: number;
     endedAt: number | null;
     status: string;

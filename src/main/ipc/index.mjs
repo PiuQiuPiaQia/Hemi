@@ -70,7 +70,6 @@ export async function registerAllIpcHandlers() {
   registerAccessIpc();
   // 033：工作区登记先于 task/conversation 注册（两者运行期共享同一实例）。
   registerWorkspaceIpc();
-  registerBotIpc();
   registerSkillsIpc();
   registerContextIpc();
   registerComposerIpc();
@@ -100,6 +99,7 @@ export async function registerAllIpcHandlers() {
       notification.show();
     },
   });
+  registerBotIpc({onConversationResult:info=>turnNotifier.notifyCompletion(info)});
   initConversationFlowService({
     dir: path.join(runtimeDataDir(app.getPath('userData')), 'conversations'),
     log: createLogger('flow'),

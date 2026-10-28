@@ -210,6 +210,10 @@ export function DesktopConversationFlow(props: Props) {
           case "message.edit":
             p.onEdit(action.targetId, action.nextText);
             break;
+          case "background.command": {
+            const result=await bridge.flowCommand(p.conversationId!,{type:'backgroundCommand',targetRunId:action.targetId,action:action.action,jobId:action.jobId,from:action.from});
+            return result.ok?{ok:true,value:{receipt:'completed',data:result.data}}:{ok:false,error:{code:'failed',message:result.message??'任务状态已变化'}};
+          }
           case "run.stop":
           case "recovery.retry": {
             const result = await bridge.flowCommand(p.conversationId!, action.type === 'recovery.retry'

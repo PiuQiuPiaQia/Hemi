@@ -92,3 +92,13 @@ test('awaiting_user 必须携带实际问题、证据和未完成事项',()=>{
  assert.deepEqual(parseGoalVerdict(JSON.stringify(awaiting)),awaiting);
  for(const patch of [{question:''},{question:undefined},{evidence:[]},{remaining:[]}])assert.throws(()=>parseGoalVerdict(JSON.stringify({...awaiting,...patch})));
 });
+
+
+test('答复时预算已耗尽正常返回 partial，不调用模型或重置原预算',async t=>{
+ const {journal}=await fixture(t,{maxRounds:1});await journal.checkGoal(owner);await journal.recordGoalCheck(owner,awaiting);await journal.finishRoot(owner,'awaiting_user');
+ const reply={...owner,rootRunId:'budget-answer'};await journal.beginRoot(reply);
+ const result=await driveGoal({journal,owner:reply,objective:'用户答复',continuation:{rootRunId:owner.rootRunId,inputId:'answer',answer:'继续'},policy:goalPolicy(),signal:new AbortController().signal,
+ run:async()=>assert.fail('exhausted goal must not execute'),verify:async()=>assert.fail('exhausted goal must not call verifier'),persist:async()=>{},evidence:async()=>''});
+ assert.equal(result.halted.kind,'budget_limited');assert.deepEqual(result.texts,[]);assert.equal(goalRunOutcome(result),'partial');
+ await journal.finishRoot(reply,'partial');assert.equal((await journal.root(reply)).goal.phase,'budget_limited');
+});

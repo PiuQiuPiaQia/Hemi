@@ -518,7 +518,7 @@ function ConversationFlowBody({
           {error}
         </p>
       ) : null}
-      {state?.runActivity ? <RunActivity activity={state.runActivity} /> : null}
+      {state?.runActivity ? <RunActivity activity={state.runActivity} readOnly={state.readOnly} /> : null}
     </DeliverableContext.Provider>
   );
 }

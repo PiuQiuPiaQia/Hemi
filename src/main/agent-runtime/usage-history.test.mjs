@@ -294,3 +294,97 @@ test('真实 runtime 装配：createAgentRuntime.usageHistory 投影临时 journ
   assert.equal(page2.records[0].id, 'rq1');
   assert.equal((await runtime2.usageHistory({})).earliestAt, page.records[0].at);
 });
+
+test('全链路集成：真实 SSE → controlledStream → 磁盘 journal → runtime.usageHistory（IPC 同一服务入口）筛选/分页/统计', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'h-usage-e2e-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let hits = 0;
+  const sseChunk = payload => `data: ${JSON.stringify({ id: 'm', object: 'chat.completion.chunk', model: 'test', ...payload })}\n\n`;
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      hits += 1;
+      if (hits === 1) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'upstream exploded' } })); return; }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      // 空 delta 先到：TTFT 不从响应头/空事件起算。
+      res.write(sseChunk({ choices: [{ index: 0, delta: {}, finish_reason: null }] }));
+      setTimeout(() => {
+        res.write(sseChunk({ choices: [{ index: 0, delta: { role: 'assistant', content: '好的' }, finish_reason: null }] }));
+        setTimeout(() => {
+          // 第二段内容与终态 usage 间隔 30ms：生成窗口稳定为正，TPS 可断言（同毫秒收尾会让窗口为 0）。
+          res.write(sseChunk({ choices: [{ index: 0, delta: { content: '，已收到' }, finish_reason: null }] }));
+          res.write(sseChunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 4, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 0 } } }));
+          res.end('data: [DONE]\n\n');
+        }, 30);
+      }, 120);
+    });
+  });
+  const port = await listen(server);
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const { createAgentRuntime } = await import('./core.mjs');
+  const runtime = await createAgentRuntime({ userDataDir: dir, getProfiles: () => ({}), resolveCapabilities: () => ({}), getAccessService: () => ({}), log: { info() {}, warn() {}, error() {} } });
+  t.after(() => { try { runtime.disposeAll?.(); } catch { /* 测试结束清理 */ } });
+  await runtime.usageHistory({}); // 空查询等待 runtime 启动恢复（journalReady）完成，避免与 recover() 竞态。
+  const configA = { modelKey: 'p/a', providerId: 'p', credentialRef: 'p', model: 'a-model', baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-completions', apiKey: 'K1' };
+  const configB = { ...configA, modelKey: 'p/b', model: 'b-model' };
+  const owner = { conversationId: 'conv-e2e', rootRunId: 're2e', generation: 0 };
+  await runtime.journal.beginRoot(owner);
+  const execution = { journal: runtime.journal, owner, plan: { role: 'main', primary: configA, allowedFallbacks: [configB] },
+    store: { resolveStrict: async key => ({ ok: true, config: key === 'p/a' ? configA : configB }) },
+    budgets: { maxRequestsPerRun: 5 }, purpose: 'main',
+    recoveryTestClock: { timers: { setTimeout: fn => setTimeout(fn, 1), clearTimeout: id => clearTimeout(id) } } };
+  const answer = await controlledStream(streamSimple, () => execution)(piModelOf(configA, 'hemi'),
+    { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }).result();
+  assert.equal(answer.stopReason, 'stop');
+
+  // runtime.usageHistory 与 IPC usage:get-history 处理器调用的是同一入口。
+  const all = await runtime.usageHistory({});
+  assert.equal(all.total, 2, '回退两次 HTTP attempt 各一行');
+  const success = all.records[0];
+  assert.equal(success.status, 'success');
+  assert.equal(success.model, 'b-model', '真实请求模型（回退后的候选）');
+  assert.equal(success.protocol, 'openai-completions');
+  assert.ok(success.ttftMs >= 100, 'TTFT 从首个有效输出起算，跳过响应头与空 delta');
+  assert.equal(success.output, 2, '成功 attempt 按 provider 报告计 tokens');
+  assert.ok(success.tps > 0, '生成窗口 TPS');
+  const failed = all.records[1];
+  assert.equal(failed.status, 'error');
+  assert.equal(failed.httpStatus, 500);
+  assert.equal(failed.output, null, '失败 attempt tokens 不伪 0');
+  assert.equal(all.earliestAt, failed.at);
+
+  // 筛选影响 total/totals/daily/earliestAt；分页只切 records 且统计不随之重复计算。
+  const successOnly = await runtime.usageHistory({ status: 'success' });
+  assert.equal(successOnly.total, 1);
+  assert.deepEqual(successOnly.totals, { requests: 1, input: 4, output: 2, cacheRead: 0, cacheWrite: 0 }, 'tokens 只由成功 attempt 承担');
+  assert.equal((await runtime.usageHistory({ query: 'b-model' })).total, 1);
+  const paged = await runtime.usageHistory({ limit: 1, offset: 1 });
+  assert.deepEqual(paged.records.map(r => r.model), ['a-model']);
+  assert.equal(paged.total, 2);
+  assert.deepEqual(paged.totals, all.totals);
+  assert.deepEqual(paged.daily, all.daily);
+  assert.equal(paged.earliestAt, all.earliestAt);
+  assert.equal(all.daily.reduce((sum, bucket) => sum + bucket.requests, 0), 2, '按日统计覆盖全部筛选结果');
+  assert.equal(all.daily.reduce((sum, bucket) => sum + bucket.input, 0), 4, '按日 tokens 与 totals 同源不双计');
+});
+
+test('failure-only 旧记录投影：status=error 且错误文本来自 failure.message（经脱敏）', () => {
+  const record = projectUsageRecord({ requestId: 'f', startedAt: 1000, endedAt: 2000, failure: { kind: 'http', message: '上游 429: https://user:pass@api.example.com/v1?k=s' } });
+  assert.equal(record.status, 'error');
+  assert.equal(record.error, '上游 429: https://api.example.com/v1', '错误文本来自 failure.message 且去 query/userinfo');
+  assert.equal(record.error.includes('user:pass'), false);
+  assert.equal(record.error.includes('k=s'), false);
+  assert.equal(projectUsageRecord({ requestId: 'g', startedAt: 1000, endedAt: 2000 }).error, null);
+});
+
+test('IPC 边界静态接线：preload getUsageHistory → usage:get-history → usageHistory 服务入口', async () => {
+  const { fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const ipc = await readFile(path.join(here, '../ipc/conversation.ipc.mjs'), 'utf8');
+  const preload = await readFile(path.join(here, '../../preload/index.cjs'), 'utf8');
+  const handlerAt = ipc.indexOf('ipcMain.handle(IPC.usage.getHistory');
+  const serviceAt = ipc.indexOf('getAgentRuntime().usageHistory(options)');
+  assert.ok(handlerAt >= 0 && serviceAt > handlerAt, 'usage:get-history 处理器必须调用 usageHistory 服务入口');
+  assert.ok(preload.includes('getUsageHistory:'), 'preload 暴露 getUsageHistory');
+  assert.ok(preload.includes("'usage:get-history'"), 'preload 经 usage:get-history 通道');
+});

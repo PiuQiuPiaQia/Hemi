@@ -5,6 +5,7 @@ import {promisify} from 'node:util';
 import {StringDecoder} from 'node:string_decoder';
 import {commandDeadline} from './command-deadline.mjs';
 import {windowsCommandHelper, reapWindowsCommand} from './windows-command-job.mjs';
+import { CommandOutput } from './command-output.mjs';
 import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
 const exec=promisify(execFile), pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const MAX_OUTPUT=8*1024*1024;
@@ -19,7 +20,8 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
   if(signal?.aborted)return {...empty,aborted:true,status:'cancelled'};
   return new Promise(resolve=>{
     let child,timer,ending=false,closed=false,code=null,exitSignal=null,spawnError=null;
-    let stdout='',stderr='',bytes=0,truncated=false,aborted=false,timedOut=false;
+    let stdout='',stderr='',truncated=false,aborted=false,timedOut=false;
+    const output = new CommandOutput(maxOutput);
     const decoders={out:new StringDecoder('utf8'),err:new StringDecoder('utf8')};
     const exited=Promise.withResolvers(),streamsClosed=Promise.withResolvers();
     const clean=async()=>{
@@ -56,7 +58,8 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
         cleanupConfirmed=false;cleanupError??=error.message;
       });
       child?.stdout?.destroy();child?.stderr?.destroy();
-      stdout+=decoders.out.end();stderr+=decoders.err.end();
+      output.append('out',decoders.out.end());output.append('err',decoders.err.end());
+      stdout=output.text('out');stderr=output.text('err');truncated=output.total>output.bytes;
       signal?.removeEventListener('abort',onAbort);
       const status=!cleanupConfirmed?'cleanup-failed':aborted?'cancelled':timedOut?'timed-out':spawnError?'start-failed':code===0?'succeeded':'failed';
       resolve({code,signal:exitSignal,stdout,stderr,cleanupError,spawnError:spawnError?.code??(spawnError?'registration-failed':null),timedOut,aborted,cleanupConfirmed,truncated,status});
@@ -64,9 +67,9 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
     const onAbort=()=>{aborted=true;void finish();};
     const append=(which,chunk)=>{
       if(closed)return;
-      const kept=chunk.subarray(0,Math.max(0,maxOutput-bytes));bytes+=kept.length;truncated||=kept.length<chunk.length;
-      if(which==='out')stdout+=decoders.out.write(kept);else stderr+=decoders.err.write(kept);
-      try {onOutput?.({stdout,stderr});}catch(error){spawnError=error;void finish();}
+      const text=decoders[which].write(chunk);
+      output.append(which,text);
+      try {onOutput?.({get stdout(){return output.text('out');},get stderr(){return output.text('err');},channel:which,chunk:text});}catch(error){spawnError=error;void finish();}
     };
     try{
       const args=windows?['run',ownerToken,Buffer.from(command).toString('base64')]:onSpawn
@@ -104,7 +107,7 @@ export function commandToolResult(out) {
   };
   const text = [out.stdout, out.stderr ? `stderr:\n${out.stderr}` : '',
     `exit=${out.code ?? 'none'}${out.signal ? ` signal=${out.signal}` : ''} · ${out.status}`,
-    out.truncated ? '（输出已截断）' : '',
+    out.truncated ? '（输出已截断，保留最近输出）' : '',
   ].filter(Boolean).join('\n');
   return { content: [{ type: 'text', text }], isError: out.status !== 'succeeded', details: out };
 }

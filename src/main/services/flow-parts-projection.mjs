@@ -140,20 +140,20 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   }
 
   /** 收口：失败补 notice（成功不加——正文 part 已完整）。 */
-  function finish({ error = null, stopped = false, blocked = null } = {}) {
+  function finish({ error = null, stopped = false, blocked = null, halted = null } = {}) {
     const facts = [...closeOpenParts(), ...[...toolParts.values(),...backgroundParts.values()].map(({ partId }) => ({
       type: 'part-updated', runId, partId, patch: { status: stopped ? 'stopped' : 'error' }, ...gen(),
     }))];
     toolParts.clear();
     backgroundParts.clear();
-    if (!error && !blocked && !(stopped && seq === 0)) return facts;
+    if (!error && !blocked && !halted && !(stopped && seq === 0)) return facts;
     const partId = nextId('n');
     return [...facts, {
       type: 'part-appended',
       runId,
       part: { partId, kind: 'notice', level: error ? 'error' : 'info', text: error
         ? boundedErrorDetail(error)
-        : blocked && !stopped ? `任务受阻：${blocked.reason}${blocked.nextAction ? '\n'+blocked.nextAction : ''}` : '本任务已停止。' },
+        : halted && !stopped ? `${halted.kind==='budget_limited'?'任务达到预算上限':'任务暂无进展'}：${halted.reason}\n${halted.nextAction??''}` : blocked && !stopped ? `任务受阻：${blocked.reason}${blocked.nextAction ? '\n'+blocked.nextAction : ''}` : '本任务已停止。' },
       ...gen(),
     }];
   }

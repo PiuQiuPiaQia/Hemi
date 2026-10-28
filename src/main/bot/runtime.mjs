@@ -59,7 +59,7 @@ export async function validateCloudModel(config) {
 }
 
 /** Cloud host bindings only. Desktop and Bot share the same execution runtime. */
-export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy}) {
+export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy, backgroundQuietReviewMs = 60000}) {
   const active = new Map(), generations = new Map(), cancelledBeforeStart = new Set();
   const access = createPermissionService({dir: dataDir}), ready = access.load();
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
@@ -82,7 +82,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
     getSkillService: () => capabilities.skills,
     loadArchiveSession: readConversation,
     getAccessService: () => access,
-    sessionOptions: {desktopClient: desktop, tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
+    sessionOptions: {backgroundQuietReviewMs,desktopClient: desktop, tools: [...TOOLS, 'task', 'task_status', 'task_message', 'task_cancel', 'memory_write', 'memory_read', 'memory_forget', 'memory_restore', 'scratchpad'], permissionTimeoutMs: 0, controlRoots: [dataDir, path.join(os.homedir(), '.local/share/hemi-bot'), path.join(os.homedir(), '.config/systemd/user/hemi-bot.service'), path.resolve(import.meta.dirname, '../../..')]},
     appendSystem: [CLOUD_SYSTEM], permissionTimeoutMs: 0,
     loadArchiveAgent(id) {
       const owner = active.get(id);if (!owner) return null;
@@ -155,8 +155,8 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         const result = await runtime.runRootTurn(conversationId, {userText: input.text, inputId: envelope.inputId, imageBlocks: input.images ?? []});
         await Promise.all(owner.deliveries);await runtime.persist(conversationId);
         outcome = goalRunOutcome(result, {cancelled: ctx.cancelled});
-        for (const value of projector.finish({stopped: result.aborted || ctx.cancelled, blocked:outcome==='blocked'?result.blocked:null})) apply(value);
-        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser,blocked:outcome==='blocked'?result.blocked:null};
+        for (const value of projector.finish({stopped: result.aborted || ctx.cancelled, halted:result.halted,blocked:outcome==='blocked'?result.blocked:null})) apply(value);
+        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser,halted:result.halted,blocked:outcome==='blocked'?result.blocked:null};
       } catch (error) {
         cleanupUnconfirmed = error.code === 'cleanup-unconfirmed';
         for (const value of projector.finish({error: owner.stopped ? null : error, stopped: owner.stopped})) apply(value);
@@ -172,6 +172,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         finally {if (active.get(conversationId) === owner) active.delete(conversationId);owner.settled.resolve();}
       }
     },
+    backgroundCommand: (id,request) => runtime.backgroundCommand(id,request),
     async cancelWaitingUser(id,runId) {await runtime.completeConversation(id,'stopped','用户停止等待答复',runId);},
     async stop(id) {
       const owner = active.get(id);

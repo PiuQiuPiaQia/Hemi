@@ -25,6 +25,8 @@ test('前台聚焦不打扰；隐藏、最小化、在别的应用上都算后�
   assert.equal(shouldNotifyForCompletion({ enabled: false, visible: false }), false);
 });
 
+test('等待用户的提醒明确需要回复',()=>{assert.match(completionBody({outcome:'awaiting-user'}),/等待你的回复/);});
+
 test('文案：会话标题优先，正文带结果口径与输入摘要；多条只报条数', () => {
   assert.equal(completionTitle({ conversationTitle: '  整理下载文件夹 ' }), '整理下载文件夹');
   assert.equal(completionTitle({ conversationTitle: '' }), 'Hemi');

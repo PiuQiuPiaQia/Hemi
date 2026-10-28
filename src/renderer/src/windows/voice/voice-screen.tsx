@@ -1045,7 +1045,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
-              <RunActivity key={currentConversationId} active={!skillMarketOpen && !workflowStudioOpen} activity={runActivity} />
+              <RunActivity key={currentConversationId} readOnly={conversationReadOnly} conversationId={currentConversationId} generation={timelineGeneration} active={!skillMarketOpen && !workflowStudioOpen} activity={runActivity} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}

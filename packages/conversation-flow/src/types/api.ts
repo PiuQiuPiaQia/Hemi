@@ -222,6 +222,7 @@ export type FlowAction = BaseAction &
     | { type: "message.retry"; runId?: string }
     | { type: "recovery.retry"; runId: string; recoveryId: string }
     | { type: "run.stop" | "task.stop" }
+    | { type: "background.command"; action: "read" | "stop" | "review"; jobId?: string; from?: number }
     | { type: "permission.decide"; choice: TaskPermissionChoice }
     | {
         type: "workflow.configure";
@@ -275,6 +276,7 @@ export type FlowActionRequest = FlowAction & {
   requestId: string;
 };
 export type FlowActionReceipt = {
+  data?: {text?:string;next?:number;total?:number;lossy?:boolean;accepted?:boolean};
   receipt: "accepted" | "completed" | "needs-review";
   revision?: string;
 };

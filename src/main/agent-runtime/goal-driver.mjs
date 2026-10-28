@@ -61,6 +61,10 @@ export const incompleteGoal = (message, code = 'goal-incomplete') => Object.assi
 /** Desktop is the complete host; other hosts use the same goal result contract. */
 export function goalRunOutcome(result, {cancelled = false} = {}) {
   if (result?.aborted || cancelled) return 'stopped';
+  if (result?.halted) {
+    if(result.goalComplete || result.waitingForUser || result.blocked || result.budgetLimited || !['no_progress','budget_limited'].includes(result.halted.kind) || !result.halted.reason?.trim())throw incompleteGoal('任务停止结果无效');
+    return 'partial';
+  }
   if (result?.blocked) {
     if (!result.budgetLimited && !result.goalComplete && !result.waitingForUser
       && typeof result.blocked.reason === 'string' && result.blocked.reason.trim()) return 'blocked';
@@ -72,11 +76,17 @@ export function goalRunOutcome(result, {cancelled = false} = {}) {
 
 /** Each continuation is durable and stays under the original root/input/model policy. */
 export async function driveGoal({journal, owner, objective, policy, continuation = null, run, verify, evidence, persist, signal}) {
-  let goal = await journal.beginGoal(owner, objective, policy, continuation), result, hostEvent = null;
+  let goal = await journal.beginGoal(owner, objective, policy, continuation), result={texts:[],usages:[],toolNames:[],requests:0}, hostEvent = null;
   policy = goal.policy;
   let combined = {texts: [], usages: [], toolNames: [], requests: 0};
   let lastSignature = null, repeated = 0;
+  const halt = async (kind,reason) => {
+    await journal.endGoal(owner,kind,reason);
+    const last=goal.verifications.at(-1);
+    return {...result,goalComplete:false,budgetLimited:false,halted:{kind,reason,remaining:last?.remaining??[],nextAction:last?.nextAction??'请核对已有结果后明确后续工作。'}};
+  };
   try {
+    if(goal.budgetExhausted)return await halt('budget_limited','目标总预算已达到，已有成果已保留。');
     while (true) {
       signal.throwIfAborted();
       const turn = await run(hostEvent);
@@ -102,7 +112,7 @@ export async function driveGoal({journal, owner, objective, policy, continuation
       }
       const signature = createHash('sha256').update(JSON.stringify({remaining:verdict.remaining, evidence:verdict.evidence})).digest('hex');
       repeated = signature === lastSignature ? repeated + 1 : 1; lastSignature = signature;
-      if (repeated >= policy.noProgressRounds) throw incompleteGoal(`任务未完成，连续 ${repeated} 轮没有可确认的进展：${verdict.reason}`, 'goal-no-progress');
+      if (repeated >= policy.noProgressRounds) return await halt('no_progress',`连续 ${repeated} 轮没有可确认的进展：${verdict.reason}`);
       goal = await journal.continueGoal(owner);
       hostEvent = {customType:'hemi_goal_continuation',content:[
         '［宿主目标续跑 · 不是用户新指令］', `原目标：${goal.objective}`, `当前第 ${goal.round}/${policy.maxRounds} 段；保留已有成果和执行归属。`,
@@ -111,7 +121,8 @@ export async function driveGoal({journal, owner, objective, policy, continuation
       ].join('\n')};
     }
   } catch (error) {
-    await journal.endGoal(owner, signal.aborted ? 'cancelled' : error.code === 'goal-budget-limit' ? 'budget_limited' : 'blocked', error.message);
+    if(!signal.aborted && error.code==='goal-budget-limit')return await halt('budget_limited',error.message);
+    await journal.endGoal(owner, signal.aborted ? 'cancelled' : 'failed', error.message);
     throw error;
   }
 }

@@ -12,6 +12,7 @@ import { createBotTransport } from './transport.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
 import { manualProviderModels } from './models.mjs';
 import { modelSyncChanges, selectedModelChanges } from './model-sync.mjs';
+import {conversationStatus,newSettledRuns} from '../../shared/conversation-status.mjs';
 import { applyFlowChange } from '../../shared/conversation-flow.mjs';
 import {readComponentVersion, componentUpdateNeeded} from './component-version.mjs';
 import { createBotOAuthLogin } from './oauth-login.mjs';
@@ -67,6 +68,7 @@ export function createBotDesktopService({
   profiles,
   archivePath,
   onChanged = () => {},
+  onConversationResult = () => {},
   transport = createBotTransport({ runner, archivePath }),
   ensureArchive = async () => {},
   autoComponentUpdates = true,
@@ -322,8 +324,10 @@ export function createBotDesktopService({
         else if(frame.change.revision>detail.flow.revision){
           const next=applyFlowChange(detail.flow,frame.change);
           if(!next.ok)changedCatalog();else{
+            const fresh=newSettledRuns({flow:detail.flow},next.snapshot);
             detail.flow=next.snapshot;
-            cache.sessions=cache.sessions.map(s=>s.id===frame.id?{...s,status:detail.flow.phase==='idle'?null:'running',turnCount:detail.flow.timeline.length}:s);
+            for(const run of fresh){const input=detail.flow.timeline.find(x=>x.kind==='user'&&run.inputIds?.includes(x.id));onConversationResult({conversationId:frame.id,conversationTitle:detail.title,outcome:run.outcome,preview:input?.text??''});}
+            cache.sessions=cache.sessions.map(s=>s.id===frame.id?{...s,status:conversationStatus(detail.flow,{live:true}),waitingForUser:Boolean(detail.flow.awaitingUser),turnCount:detail.flow.timeline.length}:s);
           }
         }
       } else if(frame.type==='catalog')changedCatalog();

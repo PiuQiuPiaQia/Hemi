@@ -15,7 +15,7 @@ import { closeActiveTtsPlayback } from './tts.ipc.mjs';
 import {readSkillDirectory} from '../skills/skill-store.mjs';
 let service = null;
 export const getBotService = () => service;
-export function registerBotIpc() {
+export function registerBotIpc({onConversationResult=()=>{}}={}) {
   const remote = getRemoteService(),
     archivePath = path.join(app.getAppPath(), 'build/hemi-bot-runtime.tgz');
   const runner = createSshRunner({
@@ -41,6 +41,7 @@ export function registerBotIpc() {
       );
       await buildBotRuntime({ root: app.getAppPath(), output: archivePath });
     },
+    onConversationResult,
     onChanged: (value) => {
       for (const win of [state.mainWindow])
         if (win && !win.isDestroyed())

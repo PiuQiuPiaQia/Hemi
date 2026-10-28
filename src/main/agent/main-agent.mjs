@@ -211,6 +211,7 @@ export function createMainAgent({
     recordEvents: (events, content) => session.appendContextFact('hemi_subagent_result', content, {eventIds:events.map(event=>event.eventId)}),
     consumeEvents: (events, content) => session.prompt('', { hostEvent: { customType: 'hemi_subagent_result', content, eventIds: events.map(event => event.eventId) } }),
     callAnchor: id => session.callAnchor(id),
+    backgroundCommand: request => session.backgroundCommand(request),
     steer: (text) => session.steer(text),
     abort: async () => { const pending = summary; pending?.controller.abort(); await session.abort(); await pending?.promise.catch(() => {}); },
     reclaimBrowserPages: () => session.reclaimBrowserPages(),

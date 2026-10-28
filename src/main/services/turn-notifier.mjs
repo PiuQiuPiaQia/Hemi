@@ -20,6 +20,7 @@ const OUTCOME_LABEL = {
   partial: '任务部分完成',
   failed: '任务未完成',
   blocked: '任务受阻',
+  'awaiting-user':'等待你的回复',
 };
 
 /**

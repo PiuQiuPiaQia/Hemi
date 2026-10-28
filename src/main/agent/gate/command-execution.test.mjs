@@ -21,7 +21,7 @@ test('060 真实退出、启动失败与输出预算保留到工具结果；EPER
   assert.equal(missing.status, 'start-failed');
   assert.equal(missing.spawnError, 'ENOENT');
   const huge = await runCommand({ command: 'printf 123456789', maxOutput: 4 });
-  assert.equal(huge.stdout, '1234');
+  assert.equal(huge.stdout, '6789');
   assert.equal(huge.truncated, true);
 });
 

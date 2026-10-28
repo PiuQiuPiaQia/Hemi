@@ -75,6 +75,7 @@ const MIME = {
 };
 const COMMANDS = new Set([
   'send',
+  'backgroundCommand',
   'stop',
   'resumeQueue',
   'promoteInput',
@@ -248,8 +249,8 @@ export async function createBotHost({
       (jobs.has(session.id) && !jobs.get(session.id).running) || resourceWait(session)?.phase === 'waiting-resource'
         ? 'queued'
         : session.flow?.activeRunId && session.flow.phase !== 'idle'
-          ? 'running'
-          : null,
+          ? resourceWait(session)?.phase === 'waiting-background' ? 'waiting' : 'running'
+          : session.flow?.awaitingUser ? 'waiting' : null,
     waitingPermission: Object.values(session.permissions ?? {}).some(
       (p) => p.status === 'pending',
     ),
@@ -347,9 +348,10 @@ export async function createBotHost({
         type: 'run-closed',
         runId: job.spec.runId,
         generation: job.spec.generation,
-        outcome: stopped ? 'stopped' : result?.waitingForUser ? 'awaiting-user' : result?.blocked ? 'blocked' : 'completed',
+        outcome: stopped ? 'stopped' : result?.waitingForUser ? 'awaiting-user' : result?.blocked ? 'blocked' : result?.halted ? 'partial' : 'completed',
         ...(result?.waitingForUser ? {waitingForUser:result.waitingForUser} : {}),
         ...(result?.blocked ? {blocked:result.blocked} : {}),
+        ...(result?.halted ? {halted:result.halted} : {}),
         at: Date.now(),
       });
     } catch (error) {
@@ -455,6 +457,7 @@ export async function createBotHost({
         },
         runtime: {
           freezeInput: (input) => freeze(id, input),
+          backgroundCommand: request => executor.backgroundCommand(id,request),
           cancelWaitingUser: ({runId}) => executor.cancelWaitingUser?.(id,runId),
           async start(spec) {
             if (!state.enabled) fail('Bot 已停止。', 'busy');

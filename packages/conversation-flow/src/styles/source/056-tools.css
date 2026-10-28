@@ -280,16 +280,17 @@ html.kb-nav .h56-route-gear:focus-visible {
 html.kb-nav .compact-shell .h56-run-activity-head:focus-visible { outline: none; }
 .compact-shell .h56-run-activity-head > svg { width: var(--sp-12); height: var(--sp-12); flex: none; }
 .compact-shell .h56-run-activity-title { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
-.compact-shell .h56-run-activity-time { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.compact-shell .h56-run-activity-status { flex: none; white-space: nowrap; }
 .compact-shell .h56-run-activity-disclosure[open] > summary .h56-run-activity-chevron { transform: rotate(90deg); }
 .compact-shell .h56-run-activity-body { max-height: min(30vh, calc(var(--sp-32) * 6)); padding: var(--sp-8) var(--sp-12); border-top: 1px solid var(--line); overflow: auto; overscroll-behavior: contain; }
-.compact-shell .h56-run-activity-hint { margin: 0; overflow-wrap: anywhere; }
-.compact-shell .h56-background-job { margin-top: var(--sp-8); }
+.compact-shell .h56-background-job + .h56-background-job { margin-top: var(--sp-8); }
 .compact-shell .h56-background-job + .h56-background-job { padding-top: var(--sp-8); border-top: 1px solid var(--line); }
-.compact-shell .h56-background-job-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4) var(--sp-8); }
+.compact-shell .h56-background-job-head { display: flex; align-items: center; gap: var(--sp-8); margin-bottom: var(--sp-4); }
 .compact-shell .h56-background-job-description { flex: 1; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
-.compact-shell .h56-background-job > p { margin: var(--sp-8) 0 var(--sp-4); }
-.compact-shell .h56-background-output-time { font-variant-numeric: tabular-nums; }
 .compact-shell .h56-background-job pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
 .compact-shell .h56-tool-copy { flex: 1; min-width: 0; }
 .compact-shell .h56-tool-copy pre { max-height: calc(var(--sp-32) * 4); margin: var(--sp-4) 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
+
+.compact-shell .h56-command-action { padding: var(--sp-4) var(--sp-8); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); color: var(--ink); font: inherit; cursor: var(--cursor-arrow); }
+.compact-shell .h56-command-action:hover { background: var(--bg-hover); }
+.compact-shell .h56-command-action:disabled { opacity: .5; }

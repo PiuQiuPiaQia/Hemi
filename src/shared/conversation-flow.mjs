@@ -384,6 +384,7 @@ export function applyFlowFact(snapshot, fact) {
         outcome: fact.outcome ?? 'unknown',
         ...(fact.outcome === 'awaiting-user' ? {waitingForUser:fact.waitingForUser} : {}),
         ...(fact.outcome === 'blocked' ? {blocked:structuredClone(fact.blocked)} : {}),
+        ...(fact.halted ? {halted:structuredClone(fact.halted)} : {}),
         ...(snapshot.runs[fact.runId].recovery && !['expired','recovered'].includes(snapshot.runs[fact.runId].recovery.phase) ? { recovery: { ...snapshot.runs[fact.runId].recovery, phase: fact.outcome === 'stopped' ? 'stopped' : 'failed', nextRetryAt: null } } : {}),
         activity: null,
         ...(fact.usage ? { usage: fact.usage } : {}),

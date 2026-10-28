@@ -130,6 +130,23 @@
 }
 
 /* —— 热力图：GitHub 贡献图风格 —— */
+.h37-usage-heatmap-head {
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+}
+
+.h37-usage-heatmap-head > h2 {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.h37-usage-heatmap-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-shrink: 0;
+}
+
 .h37-usage-heatmap-toggle {
   display: flex;
   gap: var(--sp-4);
@@ -185,6 +202,12 @@
   background: var(--n-100);
   transition: all var(--dur-1) linear;
   cursor: default;
+}
+
+/* 热力图：focus 可见 */
+html.kb-nav .h37-usage-heatmap-cell:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
 }
 
 .h37-usage-heatmap-cell[data-level='0'] {

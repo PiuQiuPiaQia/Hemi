@@ -79,7 +79,7 @@ async function fixture(t, command, toolOptions = {}, behavior = {}) {
     const session = createHemiSession({ cwd: dir, agentDir: path.join(dir, `agent-${id}`), model: config,
       accessWorkspaceDir: dir, tools: ['bash'], features: {}, executionContext: execution,
       appendSystem: role === 'main' ? buildAgentAppendSystem() : [loadRoles().get(role).systemPrompt],
-      settings: { retry: { enabled: false } },
+      settings: { retry: { enabled: false } },backgroundQuietReviewMs:behavior.quietMs??0,
     });
     session.on('activity', activity => activities.push({ id, ...activity }));
     sessions.push(session);

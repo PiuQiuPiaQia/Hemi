@@ -33,6 +33,7 @@ export type FlowRunSummary = {
   outcome: 'completed' | 'partial' | 'awaiting-user' | 'blocked' | 'stopped' | 'failed' | 'interrupted' | 'unknown' | null;
   continuationOf?: string;
   waitingForUser?: {question:string;reason:string};
+  halted?: {kind:'no_progress'|'budget_limited';reason:string;remaining:string[];nextAction:string};
   blocked?: {reason:string;nextAction?:string;evidence?:string[];remaining?:string[]};
   modelUsed?: string | null;
   [key: string]: unknown;

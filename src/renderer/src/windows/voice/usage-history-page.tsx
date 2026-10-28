@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   Database,
   HardDrive,
   Loader2,
+  RefreshCw,
   Search,
   X,
 } from 'lucide-react';
@@ -18,6 +19,8 @@ import type {
 } from '@/shared/types';
 import { NavRail } from './nav-rail';
 import { AppTopBar } from './app-top-bar';
+import { Tooltip } from '@/components/ui/tooltip';
+import { formatNumber, formatDuration, formatTPS } from '@/utils/format-usage';
 
 /**
  * 使用记录独立应用页：跨会话总览消耗，GitHub 贡献图式热力图，可筛选分页的请求历史。
@@ -36,25 +39,26 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
   const [statusFilter, setStatusFilter] = useState<'all' | UsageHistoryStatus>('all');
   const [offset, setOffset] = useState(0);
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('requests');
-  const [revision, setRevision] = useState(0);
+  const requestSeqRef = useRef(0);
 
-  useEffect(() => {
-    let active = true;
+  const loadData = useCallback(() => {
+    const seq = ++requestSeqRef.current;
     setLoading(true);
     setError('');
     void window.hemiVoice.getUsageHistory({
       query: searchQuery || undefined, status: statusFilter, limit: PAGE_SIZE, offset,
     }).then(response => {
-      if (active) setData(response);
+      if (seq === requestSeqRef.current) setData(response);
     }).catch(err => {
-      if (active) setError(err instanceof Error ? err.message : '加载失败');
+      if (seq === requestSeqRef.current) setError(err instanceof Error ? err.message : '加载失败');
     }).finally(() => {
-      if (active) setLoading(false);
+      if (seq === requestSeqRef.current) setLoading(false);
     });
-    return () => { active = false; };
-  }, [searchQuery, statusFilter, offset, revision]);
+  }, [searchQuery, statusFilter, offset]);
 
-  useEffect(() => window.hemiVoice.onUsageChanged?.(() => setRevision(value => value + 1)), []);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleStatusChange = useCallback((status: 'all' | UsageHistoryStatus) => {
     setStatusFilter(status);
@@ -130,7 +134,9 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                     <Activity className="size-4" aria-hidden="true" />
                   </div>
                   <div className="h37-usage-stat-text">
-                    <div className="h37-usage-stat-value">{data.totals.requests.toLocaleString()}</div>
+                    <div className="h37-usage-stat-value" title={data.totals.requests.toLocaleString()}>
+                      {data.totals.requests.toLocaleString()}
+                    </div>
                     <div className="h37-usage-stat-label">总请求数</div>
                   </div>
                 </div>
@@ -140,10 +146,10 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                     <Database className="size-4" aria-hidden="true" />
                   </div>
                   <div className="h37-usage-stat-text">
-                    <div className="h37-usage-stat-value">
-                      {((data.totals.input + data.totals.output + data.totals.cacheRead + data.totals.cacheWrite) / 1000).toFixed(1)}K
+                    <div className="h37-usage-stat-value" title={(data.totals.input + data.totals.output + data.totals.cacheRead + data.totals.cacheWrite).toLocaleString()}>
+                      {formatNumber(data.totals.input + data.totals.output + data.totals.cacheRead + data.totals.cacheWrite)}
                     </div>
-                    <div className="h37-usage-stat-label">总 tokens</div>
+                    <div className="h37-usage-stat-label">已记录用量</div>
                   </div>
                 </div>
 
@@ -152,10 +158,10 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                     <HardDrive className="size-4" aria-hidden="true" />
                   </div>
                   <div className="h37-usage-stat-text">
-                    <div className="h37-usage-stat-value">
-                      {((data.totals.cacheRead + data.totals.cacheWrite) / 1000).toFixed(1)}K
+                    <div className="h37-usage-stat-value" title={(data.totals.cacheRead + data.totals.cacheWrite).toLocaleString()}>
+                      {formatNumber(data.totals.cacheRead + data.totals.cacheWrite)}
                     </div>
-                    <div className="h37-usage-stat-label">缓存 tokens</div>
+                    <div className="h37-usage-stat-label">缓存用量</div>
                   </div>
                 </div>
               </section>
@@ -164,9 +170,19 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
             {/* 热力图 */}
             {data?.daily.length ? (
               <section className="h37-section">
-                <div className="h37-section-head">
-                  <h2>活动热力图</h2>
-                  <div className="h37-usage-heatmap-toggle">
+                <div className="h37-section-head h37-usage-heatmap-head">
+                  <h2>活动热力图（近 12 周）</h2>
+                  <div className="h37-usage-heatmap-controls">
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label="刷新数据"
+                      onClick={() => loadData()}
+                      disabled={loading}
+                    >
+                      <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} aria-hidden="true" />
+                    </button>
+                    <div className="h37-usage-heatmap-toggle">
                     <button
                       type="button"
                       className="h37-usage-toggle-btn"
@@ -183,6 +199,7 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                     >
                       Tokens
                     </button>
+                    </div>
                   </div>
                 </div>
                 <div className="h37-usage-heatmap">
@@ -192,13 +209,19 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                         const intensity = day.value / maxHeatmapValue;
                         const level = intensity === 0 ? 0 : Math.max(1, Math.ceil(intensity * 4));
                         return (
-                          <div
+                          <Tooltip
                             key={day.date}
-                            className="h37-usage-heatmap-cell"
-                            data-level={level}
-                            title={day.label}
-                            aria-label={day.label}
-                          />
+                            content={day.label}
+                            delay={200}
+                          >
+                            <div
+                              className="h37-usage-heatmap-cell"
+                              data-level={level}
+                              tabIndex={0}
+                              role="img"
+                              aria-label={day.label}
+                            />
+                          </Tooltip>
                         );
                       })}
                     </div>
@@ -358,23 +381,6 @@ function UsageRecordRow({ record }: { record: UsageHistoryRecord }) {
       date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatDuration = (ms: number | null) => {
-    if (ms === null) return '—';
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(1)}s`;
-  };
-
-  const formatNumber = (n: number | null) => {
-    if (n === null) return '—';
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return n.toLocaleString();
-  };
-
-  const formatTPS = (tps: number | null) => {
-    if (tps === null) return '—';
-    return tps.toFixed(1);
-  };
-
   return (
     <>
       <tr
@@ -403,30 +409,46 @@ function UsageRecordRow({ record }: { record: UsageHistoryRecord }) {
             {record.status === 'success' ? '成功' : record.status === 'error' ? '失败' : '进行中'}
           </span>
         </td>
-        <td className="h37-usage-td-right">{formatNumber(record.input)}</td>
-        <td className="h37-usage-td-right">{formatNumber(record.output)}</td>
-        <td className="h37-usage-td-right">{formatNumber(record.cacheRead)}</td>
-        <td className="h37-usage-td-right">{formatDuration(record.ttftMs)}</td>
-        <td className="h37-usage-td-right">{formatDuration(record.durationMs)}</td>
-        <td className="h37-usage-td-right">{formatTPS(record.tps)}</td>
+        <td className="h37-usage-td-right" title={record.input !== null ? record.input.toLocaleString() : undefined}>
+          {formatNumber(record.input)}
+        </td>
+        <td className="h37-usage-td-right" title={record.output !== null ? record.output.toLocaleString() : undefined}>
+          {formatNumber(record.output)}
+        </td>
+        <td className="h37-usage-td-right" title={record.cacheRead !== null ? record.cacheRead.toLocaleString() : undefined}>
+          {formatNumber(record.cacheRead)}
+        </td>
+        <td className="h37-usage-td-right" title={record.ttftMs !== null ? `${record.ttftMs}ms` : undefined}>
+          {formatDuration(record.ttftMs)}
+        </td>
+        <td className="h37-usage-td-right" title={record.durationMs !== null ? `${record.durationMs}ms` : undefined}>
+          {formatDuration(record.durationMs)}
+        </td>
+        <td className="h37-usage-td-right" title={record.tps !== null ? record.tps.toFixed(2) : undefined}>
+          {formatTPS(record.tps)}
+        </td>
       </tr>
       {expanded && (
         <tr className="h37-usage-detail-row">
           <td colSpan={10}>
             <div className="h37-usage-detail">
               <div className="h37-usage-detail-grid">
-                {record.url && (
-                  <div className="h37-usage-detail-item">
-                    <div className="h37-usage-detail-label">URL</div>
-                    <div className="h37-usage-detail-value">{record.url}</div>
-                  </div>
-                )}
-                {record.thinkingLevel && (
-                  <div className="h37-usage-detail-item">
-                    <div className="h37-usage-detail-label">思考强度</div>
-                    <div className="h37-usage-detail-value">{record.thinkingLevel}（配置值）</div>
-                  </div>
-                )}
+                <div className="h37-usage-detail-item">
+                  <div className="h37-usage-detail-label">URL</div>
+                  <div className="h37-usage-detail-value">{record.url || '未记录'}</div>
+                </div>
+                <div className="h37-usage-detail-item">
+                  <div className="h37-usage-detail-label">思考强度（配置值）</div>
+                  <div className="h37-usage-detail-value">{record.thinkingLevel || '未记录'}</div>
+                </div>
+                <div className="h37-usage-detail-item">
+                  <div className="h37-usage-detail-label">缓存写</div>
+                  <div className="h37-usage-detail-value">{record.cacheWrite !== null ? formatNumber(record.cacheWrite) : '未记录'}</div>
+                </div>
+                <div className="h37-usage-detail-item">
+                  <div className="h37-usage-detail-label">推理 tokens</div>
+                  <div className="h37-usage-detail-value">{record.reasoning !== null ? formatNumber(record.reasoning) : '未记录'}</div>
+                </div>
                 {record.role && (
                   <div className="h37-usage-detail-item">
                     <div className="h37-usage-detail-label">角色</div>
@@ -445,18 +467,6 @@ function UsageRecordRow({ record }: { record: UsageHistoryRecord }) {
                     <div className="h37-usage-detail-value h37-usage-mono">{record.conversationId}</div>
                   </div>
                 )}
-                {record.cacheWrite !== null && record.cacheWrite > 0 && (
-                  <div className="h37-usage-detail-item">
-                    <div className="h37-usage-detail-label">缓存写</div>
-                    <div className="h37-usage-detail-value">{formatNumber(record.cacheWrite)}</div>
-                  </div>
-                )}
-                {record.reasoning !== null && (
-                  <div className="h37-usage-detail-item">
-                    <div className="h37-usage-detail-label">推理 tokens</div>
-                    <div className="h37-usage-detail-value">{formatNumber(record.reasoning)}</div>
-                  </div>
-                )}
                 {record.httpStatus !== null && (
                   <div className="h37-usage-detail-item">
                     <div className="h37-usage-detail-label">HTTP 状态</div>
@@ -470,11 +480,9 @@ function UsageRecordRow({ record }: { record: UsageHistoryRecord }) {
                   </div>
                 )}
               </div>
-              {record.tps !== null && (
-                <div className="h37-usage-detail-note">
-                  TPS 口径：输出 tokens / 首语义输出至结束的秒数
-                </div>
-              )}
+              <div className="h37-usage-detail-note">
+                TPS 口径：输出 tokens / 首语义输出至结束的秒数。总览统计含所有筛选后记录，热力图仅显示近 12 周。
+              </div>
             </div>
           </td>
         </tr>

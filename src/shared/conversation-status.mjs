@@ -1,6 +1,7 @@
 /** 只读列表投影：不创建控制器、不恢复或派发任务。离线档案不能冒充在途运行。 */
 export function conversationStatus(flow, { live = false, isTaskLive = () => true } = {}) {
   if (!flow || !live) return null;
+  if(flow.awaitingUser)return 'waiting';
   const active = ['preparing', 'running', 'stopping'].includes(flow.phase);
   const tasks = Object.values(flow.tasks ?? {}).filter(task => task && typeof task === 'object');
   const working = live && tasks.filter(task => task.phase && task.phase !== 'terminal' && isTaskLive(task));
@@ -16,7 +17,7 @@ export function conversationStatus(flow, { live = false, isTaskLive = () => true
 export function newSettledRuns(record, flow) {
   return Object.values(flow?.runs ?? {}).filter(run => run
     && ['user', 'queue', 'event'].includes(run.source)
-    && ['completed', 'partial', 'failed', 'blocked'].includes(run.outcome)
+    && ['completed', 'partial', 'failed', 'blocked', 'awaiting-user'].includes(run.outcome)
     && run.closedAt != null && record?.flow?.runs?.[run.runId]?.closedAt == null);
 }
 

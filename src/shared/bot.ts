@@ -42,7 +42,7 @@ export type BotSession = {
   createdAt: number;
   updatedAt: number;
   turnCount: number;
-  status: 'queued' | 'running' | null;
+  status: 'queued' | 'running' | 'waiting' | null;
   waitingPermission: boolean;
   waitingForUser?: boolean;
   waitingResource?: boolean;

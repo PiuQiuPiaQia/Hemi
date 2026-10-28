@@ -1563,11 +1563,13 @@ export type TurnQueuePushEvent =
 export type FlowPhase = 'idle' | 'preparing' | 'running' | 'stopping';
 
 export type RunActivityView = {
+  runId?: string;
   phase: 'running' | 'waiting-background' | 'waiting-resource';
   since: number | null;
   jobs: Array<{
     id: string; toolCallId?: string; command: string;
     description?: string; commandTruncated?: boolean; lastOutputAt?: number | null;
+    deadlineAt?: number; outputBytes?: number; earliestOutput?: number;
     startedAt: number; endedAt: number | null; status: string;
     code: number | null; output: string;
   }>;
@@ -1697,6 +1699,7 @@ export type ConversationLinkResolution = {
 };
 
 export type FlowCommandResult = {
+  data?: {text?:string;next?:number;total?:number;lossy?:boolean;accepted?:boolean};
   ok: boolean;
   code?: string;
   disposition?: string;
@@ -2622,7 +2625,7 @@ export type HemiVoiceBridge = {
     artifactId: string,
   ) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>;
   /** 使用记录：跨会话总览消耗与请求历史。 */
-  getUsageHistory: (query: import('@shared/usage-history').UsageHistoryQuery) => Promise<import('@shared/usage-history').UsageHistoryResponse>;
+  getUsageHistory: (query: import('./usage-history').UsageHistoryQuery) => Promise<import('./usage-history').UsageHistoryResponse>;
   /** 019：拉起原生双工后端（失败回退浏览器链路）。 */
   startDuplex: () => Promise<DuplexStartResult>;
   /** 019：会话结束关停双工后端。 */

@@ -12,7 +12,8 @@ import electronPath from 'electron';
 import {GOAL_CHECK_SYSTEM} from '../src/main/agent-runtime/goal-driver.mjs';
 
 const mode = process.argv.includes('--dev') ? 'dev' : 'built';
-const evidence = path.resolve('.visual/workflow/desktop-goals', mode);
+const jobsOnly=process.argv.includes('--jobs-only');
+const evidence = path.resolve(jobsOnly?'.visual/workflow/background-job-simple':'.visual/workflow/desktop-goals', mode);
 const userData = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `hemi-pc-goals-${mode}-`)));
 const workspace = path.join(userData, 'workspace/default');
 fs.mkdirSync(workspace, {recursive:true}); fs.mkdirSync(evidence, {recursive:true});
@@ -23,11 +24,11 @@ const report = {mode,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'u
 const counts = new Map(), held = new Set();
 let app, page, vite;
 const verdict = (status, reason, remaining = [], question) => ({status,reason,evidence:['实际会话与真实工具结果'],remaining,nextAction:status === 'continue' ? '写入剩余成果' : '',...(question ? {question} : {})});
-const markers = ['PC_GOAL_CHUNK','PC_GOAL_WAIT_STOP','PC_GOAL_WAIT','PC_GOAL_STOP','PC_GOAL_INVALID','PC_GOAL_BLOCKED'];
+const markers = ['PC_GOAL_CHUNK','PC_GOAL_WAIT_STOP','PC_GOAL_WAIT','PC_GOAL_STOP','PC_GOAL_INVALID','PC_GOAL_BLOCKED','PC_GOAL_JOBS','PC_GOAL_NO_PROGRESS'];
 function respond(res, body, content, tool) {
   if (res.destroyed) return;
   res.writeHead(200, {'content-type':'text/event-stream'});
-  const delta = tool ? {role:'assistant',tool_calls:[{index:0,id:randomUUID(),type:'function',function:{name:tool.name,arguments:JSON.stringify(tool.args)}}]} : {role:'assistant',content};
+  const delta = tool ? {role:'assistant',tool_calls:(Array.isArray(tool)?tool:[tool]).map((t,index)=>({index,id:randomUUID(),type:'function',function:{name:t.name,arguments:JSON.stringify(t.args)}}))} : {role:'assistant',content};
   for (const [value, finish] of [[delta,null],[{},tool ? 'tool_calls' : 'stop']]) res.write(`data: ${JSON.stringify({id:randomUUID(),model:body.model,choices:[{index:0,delta:value,finish_reason:finish}],...(finish ? {usage:{prompt_tokens:25,completion_tokens:10}} : {})})}\n\n`);
   res.end('data: [DONE]\n\n');
 }
@@ -46,7 +47,7 @@ const server = http.createServer(async (req, res) => {
       if (marker === 'PC_GOAL_STOP') { const entry = {res,body}; held.add(entry); res.on('close', () => held.delete(entry)); return; }
       if (marker === 'PC_GOAL_INVALID') { respond(res,body,'invalid json'); return; }
       if (marker === 'PC_GOAL_BLOCKED') { respond(res,body,JSON.stringify({...verdict('blocked','实际命令已确认外部资源不可用',['等待外部资源恢复']),nextAction:'请恢复外部资源后继续'})); return; }
-      const done = marker === 'PC_GOAL_CHUNK' ? fs.existsSync(path.join(workspace,'chunk-proof.txt'))
+      const done = marker === 'PC_GOAL_JOBS' ? fs.existsSync(path.join(workspace,'jobs-proof.txt')) : marker === 'PC_GOAL_CHUNK' ? fs.existsSync(path.join(workspace,'chunk-proof.txt'))
         : marker === 'PC_GOAL_WAIT' && fs.existsSync(path.join(workspace,'clarified-proof.txt'));
       const value = done ? verdict('complete','实际文件已写入并核对')
         : marker?.startsWith('PC_GOAL_WAIT') ? verdict('awaiting_user','需要用户提供内容',['写入用户指定的内容'],'文件里写什么内容？')
@@ -56,7 +57,12 @@ const server = http.createServer(async (req, res) => {
     counts.set(marker,(counts.get(marker) ?? 0)+1);
     const count = counts.get(marker);
     let content, tool;
-    if (marker === 'PC_GOAL_CHUNK') {
+    if (marker === 'PC_GOAL_JOBS') {
+      if(count===1)tool=[
+        {name:'bash',args:{command:`"${process.execPath}" -e "process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('bad-job.txt','BAD'),90000)"`,description:'等待第一个独立任务',run_in_background:true,timeout_ms:120000}},
+        {name:'bash',args:{command:`"${process.execPath}" -e "process.stdout.write('SECOND_ALIVE');const t=setInterval(()=>{if(require('fs').existsSync('jobs-release')){clearInterval(t);require('fs').writeFileSync('jobs-proof.txt','DONE')}},30)"`,description:'等待第二个独立任务',run_in_background:true,timeout_ms:120000}},
+      ];else content=fs.existsSync(path.join(workspace,'jobs-proof.txt'))?'后台成果已核对完成。':'已核对现有输出，等待后台任务的实际结果。';
+    } else if (marker === 'PC_GOAL_CHUNK') {
       if (!all.includes('宿主目标续跑')) tool = {name:'read',args:{path:path.join(workspace,'seed.txt')}};
       else if (!fs.existsSync(path.join(workspace,'chunk-proof.txt'))) tool = {name:'write',args:{path:path.join(workspace,'chunk-proof.txt'),content:'PC_CHUNK_PROOF'}};
       else content = '已完成 PC_CHUNK_PROOF。';
@@ -113,6 +119,49 @@ try {
   await launch();
   await page.evaluate(baseUrl => window.hemiVoice.saveModelProfile({id:'pc-goals',name:'PC 目标验收',api:'openai-completions',baseUrl,apiKey:'SYNTHETIC_ONLY',models:[{id:'main',model:'pc-goals',thinkingLevel:'off',supportsVision:false}],makeDefault:true}),baseUrl);
   await page.reload(); await input().waitFor();
+  const jobsId=await send('PC_GOAL_JOBS 启动两个独立后台任务，并核对结果。');
+  await wait(async()=>{const v=await flow(jobsId);return v.runs[v.activeRunId]?.activity?.jobs.length===2;},'two actual background jobs');
+  const summary=page.locator('.h56-run-activity');
+  assert.equal(await summary.locator('details').getAttribute('open'),null);
+  assert.equal(await summary.locator('.h56-run-activity-body').isVisible(),false);
+  const initialFlow=await flow(jobsId),runId=initialFlow.activeRunId,firstJob=initialFlow.runs[runId].activity.jobs[0].id;
+  const read=await page.evaluate(({cid,runId,jobId})=>window.hemiVoice.flowCommand(cid,{type:'backgroundCommand',targetRunId:runId,action:'read',jobId}),{cid:jobsId,runId,jobId:firstJob});
+  assert.equal(read.ok,true);
+  const requestCountBeforeReview=report.requests.filter(r=>r.main).length;
+  await page.evaluate(({cid,runId})=>window.hemiVoice.flowCommand(cid,{type:'backgroundCommand',targetRunId:runId,action:'review'}),{cid:jobsId,runId});
+  await wait(()=>report.requests.filter(r=>r.main).length>requestCountBeforeReview,'backend progress review remains available');
+  await summary.getByText('暂无新输出',{exact:true}).waitFor({timeout:35000});
+  for(const width of [1440,768,375]){
+    await page.setViewportSize({width,height:900});
+    await summary.screenshot({path:path.join(evidence,`collapsed-${width}.png`)});
+    await summary.locator('summary').click();
+    await summary.locator('[aria-label="后台命令最近输出"]').first().filter({hasText:'FIRST_ALIVE'}).waitFor();
+    assert.equal(await summary.getByRole('button',{name:'检查进展',exact:true}).count(),0);
+    assert.equal(await summary.getByRole('button',{name:'读取输出',exact:true}).count(),0);
+    assert.equal(await summary.getByText(/距离命令超时|最近输出于|已运行|命令（/).count(),0);
+    assert.equal(await summary.getByRole('button').count(),2);
+    const bounds=await summary.boundingBox();assert.ok(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width+1,'summary must fit viewport');
+    await summary.screenshot({path:path.join(evidence,`expanded-${width}.png`)});
+    await page.screenshot({path:path.join(evidence,`background-jobs-${width}.png`)});
+    await summary.locator('summary').click();
+  }
+  await page.setViewportSize({width:1440,height:900});
+  await page.reload();await input().waitFor();assert.equal((await flow(jobsId)).phase,'running');
+  await page.locator('.h56-run-activity-head').click();
+  await page.getByRole('button',{name:/^停止此命令/}).first().click();
+  await wait(async()=>{const v=await flow(jobsId);return v.runs[v.activeRunId]?.activity?.jobs.length===1;},'only chosen command stopped');
+  fs.writeFileSync(path.join(workspace,'jobs-release'),'go');const jobsDone=await settled(jobsId);
+  assert.equal(Object.values(jobsDone.runs)[0].outcome,'completed');assert.deepEqual(errors(jobsDone),[]);
+  assert.equal(fs.readFileSync(path.join(workspace,'jobs-proof.txt'),'utf8'),'DONE');assert.equal(fs.existsSync(path.join(workspace,'bad-job.txt')),false);
+  assert.equal(jobsDone.timeline.filter(x=>x.kind==='user').length,1);
+  check('状态默认一行折叠，展开仅最近输出和停止；后台查询核验保留，重载和单条取消仍正常');
+  if(!jobsOnly){
+  await newChat();const npId=await send('PC_GOAL_NO_PROGRESS 核验尚未完成的工作。');const np=await settled(npId);
+  assert.equal(Object.values(np.runs)[0].outcome,'partial');assert.deepEqual(errors(np),[]);
+  assert.equal(Object.values(journal().roots).find(r=>r.owner.conversationId===npId&&r.goal)?.goal.phase,'no_progress');
+  await page.getByText(/任务暂无进展：/).waitFor();await page.screenshot({path:path.join(evidence,'no-progress-normal.png')});
+  check('无进展保护正常收口并保留原因，不抛异常');
+  await newChat();
   const chunkId = await send('PC_GOAL_CHUNK 读取现有记录后写入 chunk-proof.txt，内容 PC_CHUNK_PROOF。');
   const chunkFlow = await settled(chunkId), chunkRun = Object.values(chunkFlow.runs)[0], chunkRoot = journal().roots[chunkRun.runId];
   assert.equal(chunkRun.outcome,'completed',JSON.stringify(chunkFlow.timeline)); assert.deepEqual(errors(chunkFlow),[]);
@@ -178,6 +227,7 @@ try {
   assert.equal(errors(invalid).length,1); assert.match(errors(invalid)[0].text,/JSON/);
   await wait(async () => await page.locator('.turn-error-notice').count()===1,'one visible error notice');
   check('完成校验失败保留未完成状态，界面只显示一条错误');
+  }
   assert.deepEqual(report.errors,[]); report.result='PASS';
 } catch (error) {
   report.result='FAIL'; report.failure=String(error.stack); if (page&&!page.isClosed()) await page.screenshot({path:path.join(evidence,'failure.png')}).catch(() => {});

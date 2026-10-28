@@ -12,6 +12,7 @@ import { runCommand, commandToolResult } from './command-execution.mjs';
 import { COMMAND_FOREGROUND_MS, COMMAND_TIMEOUT_MS } from './command-scope.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
 import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
+import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 
 const MAX_READ_BYTES = 512 * 1024;
 export const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
@@ -251,6 +252,17 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
   const access = config.access;
   if (!access) return;
   const execute = config.commands?.run ?? runCommand;
+  if (config.commands) {
+    const owner = () => currentExecutionScope()?.execution?.owner;
+    const result = value => ({content:[{type:'text',text:JSON.stringify(value)}],details:value});
+    pi.registerTool({name:'job_list',label:'查看后台命令',description:'列出当前目标所属的后台命令、真实状态、最近输出和硬截止时间。查询不会消费完成通知。',
+      parameters:{type:'object',properties:{}},async execute(){return result(config.commands.list(owner()));}});
+    pi.registerTool({name:'job_output',label:'读取后台输出',description:'按命令 id 读取有界输出和状态。from 是上次 next 字节偏移；lossy 表示旧日志已超出保留范围。wait_ms 最多等待 30000 毫秒，到限返回当前状态，命令继续运行。不要连续查询空转。',
+      parameters:{type:'object',properties:{job_id:{type:'string'},from:{type:'number'},wait_ms:{type:'number'}},required:['job_id']},
+      async execute(_id,p,signal){return result(await config.commands.read(owner(),p.job_id,{from:p.from,waitMs:Math.max(0,Math.min(30000,p.wait_ms??0)),signal,collect:true}));}});
+    pi.registerTool({name:'job_kill',label:'停止后台命令',description:'停止当前目标中指定 id 的单条后台命令，并确认进程清理。其他命令继续。仅在用户要求或任务已不需要该命令时使用；静默本身不能证明失败。',
+      parameters:{type:'object',properties:{job_id:{type:'string'}},required:['job_id']},async execute(_id,p){return result(await config.commands.stop(owner(),p.job_id));}});
+  }
   pi.registerTool({
     name: 'bash',
     label: '执行命令',

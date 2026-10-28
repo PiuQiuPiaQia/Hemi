@@ -765,6 +765,12 @@ export function createAgentRuntime({
     } finally { entry.actualCandidate = execution.actualCandidate; if (!args.goalRound && entry.activeRootRunId === owner.rootRunId) entry.activeRootRunId = null; }
   }
 
+  async function backgroundCommand(conversationId,request) {
+    const entry=agents.get(conversationId);
+    if(!entry || entry.ctx.runId!==request.runId || entry.ctx.cancelled)throw new Error('当前目标已变化');
+    return entry.agent.backgroundCommand(request);
+  }
+
   async function completeConversation(conversationId, status, reason = null, rootRunId = null) {
     if (!rootRunId) throw new Error('收口缺少根目标身份');
     await journalReady;
@@ -893,5 +899,5 @@ export function createAgentRuntime({
     } finally {disposeAll();environment?.release();}
   }
 
-  return { isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
+  return { backgroundCommand, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
 }

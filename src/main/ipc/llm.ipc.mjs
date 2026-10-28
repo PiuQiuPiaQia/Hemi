@@ -487,7 +487,7 @@ function createLlmFlowRuntime(conversationId) {
             if ((event?.kind === 'tool_start' && event.tool === 'task') || ['recovery','request-reset'].includes(event?.kind)) flushFacts();
           },
         });
-        for (const fact of projector.finish({blocked:result.blocked})) bufferFact(fact);
+        for (const fact of projector.finish({blocked:result.blocked,halted:result.halted})) bufferFact(fact);
         flushFacts();
         await Promise.allSettled(pendingDeliveries);
         controller.applyFact({ type: 'run-settled', runId, at: Date.now(), generation });
@@ -497,6 +497,7 @@ function createLlmFlowRuntime(conversationId) {
         controller.applyFact({ type: 'run-closed', runId, outcome, at: Date.now(), generation, usage: result?.usage ?? null,
           ...(result.waitingForUser ? {waitingForUser: result.waitingForUser} : {}),
           ...(result.blocked ? {blocked:result.blocked} : {}),
+          ...(result.halted ? {halted:result.halted} : {}),
         });
         completeInput(envelope?.inputId, null, result);
         return { modelUsed: result?.usage?.requestedModel ?? null, result, aborted: false };
@@ -562,6 +563,7 @@ function createLlmFlowRuntime(conversationId) {
       if (controllerOf().getSnapshot().activeRunId !== runId) return { ok: false, code: 'run-changed' };
       return { ok: Boolean(runtime?.get(conversationId)?.retryConnection(recoveryId)) };
     },
+    backgroundCommand: request => getAgentRuntime().backgroundCommand(conversationId,request),
     async cancelWaitingUser({ runId }) {
       await getAgentRuntime().completeConversation(conversationId, 'stopped', '用户停止等待答复', runId);
     },
@@ -997,6 +999,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           goalComplete: run.goalComplete,
           ...(run.waitingForUser ? {waitingForUser: run.waitingForUser} : {}),
           ...(run.blocked ? {blocked:run.blocked} : {}),
+          ...(run.halted ? {halted:run.halted} : {}),
           ...(run.budgetLimited ? { budgetLimited: true } : {}),
         };
       },

@@ -60,3 +60,11 @@ test('仅新的成功／失败结果产生持久未读，旧档和重复保存�
   const flow = { runs: { r2: { runId: 'r2', source: 'user', outcome: 'completed', closedAt: 10 } } };
   assert.equal(withConversationUnread({ unreadAt: null, lastReadAt: 100 }, flow, 100).unreadAt, 101, '同毫秒新结果不复用旧清读身份');
 });
+
+
+test('等待用户需要新结果提醒，重读旧快照不会重复提醒',()=>{
+ const flow={phase:'idle',awaitingUser:{runId:'r'},runs:{r:{runId:'r',source:'user',outcome:'awaiting-user',closedAt:10}},tasks:{}};
+ assert.equal(conversationStatus(flow,{live:true}),'waiting');
+ const record=withConversationUnread({flow:{runs:{}}},flow,20);assert.equal(record.unreadAt,20);
+ assert.equal(withConversationUnread(record,flow,30).unreadAt,20);
+});

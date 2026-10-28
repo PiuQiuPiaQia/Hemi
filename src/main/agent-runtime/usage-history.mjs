@@ -76,7 +76,7 @@ export function projectUsageRecord(row = {}) {
     cacheRead: tokenOf(row, 'cacheRead'),
     cacheWrite: tokenOf(row, 'cacheWrite'),
     reasoning: tokenOf(row, 'reasoning'),
-    error: sanitizeErrorText((typeof row.error === 'string' && row.error) ? row.error : interrupted),
+    error: sanitizeErrorText((typeof row.error === 'string' && row.error) || row.failure?.message || interrupted),
   };
 }
 
