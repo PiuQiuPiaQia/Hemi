@@ -9,7 +9,7 @@
 
 import { isContextOverflow, isRecoverableLength, isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 import { isSameCandidate, RoutingStoppedError, routeStopReason } from '../lib/model-routing.mjs';
-import { MODEL_OUTPUT_LIMIT, providerRegistrationOf, sdkThinkingLevelOf } from '../lib/pi-model.mjs';
+import { candidateModelDef, MODEL_OUTPUT_LIMIT, providerRegistrationOf, sdkThinkingLevelOf } from '../lib/pi-model.mjs';
 
 /**
  * 038：SDK 虚拟模型扩展——主/备物理 provider + route 闭包（探针口径）。
@@ -29,10 +29,32 @@ export function createRoutingExtension({ routing, runtime, onRoute = null, name 
     factory: (pi) => {
       pi.registerProvider('hemi', providerRegistrationOf(routing.execution));
       candidates.slice(1).forEach((candidate, index) => pi.registerProvider(providerOf(index + 1), providerRegistrationOf(candidate)));
+      // OAuth 候选的响应消息记录原生 provider id（streamOAuthModel 以原生定义流式）。
+      // 会话注册表按该 id 才能解析出物理模型：解析不到时 SDK 的压缩阈值回退到虚拟
+      // 模型窗口（未传则为 0，恒判超限，见 2026-10-29 压缩事故）。同一原生 provider
+      // 的多个候选合并目录，避免后注册冲掉先注册的型号。
+      const nativeRegistrations = new Map();
+      for (const candidate of candidates) {
+        if (!candidate.oauthProvider) continue;
+        const registration = providerRegistrationOf(candidate);
+        const existing = nativeRegistrations.get(candidate.oauthProvider);
+        if (!existing) nativeRegistrations.set(candidate.oauthProvider, registration);
+        else for (const modelDef of registration.models) {
+          if (!existing.models.some(def => def.id === modelDef.id)) existing.models.push(modelDef);
+        }
+      }
+      for (const [providerId, registration] of nativeRegistrations) pi.registerProvider(providerId, registration);
+      // 虚拟模型窗口兜底：首个响应前、以及历史消息的 provider 不在当前候选内（切换
+      // 配置后恢复旧会话）时，阈值用它而不是 SDK 默认的 0。取候选最小窗口，避免高窗
+      // 主模型掩盖低窗备用的真实上限。
+      const windows = candidates
+        .map(candidate => candidateModelDef(candidate).contextWindow)
+        .filter(window => Number.isFinite(window) && window > 0);
       pi.registerVirtualModel({
         provider: name,
         id: 'auto',
         name: 'Hemi 自动路由',
+        ...(windows.length ? { contextWindow: Math.min(...windows) } : {}),
         thinkingLevels: ['off', 'low', 'medium', 'high'],
         route: (request, ctx) => {
           // 受控会话的候选由请求恢复器选择；SDK 只投影当前物理模型，不再次解释错误文案。

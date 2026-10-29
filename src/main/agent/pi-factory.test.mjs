@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createRoutingExtension, resetRoutingForApplicationTurn, settledRoutingError, sessionSettingsOf } from './pi-factory.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
+import { setOAuthRuntime } from '../services/oauth-models.mjs';
 
 /** 只取 route 闭包：假 pi 记下注册的虚拟模型，modelRegistry.find 回传「provider/model」字符串。 */
 function routerOf({ withoutFallback = false, extraFallbacks = [] } = {}) {
@@ -148,4 +149,41 @@ test('生产 route：上下文溢出重试保留当前主／备用槽位和备�
     assert.equal(after.model, before.model);
     assert.deepEqual(after.state, before.state);
   }
+});
+
+test('回归 2026-10-29：OAuth 候选注册原生 provider，虚拟模型带最小候选窗口', () => {
+  // 压缩事故链条：OAuth 消息记录原生 provider id，会话注册表查无此人 → 压缩阈值
+  // 回退虚拟模型窗口；虚拟模型未传窗口恒为 0 → tot > 0−20000 恒真 → 每轮都压缩。
+  setOAuthRuntime({ models: { getModel: (_provider, id) => ({
+    id, name: `Native ${id}`, contextWindow: id.endsWith('flash') ? 256000 : 1000000,
+    maxTokens: 131072, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }) } });
+  const registrations = [];
+  let virtual = null;
+  const pi = {
+    registerProvider: (id, registration) => registrations.push([id, registration]),
+    registerVirtualModel: (definition) => { virtual = definition; },
+  };
+  const execution = { modelKey: 'bigmodel/glm-5.3', name: 'GLM', model: 'glm-5.3', oauthProvider: 'bigmodel', thinkingLevel: 'default' };
+  const fallback = { modelKey: 'bigmodel/glm-5.3-flash', name: 'Flash', model: 'glm-5.3-flash', oauthProvider: 'bigmodel', thinkingLevel: 'default' };
+  createRoutingExtension({ routing: { execution, fallback }, runtime: { state: { slot: 'primary', fallbackUsed: false } } }).factory(pi);
+  const native = registrations.find(([id]) => id === 'bigmodel');
+  assert.ok(native, '原生 provider bigmodel 注册进会话，消息元数据可解析回物理模型');
+  assert.deepEqual(native[1].models.map(def => def.id), ['glm-5.3', 'glm-5.3-flash'], '同一原生 provider 的候选合并目录');
+  assert.equal(virtual.contextWindow, 256000, '虚拟模型兜底窗口＝候选最小值，不再是 SDK 默认 0');
+  assert.deepEqual(registrations.map(([id]) => id), ['hemi', 'hemi-fallback', 'bigmodel'], '别名注册不受影响');
+});
+
+test('非 OAuth 候选不额外注册原生 provider，虚拟窗口取目录缺省值', () => {
+  const registrations = [];
+  let virtual = null;
+  const pi = {
+    registerProvider: (id, registration) => registrations.push([id, registration]),
+    registerVirtualModel: (definition) => { virtual = definition; },
+  };
+  const execution = { modelKey: 'p/main', name: 'P', model: 'main-m', api: 'anthropic-messages', baseUrl: 'https://a', apiKey: 'k', thinkingLevel: 'default' };
+  const fallback = { modelKey: 'q/fb', name: 'Q', model: 'fb-m', api: 'openai-completions', baseUrl: 'https://b', apiKey: 'k2', thinkingLevel: 'default' };
+  createRoutingExtension({ routing: { execution, fallback }, runtime: { state: { slot: 'primary', fallbackUsed: false } } }).factory(pi);
+  assert.deepEqual(registrations.map(([id]) => id), ['hemi', 'hemi-fallback'], '无 OAuth 候选时只注册别名');
+  assert.ok(Number.isFinite(virtual.contextWindow) && virtual.contextWindow > 0, '窗口未知时用目录缺省 128000 而非 0');
 });
