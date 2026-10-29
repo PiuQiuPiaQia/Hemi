@@ -13,16 +13,26 @@ import { DeliverableCards } from "./deliverable-card";
  * 先后排，而不是思考、工具、正文各自堆一处）。text 作为阶段正文，正文之间的
  * 思考和普通工具合成一个过程组；组内仍按原序展开，任务和交付等独立入口不折入。
  * 流式与档案回看共用；只有尾段显示流式状态。正文后处理由 renderText 接管。
+ *
+ * 065 · 完成态（complete: true，回合正常收尾后）：回答之前的全部过程折进首个
+ * 活动组（「用时 X」头部），过程文本以「说明」行入组，只外显最后无后续动作的
+ * text。执行中、失败、停止、等待用户时不折叠（见 buildTurnDisplayBlocks）。
  */
 export function TurnParts({
   parts,
   live = false,
+  complete = false,
+  durationMs,
   renderText,
   renderTask,
   onOpenDeliverable,
 }: {
   parts: Array<TurnPart & { partId?: string }>;
   live?: boolean;
+  /** 065：完成态——过程并入整轮折叠组，仅尾段文本外显。 */
+  complete?: boolean;
+  /** 065：整轮生成时长（完成态头部「用时 X」）。 */
+  durationMs?: number;
   renderText?: (text: string, index: number) => ReactNode;
   /**
    * 056：task 调用原地渲染子 agent 的一行（按 toolCallId 找到对应子 agent）——它在接口里
@@ -34,7 +44,7 @@ export function TurnParts({
 }) {
   return (
     <>
-      {buildTurnDisplayBlocks(parts).map((block) => {
+      {buildTurnDisplayBlocks(parts, { complete }).map((block) => {
         const key = block.id;
         if (block.kind === "activity") {
           return (
@@ -42,6 +52,12 @@ export function TurnParts({
               <TurnActivity
                 entries={block.entries}
                 live={live && block.lastIndex === parts.length - 1}
+                variant={
+                  complete && block.turnSummary ? "turn" : "stage"
+                }
+                durationMs={
+                  complete && block.turnSummary ? durationMs : undefined
+                }
               />
             </TranscriptPartState>
           );

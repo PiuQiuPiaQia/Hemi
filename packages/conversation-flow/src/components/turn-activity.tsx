@@ -5,6 +5,7 @@ import {
   FilePenLine,
   Folder,
   Globe,
+  MessageSquareText,
   Search,
   Square,
   Terminal,
@@ -89,13 +90,21 @@ function ThinkingProgress({
   );
 }
 
-/** A single disclosure for the ordered thinking/tools between two text segments. */
+/** A single disclosure for the ordered thinking/tools between two text segments.
+ * 065：variant="turn" 用于完成态的整轮过程组——头部显示「用时 X」＋计数，
+ * 过程文本以「说明」行折入组内（见 buildTurnDisplayBlocks 的 complete 模式）。 */
 export function TurnActivity({
   entries,
   live,
+  variant = "stage",
+  durationMs,
 }: {
   entries: ActivityEntry[];
   live: boolean;
+  /** stage＝执行态的段间过程组；turn＝完成态的整轮过程组。 */
+  variant?: "stage" | "turn";
+  /** turn 头部的整轮生成时长（item.usage.genMs）。 */
+  durationMs?: number;
 }) {
   const [open, setOpen] = useTranscriptRowState<boolean>(
     "activity-expanded",
@@ -117,24 +126,32 @@ export function TurnActivity({
   const interrupted = entries.some(
     (entry) => entry.kind === "thinking" && entry.part.interrupted,
   );
+  const says = entries.filter((entry) => entry.kind === "say").length;
+  const thinks = entries.filter((entry) => entry.kind === "thinking").length;
   const labels = [
     ...new Set(
       calls.map((call) => describeToolCall({ tool: call.tool, args: {} })),
     ),
   ];
+  const turnLabel =
+    durationMs && durationMs > 0
+      ? `用时 ${formatThinkingDuration(durationMs)}`
+      : "已完成";
   const headline = running
     ? `正在${describeActivityCall(running)}`
     : thinking
       ? open
         ? "执行过程"
         : "思考中"
-      : calls.length === 1
-        ? describeActivityCall(calls[0])
-        : calls.length
-          ? `${labels.slice(0, 3).join("、")}${labels.length > 3 ? "等" : ""}`
-          : interrupted
-            ? "思考已中断"
-            : "思考过程";
+      : variant === "turn"
+        ? turnLabel
+        : calls.length === 1
+          ? describeActivityCall(calls[0])
+          : calls.length
+            ? `${labels.slice(0, 3).join("、")}${labels.length > 3 ? "等" : ""}`
+            : interrupted
+              ? "思考已中断"
+              : "思考过程";
 
   return (
     <div
@@ -168,8 +185,14 @@ export function TurnActivity({
             startedAt={activeThinking.part.startedAt}
           />
         ) : null}
-        {calls.length > 1 ? (
+        {calls.length > 0 && (calls.length > 1 || variant === "turn") ? (
           <span className="turn-activity-count">{calls.length} 项操作</span>
+        ) : null}
+        {variant === "turn" && says > 0 ? (
+          <span className="turn-activity-count">{says} 条说明</span>
+        ) : null}
+        {variant === "turn" && thinks > 0 ? (
+          <span className="turn-activity-count">{thinks} 段思考</span>
         ) : null}
         {failed ? (
           <span className="turn-activity-failed">{failed} 项失败</span>
@@ -205,6 +228,11 @@ export function TurnActivity({
                     )}
                   />
                 </TranscriptPartState>
+              ) : entry.kind === "say" ? (
+                <div className="turn-activity-say">
+                  <MessageSquareText aria-hidden="true" />
+                  <span className="selectable">{entry.part.text}</span>
+                </div>
               ) : (
                 <ToolStep call={entry.call} />
               )}

@@ -30,6 +30,8 @@ test('bootstrap：按原顺序投影、身份沿用/位置确定、withdrawn 不
   assert.equal(snapshot.timeline[0].text, '第一问');
   const [firstAssistant, delegation, errorItem, plain] = snapshot.timeline.slice(1);
   assert.deepEqual(firstAssistant.parts.map((p) => p.kind), ['thinking', 'tool', 'text']);
+  assert.equal(firstAssistant.parts[0].startedAt, 11, '065 思考段起止随迁移保留（用时兜底估算用）');
+  assert.equal(firstAssistant.parts[0].endedAt, 12);
   assert.equal(firstAssistant.parts[1].toolCallId, 'tc1');
   assert.equal(firstAssistant.parts[1].status, 'done');
   assert.equal(firstAssistant.legacyUsage.modelKey, 'p/m', '用量随段保留');

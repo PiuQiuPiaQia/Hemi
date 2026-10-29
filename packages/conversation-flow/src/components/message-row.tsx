@@ -12,6 +12,7 @@ import { useFlow } from "../host/context.js";
 import { useClipboardCopy } from "../host/context.js";
 import { segmentTaggedText } from "../presentation/composer-tokens.js";
 import { visibleStageCount } from "../presentation/stage-briefs.js";
+import { estimateTurnDurationMs } from "../presentation/turn-display-blocks.js";
 import { TurnParts } from "./turn-parts.js";
 import { ThinkingBlock } from "./thinking-block.js";
 import { CompactDelegation } from "./compact-delegation.js";
@@ -467,11 +468,15 @@ export function ChatTurnItem({
             回应中
           </span>
         ) : null}
-        {/* 056：有按序的段（思考／正文／工具组）就照接口返回的先后从上往下排；旧档走 048 形态。 */}
+        {/* 056：有按序的段（思考／正文／工具组）就照接口返回的先后从上往下排；旧档走 048 形态。
+            065：正常收尾（非流式、无 stopped/awaiting-user）的轮次按完成态折叠——
+            回答之前的全部过程收进「用时 X」一行；异常终态保持过程可见。 */}
         {item.parts?.length ? (
           <TurnParts
             parts={item.parts}
             live={streaming}
+            complete={!streaming && !item.replyStatus}
+            durationMs={item.usage?.genMs || estimateTurnDurationMs(item.parts)}
             renderText={renderText ?? ((text: string) => renderReplyText(text))}
             renderTask={renderTask}
             onOpenDeliverable={onOpenDeliverable}

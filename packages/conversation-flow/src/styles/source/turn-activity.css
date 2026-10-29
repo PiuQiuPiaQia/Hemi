@@ -118,3 +118,25 @@
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
 }
+
+/* 065 完成态过程组里的「说明」行：弱于工具步骤，强于纯思考文本——过程播报原样保留，可整组回看。 */
+.compact-shell .turn-activity-say {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-6);
+  min-height: 24px;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .turn-activity-say > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+
+.compact-shell .turn-activity-say .selectable {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
