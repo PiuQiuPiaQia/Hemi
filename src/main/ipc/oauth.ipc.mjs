@@ -3,12 +3,16 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 import { state } from '../state.mjs';
 import { appearanceCaller } from '../windows/appearance-window.mjs';
 import { getOAuthRuntime, getProfiles } from '../lib/profiles-holder.mjs';
+import { createLogger } from '../lib/logger.mjs';
 import { createOAuthLogin } from '../services/oauth-login.mjs';
+import { createSubscriptionQuota } from '../services/subscription-quota.mjs';
 
 export function registerOAuthIpc() {
   const runtime = getOAuthRuntime();
   const service = createOAuthLogin({ runtime, credentials: runtime.credentials, profiles: getProfiles(), openExternal: url => shell.openExternal(url) });
   app.on('before-quit', () => service.dispose());
+  // 订阅余额查询：失败以 DTO status 表达不抛错；错误/日志经 redactText 兜底，凭据不出主进程。
+  const quota = createSubscriptionQuota({ runtime, credentials: runtime.credentials, log: createLogger('oauth') });
   const handle = (channel, run) => ipcMain.handle(channel, async (event, payload) => {
     if (event.sender !== state.mainWindow?.webContents || !appearanceCaller(event, true)) throw new Error('账号登录仅允许在 Hemi 主窗口操作');
     return run(payload ?? {});
@@ -22,6 +26,10 @@ export function registerOAuthIpc() {
   handle(IPC.oauth.getState, () => service.getState());
   handle(IPC.oauth.answer, payload => service.answer(payload));
   handle(IPC.oauth.cancel, ({ id }) => service.cancel(id));
-  handle(IPC.oauth.logout, ({ provider }) => service.logout(provider));
+  handle(IPC.oauth.logout, async ({ provider }) => {
+    quota.invalidate(provider);
+    return service.logout(provider);
+  });
+  handle(IPC.oauth.quota, ({ provider, force }) => quota.view(provider, { force: force === true }));
   return service;
 }

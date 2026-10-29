@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   answerOAuthLogin: (payload) => ipcRenderer.invoke('oauth:answer', payload),
   cancelOAuthLogin: (id) => ipcRenderer.invoke('oauth:cancel', { id }),
   logoutOAuth: (provider) => ipcRenderer.invoke('oauth:logout', { provider }),
+  // 订阅余额（5h/周窗口）查询：主进程缓存＋并发合并＋force 限频；失败以 status 表达，不抛错。
+  getSubscriptionQuota: (provider, options) => ipcRenderer.invoke('oauth:quota', { provider, force: options?.force === true }),
   saveModelProfile: (profile) => ipcRenderer.invoke('llm:save-model-profile', profile),
   removeModelProfile: (payload) => ipcRenderer.invoke('llm:remove-model-profile', payload),
   // 041 修复：主进程读 payload.modelKey——此前发 { profileId} 自 033 起永远 undefined，

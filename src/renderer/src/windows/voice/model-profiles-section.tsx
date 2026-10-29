@@ -46,6 +46,8 @@ import { copyTextViaBridge } from '@/lib/use-clipboard-copy';
 import { useRemoteModels } from './lib/use-remote-models';
 import { groupModelProviders } from '@shared/model-categories.mjs';
 import { ModelConnectionMethods } from './model-connection-methods';
+import { useSubscriptionQuota } from './lib/use-subscription-quota';
+import { SubscriptionQuota, SubscriptionQuotaRefresh } from './subscription-quota-view';
 
 /**
  * 037 模型页 v2（文本 tab）：「看图」即时保存 → 供应商摘要行 → 下钻供应商详情 / 添加供应商。
@@ -964,6 +966,7 @@ function OverviewView({
     );
   };
   const visionPicked = visionKey ? findModelRef(directory, visionKey) : null;
+  const quota = useSubscriptionQuota(directory.providers, { bridge: ctl.bridge ?? window.hemiVoice, external: ctl.external, environment: ctl.environment });
 
   return (
     <>
@@ -1038,11 +1041,16 @@ function OverviewView({
         </div>
       </section>
       {groupModelProviders(directory.providers, ctl.environment === 'bot' || ctl.external).map(category => <section className="h37-section" key={category.id} aria-label={category.label}>
-        <div className="h37-section-head"><h3>{category.label}</h3><span className="h37-count">{category.providers.length}</span></div>
+        <div className="h37-section-head"><h3>{category.label}</h3><span className="h37-count">{category.providers.length}</span>
+          {category.id === 'subscription' && quota.enabled ? <SubscriptionQuotaRefresh entries={Object.values(quota.byProviderId)} loading={quota.loading} onRefresh={quota.refresh} /> : null}
+        </div>
         <div className="h37-group">
           {!category.providers.length ? <div className="h37-row"><span className="h37-row-desc">{category.id === 'local' ? '还没有从本机同步的模型' : category.id === 'api' ? '暂无 API 配置' : category.id === 'newapi' ? '暂无 New API 站点' : '暂无订阅账号'}</span></div> : null}
           {category.providers.map((provider) => {
             const host = hostOf(provider.baseUrl);
+            // 只有可查询的订阅（openai / bigmodel、本机、已登录）才挂额度，其余行保持原样。
+            const hasQuota = category.id === 'subscription' && quota.targetIds.has(provider.id);
+            const quotaEntry = hasQuota ? quota.byProviderId[provider.id] : undefined;
             return (
               <button
                 key={provider.id}
@@ -1061,6 +1069,7 @@ function OverviewView({
                   </span>
                 </span>
                 <span className="h37-row-end">
+                  {hasQuota ? <SubscriptionQuota entry={quotaEntry} name={provider.name} /> : null}
                   {!ctl.external ? <StatusBadge status={statuses[provider.id]} provider={provider} /> : null}
                   <ChevronRight className="h37-chev" aria-hidden />
                 </span>

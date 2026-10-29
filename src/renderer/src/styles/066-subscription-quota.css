@@ -1,0 +1,103 @@
+/**
+ * 066 订阅额度：设置 → 模型 → 订阅分组里，每个可查询订阅行右侧的紧凑额度。
+ * 结构：行按钮行尾区内的纯展示 span（.h37q）：两个窗口竖向叠放，一层一个
+ * .h37q-item（短标签 · 48px 定宽短进度条 · 剩余）；计数与重置时间进 title，
+ * 不占行内空间。颜色只在余量偏低时出现；未知百分比不画进度、不写 0%。
+ */
+
+.h37q {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin-right: var(--sp-8);
+  font-size: var(--fs-12);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.h37q-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.h37q-label {
+  color: var(--muted);
+}
+
+.h37q-bar {
+  position: relative;
+  width: 48px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--n-150);
+}
+
+.h37q-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--g-500);
+  transition: width var(--dur-3) var(--ease-out);
+}
+
+.h37q-item[data-tone='warn'] .h37q-fill { background: var(--warn); }
+.h37q-item[data-tone='danger'] .h37q-fill { background: var(--danger); }
+
+.h37q-value {
+  color: var(--body);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.h37q-item[data-tone='warn'] .h37q-value { color: var(--warn); }
+.h37q-item[data-tone='danger'] .h37q-value { color: var(--danger); }
+.h37q-item[data-tone='unknown'] .h37q-value { color: var(--faint); font-weight: var(--fw-regular); }
+
+/* 拉取失败但有旧数据：整体降一档，说明进悬停提示。 */
+.h37q[data-stale='true'] .h37q-item { opacity: 0.6; }
+
+.h37q-note {
+  color: var(--muted);
+}
+
+.h37q-note[data-tone='warn'] { color: var(--warn); }
+
+/* 分组标题右侧：更新时间 + 刷新。刷新按钮压到标题行高，不撑高标题。 */
+.h37q-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  align-self: center;
+}
+
+.h37q-updated {
+  font-size: var(--fs-12);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.h37q-head > .h37-btn {
+  height: 22px;
+  margin: calc(var(--sp-2) * -1) 0;
+  padding: 0 var(--sp-6);
+  color: var(--muted);
+}
+
+/* 窄窗逐级收：先收标签与窗口间距，再收条宽；进度条与百分比始终保留。 */
+@media (max-width: 720px) {
+  .h37q { gap: var(--sp-8); }
+  .h37q-label { display: none; }
+}
+
+@media (max-width: 480px) {
+  .h37q { margin-right: 0; gap: var(--sp-6); }
+  .h37q-bar { width: 40px; }
+  .h37q-updated { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h37q-fill { transition: none; }
+}

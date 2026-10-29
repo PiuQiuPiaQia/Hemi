@@ -46,6 +46,8 @@ export function botOAuthFailure(error, stage) {
     : /CERT_|TLS_|UNABLE_TO_VERIFY|SELF_SIGNED_CERT/i.test(text) ? 'tls'
     : /TimeoutError|ETIMEDOUT|UND_ERR_(?:CONNECT|HEADERS|BODY)_TIMEOUT|验证超时/i.test(text) ? 'timeout'
     : /fetch failed|ECONN(?:REFUSED|RESET)|ENETUNREACH|EHOSTUNREACH|connection error/i.test(text) ? 'network'
+    // Codex 通道：凭据缺账号标识（旧直连凭据或损坏令牌）只能重新授权。
+    : /Failed to extract accountId from token/i.test(text) ? 'unauthorized'
     : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : status === 429 ? 'rate'
     : /没有返回|账号没有.*模型|模型目录.*不可用/.test(text) ? 'models' : 'unknown';
   return { stage, reason, ...(Number.isInteger(status) ? { status } : {}),

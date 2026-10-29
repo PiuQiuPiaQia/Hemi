@@ -12,6 +12,7 @@ test('Bot OAuth failure distinguishes server networking, auth, quota and storage
     [Object.assign(new Error(privateValue), { status: 403, providerCode: 'unsupported_country_region_territory' }), 'catalog', 'region'],
     [new Error('模型验证失败', { cause: 'subscription_sharing_usage_limit_exceeded ' + privateValue }), 'inference', 'quota'],
     [new Error('模型验证失败', { cause: 'Connection error. ' + privateValue }), 'inference', 'network'],
+    [new Error('模型验证失败', { cause: 'Failed to extract accountId from token' }), 'inference', 'unauthorized'],
     [Object.assign(new Error(privateValue), { code: 'ENOTFOUND' }), 'catalog', 'dns'],
     [Object.assign(new Error(privateValue), { code: 'CERT_HAS_EXPIRED' }), 'catalog', 'tls'],
     [Object.assign(new Error(privateValue), { code: 'ENOSPC' }), 'storage', 'disk'],

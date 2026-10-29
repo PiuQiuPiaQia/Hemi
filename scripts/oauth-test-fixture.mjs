@@ -1,18 +1,24 @@
 // Synthetic provider HTTP boundary. Never reads an account, browser profile, or real token.
 import http from 'node:http';
+import zlib from 'node:zlib';
 import { createBigModelTestProvider } from './bigmodel-test-fixture.mjs';
 const json = value => Response.json(value);
 const event = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+/** pi-ai 的 Codex OAuth 用 atob 解 JWT payload（标准 base64），并要求嵌套 account claim。 */
+export const codexTestAccess = accountId => `codex-test-hdr.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: accountId } })).toString('base64')}.codex-test-sig`;
 
 export function oauthTestReply(rawUrl, init = {}, bigmodel) {
   const url = new URL(rawUrl);
   const codingReply = bigmodel?.reply(rawUrl, init);
   if (codingReply) return codingReply;
-  if (url.pathname.endsWith('/oauth/token')) return json({ access_token: url.hostname.includes('claude') ? 'sk-ant-oat-test-access' : 'openai-test-access', refresh_token: 'test-refresh-rotated', expires_in: 7200, scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct', id_token: 'test-presence-only' });
+  if (url.pathname.endsWith('/oauth/token')) {
+    if (url.hostname.includes('claude')) return json({ access_token: 'sk-ant-oat-test-access', refresh_token: 'test-refresh-rotated', expires_in: 7200, scope: 'openid profile email offline_access resource.invoke', id_token: 'test-presence-only' });
+    // Codex OAuth：凭据形状要求 access token 携带 chatgpt_account_id（标准 base64，pi-ai 用 atob 解）。
+    return json({ access_token: codexTestAccess('acct-test'), refresh_token: 'test-refresh-rotated', expires_in: 7200, scope: 'openid profile email offline_access', id_token: 'test-presence-only' });
+  }
   if (url.pathname === '/login/device/code') return json({ device_code: 'test-device', user_code: 'HEMI-TEST', verification_uri: 'https://github.com/login/device', interval: 0.01, expires_in: 60 });
   if (url.pathname === '/login/oauth/access_token') return json({ access_token: 'test-github-token', token_type: 'bearer' });
   if (url.pathname === '/copilot_internal/v2/token') return json({ token: 'test-copilot;proxy-ep=proxy.individual.githubcopilot.com;', expires_at: Math.floor(Date.now() / 1000) + 7200 });
-  if (url.pathname === '/v1/models') return json({ models: [{ slug: 'gpt-4.1', display_name: 'GPT 4.1', visibility: 'list' }, { slug: 'gpt-4', visibility: 'hidden' }] });
   if (url.pathname === '/models') return json({ data: ['gpt-5-mini', 'claude-sonnet-5.5'].map(id => ({ id, model_picker_enabled: true, policy: { state: 'enabled' }, capabilities: { supports: { tool_calls: true } } })) });
   const body = JSON.parse(init.body || '{}');
   let frames;
@@ -48,7 +54,13 @@ export async function startOAuthTestServer() {
   const originalFetch = globalThis.fetch;
   const server = http.createServer(async (request, response) => {
     try {
-      let body = ''; for await (const chunk of request) body += chunk;
+      // Codex SSE 客户端会发 zstd 压缩请求体（Content-Encoding: zstd）；仿真后端按真实
+      // 行为先解压，让 requests[].body 保持明文 JSON 供断言使用。
+      const chunks = []; for await (const chunk of request) chunks.push(chunk);
+      let body = Buffer.concat(chunks);
+      const encoding = String(request.headers['content-encoding'] ?? '').toLowerCase();
+      if (encoding === 'zstd') body = zlib.zstdDecompressSync(body);
+      body = body.toString('utf8');
       const target = new URL(request.url, 'http://localhost').searchParams.get('target');
       requests.push({ url: target, body, headers: request.headers });
       const reply = oauthTestReply(target, { body, headers: request.headers, method: request.method }, bigmodel);

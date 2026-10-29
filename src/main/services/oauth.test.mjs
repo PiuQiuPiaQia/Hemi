@@ -13,6 +13,9 @@ import { answerAboutImage } from './vision-model.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
 import { freezeModelPolicy, hydrateModelPlan, resolveModelPlan } from '../agent-runtime/model-policy.mjs';
 import { startOAuthTestServer, waitForOAuth } from '../../../scripts/oauth-test-fixture.mjs';
+import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-codex.models';
+
+const codexModelIds = Object.values(OPENAI_CODEX_MODELS).map(model => model.id);
 
 function encryption() {
   const key = randomBytes(32);
@@ -44,7 +47,10 @@ async function fixture(t) {
   const state = predicate => waitForOAuth(() => login.getState(), predicate);
   async function connect(provider) {
     const start = await login.start(provider);
-    if (provider === 'anthropic') {
+    if (provider === 'openai') {
+      const select = await state(s => s?.prompt?.type === 'select');
+      login.answer({ id: start.id, promptId: select.prompt.id, value: 'browser' });
+    } else if (provider === 'anthropic') {
       const select = await state(s => s?.prompt?.type === 'select');
       login.answer({ id: start.id, promptId: select.prompt.id, value: 'copy_code' });
       const manual = await state(s => s?.prompt?.type === 'manual_code');
@@ -67,7 +73,7 @@ test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
     const directory = await f.profiles.list();
     const account = directory.providers.find(item => item.oauthProvider === provider);
     assert.equal(account.hasApiKey, true);
-    if (provider === 'openai') assert.deepEqual(account.models.map(model => model.model), ['gpt-4.1']);
+    if (provider === 'openai') assert.deepEqual(account.models.map(model => model.model), codexModelIds);
     if (provider === 'github-copilot') assert.deepEqual(new Set(account.models.map(model => model.model)), new Set(['gpt-5-mini', 'claude-sonnet-5.5']));
     const config = await f.profiles.get(account.models[0].modelKey);
     assert.equal(config.apiKey, 'oauth');
@@ -87,6 +93,11 @@ test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
     assert.ok(request.headers.authorization?.startsWith('Bearer '));
     assert.notEqual(request.headers.authorization, 'Bearer oauth');
     if (provider === 'openai') { assert.equal(JSON.parse(request.body).store, false); assert.equal(JSON.parse(request.body).stream, true); }
+    if (provider === 'openai') {
+      const visionEntry = account.models.find(model => model.supportsVision);
+      assert.ok(visionEntry, 'Codex 目录应包含看图模型');
+      assert.equal(await answerAboutImage({ ...(await f.profiles.get(visionEntry.modelKey)), imageData: 'QQ==', mimeType: 'image/png', question: 'what' }), 'OAuth OK');
+    }
     const publicData = JSON.stringify({ directory, snapshot: await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey }) });
     assert.doesNotMatch(publicData, /test-access|test-refresh|test-github-token/);
   }
@@ -95,7 +106,7 @@ test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
   // Windows does not honor POSIX permission bits, so the 0600 mode is best-effort there.
   if (process.platform !== 'win32') assert.equal((await stat(f.filePath)).mode & 0o777, 0o600);
   const restarted = createOAuthCredentials({ filePath: f.filePath, safeStorage: f.safeStorage });
-  assert.equal((await restarted.read('openai')).clientId, 'test-issued-client');
+  assert.equal((await restarted.read('openai')).accountId, 'acct-test');
   assert.equal(await restarted.deviceId(), await f.credentials.deviceId());
 });
 
@@ -112,7 +123,7 @@ test('刷新并发互斥；退出使既有冻结计划失效；重登保留模�
   const before = f.transport.requests.filter(request => request.url.endsWith('/oauth/token')).length;
   await Promise.all(Array.from({ length: 4 }, () => f.runtime.models.getAuth('openai')));
   assert.equal(f.transport.requests.filter(request => request.url.endsWith('/oauth/token')).length, before + 1);
-  assert.deepEqual((await f.runtime.catalog('openai')).map(model => model.id), ['gpt-4.1']);
+  assert.deepEqual((await f.runtime.catalog('openai')).map(model => model.id), codexModelIds);
   await f.login.logout('openai');
   assert.equal((await f.profiles.list()).providers[0].hasApiKey, false);
   await assert.rejects(hydrateModelPlan(resolveModelPlan(snapshot), f.profiles), /重新登录/);
@@ -133,6 +144,8 @@ test('取消/过期 prompt/超时与原始认证错误不会暴露 token', async
   assert.equal((await f.credentials.list()).length, 0);
   const callbackLogin = createOAuthLogin({ runtime: f.runtime, credentials: f.credentials, profiles: f.profiles, openExternal: async () => {} });
   const callbackOp = await callbackLogin.start('openai');
+  const method = await waitForOAuth(() => callbackLogin.getState(), state => state?.prompt?.type === 'select');
+  callbackLogin.answer({ id: callbackOp.id, promptId: method.prompt.id, value: 'browser' });
   await waitForOAuth(() => callbackLogin.getState(), state => state?.prompt?.type === 'manual_code');
   await callbackLogin.cancel(callbackOp.id);
   await f.connect('openai'); // the real SDK callback port must have been released
