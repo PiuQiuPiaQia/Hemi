@@ -148,6 +148,7 @@ export function createCuaBridge({
   timeoutMs = DRIVER_CALL_TIMEOUT_MS,
   nowFn = Date.now,
   platform = process.platform,
+  resolveWindowsIdentities = async (options) => (await import('../../services/installed-apps.mjs')).windowsDesktopApps.running(options),
 } = {}) {
   let sdkPromise = null;
   let driverPromise = null;
@@ -215,12 +216,14 @@ export function createCuaBridge({
           if (!grouped.has(w.pid)) grouped.set(w.pid, []);
           grouped.get(w.pid).push(w);
         }
+        const windowsIdentities = platform === 'win32'
+          ? await resolveWindowsIdentities({ signal }) : null;
         return [...grouped.entries()].map(([pid, ws]) => {
           const app = byPid.get(pid);
           return {
             pid,
             name: app?.name ?? ws[0]?.appName ?? `pid ${pid}`,
-            bundleId: app?.bundleId ?? '',
+            bundleId: windowsIdentities ? (windowsIdentities.get(pid)?.bundleId ?? '') : (app?.bundleId ?? ''),
             frontmost: Boolean(app?.active),
             windows: ws.map((w) => ({
               windowId: w.windowId.toString(),

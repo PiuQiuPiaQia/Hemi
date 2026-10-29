@@ -19,6 +19,8 @@ function run(command, args, timeoutMs = 8000) {
 
 /** 辅助功能（操控/AX 读取的前提）。 */
 export function detectAccessibility() {
+  // Windows 无 macOS TCC；真实桌面状态由平台 cua 探针与每次动作核验。
+  if (process.platform !== 'darwin') return null;
   const out = run('osascript', ['-e', 'tell application "System Events" to count of application processes']);
   if (out.ok) return true;
   if (/assistive access|辅助功能/i.test(out.stderr)) return false;
@@ -27,6 +29,7 @@ export function detectAccessibility() {
 
 /** 屏幕录制（截屏的前提）。 */
 export function detectScreenRecording() {
+  if (process.platform !== 'darwin') return null;
   const out = run('osascript', [
     '-l', 'JavaScript',
     '-e',

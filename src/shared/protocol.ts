@@ -167,6 +167,8 @@ export type CapabilityReason =
   | 'privacy-disabled'
   | 'no-device'
   | 'driver-load-failed'
+  | 'desktop-session-unavailable'
+  | 'app-catalog-unavailable'
   | 'shortcut-conflict'
   | 'bridge-disconnected'
   | 'backend-not-verified'

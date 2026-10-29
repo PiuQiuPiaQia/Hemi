@@ -23,6 +23,13 @@ public static class HemiDesktop {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetApplicationUserModelId(IntPtr process, ref uint length, StringBuilder appId);
   [DllImport("wtsapi32.dll", CharSet=CharSet.Unicode)] static extern bool WTSQuerySessionInformation(IntPtr server, int session, int info, out IntPtr data, out int bytes);
   [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr data);
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+  [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+  public static bool InputDesktopAccessible() {
+    var desktop=OpenInputDesktop(0,false,0x0001 | 0x0100);
+    if(desktop==IntPtr.Zero)return false;
+    CloseDesktop(desktop);return true;
+  }
   public static int ConnectionState(int session) {
     IntPtr data;int bytes;
     if(!WTSQuerySessionInformation(IntPtr.Zero,session,8,out data,out bytes))return -1;
@@ -51,7 +58,7 @@ export function createWindowsDesktopApps() {
       // availability belongs to Cua Driver; external input-desktop probes also
       // reject valid targeted UIA/capture routes and must not gate them.
       if (refresh) sessionStatus = null;
-      sessionStatus ??= run(native + '$session=(Get-Process -Id $PID).SessionId;$state=[HemiDesktop]::ConnectionState($session);@{available=($session -gt 0);sessionId=$session;sessionConnected=($state -eq 0);connectionState=$state;reason=$(if($session -gt 0){""}else{"桌面助手未进入登录用户会话，请登录 Windows 或修复 Bot 组件。"});note=$(if($state -eq 4){"远程桌面已断开；前台按键需要保持连接且未锁定。后台操作仍由驱动核验。"}else{""})}|ConvertTo-Json -Compress', signal).catch(error => {sessionStatus = null;throw error;});
+      sessionStatus ??= run(native + '$session=(Get-Process -Id $PID).SessionId;$state=[HemiDesktop]::ConnectionState($session);@{available=($session -gt 0);inputDesktopAccessible=[HemiDesktop]::InputDesktopAccessible();sessionId=$session;sessionConnected=($state -eq 0);connectionState=$state;reason=$(if($session -gt 0){""}else{"桌面助手未进入登录用户会话，请登录 Windows 或修复 Bot 组件。"});note=$(if($state -eq 4){"远程桌面已断开；前台按键需要保持连接且未锁定。后台操作仍由驱动核验。"}else{""})}|ConvertTo-Json -Compress', signal).catch(error => {sessionStatus = null;throw error;});
       return sessionStatus;
     },
     async running({signal} = {}) {

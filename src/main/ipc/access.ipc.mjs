@@ -39,6 +39,7 @@ export function registerAccessIpc() {
   // 043 B2a：应用目录包装器——appRef 由这里签发与复核，渲染层只持引用。
   const catalog = createAppCatalog({
     listInstalled: listInstalledApplications,
+    platform: process.platform,
     locale: () => app.getLocale(),
   });
   /** 最近一次应用清单（addApplication 据此回填展示名）。 */

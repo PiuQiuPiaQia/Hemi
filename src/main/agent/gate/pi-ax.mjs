@@ -14,7 +14,7 @@
 import { execFile } from 'node:child_process';
 
 import { cua as defaultCua, describeAction, describeToolResult } from './cua-client.mjs';
-import { findInstalledApplication } from '../../services/installed-apps.mjs';
+import { findInstalledApplication, openWindowsApplication } from '../../services/installed-apps.mjs';
 
 /** 单次 ui_act 最多动作数：批处理语义是「短序列」，不是程序。 */
 export const AX_MAX_ACTIONS = 10;
@@ -332,6 +332,10 @@ export default function hemiAx(pi, { config = {} } = {}) {
       const running = await cua.listAppWindows({ signal });
       if (running.some((a) => a.bundleId === target.bundleId)) {
         return { content: [{ type: 'text', text: `「${target.name}」已在运行，可直接 ui_tree({app:"${target.name}"})。` }] };
+      }
+      if (process.platform === 'win32' && !config.openApplication) {
+        await openWindowsApplication(target, { signal });
+        return { content: [{ type: 'text', text: `已请求打开「${target.name}」。请用 ui_list / ui_tree 确认窗口。` }] };
       }
       if (config.openApplication) {
         await config.openApplication(target, signal);

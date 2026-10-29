@@ -37,7 +37,7 @@ export function decodeBundleAppRef(appRef) {
  *   平台清单来源（darwin 传 installed-apps 的 listInstalledApplications）
  * @param {() => string} [options.locale] 排序用 locale
  */
-export function createAppCatalog({ listInstalled, locale = () => 'en' } = {}) {
+export function createAppCatalog({ listInstalled, locale = () => 'en', platform = 'darwin' } = {}) {
   if (typeof listInstalled !== 'function') throw new Error('createAppCatalog 需要 listInstalled');
 
   let catalogRevision = 0;
@@ -61,12 +61,12 @@ export function createAppCatalog({ listInstalled, locale = () => 'en' } = {}) {
       .map((app, index) => ({
         rowId: `app-${catalogRevision}-${index}`,
         name: app.name || app.bundleId,
-        platform: 'darwin',
+        platform,
         ref: { appRef: encodeBundleAppRef(app.bundleId), catalogRevision },
         running: runningNames.has(app.bundleId),
         icon: null,
         source: {
-          kind: 'bundle',
+          kind: platform === 'win32' ? (app.appId ? 'package' : 'executable') : 'bundle',
           locationLabel: app.path ?? app.bundleId,
         },
       }))

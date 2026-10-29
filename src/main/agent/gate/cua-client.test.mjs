@@ -97,7 +97,7 @@ test('driverErrorInfo / translateDriverError：errorCode 路由到中文指引',
   const stale = translateDriverError(refusedError('stale_element_token', 'token expired'));
   assert.match(stale.message, /重新 screen_view/);
   const perm = translateDriverError(refusedError('accessibility_permission_missing', 'not authorized'));
-  assert.match(perm.message, /隐私与安全性/);
+  assert.match(perm.message, process.platform === 'win32' ? /Windows 桌面权限不足/ : /隐私与安全性/);
   const gone = translateDriverError(refusedError('window_not_found', 'pid gone'));
   assert.match(gone.message, /目标窗口已不存在/);
   const other = translateDriverError(refusedError('weird_code', 'nope'));
@@ -139,7 +139,7 @@ function fakeDriver() {
 }
 
 function bridgeWith(driver) {
-  return createCuaBridge({ loadSdk: () => fakeSdk(), createDriver: () => driver });
+  return createCuaBridge({ loadSdk: () => fakeSdk(), createDriver: () => driver, platform: 'darwin' });
 }
 
 test('listAppWindows：按 pid 聚合成旧输出形状（ui_list/对话侧兼容）', async () => {
@@ -273,6 +273,14 @@ test('dispose：shutdown + uniffiDestroy 收尾', async () => {
   const kinds = d.__calls.map(([n]) => n);
   assert.ok(kinds.includes('shutdown'));
   assert.ok(kinds.includes('uniffiDestroy'));
+});
+
+test('Windows 窗口枚举采用 OS 身份，匹配安装目录授权键', async () => {
+  const d = fakeDriver();
+  const identity = 'win32:exe:c:\\windows\\system32\\notepad.exe';
+  const b = createCuaBridge({ loadSdk: () => fakeSdk(), createDriver: () => d, platform: 'win32', resolveWindowsIdentities: async () => new Map([[11, {bundleId: identity}]]) });
+  const apps = await b.listAppWindows();
+  assert.equal(apps[0].bundleId, identity);
 });
 
 test('Windows exact element input uses native element tokens and never silently upgrades background scroll', async () => {

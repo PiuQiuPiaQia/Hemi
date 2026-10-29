@@ -47,15 +47,19 @@ export function win32Backend(deps) {
     },
     requestMicrophoneAccess: async () => microphoneGranted(),
 
+    // Windows 冷启动含 PowerShell 会话探测及原生库初始化，真机约 10s。
+    // 仅此两项放宽有界预算，其余探针保持 8s。
+    probeTimeouts: { desktop: 20_000, appCatalog: 20_000 },
     probes: {
       microphone: microphoneCapability,
       // Swift/VPIO helper 是 mac 专属；Windows 音频后端等 WP-04 定案。
       audioDuplex: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
       // uiohook 在 Windows 的钩子链未验证（WP-04）；不启用、不假装可用。
       pushToTalk: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
-      // cua-driver 声明了 Windows 原生包，但 Hemi 的桌面链（身份/授权/中文键
+      // 本地宿主注入真实驱动/登录会话探针；未注入时保持不可用，不因原生包存在放行。
+      // 历史门控：Windows 的桌面链（身份/授权/中文键
       // 入/DPI）未过 WP-03：不可用，不为「包存在」背书。
-      desktop: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
+      desktop: deps.probeDesktop ?? (() => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false })),
       browser: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
       // 命令隔离在 Windows 没有 Seatbelt 后端；WP-01 未过不注册命令工具。
       command: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
@@ -63,7 +67,7 @@ export function win32Backend(deps) {
       systemProxy: () => ({ state: 'unavailable', reason: 'unsupported-proxy', supported: false }),
       capture: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
       currentPage: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
-      appCatalog: () => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false }),
+      appCatalog: deps.probeAppCatalog ?? (() => ({ state: 'unavailable', reason: 'backend-not-verified', supported: false })),
     },
   };
 }

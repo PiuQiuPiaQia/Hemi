@@ -34,6 +34,15 @@ function desktopBlockedCopy(capability: Capability | null): { text: string; rech
   if (!capability || capability.state === 'checking') {
     return { text: '正在检测桌面操控支持…', recheckable: false };
   }
+  if (capability.state === 'ready') {
+    return { text: '桌面操控组件已就绪；操作应用仍需你的授权。', recheckable: true };
+  }
+  if (capability.reason === 'desktop-session-unavailable') {
+    return { text: '请连接并解锁 Windows 桌面后重新检测。', recheckable: true };
+  }
+  if (capability.reason === 'probe-failed') {
+    return { text: '桌面检测超时或失败，请重新检测。', recheckable: true };
+  }
   if (capability.reason === 'backend-not-verified') {
     return { text: '正在适配这台系统的桌面操控，暂时不可用。', recheckable: false };
   }
@@ -168,6 +177,7 @@ function PlatformVisionSection({
           <span>{blocked.text}</span>
         </span>
         <span className="h37-row-end">
+          {capability?.state === 'ready' ? <span className="h37-badge" data-tone="ok">可用</span> : null}
           {blocked.recheckable ? (
             <button
               type="button"

@@ -21,7 +21,7 @@ export function createPlatformService({ platform = process.platform, deps, enabl
 }
 
 function createWithBackend(backend, { platform, enabledIntents, notify }) {
-  const service = createCapabilityService({ platform, probes: backend.probes, enabledIntents, notify });
+  const service = createCapabilityService({ platform, probes: backend.probes, probeTimeouts: backend.probeTimeouts, enabledIntents, notify });
   if (backend.shortcut?.pushToTalk) {
     service.setShortcut(backend.shortcut.pushToTalk.key, backend.shortcut.pushToTalk.label);
   }

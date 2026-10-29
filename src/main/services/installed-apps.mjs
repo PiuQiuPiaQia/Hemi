@@ -8,6 +8,18 @@ import { execFile } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createWindowsDesktopApps } from '../bot/windows-desktop-apps.mjs';
+
+export const windowsDesktopApps = process.platform === 'win32' ? createWindowsDesktopApps() : null;
+
+/** Windows 启动目标必须来自宿主安装目录，沿用同一 exe/AUMID 身份。 */
+export async function openWindowsApplication(target, options = {}) {
+  if (!windowsDesktopApps) throw new Error('Windows 应用启动不可用');
+  const installed = await windowsDesktopApps.list(options);
+  const verified = installed.find((app) => app.bundleId === target?.bundleId);
+  if (!verified) throw new Error('应用身份已变化，请刷新应用清单');
+  return windowsDesktopApps.open(verified, options);
+}
 
 /** plutil 转 JSON 读 plist / InfoPlist.strings（异步子进程，不阻塞主循环）。 */
 function readPlistJson(file) {
@@ -73,6 +85,7 @@ export const APP_ROOTS = [
 /** 已安装应用扫描（用户与系统应用目录顶层 .app；结果缓存 5 分钟，弹窗重开秒出）。 */
 let installedCache = { at: 0, apps: null };
 export async function listInstalledApplications() {
+  if (windowsDesktopApps) return (await windowsDesktopApps.list()).map((app) => ({ ...app, path: app.executable || app.launchPath || app.bundleId }));
   if (installedCache.apps && Date.now() - installedCache.at < 5 * 60_000) return installedCache.apps;
   const paths = [];
   for (const root of APP_ROOTS) {

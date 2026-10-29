@@ -70,6 +70,7 @@ export function createCapabilityService({
   notify = () => {},
   now = Date.now,
   probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  probeTimeouts = {},
 }) {
   if (!platform) throw new Error('createCapabilityService: platform 必填');
   if (!probes || typeof probes !== 'object') throw new Error('createCapabilityService: probes 必填');
@@ -91,7 +92,7 @@ export function createCapabilityService({
         if (settled) return;
         settled = true;
         resolve({ state: 'error', reason: 'probe-failed' });
-      }, probeTimeoutMs);
+      }, probeTimeouts[id] ?? probeTimeoutMs);
       timer.unref?.();
       Promise.resolve()
         .then(() =>

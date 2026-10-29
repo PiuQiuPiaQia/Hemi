@@ -14,6 +14,13 @@ import {
   isGlobalPushToTalkRunning,
 } from '../lib/global-push-to-talk.mjs';
 
+import { createLogger } from '../lib/logger.mjs';
+import { cua } from '../agent/gate/cua-client.mjs';
+import { windowsDesktopApps } from './installed-apps.mjs';
+import { createWindowsDesktopProbes } from '../platform/windows-desktop-probe.mjs';
+
+const windowsProbes = process.platform === 'win32'
+  ? createWindowsDesktopProbes({ apps: windowsDesktopApps, cua, report: (message) => createLogger('platform-desktop').info(message) }) : null;
 let instance = null;
 /** 能力变化广播（platform.ipc 注册时挂上；未挂时变化只进状态不广播）。 */
 let notifyTarget = null;
@@ -24,6 +31,7 @@ export function getPlatformService() {
     platform: process.platform,
     notify: (snapshot) => notifyTarget?.(snapshot),
     deps: {
+      ...(windowsProbes ? { probeDesktop: windowsProbes.desktop, probeAppCatalog: windowsProbes.appCatalog } : {}),
       getMediaAccessStatus: (mediaType) => systemPreferences.getMediaAccessStatus(mediaType),
       askForMediaAccess: (mediaType) => systemPreferences.askForMediaAccess(mediaType),
       // 024 冒烟约定（permissions.ipc 同款）：dev 二进制没有麦克风用途声明，
