@@ -10,6 +10,19 @@ export function isFlowSnapshot(value: unknown): value is FlowSnapshotView {
     && view.runs && view.tasks && view.artifacts && view.permissions);
 }
 
+/**
+ * A patch normally belongs to the replica's generation. The one exception is the
+ * rewind patch itself: it moves generation forward by exactly one and declares the
+ * new value in its meta. Without this, every rewind forced an async refetch and an
+ * immediate resend still carried the old generation (host rejects it as conflict).
+ */
+function acceptsGeneration(snapshot: FlowSnapshotView, change: Extract<FlowChangeView, { kind: 'patch' }>): boolean {
+  if (change.generation === snapshot.generation) return true;
+  if (change.generation !== snapshot.generation + 1 || !Array.isArray(change.changes)) return false;
+  return change.changes.some(group => (group.kind === 'multi' ? (group.changes as Array<Record<string, unknown>>) ?? [] : [group as Record<string, unknown>])
+    .some(patch => patch.kind === 'meta' && (patch.meta as { generation?: number } | undefined)?.generation === change.generation));
+}
+
 /** Apply published facts only; execution and scheduling remain authoritative upstream. */
 export function applyFlowChange(snapshot: FlowSnapshotView, change: FlowChangeView): { ok: boolean; snapshot?: FlowSnapshotView; code?: string } {
   if (change.kind === 'snapshot') {
@@ -18,7 +31,7 @@ export function applyFlowChange(snapshot: FlowSnapshotView, change: FlowChangeVi
       || incoming.revision < snapshot.revision || incoming.generation < snapshot.generation) return { ok: false, code: 'stale' };
     return { ok: true, snapshot: incoming };
   }
-  if (change.conversationId !== snapshot.conversationId || change.generation !== snapshot.generation
+  if (change.conversationId !== snapshot.conversationId || !acceptsGeneration(snapshot, change)
     || change.baseRevision !== snapshot.revision || !Number.isSafeInteger(change.revision)
     || change.revision <= snapshot.revision || !Array.isArray(change.changes)) return { ok: false, code: 'stale' };
   let next = snapshot;

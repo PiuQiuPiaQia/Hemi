@@ -47,3 +47,11 @@ test('loaded history merges with live heads without duplicating rows or caching 
  const old=client.getSnapshot().snapshot.timeline[0];receive({kind:'patch',conversationId:'long',generation:1,baseRevision:2,revision:3,changes:[{kind:'item-updated',item:{...old,text:'Historical update'}}]});assert.equal(client.getSnapshot().snapshot.timeline[0].text,'Historical update');
  await client.flushSnapshot();assert.ok(saved.at(-1).timeline.length<snapshot.timeline.length);assert.ok(Buffer.byteLength(JSON.stringify(saved.at(-1)))<256*1024);
 });
+test('replica applies the rewind patch that advances generation by one',()=>{
+ const base={...full,timeline:full.timeline.slice(0,2)};
+ const meta={phase:'idle',activeRunId:null,awaitingUser:null,queuePaused:false,generation:2};
+ const change={kind:'patch',conversationId:'long',generation:2,baseRevision:1,revision:2,changes:[{kind:'multi',changes:[{kind:'meta',meta},{kind:'timeline',timeline:[]}]}]};
+ const applied=applyFlowChange(base,change);assert.equal(applied.ok,true);assert.equal(applied.snapshot.generation,2);assert.equal(applied.snapshot.timeline.length,0);
+ assert.equal(applyFlowChange(base,{...change,changes:[{kind:'timeline',timeline:[]}]}).code,'stale');
+ assert.equal(applyFlowChange(base,{...change,generation:3,changes:[{kind:'meta',meta:{...meta,generation:3}}]}).code,'stale');
+});

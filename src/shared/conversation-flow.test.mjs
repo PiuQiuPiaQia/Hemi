@@ -352,3 +352,18 @@ test('063：input-updated 接受 skills 键；input-delivered 用户项冻结 sk
   assert.deepEqual(userItem.skills, skills);
   assert.deepEqual(userItem.references, references);
 });
+
+test('回卷补丁可被客户端增量应用（编辑重发不再带旧 generation）', () => {
+  const setup = prepared();
+  const before = setup.apply({ type: 'run-closed', runId: 'run-1', outcome: 'done', at: 20 }).snapshot;
+  const cut = applyFlowFact(before, { type: 'generation-bumped', cutAfterInputId: 'in-1' });
+  const change = { kind: 'patch', conversationId: 'c1', generation: cut.snapshot.generation, baseRevision: before.revision,
+    revision: cut.snapshot.revision, changes: cut.patch.kind === 'multi' ? cut.patch.changes : [cut.patch] };
+  const applied = applyFlowChange(before, change);
+  assert.equal(applied.ok, true);
+  assert.equal(applied.snapshot.generation, before.generation + 1);
+  assert.deepEqual(applied.snapshot, cut.snapshot);
+  // 跨代且未声明新 generation 的补丁仍判 stale。
+  assert.equal(applyFlowChange(before, { ...change, changes: [{ kind: 'timeline', timeline: [] }] }).code, 'stale');
+  assert.equal(applyFlowChange(before, { ...change, generation: before.generation + 2 }).code, 'stale');
+});

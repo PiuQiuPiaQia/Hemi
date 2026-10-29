@@ -524,7 +524,12 @@ export function applyFlowChange(snapshot, change) {
     if ((incoming?.generation ?? 1) < (snapshot.generation ?? 1)) return { ok: false, code: 'stale' };
     return { ok: true, snapshot: incoming };
   }
-  if (change.generation !== snapshot.generation) return { ok: false, code: 'stale' };
+  // 回卷补丁自身把 generation 恰好推进 1，并在 meta 里声明新值——允许增量应用，
+  // 否则副本只能异步重取快照，紧随其后的重发会带旧 generation 被宿主判冲突。
+  const bumpsGeneration = change.generation === (snapshot.generation ?? 1) + 1
+    && (change.changes ?? []).some((group) => (group.kind === 'multi' ? group.changes ?? [] : [group])
+      .some((patch) => patch.kind === 'meta' && patch.meta?.generation === change.generation));
+  if (change.generation !== snapshot.generation && !bumpsGeneration) return { ok: false, code: 'stale' };
   if (change.baseRevision !== snapshot.revision) return { ok: false, code: 'stale' };
   let next = snapshot;
   for (const patch of change.changes) {

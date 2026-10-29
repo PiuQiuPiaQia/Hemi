@@ -19,7 +19,7 @@ export function registerFlowIpc() {
     if (!conversationId) return { ok: false, code: 'invalid', message: '缺少 conversationId' };
     return service.operations.execute(conversationId,payload.operation,payload.command,async()=>{
     const controller = service.controllerFor(conversationId);
-    if(payload.operation?.generation!=null&&payload.operation.generation!==controller.getSnapshot().generation)return {ok:false,code:'conflict'};
+    if(payload.operation?.generation!=null&&payload.operation.generation!==controller.getSnapshot().generation)return {ok:false,code:'conflict',message:'会话已回卷，请核对后重新发送。'};
     const command = structuredClone(payload.command ?? {});
     if (command.input) { delete command.input.modelPolicySnapshot; delete command.input.workspaceSnapshot; }
     if (command.patch) { delete command.patch.modelPolicySnapshot; delete command.patch.workspaceSnapshot; }

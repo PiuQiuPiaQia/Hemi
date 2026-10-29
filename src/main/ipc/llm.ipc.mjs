@@ -1,6 +1,7 @@
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
 import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
 import {closeConversationRun} from '../services/run-completion.mjs';
+import {waitRunSettled} from '../services/run-settle.mjs';
 import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { ipcMain, app, shell, dialog, net } from 'electron';
 import { createLocalFileActions } from '../services/local-file-actions.mjs';
@@ -1105,6 +1106,11 @@ export function registerLlmIpc() {
     const keys = Array.isArray(payload?.removedTurnKeys) ? payload.removedTurnKeys.map(String) : [];
     if (!conversationId || !targetInputId) return { ok: false, code: 'invalid' };
     const controller = flowService.controllerFor(conversationId);
+    // 在途回合先收口再回卷（2026-10-29 真机）：旧运行仍活着时直接 generation+1，
+    // 它稍后按旧代上报的 run-closed 会被丢弃，控制器永远卡在 stopping，
+    // 紧随的重发只能排队且永不派发。
+    const settled = await waitRunSettled(controller);
+    if (!settled) return { ok: false, code: 'busy', message: '上一轮还没停下，请稍后再重新发送。' };
     const cut = applyConversationCut(conversationId, keys, { targetInputId });
     if (!cut?.ok) return { ok: false, code: 'storage-failed', message: cut?.storageError ?? '剪除失败' };
     controller.applyFact({ type: 'generation-bumped', cutAfterInputId: targetInputId });
