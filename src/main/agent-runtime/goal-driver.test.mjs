@@ -38,15 +38,18 @@ test('blocked 正常返回结构化结果；终态保留原因、禁止旧动作
  const nextOwner={...owner,rootRunId:'explicit-next'};await restored.beginRoot(nextOwner);await restored.beginGoal(nextOwner,'用户的新请求',goalPolicy());
 });
 test('主子和辅助共享每段额度；单段触顶可校验一次，持久续跑不重置总预算',async t=>{
- const {journal}=await fixture(t,{maxRequests:3});const child={...owner,taskId:'child'},aux={...owner,rootRunId:'aux'};
+ const {journal}=await fixture(t,{maxRequests:4});const child={...owner,taskId:'child'},aux={...owner,rootRunId:'aux'};
  await journal.beginRoot(aux,{kind:'auxiliary',sourceRootRunId:owner.rootRunId});
  await request(journal,'a',child,'subagent');await finish(journal,'a');await request(journal,'b',aux,'title');await finish(journal,'b');
- await assert.rejects(request(journal,'over'),/上限 2/);await journal.checkGoal(owner);
+ // 057 软复盘：段边界（perRound=2）不再拒绝请求，第 3 个跨段继续（R-02 子任务不等待祖先）。
+ await request(journal,'over');await finish(journal,'over');
+ await journal.checkGoal(owner);
  await request(journal,'verify',owner,GOAL_VERIFICATION_PURPOSE);await finish(journal,'verify');await assert.rejects(request(journal,'verify2',owner,GOAL_VERIFICATION_PURPOSE),/不可用/);
- await journal.recordGoalCheck(owner,next);const round=await journal.continueGoal(owner);assert.equal(round.requestOffset,2);assert.equal(round.round,2);
- await request(journal,'c');await finish(journal,'c');await assert.rejects(request(journal,'total-over',child,'subagent'),/上限 3/);
+ await journal.recordGoalCheck(owner,next);const round=await journal.continueGoal(owner);assert.equal(round.requestOffset,3);assert.equal(round.round,2);
+ // 硬预算（maxRequests=4）仍原子拒绝并保留触顶事实（R-07）。
+ await request(journal,'c');await finish(journal,'c');await assert.rejects(request(journal,'total-over',child,'subagent'),/上限 4/);
  await journal.checkGoal(owner);await journal.recordGoalCheck(owner,next);await assert.rejects(journal.continueGoal(owner),{code:'goal-budget-limit'});
- assert.equal(Object.keys((await journal.snapshot()).requests).length,4);
+ assert.equal(Object.keys((await journal.snapshot()).requests).length,5);
 });
 for(const kind of ['request','tool','process','dispatch','inbox'])test(`未确认的 ${kind} 不能通过完成边界`,async t=>{
  const {journal}=await fixture(t);
@@ -106,21 +109,28 @@ test('答复时预算已耗尽正常返回 partial，不调用模型或重置原
 test('分段检查点保留后台归属，完成门仍拒绝活动进程；重启不自动重放',async t=>{
  const {journal,dir}=await fixture(t);
  await journal.processStart({id:'live',owner,pid:99999,token:'fixture',description:'长任务'});await journal.processBackground('live');
- await request(journal,'one');await finish(journal,'one');await request(journal,'two');await finish(journal,'two');await assert.rejects(request(journal,'cap'),{code:'request-limit'});
- const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.goal.round,2);assert.equal(checkpoint.goal.requestOffset,2);assert.equal(checkpoint.work.processes[0].id,'live');
+ await request(journal,'one');await finish(journal,'one');await request(journal,'two');await finish(journal,'two');
+ // 057 软复盘：段边界不再拒绝；第 3 个请求跨段继续后，在回合边界交接段事实。
+ await request(journal,'cap');await finish(journal,'cap');
+ const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.goal.round,2);assert.equal(checkpoint.goal.requestOffset,3);assert.equal(checkpoint.work.processes[0].id,'live');
  assert.equal((await journal.snapshot()).processes.live.state,'active');await assert.rejects(journal.checkGoal(owner),/未确认/);
- await assert.rejects(journal.checkpointGoal(owner),/未触顶/);
+ await assert.rejects(journal.checkpointGoal(owner),/尚未耗尽/);
  const restored=createRunJournal({dir});await restored.recover();const root=await restored.root(owner);assert.equal(root.status,'interrupted');assert.equal(root.goal.checkpoints.length,1);
  await assert.rejects(restored.checkpointGoal(owner),/停止/);
 });
 
 test('分段触顶与续跑通知可取消、按归属隔离，子请求仍阻止完成',async t=>{
- const {journal}=await fixture(t),aux={...owner,rootRunId:'wait-aux'};
+ const {journal}=await fixture(t,{maxRequests:3}),aux={...owner,rootRunId:'wait-aux'};
  await assert.rejects(journal.waitForRequestLimit({...owner,generation:2}),/归属/);
  await journal.beginRoot(aux,{kind:'auxiliary',sourceRootRunId:owner.rootRunId});
  const controller=new AbortController();const cancelled=journal.waitForRequestLimit(owner,{signal:controller.signal});controller.abort();await assert.rejects(cancelled,{name:'AbortError'});
- const limited=journal.waitForRequestLimit(owner);await request(journal,'one');await finish(journal,'one');await request(journal,'two',{...owner,taskId:'child'},'subagent');
+ // 057 软复盘：段（perRound=2）内第 3 个请求跨段继续，不设置触顶标志；硬预算（maxRequests=3）拒绝时才设置。
+ const guard=new AbortController();const limited=journal.waitForRequestLimit(owner,{signal:guard.signal});
+ await request(journal,'one');await finish(journal,'one');await request(journal,'two',{...owner,taskId:'child'},'subagent');
+ await request(journal,'edge');await finish(journal,'edge');
  await assert.rejects(request(journal,'cap'),{code:'request-limit'});assert.ok((await limited).requestLimitReached);
- const resumed=journal.waitForRequestLimit(aux,{cleared:true});const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.work.requests[0],'two');assert.equal((await resumed).goal.round,2);
+ // 硬预算是终局：段交接不再推进（不重置总预算），标志不再被清除。
+ await assert.rejects(journal.checkpointGoal(owner),{code:'goal-budget-limit'});
  await assert.rejects(journal.checkGoal(owner),/未确认/);await finish(journal,'two');await journal.checkGoal(owner);
+ guard.abort();
 });

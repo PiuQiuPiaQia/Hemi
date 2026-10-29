@@ -50,6 +50,9 @@ test('durable admission identities survive reload and fence receipts/results; re
   await assert.rejects(restored.completeTask({ dispatchKey: 'first', owner: { ...owner, taskId: 't1' }, result: { taskId: 't1' } }), /不匹配/);
   await restored.completeTask({ dispatchKey: 'first', owner: { ...owner, taskId: reserved.taskId }, result: { taskId: reserved.taskId } });
   await restored.recordReceipt('first', { ok: true, taskId: reserved.taskId });
+  // 057 统一 accepted：所有派单结算都产生 inbox 事件；未消费前完成门保持关闭（R-11）。
+  assert.equal((await restored.pending(owner)).length, 1);
+  await restored.consume([`complete:${reserved.taskId}`], 'entry-anchor');
   const rejected = await restored.reserveDispatch('rejected', { owner });
   assert.notEqual(rejected.taskId, reserved.taskId);
   await restored.recordReceipt('rejected', { ok: false, error: '子会话不兼容，未开始执行' });

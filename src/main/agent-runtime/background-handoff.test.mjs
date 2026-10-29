@@ -110,15 +110,15 @@ async function fixture(t, platform, mode, policy = {}) {
       sessionOptions:{backgroundQuietReviewMs:mode === 'quiet-hung' ? 30 : 0}});
     agent = await runtime.obtain(ctx); agent.on('activity', value => activities.push(value));
     if (mode === 'race' || mode === 'stop-handoff') {
+      // 057 软复盘：段交接在回合边界发生，命令完成不再由旧的请求触顶点触发；
+      // 这两种场景改用定时释放命令，让完成事实与回合边界复盘各自独立到达。
       const checkpoint = runtime.journal.checkpointGoal;
       runtime.journal.checkpointGoal = async (...args) => {
         atHandoff = true;
-        if (mode === 'race') {
-          await fs.writeFile(path.join(workspace, 'release'), 'done');
-          await until(async () => (await processes()).every(item => item.state === 'finished'));
-        } else await new Promise(resolve => { releaseHandoff = resolve; });
+        if (mode !== 'race') await new Promise(resolve => { releaseHandoff = resolve; });
         return checkpoint(...args);
       };
+      setTimeout(() => { void fs.writeFile(path.join(workspace, 'release'), 'done').catch(() => {}); }, 200);
     }
   } else {
     host = await createBotHost({dataDir, defaultDir:workspace, goalPolicy, allowLoopbackModels:true, validateModel:async () => {},
@@ -180,9 +180,14 @@ for (const platform of ['PC','Bot']) {
     const jobs = await f.processes(); assert.equal(jobs.length, 1); assert.equal(jobs[0].status, 'cancelled'); assert.equal(jobs[0].cleanupConfirmed, true);
     assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'), 'ACTUAL_WORK_DONE');
     const root = Object.values((await f.snapshot()).roots).find(item => item.goal);
-    assert.ok(root.goal.checkpoints.length >= 1); assert.ok(root.goal.round > 1); assert.equal(f.checks, 1);
+    // 057 软复盘：段边界不再拒绝请求，模型在单回合内跨软段边界连续工作（R-07）；
+    // 回合结束时已无未决工作则无需段交接（checkpoint 为空是正确行为），完成校验收口。
+    assert.ok(f.calls >= 2, `requests admitted across the soft segment boundary (calls=${f.calls})`);
+    assert.equal(root.goal.phase, 'complete'); assert.equal(f.checks, 1);
     const entries = await f.entries(); assert.equal(entries.filter(item => item.type === 'custom' && item.customType === 'hemi.input').length, 1);
-    if (mode === 'quiet-hung') assert.ok(entries.some(item => item.customType === 'hemi_background_command_review'), 'quiet review survives the shared budget boundary');
+    // 057 软复盘（R-02/R-07）：跨段不再依赖 60s 静默复核兜底唤醒——reviewPending 立即唤醒
+    // 根复盘（goal round 推进），模型自己核验并停止不再需要的命令；quiet review 保留为长静默兜底。
+    if (mode === 'quiet-hung') assert.ok(root.goal.round >= 2, `soft segment review woke the root (round=${root.goal.round})`);
   });
   test(`${platform}: a quiet required long job survives handoff and retains its original identity and deadline`, {timeout:25000}, async t => {
     const f = await fixture(t, platform, 'normal'); await f.start();
@@ -213,7 +218,9 @@ for (const platform of ['PC','Bot']) {
   });
   for (const policy of [{maxRounds:1},{maxRequests:1}]) test(`${platform}: exhausted ${Object.keys(policy)[0]} clears live work and closes partial without verification`, {timeout:25000}, async t => {
     const f = await fixture(t, platform, 'budget', policy); await f.start(); assert.equal(await f.finish(),'partial');
-    assert.equal(f.calls,1); assert.equal(f.checks,0); assert.equal((await f.processes()).length,1);
+    // 057 软复盘：maxRounds 场景第 2 个请求软性发出（段不拒请求，回合边界才收口）；maxRequests 硬预算仍在准入处拒绝。
+    if (Object.keys(policy)[0] === 'maxRequests') assert.equal(f.calls, 1); else assert.ok(f.calls >= 2, `segment admitted softly (calls=${f.calls})`);
+    assert.equal(f.checks,0); assert.equal((await f.processes()).length,1);
     assert.ok((await f.processes()).every(item => item.cleanupConfirmed && item.status === 'cancelled'));
     const goal = Object.values((await f.snapshot()).roots).find(item => item.goal).goal; assert.equal(goal.phase,'budget_limited'); assert.equal(goal.round,1);
   });
@@ -232,6 +239,9 @@ test('PC: completion racing the durable handoff is delivered exactly once before
 });
 test('PC: cancellation while checkpoint persistence is delayed cannot advance or restart the goal', {timeout:25000}, async t => {
   const f = await fixture(t,'PC','stop-handoff'); await f.start(); await until(() => f.atHandoff); await f.stop(); assert.equal(await f.finish(),'stopped');
-  assert.equal(f.calls,1); assert.equal(f.checks,0); assert.ok((await f.processes()).every(item => item.cleanupConfirmed));
+  // 057 软复盘：段边界软放行了第 2 次请求（不再硬拒）；取消后不得再有任何新请求，也不得推进或重启目标。
+  const count = f.requests.length; await pause(80);
+  assert.equal(f.requests.length, count); assert.ok(f.calls >= 1 && f.calls <= 2, `calls=${f.calls}`);
+  assert.equal(f.checks,0); assert.ok((await f.processes()).every(item => item.cleanupConfirmed));
   const goal = Object.values((await f.snapshot()).roots).find(item => item.goal).goal; assert.equal(goal.round,1); assert.notEqual(goal.phase,'complete');
 });

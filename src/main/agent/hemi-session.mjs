@@ -1020,12 +1020,18 @@ export function createHemiSession({
         try {
           update = await Promise.race([
             commands.waitForUpdate(execution?.owner, {signal, collect:false}),
-            ...(goalManaged && !execution.owner.taskId ? [execution.journal.waitForRequestLimit(execution.owner, {signal}).then(() => ({kind:'budget'}))] : []),
+            ...(goalManaged && !execution.owner.taskId ? [
+              execution.journal.waitForRequestLimit(execution.owner, {signal}).then(() => ({kind:'budget'})),
+              // 057 软复盘：模型已停止生成、宿主在等命令也是安全回合边界；跨段后唤醒根调度复盘，
+              // 命令与预算记账原样保留（H-01），请求本身从未被拒（R-02/R-07）。
+              execution.journal.waitForReview(execution.owner, {signal}).then(() => ({kind:'segment-review'})),
+            ] : []),
           ]);
         }
         finally { updateAbort.abort(); waitingForBackground = false; backgroundWaitSince = null; publishActivity(); }
         if (disposed || abortRequested || execution?.cancelled?.() || runtimeExecution !== execution) break;
         if (update.kind === 'budget') continue;
+        if (update.kind === 'segment-review') break;
         if (update.kind === 'review') {
           commands.acknowledgeReview(execution?.owner, update);
           append(await promptOnce('',{hostEvent:{customType:'hemi_background_command_review',content:[
@@ -1042,7 +1048,9 @@ export function createHemiSession({
         append(await promptOnce('', { hostEvent: backgroundCommandEvent(events) }));
         await persistExecution();
       }
-      if (result.aborted || result.modelError || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
+      // 057 子 Agent 失败后的工作控制：模型错误只结束该次推理，健康进程留给根目标继续受管
+      // （agent-task-lifecycle R-09）；用户停止与终局释放仍按原契约清理全部命令。
+      if (result.aborted || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
       return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
     } catch (error) {
       await commands.abort();
@@ -1272,6 +1280,9 @@ export function createHemiSession({
       if(action==='review')return {accepted:commands.requestReview(owner)};
       throw new Error('不支持的后台命令操作');
     },
+    /** 057 供根调度按 rootRunId+generation 收集本会话树内（含子任务归属）已完成的命令事实。 */
+    collectTreeCommands: owner => commands.collectCompletedTree(owner),
+    hasTreeCommands: owner => commands.hasBackgroundTree(owner),
     steer,
     followUp,
     notify,

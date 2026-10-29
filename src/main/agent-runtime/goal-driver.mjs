@@ -98,7 +98,9 @@ export async function driveGoal({journal, owner, objective, policy, continuation
       signal.throwIfAborted();
       if (result.aborted) return result;
       await persist();
-      if (result.budgetLimited) {
+      // 057 软复盘：段预算在回合边界耗尽时主动交接（硬预算触顶仍走 budgetLimited 同一路径），
+      // 段内请求不再被拒绝，必要进程不必先退出（agent-task-lifecycle R-02/R-07）。
+      if (result.budgetLimited || await journal.reviewDue(owner)) {
         const checkpoint = await journal.checkpointGoal(owner, {signal});
         signal.throwIfAborted();
         if (checkpoint) {

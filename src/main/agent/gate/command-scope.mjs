@@ -248,6 +248,20 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     },
     takeCompleted,
     acknowledgeReview,
+    // 057 根调度树形收集：子任务结算后其仍受管的命令按 rootRunId+generation 归根消费（R-04/R-09）。
+    // 与 takeCompleted 同一消费入口：已收集记录标记 collected，不重复投递；失败不抛（作为事实投递）。
+    async collectCompletedTree(owner) {
+      const sameTree = recordOwner => recordOwner?.rootRunId === owner.rootRunId && recordOwner.generation === owner.generation
+        && recordOwner.conversationId === owner.conversationId;
+      const finishing = [...active].filter(record => record.background && sameTree(record.owner) && (record.result || record.error));
+      await Promise.all(finishing.map(record => commandDeadline(record.promise, settleTimeoutMs, '后台命令结果保存未能确认').catch(() => {})));
+      const ready = completed.filter(r => sameTree(r.owner));
+      for (const record of ready) completed.splice(completed.indexOf(record), 1);
+      return ready.filter(record => !record.collected).map(record => ({ ...view(record), outputRef: record.outputRef,
+        text: record.error ? `命令异常结束：${record.error.message}` : commandToolResult(record.result).content[0].text.slice(-12_000),
+      }));
+    },
+    hasBackgroundTree: owner => [...active].some(r => r.background && r.owner?.rootRunId === owner.rootRunId && r.owner?.generation === owner.generation && r.owner?.conversationId === owner.conversationId),
     async collectCompleted(owner) {
       // An exited process may still be saving its result. Join only that bounded settlement, never live work.
       const finishing = [...active].filter(record => record.background && sameOwner(record.owner, owner) && (record.result || record.error));

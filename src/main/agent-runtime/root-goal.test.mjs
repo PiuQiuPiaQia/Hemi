@@ -59,22 +59,32 @@ for (const chunked of [false, true]) test(`shared PC runtime ${chunked ? 'contin
   await runtime.completeConversation(ctx.conversationId, goalRunOutcome(result), null, ctx.runId);
   const journal = await runtime.journal.snapshot(), goal = journal.roots[ctx.runId].goal;
   assert.equal(journal.roots[ctx.runId].status, 'completed');
-  assert.equal(goal.round, 2); assert.deepEqual(checks, ['continue','complete']); assert.equal(calls.length, 2);
-  assert.equal(activities.filter(phase => phase === 'verifying').length, 2);
-  assert.ok(activities.includes('continuing'));
-  assert.equal(activities.at(-1), 'finishing');
-  assert.ok(streams.includes('hemi_message_end'));
   assert.equal(await fs.readFile(path.join(root,'proof.txt'),'utf8'), 'SHARED_GOAL_PROOF');
   assert.equal(Object.keys(journal.requests).length, requests.length, 'every execution and verification HTTP request is accounted');
   assert.ok(Object.values(journal.requests).every(row => row.owner.rootRunId === ctx.runId && row.endedAt));
   const entries = (await agent.exportEntries()).entries;
   assert.equal(entries.filter(entry => entry.message?.role === 'user').length, 1);
-  assert.equal(entries.filter(entry => entry.customType === 'hemi_goal_continuation').length, 1);
-  assert.ok(result.toolNames.includes('write'));
   if (chunked) {
-    assert.equal(goal.limitHistory.length, 1); assert.equal(goal.requestOffset, 1);
-    assert.ok(result.toolNames.includes('ls')); assert.match(result.lastText, /实际文件已写入/);
+    // 057 软段边界（R-02/R-07）：请求不再被段预算硬拒，主模型单回合内跨段连续工作
+    // （ls→write→收口），回合结束软复盘一次即完成；不再强制分段续跑或注入续跑条目。
+    assert.equal(goal.round, 1);
+    assert.deepEqual(checks, ['complete']);
+    assert.equal(calls.length, 1);
+    assert.equal(activities.filter(phase => phase === 'verifying').length, 1);
+    assert.ok(!activities.includes('continuing'));
+    assert.equal(activities.at(-1), 'finishing');
+    assert.equal(entries.filter(entry => entry.customType === 'hemi_goal_continuation').length, 0);
+    assert.equal(goal.limitHistory, undefined);
+    assert.ok(result.toolNames.includes('ls')); assert.ok(result.toolNames.includes('write'));
+    assert.ok(result.texts.includes('FINAL_ROUND_DONE'));
   } else {
+    assert.equal(goal.round, 2); assert.deepEqual(checks, ['continue','complete']); assert.equal(calls.length, 2);
+    assert.equal(activities.filter(phase => phase === 'verifying').length, 2);
+    assert.ok(activities.includes('continuing'));
+    assert.equal(activities.at(-1), 'finishing');
+    assert.ok(streams.includes('hemi_message_end'));
+    assert.equal(entries.filter(entry => entry.customType === 'hemi_goal_continuation').length, 1);
+    assert.ok(result.toolNames.includes('write'));
     assert.equal(goal.policy.maxRequestsPerRound, 60);
     assert.deepEqual(result.texts, ['FIRST_ROUND_PLAN','FINAL_ROUND_DONE']);
   }

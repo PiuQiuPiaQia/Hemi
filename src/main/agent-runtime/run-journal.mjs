@@ -17,6 +17,8 @@ const goalIdentity = root => root?.goal?.id ?? root?.owner.rootRunId;
 const goalRequests = (s, root) => Object.values(s.requests).filter(item => ![BUDGET_SUMMARY_PURPOSE,GOAL_VERIFICATION_PURPOSE].includes(item.purpose)
   && goalIdentity(sourceRoot(s,item.owner)) === goalIdentity(root)).length;
 const assertExecuting = (s, owner) => {
+  // 057 软复盘后 requestLimitReached 只代表硬预算收口（goal 总额或无 goal 的 per-run 上限），
+  // 不再用于每段边界；段边界由根调度在回合边界主动 checkpoint（agent-task-lifecycle R-02/R-07）。
   if (sourceRoot(s, owner)?.requestLimitReached) throw new Error('执行请求已达上限，不能开始新动作');
 };
 const pendingGoalWork = (s, owner) => {
@@ -35,6 +37,8 @@ function advanceGoalRound(s, root) {
   const goal = root.goal, used = goalRequests(s, root);
   if (goal.round >= goal.policy.maxRounds || used >= goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code:'goal-budget-limit'});
   goal.round++; goal.requestOffset = used;
+  // 057 软复盘：段交接完成，未决复盘提示随段清零。
+  delete root.reviewPending;
   if (root.requestLimitReached) { (goal.limitHistory ??= []).push(root.requestLimitReached); delete root.requestLimitReached; }
   return goal;
 }
@@ -84,6 +88,23 @@ export function createRunJournal({ dir }) {
     ready: () => ready,
     snapshot: () => read(s => s),
     root: owner => read(s => s.roots[owner.rootRunId] ?? null),
+    /** 057 根调度等待后代必要工作：等 rootRunId+generation 树内全部进程到达终态且清理确认（R-04）。 */
+    async waitForProcesses(owner, {signal} = {}) {
+      await ready;
+      signal?.throwIfAborted();
+      return new Promise((resolve, reject) => {
+        const dispose = () => { watchers.delete(check); signal?.removeEventListener('abort', abort); };
+        const abort = () => { dispose(); reject(signal.reason ?? new DOMException('等待已取消','AbortError')); };
+        const pendingNow = () => Object.values(state.processes).filter(item => item.owner.rootRunId === owner.rootRunId && item.owner.generation === owner.generation
+          && (!item.cleanupConfirmed || item.state !== 'finished'));
+        const check = () => {
+          if (!owns(state.roots[owner.rootRunId], owner)) {dispose(); reject(new Error('执行归属已失效')); return;}
+          if (!pendingNow().length) {dispose(); resolve(true);}
+        };
+        signal?.addEventListener('abort', abort, {once:true});
+        check();
+      });
+    },
     // Event-driven budget fence. Abandoning a wait removes its listener; it never consumes work/results.
     async waitForRequestLimit(owner, {signal, cleared = false} = {}) {
       await ready;
@@ -165,7 +186,10 @@ export function createRunJournal({ dir }) {
       signal?.throwIfAborted();
       const root = s.roots[owner.rootRunId];
       if (!owns(root, owner) || owner.taskId || root.kind === 'auxiliary' || terminal.has(root.status)
-        || root.goal?.phase !== 'active' || !root.requestLimitReached) throw new Error('目标已停止或未触顶，不能交接');
+        || root.goal?.phase !== 'active') throw new Error('目标已停止，不能交接');
+      // 057 软复盘：交接依据从硬触顶标志改为「段预算已在回合边界耗尽」；硬预算路径由 advanceGoalRound 收口。
+      const roundCap = Math.min(root.goal.policy.maxRequestsPerRound, root.policySnapshot?.budgets?.maxRequestsPerRun ?? root.goal.policy.maxRequestsPerRound);
+      if (!root.requestLimitReached && goalRequests(s, root) < root.goal.requestOffset + roundCap) throw new Error('段预算尚未耗尽，不能交接');
       const work = pendingGoalWork(s, owner);
       if (!hasPendingWork(work)) return null;
       if (Object.values(s.requests).some(item => item.owner.rootRunId === owner.rootRunId && !item.owner.taskId && !item.endedAt)
@@ -217,7 +241,7 @@ export function createRunJournal({ dir }) {
       if (record.taskId && receipt.ok && receipt.taskId && receipt.taskId !== record.taskId) throw new Error('派单回执的任务身份不匹配');
       record.receipt = receipt; record.state = record.result || receipt.ok === false ? 'terminal' : 'accepted'; return record;
     }),
-    completeTask: ({ dispatchKey, owner, result, background }) => transaction(s => {
+    completeTask: ({ dispatchKey, owner, result }) => transaction(s => {
       const key = result.taskId;
       if (!owns(s.roots[owner.rootRunId], owner)) throw new Error('子任务终态归属无效');
       if (dispatchKey && !owns(s.dispatches[dispatchKey], owner)) throw new Error('子任务派单归属无效');
@@ -228,13 +252,36 @@ export function createRunJournal({ dir }) {
       }
       const record = { owner, result, terminalAt: Date.now() }; s.tasks[key] = record;
       if (dispatchKey && s.dispatches[dispatchKey]) Object.assign(s.dispatches[dispatchKey], { result, state: 'terminal' });
-      if (background) {
-        const eventId = `complete:${key}`;
-        s.inbox[eventId] = { eventId, owner, taskId: key, state: terminal.has(s.roots[owner.rootRunId]?.status) ? 'obsolete' : 'pending', result };
-      }
+      // 057 统一 accepted：所有已受理派单的结算事实都写入 inbox，不再由 background/stopRequested
+      // 决定是否产生事件；根目标失效时事件标 obsolete（结果仍可查，不唤醒模型）。
+      const eventId = `complete:${key}`;
+      s.inbox[eventId] = { eventId, owner, taskId: key, state: terminal.has(s.roots[owner.rootRunId]?.status) ? 'obsolete' : 'pending', result };
       return record;
     }),
     pending: owner => read(s => Object.values(s.inbox).filter(e => e.owner.conversationId === owner.conversationId && e.owner.rootRunId === owner.rootRunId && e.owner.generation === owner.generation && e.state === 'pending')),
+    /** 057 软复盘到期读数：当前段预算是否已在回合边界耗尽（不含硬预算标志，那由 requestStart 维护）。 */
+    reviewDue: owner => read(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || !root.goal || root.goal.phase !== 'active') return false;
+      const roundCap = Math.min(root.goal.policy.maxRequestsPerRound, root.policySnapshot?.budgets?.maxRequestsPerRun ?? root.goal.policy.maxRequestsPerRound);
+      return goalRequests(s, root) >= root.goal.requestOffset + roundCap;
+    }),
+    /** 057 软复盘点唤醒：子任务跨段后根调度在等待边界被唤醒复盘；不中断子任务执行（R-02/H-01）。 */
+    async waitForReview(owner, {signal} = {}) {
+      await ready;
+      signal?.throwIfAborted();
+      return new Promise((resolve, reject) => {
+        const dispose = () => { watchers.delete(check); signal?.removeEventListener('abort', abort); };
+        const abort = () => { dispose(); reject(signal.reason ?? new DOMException('等待已取消','AbortError')); };
+        const check = () => {
+          const root = sourceRoot(state, owner);
+          if (!owns(state.roots[owner.rootRunId], owner) || !root || terminal.has(root.status) || root.goal?.phase !== 'active') {dispose(); resolve(null); return;}
+          if (root.reviewPending) {dispose(); resolve(structuredClone(root.reviewPending));}
+        };
+        watchers.add(check); signal?.addEventListener('abort', abort, {once:true});
+        check();
+      });
+    },
     consume: (ids, entryId) => transaction(s => {
       for (const id of ids) if (s.inbox[id]?.state === 'pending') Object.assign(s.inbox[id], { state: 'consumed', injectedEntryId: entryId, consumedAt: Date.now() });
       return ids;
@@ -283,12 +330,20 @@ export function createRunJournal({ dir }) {
           || Object.values(s.requests).some(item => item.owner.rootRunId === owner.rootRunId && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round)) throw new Error('目标校验请求不可用');
         request = {...request, goalRound: root.goal.round};
       } else {
-        const cap = source?.goal ? Math.min(source.goal.requestOffset + Math.min(source.goal.policy.maxRequestsPerRound, source.policySnapshot?.budgets?.maxRequestsPerRun ?? limit), source.goal.policy.maxRequests) : source?.policySnapshot?.budgets?.maxRequestsPerRun ?? limit;
+        // 057 软复盘：段边界（maxRequestsPerRound）只作为回合边界复盘记账，不再拒绝请求；
+        // 硬预算（goal 总额 maxRequests，或无 goal 会话的 per-run 上限）仍原子拒绝（agent-task-lifecycle R-07）。
+        const perRun = source?.policySnapshot?.budgets?.maxRequestsPerRun ?? limit;
+        const hardCap = source?.goal ? source.goal.policy.maxRequests : perRun;
         const used = goalRequests(s,source);
-        if (source?.requestLimitReached || used >= cap) {
-          (source ?? root).requestLimitReached ??= { limit: cap, at: Date.now() };
+        if (source?.requestLimitReached || used >= hardCap) {
+          (source ?? root).requestLimitReached ??= { limit: hardCap, at: Date.now() };
           // 先提交触顶事实，再在事务外拒绝；否则 throw 会回滚，兄弟执行者看不到停止新工作的边界。
-          return { requestDenied: true, limit: cap };
+          return { requestDenied: true, limit: hardCap };
+        }
+        // 软段越界：请求照常准入，只留复盘提示唤醒根调度（子任务不等祖先，R-02；父在等待边界复盘，H-01）。
+        if (source?.goal && source.goal.phase === 'active') {
+          const roundCap = Math.min(source.goal.policy.maxRequestsPerRound, source.policySnapshot?.budgets?.maxRequestsPerRun ?? source.goal.policy.maxRequestsPerRound);
+          if (used >= source.goal.requestOffset + roundCap) source.reviewPending ??= { at: Date.now(), round: source.goal.round };
         }
       }
       return s.requests[request.requestId] = { ...request, owner, startedAt: Date.now(), coverage: 'unknown' };

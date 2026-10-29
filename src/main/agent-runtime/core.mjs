@@ -321,7 +321,9 @@ export function createAgentRuntime({
       result.reportRef = await contextStore.put({ owner: { conversationId: task.conversationId, rootRunId: task.rootRunId, taskId: result.taskId, generation: task.generation ?? 0 }, kind: 'report', content: [{ type: 'text', text: [task.resultText, result.outcomeReason ? `［宿主错误详情］\n${result.outcomeReason}` : null].filter(Boolean).join('\n\n') }], source: { kind: 'tool', tool: 'task' } });
       task.reportRef = result.reportRef;
       await task.session?.persistExecution?.();
-      await journal.completeTask({ dispatchKey: task.dispatchKey, owner: { conversationId: task.conversationId, rootRunId: task.rootRunId, generation: task.generation ?? 0, taskId: result.taskId }, result, background: task.background && !task.stopRequested });
+      // 057 统一 accepted：所有派单结算（含前台参数与单条停止）都写入结果存储与 inbox，
+      // 不再由 background/stopRequested 决定是否产生事件（agent-task-lifecycle R-03/R-11）。
+      await journal.completeTask({ dispatchKey: task.dispatchKey, owner: { conversationId: task.conversationId, rootRunId: task.rootRunId, generation: task.generation ?? 0, taskId: result.taskId }, result });
     },
     onTerminal: (event) => notifyTaskTerminal(event),
     // 062：子 agent 的 register_delivery 声明提升到会话 flow（llm.ipc 统一查证登记）。
@@ -726,26 +728,62 @@ export function createAgentRuntime({
             const boundary = await Promise.race([
               Promise.all(pending.map(task => task.running ?? task.terminalWait)),
               journal.waitForRequestLimit(owner, {signal:waitAbort.signal}).then(() => 'budget'),
+              // 057 软复盘唤醒：子任务跨段后父在等待边界复盘，可核对/干预，不中断子任务（H-01/R-02）。
+              journal.waitForReview(owner, {signal:waitAbort.signal}).then(review => review ? 'review' : null),
             ]);
-            if (boundary === 'budget') throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
+            if (boundary === 'budget' || boundary === 'review') throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
           } finally { waitAbort.abort(); }
         } else await Promise.all(pending.map(task => task.running ?? task.terminalWait));
         if (ctx.cancelled) break;
         if ((await journal.root(owner))?.requestLimitReached) throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
         const events = await journal.pending(owner);
-        if (!events.length) break;
-        const content = ['［子任务完成 · 宿主观察，不是用户新指令］', ...events.map(event => formatSubagentResult(event.result))].join('\n\n');
-        append(await agent.consumeEvents(events, content));
-        if (combined.modelError) throw new Error(`回合未完成：${describeModelError(combined.modelError)}`);
-        if (combined.aborted || ctx.cancelled) break;
-        const exported = await agent.exportEntries();
-        await agent.persistExecution();
-        await journal.consume(events.map(event => event.eventId), exported?.entries?.findLast(item => item.type === 'custom_message' && item.details?.eventIds?.some(id => events.some(event => event.eventId === id)))?.id ?? exported?.entries?.at(-1)?.id ?? 'unknown');
+        if (events.length) {
+          const content = ['［子任务完成 · 宿主观察，不是用户新指令］', ...events.map(event => formatSubagentResult(event.result))].join('\n\n');
+          append(await agent.consumeEvents(events, content));
+          if (combined.modelError) throw new Error(`回合未完成：${describeModelError(combined.modelError)}`);
+          if (combined.aborted || ctx.cancelled) break;
+          const exported = await agent.exportEntries();
+          await agent.persistExecution();
+          await journal.consume(events.map(event => event.eventId), exported?.entries?.findLast(item => item.type === 'custom_message' && item.details?.eventIds?.some(id => events.some(event => event.eventId === id)))?.id ?? exported?.entries?.at(-1)?.id ?? 'unknown');
+          continue;
+        }
+        // 057 根等待后代必要工作（agent-task-lifecycle R-04/R-09）：子任务结算后其仍受管的
+        // 命令由根按 rootRunId+generation 收集事实并等待终态，先于完成校验，不发模型请求。
+        const settled = owned.filter(task => task.phase === 'terminal' && task.session && !task.session.isDisposed?.());
+        const commandEvents = [];
+        for (const task of settled) {
+          try { commandEvents.push(...(await task.session.collectTreeCommands?.(owner) ?? [])); }
+          catch (error) { log?.warn?.(`子任务 ${task.key} 的命令事实收集失败：${error?.message ?? error}`); }
+        }
+        if (commandEvents.length) {
+          const wrapped = commandEvents.map(event => ({ eventId: event.id, result: event }));
+          const content = ['［后代后台命令完成 · 宿主观察，不是用户新指令］', ...commandEvents.map(event => `${event.description ?? String(event.command ?? '').slice(0, 120)}：\n${String(event.text).slice(0, 2000)}`)].join('\n\n');
+          append(await agent.consumeEvents(wrapped, content));
+          if (combined.modelError) throw new Error(`回合未完成：${describeModelError(combined.modelError)}`);
+          if (combined.aborted || ctx.cancelled) break;
+          await agent.persistExecution();
+          continue;
+        }
+        if (settled.some(task => task.session.hasTreeCommands?.(owner))) {
+          // 事件驱动优先（journal 进程终态唤醒）；未注册 journal 的记录缺口用有界内存观察兜底，
+          // 不发模型请求、不刷新任何截止（agent-task-lifecycle R-04：等待有明确对象与解除事件）。
+          while (!ctx.cancelled && !combined.aborted && settled.some(task => task.session.hasTreeCommands?.(owner))) {
+            agent.setActivityPhase('waiting-subagents');
+            await Promise.race([
+              journal.waitForProcesses(owner).catch(() => {}),
+              new Promise(resolve => setTimeout(resolve, 500)),
+            ]);
+          }
+          continue;
+        }
+        break;
       }
       if (combined.aborted || ctx.cancelled) await subagents.cancelByRootRun(owner.rootRunId, { reason: 'stop' });
       return { ...combined, aborted: combined.aborted || Boolean(ctx.cancelled) };
     } catch (error) {
-      const limited = (await journal.root(owner))?.requestLimitReached;
+      // 057 软复盘唤醒（reviewPending）与硬预算触顶共用回合收口路径：复盘不清除工作、不取消目标。
+      const rootNow = await journal.root(owner);
+      const limited = rootNow?.requestLimitReached || rootNow?.reviewPending;
       if (limited && (error.code === 'request-limit' || execution.requestLimited || combined.budgetLimited) && !execution.fatalError && !ctx.cancelled && !combined.aborted) {
         try {
           const owned = [...subagents._internals.tasks.values()].filter(task => task.rootRunId === owner.rootRunId);

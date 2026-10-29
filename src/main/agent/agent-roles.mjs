@@ -67,7 +67,7 @@ export function buildRoutingSection(roles, { available = null } = {}) {
   if (!list.length) return '';
   return [
     '［子 agent · 按需派活］',
-    '你可以用 task 工具把一部分工作交给专门的子 agent。子 agent 在独立的上下文里工作，看不到你和用户的对话，只看到你写的 prompt；它最后一条消息会作为工具结果回到你这里。',
+    '你可以用 task 工具把一部分工作交给专门的子 agent。子 agent 在独立的上下文里工作，看不到你和用户的对话，只看到你写的 prompt；受理立即返回 taskId，它的最终报告由宿主作为完成事件送回当前目标，继续处理时你能看到全文。',
     'agent 选择角色和工具边界；自动路由使用用户为该角色配置的模型，未配置则跟随主 agent，共用已配置的备用模型。requirements 声明图像、工具或上下文要求，宿主检查冻结计划中的模型能力；能力不足时明确返回原因，不借用其他角色模型。具体模型模式下主／子都保持同一个准确模型，不切备用。不按型号名猜能力或价格。',
     '',
     ...list.map((role) => role.routing),
@@ -81,7 +81,7 @@ export function buildRoutingSection(roles, { available = null } = {}) {
     '- 已有子 agent 会话持有相关上下文时，传它的 session_id 续用，而不是新开。',
     '- prompt 要自包含：目标、范围、用户的关键要求、已知路径或网址、完成标准；只索取验收需要的结果、证据位置与缺口，不例行要求完整命令、提示词全文或逐步日志。',
     '- 需要交付文件时，要求执行角色用 register_delivery 登记真实成果并返回文件链接；不要把路径字符串当作已交付。',
-    '- 用户明确要求后台时传 background: true；否则结果马上要用的放前台（默认），独立工作可放后台；后台只释放工具等待，当前用户目标仍需等必要结果收口。',
+    '- 派单后立即收到受理（accepted），结果不随工具返回：完成事件由宿主送回当前回合继续处理。派单后可先做不依赖结果的独立工作；没有独立工作时结束回合等待结果，不要轮询 task_status 占位等待。',
     `- ${SUBAGENT_RESULT_GUIDANCE}`,
   ].join('\n');
 }

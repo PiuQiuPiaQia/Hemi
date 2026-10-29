@@ -857,6 +857,11 @@ export function createSubagentManager({
   function pruneTerminal() {
     const terminal = [...tasks.values()].filter((task) => task.phase === 'terminal');
     for (const task of terminal.slice(0, Math.max(0, terminal.length - TERMINAL_KEEP))) {
+      // 057：仍持有树内受管命令的会话不随终态淘汰被释放（agent-task-lifecycle R-09）；
+      // 命令到硬截止必然终态，由之后的淘汰轮次回收，会话保留量有界。
+      try {
+        if (task.session?.hasTreeCommands?.({ conversationId: task.conversationId, rootRunId: task.rootRunId, generation: task.generation ?? 0, taskId: task.historyId })) continue;
+      } catch { /* 尽力而为 */ }
       try { task.session?.dispose(); } catch { /* 尽力而为 */ }
       tasks.delete(task.key);
     }
@@ -1004,16 +1009,13 @@ export function createSubagentManager({
     if (signal?.aborted) queueMicrotask(onAbort);
     broadcast();
     void launching.finally(() => signal?.removeEventListener?.('abort', onAbort)).catch(() => {});
-    if (background) {
-      void launching.then(result => {
-        if (task.stopRequested) return;
-        try { onTerminal?.({ conversationId: task.conversationId, rootRunId: task.rootRunId, ...result }); }
-        catch (error) { log?.warn?.(`子 agent 终态通知失败：${error.message}`); }
-      });
-      return { ok: true, key: task.key, taskId: task.historyId ?? task.key, alias: task.alias, sessionRef: task.sessionRef, background: true };
-    }
-    const result = await launching;
-    return { ok: true, key: task.key, taskId: task.historyId ?? task.key, alias: task.alias, background: false, result };
+    // 057 统一 accepted：前台派单不再阻塞 SDK 回合等待交付；所有结算沿 inbox 投递
+    // （onSettled → completeTask），由根目标在安全边界消费（agent-task-lifecycle R-02/R-03）。
+    void launching.then(result => {
+      try { onTerminal?.({ conversationId: task.conversationId, rootRunId: task.rootRunId, ...result }); }
+      catch (error) { log?.warn?.(`子 agent 终态通知失败：${error.message}`); }
+    });
+    return { ok: true, key: task.key, taskId: task.historyId ?? task.key, alias: task.alias, sessionRef: task.sessionRef, background: true };
   }
 
   async function runTask(task, text) {
@@ -1191,6 +1193,12 @@ export function createSubagentManager({
     if (targets.length) broadcast();
     await Promise.all(targets.map((task) => task.stopCompletion));
     await Promise.all(targets.map((task) => task.terminalWait));
+    // 057：已结算子任务仍受管的后代命令随根终止一并收口（R-09/R-10）；abort 幂等，空闲会话只清命令。
+    for (const task of [...tasks.values()].filter((task) => task.phase === 'terminal' && task.rootRunId === rootRunId)) {
+      try {
+        if (task.session?.hasTreeCommands?.({ conversationId: task.conversationId, rootRunId, generation: task.generation ?? 0, taskId: task.historyId })) await task.session.abort();
+      } catch (error) { log?.warn?.(`子任务 ${task.key} 的受管命令停止未确认：${error?.message ?? error}`); }
+    }
     return { ok: targets.length > 0, cancelled: targets.map((task) => task.key) };
   }
 

@@ -9,6 +9,7 @@
 
 ## 当前重构需求
 
+- [Agent 与后台任务生命周期](requirements/agent-task-lifecycle.md)：等待、额度、超时、异常反馈和历史回归约束；[候选方案](requirements/agent-task-lifecycle-proposal.md)记录与 CC 讨论后的边界处理及验证要求，待 review。
 - [Bot 订阅账号](technical/bot-oauth.md)：独立浏览器授权、服务器凭据与续期、首次配置和验证边界。
 - [Windows Bot](technical/bot-windows.md)：Windows x64 SSH 主机、计划任务常驻、安装维护与实机验收。
 

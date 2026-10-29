@@ -73,8 +73,8 @@ export function createAgentTools(deps) {
       description: [
         '把一部分工作交给专门的子 agent（各角色的用途与派单时机见系统提示词）。',
         '子 agent 看不到对话，prompt 必须自包含：目标、范围、已知路径（写路径和行号）、完成标准。',
-        '互相独立的多件事，在同一条消息里发出多个 task 调用即可并行。',
-        'background=false（默认）时等子 agent 交付后再继续，报告作为本工具结果返回；background=true 立刻返回 id，完成后宿主会把结果送回给你。用户明确要求后台执行时必须设 background=true。',
+        '互相独立的多件事，在同一条消息里发出多个 task 调用即可并行执行。',
+        '受理后立即返回 taskId（accepted）；结果不随本工具返回，完成后由宿主作为一条完成事件送回当前回合继续处理。派单后可先做不依赖结果的工作；没有独立工作时结束回合等待结果，不要轮询状态。',
         'session_id 传已结束的同角色子 agent 的 id 即可续用它的上下文。',
       ].join('\n'),
       parameters: {
@@ -85,7 +85,7 @@ export function createAgentTools(deps) {
           prompt: { type: 'string', description: '给子 agent 的完整任务说明（自包含）' },
           contextRefs: { type: 'array', items: { type: 'string' }, description: '本任务需要读取的受控上下文引用' },
           requirements: { type: 'object', properties: { imageInput: { type: 'boolean' }, toolCalling: { type: 'boolean' }, minContextTokens: { type: 'number' } }, description: '本任务必需的模型能力；已配置模型无法满足时如实拒绝' },
-          background: { type: 'boolean', description: '后台运行；用户明确要求后台时设 true，否则默认 false＝等结果' },
+          background: { type: 'boolean', description: '兼容保留；所有派单统一受理返回，结果均由宿主投递，本参数不再改变交付方式' },
           session_id: { type: 'string', description: '续用已结束的子 agent 会话（其 id）' },
         },
         required: ['agent', 'description', 'prompt'],
@@ -103,8 +103,9 @@ export function createAgentTools(deps) {
           signal,
         });
         if (!outcome?.ok) return { ...textResult(`派单未成功：${outcome?.error ?? '未知原因'}`), isError: true };
-        if (outcome.background) return jsonResult({ status: 'accepted', taskId: outcome.taskId, alias: outcome.alias, sessionRef: outcome.sessionRef, background: true, goalStatus: 'running', guidance: '完成事件会回到当前目标；不重复派单，不把受理当成交付。' });
-        return textResult(formatSubagentResult(outcome.result));
+        // 057 统一 accepted：重复派单已完成时直接回读既有结果；新派单一律受理，结算沿 inbox 投递。
+        if (outcome.result) return textResult(formatSubagentResult(outcome.result));
+        return jsonResult({ status: 'accepted', taskId: outcome.taskId, alias: outcome.alias, sessionRef: outcome.sessionRef, guidance: '完成事件会回到当前目标；不重复派单，不把受理当成交付。没有独立工作时结束回合等待结果。' });
       },
     });
     tools.push({
