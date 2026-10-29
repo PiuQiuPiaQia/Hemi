@@ -15,6 +15,26 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-flow-store-'));
 }
 
+test('failed writes automatically persist the latest pending flow after storage recovers', async t => {
+  const dir=tmpDir(),store=createFlowStore({dir}),id='storage-recovery',file=store.sessionPath(id),backup=file+'.last-good';
+  t.after(async()=>{await store.drop(id);fs.rmSync(dir,{recursive:true,force:true});});
+  fs.writeFileSync(file,JSON.stringify({id,customTitle:'preserved',turns:[{id:'user-original',text:'preserved'}]}));
+  fs.renameSync(file,backup);fs.mkdirSync(file);
+  await assert.rejects(store.saveFlow(id,{schemaVersion:1,revision:1,phase:'running'}));
+  await assert.rejects(store.saveFlow(id,{schemaVersion:1,revision:2,phase:'idle',queuePaused:true}));
+  assert.equal(store.hasFailure(id),true);
+  fs.rmSync(file,{recursive:true});fs.renameSync(backup,file);
+  const deadline=Date.now()+3000;
+  while(JSON.parse(fs.readFileSync(file,'utf8')).flow?.revision!==2) {
+    assert.ok(Date.now()<deadline,'pending flow should save without another user action');
+    await new Promise(resolve=>setTimeout(resolve,30));
+  }
+  const saved=JSON.parse(fs.readFileSync(file,'utf8'));
+  assert.equal(saved.flow.phase,'idle');assert.equal(saved.flow.queuePaused,true);
+  assert.equal(saved.customTitle,'preserved');assert.equal(saved.turns[0].id,'user-original');
+  assert.equal(store.hasFailure(id),false);
+});
+
 test('saveFlow：字段合并落盘，turns 等其他字段不被覆盖', async () => {
   const dir = tmpDir();
   const store = createFlowStore({ dir });

@@ -25,12 +25,13 @@ export interface NativeBotApi {
   cancelPairing(): Promise<PairResult>;
   forgetPairing(): Promise<void>;
   restore(): Promise<{active?: BotTarget; pending?: BotTarget}>;
-  request(input: {method: string; params: Record<string, unknown>}): Promise<{ok: true; result: unknown}>;
+  request(input: {method: string; params: Record<string, unknown>; requestId?: string}): Promise<{ok: true; result: unknown}>;
+  cancelRequest?(input: {requestId:string}): Promise<void>;
   forget(): Promise<void>;
 }
 export const NativeBot = registerPlugin<NativeBotApi>('HemiBot');
 export const nativeBotAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('HemiBot');
-export function createNativeBotRpc(api: Pick<NativeBotApi, 'request'|'openEvents'|'closeEvents'|'addListener'> = NativeBot): BotRpc {
+export function createNativeBotRpc(api: Pick<NativeBotApi, 'request'|'cancelRequest'|'openEvents'|'closeEvents'|'addListener'> = NativeBot): BotRpc {
   return {
     ...(api.openEvents&&api.closeEvents&&api.addListener ? {watch(options:Record<string,unknown>,receive:(frame:BotEvent)=>void,disconnected:()=>void){
       const streamId=crypto.randomUUID();let closed=false,listener:{remove():Promise<void>}|undefined;
@@ -43,7 +44,18 @@ export function createNativeBotRpc(api: Pick<NativeBotApi, 'request'|'openEvents
     async request<T>(method: string, params: Record<string, unknown>, {signal}: {signal: AbortSignal}) {
     signal.throwIfAborted();
     try {
-      const envelope = await api.request({method, params});
+      const requestId=crypto.randomUUID();
+      let abort:(()=>void)|undefined;
+      const envelope = await new Promise<{ok:true;result:unknown}>((resolve,reject)=>{
+        let started=false;
+        abort=()=>{
+          if(started)void api.cancelRequest?.({requestId}).catch(()=>{});
+          reject(new DOMException('已取消本次请求；已提交操作的结果仍需核对。','AbortError'));
+        };
+        signal.addEventListener('abort',abort,{once:true});
+        if(signal.aborted){abort();return;}
+        started=true;void api.request({method,params,requestId}).then(resolve,reject);
+      }).finally(()=>{if(abort)signal.removeEventListener('abort',abort);});
       signal.throwIfAborted();
       if (envelope.ok !== true || !Object.hasOwn(envelope, 'result')) throw new Error('Bot 未返回有效回执');
       return envelope.result as T;

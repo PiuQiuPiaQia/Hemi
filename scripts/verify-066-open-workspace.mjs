@@ -154,12 +154,12 @@ app.whenReady().then(async () => {
 
     // ① 绑定项目的会话：顶栏出现 split 按钮，与「开始通话」并排。
     const appeared = await waitFor(
-      `Boolean(document.querySelector('.bar-actions .h65-open-main') && document.querySelector('.bar-actions .h65-open-more'))`,
+      `Boolean(document.querySelector('.app-topbar-actions .h65-open-main') && document.querySelector('.app-topbar-actions .h65-open-more'))`,
       '顶栏 split 按钮',
     );
     check('AC-01 绑定本机项目的会话顶栏出现 split 按钮', appeared);
     if (!appeared) return finish(1);
-    const withCall = (await exec(`Boolean(document.querySelector('.bar-actions .h24-call-nav'))`)) === true;
+    const withCall = (await exec(`Boolean(document.querySelector('.app-topbar-actions .h24-call-nav'))`)) === true;
     check('AC-01 与「开始通话」按钮并排（不互相挤掉）', withCall);
 
     // ② 主按钮默认方式＝访达；点击后 Finder 真实打开该目录并置前。
@@ -229,7 +229,7 @@ app.whenReady().then(async () => {
     const menuClosed = await waitFor(`Boolean(!document.querySelector('.h37-menu [role="menuitemradio"]'))`, '菜单收起', 4000);
     if (!menuClosed) await exec(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     await exec(`document.querySelector('.h24-sidebar-new')?.click()`);
-    const gone = await waitFor(`Boolean(!document.querySelector('.bar-actions .h65-open-main'))`, '新建对话后按钮消失');
+    const gone = await waitFor(`Boolean(!document.querySelector('.app-topbar-actions .h65-open-main'))`, '新建对话后按钮消失');
     check('AC-02 默认空间会话不出现按钮', gone);
 
     finish(results.every((item) => item.ok) ? 0 : 1);

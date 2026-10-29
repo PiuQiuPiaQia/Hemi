@@ -75,12 +75,14 @@ export function goalRunOutcome(result, {cancelled = false} = {}) {
 }
 
 /** Each continuation is durable and stays under the original root/input/model policy. */
-export async function driveGoal({journal, owner, objective, policy, continuation = null, run, verify, evidence, persist, signal}) {
+export async function driveGoal({journal, owner, objective, policy, continuation = null, run, verify, evidence, persist, cleanup = async () => {}, signal}) {
   let goal = await journal.beginGoal(owner, objective, policy, continuation), result={texts:[],usages:[],toolNames:[],requests:0}, hostEvent = null;
   policy = goal.policy;
   let combined = {texts: [], usages: [], toolNames: [], requests: 0};
   let lastSignature = null, repeated = 0;
   const halt = async (kind,reason) => {
+    await cleanup();
+    signal.throwIfAborted();
     await journal.endGoal(owner,kind,reason);
     const last=goal.verifications.at(-1);
     return {...result,goalComplete:false,budgetLimited:false,halted:{kind,reason,remaining:last?.remaining??[],nextAction:last?.nextAction??'请核对已有结果后明确后续工作。'}};
@@ -96,6 +98,22 @@ export async function driveGoal({journal, owner, objective, policy, continuation
       signal.throwIfAborted();
       if (result.aborted) return result;
       await persist();
+      if (result.budgetLimited) {
+        const checkpoint = await journal.checkpointGoal(owner, {signal});
+        signal.throwIfAborted();
+        if (checkpoint) {
+          goal = checkpoint.goal;
+          hostEvent = {customType:'hemi_goal_continuation',content:[
+            '［宿主目标续跑 · 分段交接，不是用户新指令或目标完成］',
+            `原目标：${goal.objective}`, `当前第 ${goal.round}/${policy.maxRounds} 段；累计预算和执行归属不变。`,
+            `仍在处理的工作：${JSON.stringify(checkpoint.work)}`,
+            '沿用已受理的任务 ID、进程和原截止时间，不重复启动。先检查后台任务与已有成果；收集所需结果，停止已不需要的工作，再继续原目标。静默不等于失败，不要仅因没有输出就停止正常长任务。',
+          ].join('\n')};
+          continue;
+        }
+        // Work can finish during the durable handoff. Deliver its result before the completion check.
+        await persist();
+      }
       try { goal = await journal.checkGoal(owner); } catch (error) { throw incompleteGoal(error.message, 'goal-execution-unconfirmed'); }
       const facts = await evidence();
       let verdict;

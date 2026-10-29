@@ -11,6 +11,7 @@ import { createProfileStore } from '../lib/model-profiles.mjs';
 import { chatTurn, pingTextModel } from './text-model.mjs';
 import { answerAboutImage } from './vision-model.mjs';
 import { createCodingTransport } from './bigmodel-coding-transport.mjs';
+import { createHemiSession } from '../agent/hemi-session.mjs';
 import { startOAuthTestServer, waitForOAuth } from '../../../scripts/oauth-test-fixture.mjs';
 
 async function fixture(t) {
@@ -84,6 +85,63 @@ test('项目令牌并发刷新只签发一次；重登保留选择；退出阻�
   assert.equal((await f.profiles.list()).defaultModelId, key);
 });
 
+test('复用的主会话在项目令牌过期后继续执行，重试不持有旧令牌', async t => {
+  const f = await fixture(t); await f.connect();
+  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const session = createHemiSession({ cwd: f.dir, agentDir: path.join(f.dir, 'agent'), routing: { execution: config, fallbacks: [] },
+    tools: [], features: {}, settings: { retry: { enabled: false } } });
+  t.after(() => session.dispose());
+  assert.equal((await session.prompt('before refresh')).modelError, null);
+  await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+  const after = await session.prompt('after refresh');
+  assert.equal(after.modelError, null);
+  assert.match(after.texts.join(''), /OAuth OK/);
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+});
+
+test('旧格式登录的既有请求跟随令牌刷新，重新登录使旧请求失效', async t => {
+  const f = await fixture(t); await f.connect();
+  await f.credentials.modify('bigmodel', async ({ authSessionId, ...current }) => current);
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+  const send = createCodingTransport(f.credentials).forRequest({ fetchImpl: f.transport.fetch, authKey });
+  const request = () => send('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+    method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+  });
+  assert.equal((await request()).status, 200);
+  await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+  await f.runtime.models.getAuth('bigmodel');
+  assert.equal((await request()).status, 200, 'a project-token rotation does not replace the login');
+  assert.equal(f.transport.bigmodel.state.handshakes, 2, 'the new project token needs its own signing key');
+  await f.connect();
+  const before = f.transport.bigmodel.state.modelCalls;
+  assert.equal((await request()).status, 401, 'an explicit reconnect invalidates the old request even for the same account');
+  assert.equal(f.transport.bigmodel.state.modelCalls, before);
+});
+
+test('签名预检期间项目令牌刷新会重建预检，推理只发送一次', async t => {
+  const f = await fixture(t); await f.connect();
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+  let release, arrived;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { arrived = resolve; });
+  let hold = true;
+  const fetchImpl = async (url, init) => {
+    const response = await f.transport.fetch(url, init);
+    if (hold && String(url).endsWith('/v2/client')) { hold = false; arrived(); await blocked; }
+    return response;
+  };
+  const pending = createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+    method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+  });
+  await waiting;
+  await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+  await f.runtime.models.getAuth('bigmodel');
+  release();
+  assert.equal((await pending).status, 200);
+  assert.equal(f.transport.bigmodel.state.handshakes, 2);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+});
+
 test('只在明确签名拒绝时重新握手一次；上游响应不会泄露凭据', async t => {
   const f = await fixture(t); await f.connect();
   const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
@@ -122,7 +180,7 @@ test('拒绝恶意授权/路由；取消 polling 不落盘也不创建账号密�
 
 test('共享签名握手中取消一个请求不影响另一个；退出后不发送待发的模型请求', async t => {
   const f = await fixture(t); await f.connect();
-  const token = (await f.credentials.read('bigmodel')).access;
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
   const transport = createCodingTransport(f.credentials);
   let release, arrived;
   const blocked = new Promise(resolve => { release = resolve; });
@@ -131,7 +189,7 @@ test('共享签名握手中取消一个请求不影响另一个；退出后不�
     if (String(url).endsWith('/v2/client')) { arrived(); await blocked; }
     return f.transport.fetch(url, init);
   };
-  const send = (signal, nativeTransport = transport) => nativeTransport.forRequest({ fetchImpl, token })('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+  const send = (signal, nativeTransport = transport) => nativeTransport.forRequest({ fetchImpl, authKey })('https://open.bigmodel.cn/api/anthropic/v1/messages', {
     method: 'POST', signal, body: JSON.stringify({ model: 'glm-5.3', messages: [{ role: 'user', content: 'concurrent' }] }),
   });
   const controller = new AbortController();
@@ -152,7 +210,7 @@ test('共享签名握手中取消一个请求不影响另一个；退出后不�
     return f.transport.fetch(url, init);
   };
   const before = f.transport.bigmodel.state.modelCalls;
-  const pending = createCodingTransport(f.credentials).forRequest({ fetchImpl: logoutFetch, token })('https://open.bigmodel.cn/api/anthropic/v1/messages', { method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }) });
+  const pending = createCodingTransport(f.credentials).forRequest({ fetchImpl: logoutFetch, authKey })('https://open.bigmodel.cn/api/anthropic/v1/messages', { method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }) });
   await waitingLogout; await f.login.logout('bigmodel'); releaseLogout();
   assert.equal((await pending).status, 401);
   assert.equal(f.transport.bigmodel.state.modelCalls, before);

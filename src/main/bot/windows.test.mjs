@@ -177,6 +177,32 @@ test('PowerShell stdin reader preserves binary bytes without requiring EOF', {sk
   assert.equal(code,0,error);assert.deepEqual(await fs.readFile(file),input);
 });
 
+test('one-shot PowerShell validates all input before launching the CLI and preserves UTF-8', {skip: !ps, timeout:15000}, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-rpc-input-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  await fs.mkdir(path.join(root, 'src/main/bot'), {recursive: true});
+  await fs.writeFile(path.join(root, 'current.json'), JSON.stringify({node: process.execPath, release: root}));
+  await fs.writeFile(path.join(root, 'src/main/bot/cli.mjs'), "import fs from 'node:fs';fs.writeFileSync(new URL('../../../started',import.meta.url),'1');for await(const bytes of process.stdin)process.stdout.write(bytes);");
+  const input = Buffer.from(JSON.stringify({text: '中文🙂', method: 'handshake'}));
+  const source = powershellSource(windowsCliScript('rpc', input.length).replace(/\$root = Join-Path \$env:USERPROFILE '[^']+'/, "$root = '" + root.replaceAll("'", "''") + "'"));
+  async function run(bytes) {
+    const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], {stdio: ['pipe', 'pipe', 'pipe']});
+    const output = []; let error = '';
+    child.stdout.on('data', part => output.push(part)); child.stderr.on('data', part => {error += part;});
+    child.stdin.on('error', () => {}); child.stdin.end(bytes);
+    const [code] = await once(child, 'exit');
+    return {code, error, output: Buffer.concat(output)};
+  }
+  const incomplete = await run(input.subarray(0, 3));
+  assert.notEqual(incomplete.code, 0);
+  assert.match(incomplete.error, /SSH 输入不完整/);
+  await assert.rejects(fs.access(path.join(root, 'started')), {code: 'ENOENT'});
+  const complete = await run(input);
+  assert.equal(complete.code, 0, complete.error);
+  assert.deepEqual(complete.output, input);
+  await fs.access(path.join(root, 'started'));
+});
+
 test('persistent PowerShell forwards a small UTF-8 request before stdin closes', {skip: !ps, timeout: 15000}, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-stream-flush-'));
   await fs.mkdir(path.join(root, 'src/main/bot'), {recursive: true});

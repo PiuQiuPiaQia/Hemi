@@ -1,31 +1,31 @@
 import Foundation
-import Darwin
-private final class CancellationStore: HemiCredentialStore {
-    var values: [String:Data] = [:]
-    func read(_ name: String) throws -> Data? { values[name] }
-    func write(_ name: String, _ data: Data?) throws { values[name] = data }
+
+final class CancellationCredentials: HemiCredentialStore {
+    var values:[String:Data]=[:]
+    func read(_ name:String)throws->Data? {values[name]}
+    func write(_ name:String,_ data:Data?)throws {values[name]=data}
 }
 @main struct NativeCancellationIntegration {
     static func main() async throws {
-        let folder=URL(fileURLWithPath:CommandLine.arguments[1]), store=CancellationStore(), client=HemiDeviceClient(store:store)
-        let qr=try String(contentsOf:folder.appendingPathComponent("invite.json"),encoding:.utf8)
-        _=try await client.prepare(qr,name:"Cancellation test")
-        let sending=Task {try await client.pairRequest()}
-        var started=false
-        for _ in 0..<100 {
-            if FileManager.default.fileExists(atPath:folder.appendingPathComponent("request-started").path) {started=true;break}
-            try await Task.sleep(nanoseconds:50_000_000)
-        }
-        guard started else {throw HemiDeviceError.message("Test TLS request did not start","test")}
-        let start=Date()
-        let cancelling=Task {try await client.pairStatus(cancel:true)}
-        do {_=try await sending.value;throw HemiDeviceError.message("Blocked request unexpectedly completed","test")}
-        catch let error as HemiDeviceError {guard error.code=="network"&&Date().timeIntervalSince(start)<3 else {throw error}}
-        do {_=try await cancelling.value;throw HemiDeviceError.message("Unreachable cancellation falsely succeeded","test")}
-        catch let error as HemiDeviceError {guard error.code=="network"&&Date().timeIntervalSince(start)<15 else {throw error}}
-        guard try await client.restore()["pending"] != nil else {throw HemiDeviceError.message("Unknown cancellation lost identity","test")}
-        try await client.forgetPairing()
-        guard try await client.restore()["pending"] == nil else {throw HemiDeviceError.message("Explicit local exit did not clear pending identity","test")}
-        print("PASS blocked native request interrupted; cancellation bounded; unknown identity retained until explicit local exit")
+        let folder=URL(fileURLWithPath:CommandLine.arguments[1]),client=HemiDeviceClient(store:CancellationCredentials())
+        func record(_ name:String,_ value:Any)throws {try JSONSerialization.data(withJSONObject:value).write(to:folder.appendingPathComponent(name),options:.atomic)}
+        func wait(_ name:String)async throws {for _ in 0..<300 {if FileManager.default.fileExists(atPath:folder.appendingPathComponent(name).path){return};try await Task.sleep(nanoseconds:20_000_000)};throw HemiDeviceError.message("Cancellation fixture timed out","test")}
+        _=try await client.prepare(String(contentsOf:folder.appendingPathComponent("invite.json"),encoding:.utf8),name:"Cancellation fixture")
+        try record("requested.json",try await client.pairRequest());try await wait("approved")
+        _=try await client.pairStatus()
+        let requestId=UUID().uuidString
+        let slow=Task {try await client.request(method:"flow.snapshot",params:["id":"slow-read"],requestId:requestId)}
+        try await wait("read-started")
+        let start=Date();await client.cancelRequest(requestId)
+        var cancelled=false
+        do {_=try await slow.value} catch {cancelled=true}
+        guard cancelled else {throw HemiDeviceError.message("A cancelled read succeeded","test")}
+        let elapsed=Date().timeIntervalSince(start)*1000
+        guard elapsed<1000 else {throw HemiDeviceError.message("Native cancellation waited for the old response","test")}
+        let small=try await client.request(method:"snapshot",params:[:])
+        let early=UUID().uuidString;await client.cancelRequest(early)
+        do {_=try await client.request(method:"flow.snapshot",params:["id":"cancelled-before-start"],requestId:early);throw HemiDeviceError.message("A pre-cancelled request was sent","test")}
+        catch let error as HemiDeviceError {guard error.code=="cancelled" else {throw error}}
+        try record("result.json",["cancelled":true,"cancelMs":elapsed,"otherRequestSucceeded":small["ok"] as? Bool==true,"preCancelled":true])
     }
 }

@@ -1,109 +1,54 @@
-// Actual Host and mobile renderer; the native RPC/network boundary is controlled to delay old failures.
-import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import {execFileSync} from 'node:child_process';
-import {randomUUID, createHash} from 'node:crypto';
-import {createServer, preview} from 'vite';
-import {chromium} from 'playwright-core';
-import {createBotHost} from '../src/main/bot/host.mjs';
-import {installMobileBotEvents} from './lib/mobile-bot-events-fixture.mjs';
-
-const repo = path.resolve(import.meta.dirname, '..'), app = path.join(repo, 'apps/mobile');
-const output = path.join(repo, '.visual/workflow/mobile-reconnection');
-await fs.mkdir(output, {recursive: true});
-const report = {date: new Date().toISOString(), commit: execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim(), workingTree: true,
-  node: process.version, platform: `${process.platform}/${process.arch}`, command: 'node scripts/verify-mobile-reconnection.mjs',
-  gaps: ['Native TLS, physical-device network switching and installing the updated iOS bundle are outside this renderer regression.'], sources: {}, results: []};
-for (const name of ['apps/mobile/src/bot/realtime.ts', 'apps/mobile/src/bot/workspace-client.ts', 'packages/conversation-flow/src/core/conversation.ts', 'packages/conversation-flow/src/core/flow-replica.ts', 'scripts/verify-mobile-reconnection.mjs'])
-  report.sources[name] = createHash('sha256').update(await fs.readFile(path.join(repo, name))).digest('hex');
-const browser = await chromium.launch({executablePath: process.env.HEMI_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true});
-const wait = async predicate => {
-  const until = Date.now() + 12000;
-  while (!await predicate()) {assert.ok(Date.now() < until, 'reconnection condition timed out'); await new Promise(resolve => setTimeout(resolve, 20));}
-};
-try {
-  for (const mode of ['dev', 'built']) {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-mobile-reconnection-'));
-    process.env.HEMI_USER_DATA_DIR = path.join(root, 'userData');
-    const host = await createBotHost({dataDir: path.join(root, 'data'), defaultDir: path.join(root, 'workspace'), validateModel: async () => {},
-      executorFactory: () => ({async run() {return {};}, async stop() {}, async close() {}})});
-    const {instanceId} = await host.request('handshake');
-    const call = (method, params = {}) => host.request(method, {instanceId, requestId: randomUUID(), ...params});
-    await call('model.sync', {models: [{modelKey: 'fixture/model', providerId: 'fixture', name: 'Fixture', model: 'fixture', api: 'openai-completions', baseUrl: 'https://fixture.invalid', apiKey: 'TEST_ONLY'}]});
-    const {id} = await call('session.create');
-    const options = {root: app, configFile: path.join(app, 'vite.config.ts'), cacheDir: path.join(root, 'vite-cache'), logLevel: 'error'};
-    const server = mode === 'dev' ? await createServer({...options, server: {host: '127.0.0.1', port: 0}}) : await preview({...options, preview: {host: '127.0.0.1', port: 0}});
-    const context = await browser.newContext({viewport: {width: 390, height: 844}, hasTouch: true, isMobile: true, reducedMotion: 'reduce'});
-    const result = {mode, checks: [], errors: [], screenshots: []}; report.results.push(result);
-    const check = value => {result.checks.push(value); console.log('PASS', mode, value);};
-    let networkDown = false, holdReads = false, streamOpens = 0;
-    const held = [];
-    try {
-      if (mode === 'dev') await server.listen();
-      await installMobileBotEvents(context, {...host, watch(...args) {streamOpens++; return host.watch(...args);}}, {offline: () => networkDown});
-      await context.exposeBinding('__reconnectionRpc', async (_source, {method, params}) => {
-        if (holdReads && ['snapshot', 'flow.snapshot'].includes(method)) {
-          await new Promise(resolve => held.push({method, resolve}));
-          return {ok: false, code: 'network', message: 'Previous network request failed late'};
-        }
-        if (networkDown) return {ok: false, code: 'network', message: 'Isolated offline transport'};
-        try {return {ok: true, result: await host.request(method, params)};}
-        catch (error) {return {ok: false, code: error.code ?? 'failed', message: error.message};}
-      });
-      await context.addInitScript(target => {
-        window.CapacitorCustomPlatform = {name: 'ios'};
-        window.Capacitor = {PluginHeaders: [{name: 'HemiBot', methods: ['restore', 'request'].map(name => ({name, rtype: 'promise'}))}],
-          async nativePromise(_plugin, method, options) {
-            if (method === 'restore') return {active: target};
-            if (method === 'request') {
-              const response = await window.__reconnectionRpc(options);
-              if (!response.ok) throw Object.assign(new Error(response.message), {code: response.code});
-              return response;
-            }
-            throw new Error('Unexpected bridge call');
-          }};
-      }, {endpoint: 'https://fixture.invalid', botInstanceId: instanceId, name: 'Reconnection verification'});
-      const page = await context.newPage(); page.setDefaultTimeout(12000);
-      page.on('pageerror', error => result.errors.push(error.message));
-      await page.goto(server.resolvedUrls.local[0]);
-      const input = page.getByRole('textbox', {name: '消息', exact: true});
-      const title = page.getByRole('button', {name: '选择模型', exact: true});
-      const banner = page.getByText('Bot 连接已断开', {exact: true});
-      await input.waitFor(); await wait(() => title.isEnabled());
-      await input.fill('重连期间保留的草稿');
-      await page.waitForTimeout(150);
-      networkDown = true; holdReads = true;
-      await wait(() => held.some(value => value.method === 'flow.snapshot'));
-      await banner.waitFor();
-      const offlineShot = path.join(output, `${mode}-offline.png`); await page.screenshot({path: offlineShot}); result.screenshots.push(offlineShot);
-      check('sustained outage shows the banner after its foreground grace period');
-
-      networkDown = false;
-      const opens = streamOpens, before = Date.now();
-      await page.evaluate(() => window.dispatchEvent(new Event('online')));
-      await wait(() => streamOpens > opens);
-      await banner.waitFor({state: 'hidden', timeout: 1500});
-      await wait(() => title.isEnabled());
-      result.recoveryMs = Date.now() - before;
-      assert.ok(held.some(value => value.method === 'snapshot'), 'old catalog request is still held');
-      assert.ok(held.some(value => value.method === 'flow.snapshot'), 'old conversation request is still held');
-      assert.equal(await input.inputValue(), '重连期间保留的草稿');
-      check('authenticated ready hides the banner while both old read requests remain pending');
-
-      holdReads = false;
-      for (const request of held.splice(0)) request.resolve();
-      await page.waitForTimeout(400);
-      assert.equal(await banner.count(), 0); assert.equal(await title.isEnabled(), true);
-      const recoveredShot = path.join(output, `${mode}-recovered.png`); await page.screenshot({path: recoveredShot}); result.screenshots.push(recoveredShot);
-      await page.getByRole('button', {name: '发送消息', exact: true}).click();
-      await wait(async () => (await call('flow.snapshot', {id})).timeline.some(item => item.kind === 'user'));
-      const users = (await call('flow.snapshot', {id})).timeline.filter(item => item.kind === 'user');
-      assert.deepEqual(users.map(item => item.text), ['重连期间保留的草稿']);
-      check('late old failures do not restore offline state; the preserved draft reaches the Host exactly once');
-      assert.deepEqual(result.errors, []);
-    } catch (error) {result.error = error.stack; throw error;}
-    finally {for (const request of held) request.resolve(); await context.close(); await server.close(); await host.close(); await fs.rm(root, {recursive: true, force: true});}
-  }
-} finally {await browser.close(); await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');}
+// Real Host + mobile renderer. Faults are injected only at the native transport boundary.
+import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';import {randomUUID,createHash} from 'node:crypto';
+import {createServer,preview} from 'vite';import {chromium} from 'playwright-core';import {createBotHost} from '../src/main/bot/host.mjs';import {installMobileBotEvents} from './lib/mobile-bot-events-fixture.mjs';
+const repo=path.resolve(import.meta.dirname,'..'),app=path.join(repo,'apps/mobile'),output=path.join(repo,'.visual/workflow/shared-sdk-sync/mobile');await fs.mkdir(output,{recursive:true});
+const report={date:new Date().toISOString(),commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),workingTree:true,node:process.version,platform:process.platform+'/'+process.arch,results:[],sources:{},gaps:['Browser uses a controlled Capacitor boundary; native TLS/WSS and device installation are verified separately.']};
+const browser=await chromium.launch({executablePath:process.env.HEMI_CHROME_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+const wait=async(fn,ms=15000)=>{const end=Date.now()+ms;while(!await fn()){assert.ok(Date.now()<end,'Mobile condition timed out');await new Promise(r=>setTimeout(r,20));}};
+try {for(const mode of (process.env.HEMI_VERIFY_MODE?[process.env.HEMI_VERIFY_MODE]:['dev','built'])) {
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-mobile-sdk-'));process.env.HEMI_USER_DATA_DIR=path.join(root,'profile');
+ const options={dataDir:path.join(root,'data'),defaultDir:path.join(root,'work'),validateModel:async()=>{},executorFactory:()=>({async run(){return {};},async stop(){},async close(){}})};
+ let host=await createBotHost(options);const {instanceId}=await host.request('handshake');const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params},{clientId:'browser-verification'});
+ await call('model.sync',{models:[{modelKey:'fixture/model',providerId:'fixture',name:'Fixture',model:'fixture',api:'openai-completions',baseUrl:'https://fixture.invalid',apiKey:'TEST_ONLY'}]});const {id}=await call('session.create');
+ const flow=await call('flow.snapshot',{id});await host.close();const state=JSON.parse(await fs.readFile(path.join(root,'data/state.json'),'utf8'));
+ flow.timeline=Array.from({length:100},(_,i)=>({kind:'user',id:'history-'+i,runId:'old-'+i,text:`历史消息 ${i}：`+'长会话测试内容。'.repeat(2200),inputSource:'text',attachmentIds:[],acceptedAt:1,deliveredAt:1}));
+ state.sessions[id].flow=flow;await fs.writeFile(path.join(root,'data/state.json'),JSON.stringify(state));host=await createBotHost(options);
+ const settings={root:app,configFile:path.join(app,'vite.config.ts'),cacheDir:path.join(root,'vite-cache'),logLevel:'error'};
+ const server=mode==='dev'?await createServer({...settings,server:{host:'127.0.0.1',port:0}}):await preview({...settings,preview:{host:'127.0.0.1',port:0}});
+ const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,reducedMotion:'reduce'});
+ const result={mode,checks:[],errors:[],screenshots:[],rpc:{},resetBytes:[],longHistoryBytes:Buffer.byteLength(JSON.stringify(flow))};report.results.push(result);
+ const check=name=>{result.checks.push(name);console.log('PASS',mode,name);};let down=false,holdReads=false,holdEvents=false,streamOpens=0,commandCount=0;const held=[],queued=[],receivers=new Set();let lastHeader,historyGate,releaseHistory;
+ try {
+  if(mode==='dev')await server.listen();
+  await installMobileBotEvents(context,{watch(options,send,disconnected,owner){streamOpens++;const receive=frame=>{lastHeader=frame;if(frame.type==='reset')result.resetBytes.push(Buffer.byteLength(JSON.stringify(frame)));if(holdEvents)queued.push(()=>send(frame));else send(frame);};receivers.add(send);const release=host.watch(options,receive,disconnected,owner);return()=>{receivers.delete(send);release();};}},{offline:()=>down});
+  await context.exposeBinding('__sdkRpc',async(_,{method,params})=>{result.rpc[method]=(result.rpc[method]??0)+1;if(method==='flow.history'&&historyGate)await historyGate;if(holdReads&&['snapshot','flow.snapshot'].includes(method)){await new Promise(resolve=>held.push({method,resolve}));return {ok:false,code:'network',message:'Superseded read failed late'};}if(down)return {ok:false,code:'network',message:'Offline fixture'};if(method==='flow.command')commandCount++;try{return {ok:true,result:await host.request(method,params,{clientId:'browser-verification'})};}catch(error){return {ok:false,code:error.code??'failed',message:error.message};}});
+  await context.addInitScript(target=>{window.CapacitorCustomPlatform={name:'ios'};window.Capacitor={PluginHeaders:[{name:'HemiBot',methods:['restore','request','cancelRequest'].map(name=>({name,rtype:'promise'}))}],async nativePromise(_p,method,options){if(method==='restore')return {active:target};if(method==='cancelRequest')return {};if(method==='request'){const reply=await window.__sdkRpc(options);if(!reply.ok)throw Object.assign(new Error(reply.message),{code:reply.code});return reply;}throw Error('Unexpected native call');}};},{endpoint:'https://fixture.invalid',botInstanceId:instanceId,name:'SDK verification'});
+  const page=await context.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>result.errors.push(e.message));await page.goto(server.resolvedUrls.local[0]);
+  const input=page.getByRole('textbox',{name:'消息',exact:true}),model=page.getByRole('button',{name:'选择模型',exact:true}),banner=page.getByText('Bot 连接已断开',{exact:true});await input.waitFor();await wait(()=>model.isEnabled());
+  assert.ok(result.longHistoryBytes>5*1024*1024);assert.ok(Math.max(...result.resetBytes)<400*1024);assert.equal(result.rpc['flow.snapshot']??0,0);check('5 MiB+ history connects with bounded WSS heads and no duplicate HTTP full snapshot');
+  historyGate=new Promise(resolve=>releaseHistory=resolve);
+  const viewport=page.locator('[data-transcript-scroll] [data-slot=scroll-area-viewport]');
+  await viewport.evaluate(viewport=>{viewport.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));viewport.scrollTop=0;});await wait(()=>result.rpc['flow.history']>0);
+  const loading=page.locator('.h24-history-progress');await loading.waitFor({timeout:1000});assert.equal(await page.getByRole('button',{name:'加载更早消息',exact:true}).count(),0);
+  const loadingBox=await loading.boundingBox();assert.ok(loadingBox&&loadingBox.y>=0&&loadingBox.y<844,'history progress is visible in the viewport');result.historyLoadingVisible=true;
+  const loadingShot=path.join(output,`${mode}-history-loading.png`);await page.screenshot({path:loadingShot});result.screenshots.push(loadingShot);
+  const anchor=await viewport.evaluate(viewport=>{const box=viewport.getBoundingClientRect();const row=[...viewport.querySelectorAll('[data-virtual-row]')].find(row=>{const rect=row.getBoundingClientRect();return rect.bottom>box.top&&rect.top<box.bottom;});return row?{id:row.getAttribute('data-virtual-row'),offset:row.getBoundingClientRect().top-box.top}:null;});
+  releaseHistory();historyGate=undefined;await wait(async()=>!(await page.locator('.h24-history-progress').count()));await page.waitForTimeout(200);
+  const after=await viewport.evaluate((viewport,anchor)=>{const row=[...viewport.querySelectorAll('[data-virtual-row]')].find(row=>row.getAttribute('data-virtual-row')===anchor.id);return row?{offset:row.getBoundingClientRect().top-viewport.getBoundingClientRect().top}:null;},anchor);
+  result.historyAnchor={before:anchor,after};console.log('ANCHOR',JSON.stringify(result.historyAnchor));
+  assert.ok(after,'visible row remains mounted after prepending history');assert.ok(Math.abs(after.offset-anchor.offset)<4,'historical loading preserves reading position');check('upward scroll automatically pages earlier history without blocking active conversation state');
+  await input.fill('断线恢复时保留的草稿');holdReads=true;
+  for(const send of receivers)send({...lastHeader,type:'flow',id,change:{kind:'patch',conversationId:id,generation:1,baseRevision:10000,revision:10001,changes:[]}});
+  await call('session.rename',{id,title:'Long conversation verification'});await wait(()=>held.some(x=>x.method==='flow.snapshot')&&held.some(x=>x.method==='snapshot'));
+  down=true;await banner.waitFor({timeout:15000});check('confirmed realtime loss shows offline after the foreground grace period');
+  down=false;const before=Date.now(),opens=streamOpens;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await wait(()=>streamOpens>opens);await banner.waitFor({state:'hidden',timeout:2000});await wait(()=>model.isEnabled());result.recoveryMs=Date.now()-before;assert.equal(await input.inputValue(),'断线恢复时保留的草稿');assert.ok(held.length>=2);check('bounded reset restores connection while old catalog and flow reads remain pending');
+  const sent=Date.now();await page.getByRole('button',{name:'发送消息',exact:true}).click();await wait(async()=>(await call('flow.snapshot',{id})).timeline.some(x=>x.text==='断线恢复时保留的草稿'));result.sendMs=Date.now()-sent;assert.ok(result.sendMs<1500);assert.equal(commandCount,1);check('sending does not wait for pending history reads and reaches Host exactly once');
+  holdReads=false;for(const value of held.splice(0))value.resolve();await page.waitForTimeout(300);assert.equal(await banner.count(),0);assert.equal(await model.isEnabled(),true);check('late superseded read failures cannot undo live readiness');
+  await input.fill('手动重连不应自动发送');down=true;await banner.waitFor({timeout:15000});await page.getByRole('button',{name:'恢复连接',exact:true}).click();await page.getByText('未能恢复连接，请检查网络后重试。',{exact:true}).waitFor();check('failed manual recovery settles visibly and permits retry');
+  down=false;holdEvents=true;const prior=commandCount;await page.getByRole('button',{name:'恢复连接',exact:true}).click();const progress=page.getByRole('button',{name:'正在连接…',exact:true});await progress.waitFor();assert.equal(await progress.isDisabled(),true);
+  for(const width of [375,768,1440]){await page.setViewportSize({width,height:844});await page.waitForTimeout(50);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);const shot=path.join(output,`${mode}-connecting-${width}.png`);await page.screenshot({path:shot});result.screenshots.push(shot);}
+  await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'dark'});const dark=path.join(output,`${mode}-connecting-dark.png`);await page.screenshot({path:dark});result.screenshots.push(dark);await page.emulateMedia({colorScheme:'light'});
+  holdEvents=false;for(const deliver of queued.splice(0))deliver();await banner.waitFor({state:'hidden',timeout:2000});assert.equal(await input.inputValue(),'手动重连不应自动发送');assert.equal(commandCount,prior);check('manual recovery has immediate progress, responsive layouts and preserves unsent draft');
+  await viewport.evaluate(viewport=>viewport.scrollTop=0);await page.getByRole('button',{name:'加载更早消息',exact:true}).scrollIntoViewIfNeeded();const shot=path.join(output,`${mode}-history.png`);await page.screenshot({path:shot});result.screenshots.push(shot);assert.deepEqual(result.errors,[]);
+ } catch(error){result.error=error.stack;throw error;}finally{releaseHistory?.();for(const value of held)value.resolve();await context.close();await server.close();await host.close();await fs.rm(root,{recursive:true,force:true});}
+}}finally{await browser.close();for(const file of ['packages/conversation-flow/src/core/conversation.ts','packages/conversation-flow/src/core/flow-window.mjs','apps/mobile/src/bot/realtime.ts','apps/mobile/src/bot/workspace-client.ts'])report.sources[file]=createHash('sha256').update(await fs.readFile(file)).digest('hex');await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));}

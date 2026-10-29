@@ -8,6 +8,7 @@
  * unsupported）。控制器懒建（首次命令/快照请求），Pi 会话驻留与控制器存续解耦。
  */
 import { createConversationController } from './conversation-controller.mjs';
+import {createConversationOperationJournal} from './conversation-operation-journal.mjs';
 import { createFlowStore } from './flow-store.mjs';
 import { bootstrapFlowFromTurns, restoreFlowSnapshot } from './flow-bootstrap.mjs';
 import { newSettledRuns, conversationStatus, withConversationUnread } from '../../shared/conversation-status.mjs';
@@ -27,6 +28,8 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
 
   instance = {
     store,
+    operations:createConversationOperationJournal({dir:path.join(dir,'..','conversation-operations')}),
+    submitChat:null,
 
     /** llm.ipc 注册真实 runtime 适配工厂（先于首个控制器创建）。 */
     setRuntimeFactory(factory) {

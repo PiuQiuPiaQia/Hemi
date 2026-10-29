@@ -57,6 +57,8 @@ import {createBotCapabilities} from './capabilities.mjs';
 import {collectSkills} from '../agent-runtime/core.mjs';
 import {createWindowsDesktopClient} from './windows-desktop.mjs';
 import {firstImage} from '../agent/gate/cua-client.mjs';
+import {createFlowWindowProjector,projectFlowWindow,flowHistoryPage} from '../../../packages/conversation-flow/src/core/flow-window.mjs';
+import {applyFlowChange} from '../../shared/conversation-flow.mjs';
 
 const clone = structuredClone;
 const hash = (value) =>
@@ -154,7 +156,7 @@ export async function createBotHost({
   for (const operation of Object.values(state.operations))
     if (operation.status === 'pending') operation.status = 'interrupted';
   const commandTails = new Map(), editLeases = new Map(), liveClients = new Map();
-  const events = createBotEventStream({ instanceId: state.instanceId, bootId, snapshot: id => catalog(id) });
+  const events = createBotEventStream({ instanceId: state.instanceId, bootId, snapshot: (id,options) => catalog(id,false,options?.windowed) });
   const controls = createSessionControl({now, leaseMs: editLeaseMs,
     active: id => Boolean(jobs.has(id) || controllers.get(id)?.getSnapshot().activeRunId),
     connected: (owner, id) => [...(liveClients.get(owner) ?? [])].some(ids => ids.has(id)),
@@ -242,6 +244,7 @@ export async function createBotHost({
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    pinned: session.pinned === true,
     dir: session.dir,
     modelKey: session.modelKey,
     thinking: session.thinking,
@@ -1089,6 +1092,13 @@ export async function createBotHost({
         save();
         return { ok: true, session: view(s) };
       }
+      case 'session.pin': {
+        if (typeof p.pinned !== 'boolean') fail('置顶状态无效。');
+        const s = requireSession(p.id);
+        s.pinned = p.pinned;
+        save();
+        return { ok: true, session: view(s) };
+      }
       case 'session.remove': {
         requireSession(p.id);
         const c = controller(p.id),
@@ -1322,10 +1332,11 @@ export async function createBotHost({
       };
     if (method === 'oauth.prepare') return oauth.prepare();
     if (method === 'model.import-receipt') return state.newapiReceipts?.[p.operationId]?.receipt ?? null;
-    if (method === 'snapshot' && p.revision === state.revision)
+    if (method === 'snapshot' && p.revision === state.revision && (!p.bootId || p.bootId === bootId))
       return {
         instanceId: state.instanceId,
         revision: state.revision,
+        bootId,
         notModified: true,
         deviceAccess: gateway.summary(),
       };
@@ -1355,7 +1366,7 @@ export async function createBotHost({
         return { ok: false, error: method === 'model.list' ? '服务器无法拉取模型列表，请检查接口地址和 API Key，或手动填写型号。' : '服务器未能验证模型连接，请检查接口地址、API Key 和型号。' };
       }
     }
-    if (method === 'snapshot') return {...catalog(p.id), clientId};
+    if (method === 'snapshot') return {...catalog(p.id, p.detail === 'metadata',p.windowed), clientId};
     if (method === 'capabilities.inspect') return capabilities.inspect();
     if (method === 'context.windows') {
       if (!desktop || !capabilities.view().computerUseEnabled) fail('当前 Bot 没有启用 Windows 桌面上下文。', 'unsupported');
@@ -1380,7 +1391,7 @@ export async function createBotHost({
         state.lastConversationModelKey = session.modelKey;
         save();
       }
-      return detail(p.id);
+      return detail(p.id, p.detail === 'metadata',p.windowed);
     }
     if (method === 'operation.get') {
       if (!validId(p.operationId)) fail('无效的操作身份。');
@@ -1408,8 +1419,10 @@ export async function createBotHost({
         modelCount: Object.keys(state.models).length,
         configured: state.initialized === true,
       };
-    if (method === 'flow.snapshot')
-      return clone(controller(p.id).getSnapshot());
+    if (method === 'flow.snapshot') {
+      const flow=controller(p.id).getSnapshot();return p.windowed?projectFlowWindow(flow):clone(flow);
+    }
+    if(method==='flow.history')return flowHistoryPage(controller(p.id).getSnapshot(),p);
     if (method === 'directory.list')
       return listCloudDirectories(p.path ?? state.defaultDir, { controlDir });
     if (method === 'attachment.read' || method === 'attachment.document') {
@@ -1593,7 +1606,7 @@ export async function createBotHost({
     save();
     try {
       const work = () => {
-        if (p.id && ['session.update', 'session.rename', 'session.remove', 'session.draft', 'flow.command', 'permission.decide', 'attachment.add', 'context.capture'].includes(method)) {
+        if (p.id && ['session.update', 'session.rename', 'session.pin', 'session.remove', 'session.draft', 'flow.command', 'permission.decide', 'attachment.add', 'context.capture'].includes(method)) {
           requireSession(p.id);
           controls.requireWriter(p.id, clientId, p.controlEpoch);
         }
@@ -1613,13 +1626,14 @@ export async function createBotHost({
       throw error;
     }
   }
-  function catalog(id) {
+  function catalog(id, metadata = false, windowed = false) {
     return {
         capabilities: { nativeMemory: 1, botOAuth: 1, hostTools: 1 },
         hostCapabilities: capabilities.view(),
         oauthAccounts: oauth.accounts(),
         instanceId: state.instanceId,
         bootId,
+        eventCursor: {...events.cursor(), id: id ?? null, scope: id ?? ''},
         revision: state.revision,
         enabled: state.enabled,
         defaultDir: state.defaultDir,
@@ -1636,17 +1650,15 @@ export async function createBotHost({
           .filter((id) => state.sessions[id])
           .map((id) => view(state.sessions[id])),
         ...(id && Object.hasOwn(state.sessions, id)
-          ? { detail: detail(id) }
+          ? { detail: detail(id, metadata,windowed) }
           : {}),
       };
   }
-  function detail(id) {
+  function detail(id, metadata = false,windowed = false) {
     const s = requireSession(id);
     return {
       ...view(s),
-      draft: clone(s.draft),
-      flow: clone(controller(id).getSnapshot()),
-      attachments: Object.values(s.attachments).map(attachmentView),
+      ...(!metadata ? {draft: clone(s.draft), flow: clone(windowed?projectFlowWindow(controller(id).getSnapshot()):controller(id).getSnapshot()), attachments: Object.values(s.attachments).map(attachmentView)} : {}),
       permissions: clone(s.permissions),
       usage: clone(s.usage ?? []),
     };
@@ -1682,7 +1694,9 @@ export async function createBotHost({
   }});
   function watch(options, send, disconnected, context = {}) {
     const owner = context.clientId ?? 'legacy';
-    const unsubscribe = events.subscribe(options, send, disconnected);
+    const unsubscribe = events.subscribe(options.windowed?{...options,cursor:undefined}:options, frame => send(frame.type === 'reset'
+      ? {...frame, snapshot: {...frame.snapshot, clientId: owner}}
+      : frame), disconnected, options.windowed?createFlowWindowProjector(applyFlowChange,id=>controller(id).getSnapshot()):undefined);
     const subscriptions = liveClients.get(owner) ?? new Set();
     const ids = new Set(options.ids ?? (options.id ? [options.id] : []));
     subscriptions.add(ids); liveClients.set(owner, subscriptions);

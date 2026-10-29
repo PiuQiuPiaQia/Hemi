@@ -278,6 +278,7 @@ export function createHemiSession({
   let modelRequestActive = false;
   let managedRoutingOwner = null;
   let modelRecoveryControl = null;
+  let promptWaitAbort = null;
   /** tool-start 的参数按 toolCallId 存档——end 事件本体不回传参数。 */
   const startArgsByCall = new Map();
   /** 确认环在途请求：id → resolve（宿主经 respondPermission 应答）。 */
@@ -408,14 +409,22 @@ export function createHemiSession({
   let backgroundJobs = [];
   let waitingForBackground = false;
   let backgroundWaitSince = null;
+  let activityPhase = 'running';
+  let activitySince = null;
   const resourceWaits = new Map();
+  function setActivityPhase(phase) {
+    if (activityPhase === phase) return;
+    activityPhase = phase;
+    activitySince = Date.now();
+    publishActivity();
+  }
   function publishActivity() {
     if (disposed) return;
     touchStallWatchdog();
     emitter.emit('activity', {
       runId:runtimeExecution?.owner?.rootRunId,
-      phase: waitingForBackground ? 'waiting-background' : resourceWaits.size ? 'waiting-resource' : 'running',
-      since: backgroundWaitSince ?? [...resourceWaits.values()][0]?.since ?? null,
+      phase: compacting ? 'compacting' : waitingForBackground ? 'waiting-background' : resourceWaits.size ? 'waiting-resource' : activityPhase,
+      since: backgroundWaitSince ?? [...resourceWaits.values()][0]?.since ?? activitySince,
       jobs: backgroundJobs,
       resources: [...resourceWaits.values()],
     });
@@ -604,6 +613,7 @@ export function createHemiSession({
         }
         case 'message_update':
           touchStallWatchdog();
+          setActivityPhase('running');
           if (event.assistantMessageEvent) emitter.emit('stream', event.assistantMessageEvent);
           break;
         case 'tool_execution_start':
@@ -646,6 +656,8 @@ export function createHemiSession({
         }
         case 'message_end': {
           if (event.message?.role !== 'assistant') break;
+          // 消息结束先关闭正文光标；SDK 压缩和宿主完成校验仍可继续占用同一目标。
+          emitter.emit('stream', { type: 'hemi_message_end' });
           // SDK 自动重试耗尽后以带 errorMessage 的 assistant 消息收束（探针事实）：
           // 记录它；后续成功消息覆盖旧错误。带错误的消息不更新 lastText。
           if (event.message.errorMessage) {
@@ -675,10 +687,12 @@ export function createHemiSession({
         }
         case 'compaction_start':
           compacting = true;
+          publishActivity();
           log?.info?.(`[${label}] 上下文压缩开始`);
           break;
         case 'compaction_end':
           compacting = false;
+          publishActivity();
           // SDK 失败／取消也会派发 end，不能把结束事件当作摘要已成功持久化。
           if (event.errorMessage) log?.warn?.(`[${label}] 上下文压缩失败：${event.errorMessage}`);
           else if (event.aborted) log?.info?.(`[${label}] 上下文压缩已取消`);
@@ -817,6 +831,7 @@ export function createHemiSession({
     }).finally(()=>clearTimeout(initTimer));
     if (executionContext) session.agent.streamFunction = controlledStream(session.agent.streamFunction, () => runtimeExecution ? {
       ...runtimeExecution, compacting: () => compacting,
+      onRequestLimit: () => { runtimeExecution.requestLimited = true; },
       onAttemptRecorded: ({ candidate, requestId, purpose, stopReason, isError, coverage, tokenUsage, startedAt, genMs }) => emitter.emit('model-call', {
         modelKey: candidate.modelKey, model: candidate.model, requestId, purpose, stopReason, isError,
         usageStatus: coverage === 'complete' ? 'service' : 'unknown',
@@ -894,6 +909,7 @@ export function createHemiSession({
     abortRequested = false;
     handoffRequested = false;
     busy = true;
+    if (runtimeExecution) runtimeExecution.requestLimited = false;
     // 057（AC-32）：新的应用回合重置备用——SDK 的 reason=user 不再承担该判定
     // （并入消化的请求也带 user，探针 B6a/B6b）；宿主在 prompt 边界显式记账。
     const owner = runtimeExecution?.owner;
@@ -947,6 +963,10 @@ export function createHemiSession({
   /** 模型可先完成独立工作；其停止生成后，由宿主等进程终态再续跑同一目标。 */
   async function prompt(text, options = {}) {
     const execution = runtimeExecution;
+    const goalManaged = Boolean(execution?.journal && (await execution.journal.root(execution.owner))?.goal);
+    const waitAbort = new AbortController();
+    promptWaitAbort = waitAbort;
+    if (options.hostEvent) await checkpointExecution();
     let result = await promptOnce(text, options);
     const append = next => {
       result = { ...result, ...next,
@@ -954,25 +974,60 @@ export function createHemiSession({
         toolNames: [...result.toolNames, ...next.toolNames], requests: result.requests + next.requests,
       };
     };
-    let quotaHold = false;
     const chunkLimited = async () => {
-      if (!execution?.journal) return false;
+      if (!execution?.journal) return null;
       const root = await execution.journal.root(execution.owner);
-      return Boolean(root?.goal && root.requestLimitReached);
+      return root?.goal?.phase === 'active' && (root.requestLimitReached || execution.requestLimited) ? root : null;
+    };
+    const recordCompleted = async () => {
+      const events = await commands.collectCompleted(execution?.owner);
+      if (events.length) {
+        const event = backgroundCommandEvent(events);
+        await appendContextFact(event.customType, event.content, {eventIds:event.eventIds});
+      }
     };
     try {
       while (!result.aborted && !disposed && !abortRequested
-        && !execution?.cancelled?.() && commands.hasBackground(execution?.owner)
-        && (!result.modelError || (quotaHold = await chunkLimited()))) {
+        && !execution?.cancelled?.()) {
+        const limited = await chunkLimited();
+        if (limited) {
+          if (!execution.owner.taskId) {
+            // Yield the model segment, not its processes. Persist any racing completion before handoff.
+            await recordCompleted();
+            await persistExecution();
+            return {...result, modelError:null, aborted:false, budgetLimited:true};
+          }
+          // A child shares the root's budget. Let its host hand off instead of discarding a quiet review.
+          waitingForBackground = true; backgroundWaitSince = Date.now(); publishActivity();
+          const root = await execution.journal.waitForRequestLimit(execution.owner, {signal:waitAbort.signal, cleared:true});
+          waitingForBackground = false; backgroundWaitSince = null; publishActivity();
+          if (disposed || abortRequested || execution.cancelled?.() || root?.goal?.phase !== 'active') break;
+          await recordCompleted();
+          append(await promptOnce('', {hostEvent:{customType:'hemi_goal_continuation',content:[
+            '［宿主分段交接 · 属于原目标，不是用户新指令］',
+            '共享执行预算已进入下一段。保留已受理的任务、成果与截止时间，不重复启动；检查已有后台任务并继续原目标。',
+            JSON.stringify(commands.list(execution.owner)),
+          ].join('\n')}}));
+          continue;
+        }
+        if (result.modelError || !commands.hasBackground(execution?.owner)) break;
         waitingForBackground = true;
         backgroundWaitSince = Date.now();
         publishActivity();
         let update;
-        try { update = await commands.waitForUpdate(execution?.owner); }
-        finally { waitingForBackground = false; backgroundWaitSince = null; publishActivity(); }
+        const updateAbort = new AbortController();
+        const signal = AbortSignal.any([waitAbort.signal, updateAbort.signal]);
+        try {
+          update = await Promise.race([
+            commands.waitForUpdate(execution?.owner, {signal, collect:false}),
+            ...(goalManaged && !execution.owner.taskId ? [execution.journal.waitForRequestLimit(execution.owner, {signal}).then(() => ({kind:'budget'}))] : []),
+          ]);
+        }
+        finally { updateAbort.abort(); waitingForBackground = false; backgroundWaitSince = null; publishActivity(); }
         if (disposed || abortRequested || execution?.cancelled?.() || runtimeExecution !== execution) break;
+        if (update.kind === 'budget') continue;
         if (update.kind === 'review') {
-          if (quotaHold) continue;
+          commands.acknowledgeReview(execution?.owner, update);
           append(await promptOnce('',{hostEvent:{customType:'hemi_background_command_review',content:[
             '［后台命令状态观察 · 属于原目标，不是新用户目标］',
             update.requested?'用户请求检查当前进展。':'后台命令长时间没有新输出，请核验当前进展并简短说明实际情况。',
@@ -981,21 +1036,21 @@ export function createHemiSession({
           ].join('\n')}}));
           await persistExecution();continue;
         }
-        const events=update.events;
+        const events=commands.takeCompleted(execution?.owner);
         if (!events.length) continue;
         // hostEvent 不创建用户目标、不重置备用或预算；命令结果按原归属只消费一次。
-        if (quotaHold) {
-          const event = backgroundCommandEvent(events);
-          await appendContextFact(event.customType, event.content, {eventIds:event.eventIds});
-        } else append(await promptOnce('', { hostEvent: backgroundCommandEvent(events) }));
+        append(await promptOnce('', { hostEvent: backgroundCommandEvent(events) }));
         await persistExecution();
       }
-      if (result.aborted || (result.modelError && !quotaHold) || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
+      if (result.aborted || result.modelError || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
       return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
     } catch (error) {
       await commands.abort();
+      if (abortRequested || disposed || execution?.cancelled?.()) return {...result, aborted:true};
       throw error;
     } finally {
+      waitAbort.abort();
+      if (promptWaitAbort === waitAbort) promptWaitAbort = null;
       waitingForBackground = false;
       backgroundWaitSince = null;
       publishActivity();
@@ -1048,6 +1103,7 @@ export function createHemiSession({
   /** 中断当前运行：优雅 abort，超时 dispose 兜底；在途确认一律按未应答收口。 */
   async function abort() {
     abortRequested = true;
+    promptWaitAbort?.abort();
     cancelPendingInteractions();
     await ensurePromise?.catch(() => {});
     if (!session || disposed) { await commands.abort(); await reclaimBrowserPages(); return; }
@@ -1071,6 +1127,7 @@ export function createHemiSession({
     if (!session || disposed) return;
     if(waitingForBackground){
       abortRequested=true;
+      promptWaitAbort?.abort();
       await commands.abort();
       return;
     }
@@ -1089,6 +1146,15 @@ export function createHemiSession({
     if (!session || disposed) return false;
     await session.sendCustomMessage({ customType, content, details, display: false }, { triggerTurn: false });
     return true;
+  }
+
+  async function checkpointExecution() {
+    const events = await commands.collectCompleted(runtimeExecution?.owner);
+    if (events.length) {
+      const event = backgroundCommandEvent(events);
+      await appendContextFact(event.customType, event.content, {eventIds:event.eventIds});
+    }
+    await persistExecution();
   }
 
   /** 一次性宿主收尾进入同一正文／历史；网络请求由根运行的受控总结入口承担。 */
@@ -1169,6 +1235,7 @@ export function createHemiSession({
     if(activeTools===0)releaseInteractions();else cancelPendingInteractions();
     if (disposed) return;
     disposed = true;
+    promptWaitAbort?.abort();
     void commands.abort().catch((error) => log?.warn?.(`[${label}] ${error.message}`));
     clearTimeout(stallTimer);
     releasePermissions();
@@ -1192,7 +1259,9 @@ export function createHemiSession({
     ready,
     retryConnection: id => modelRecoveryControl?.tryNow(id) ?? false,
     setExecutionContext: value => { runtimeExecution = value; },
+    setActivityPhase,
     persistExecution,
+    checkpointExecution,
     prompt,
     backgroundCommand: async ({action,jobId,from,waitMs=0}) => {
       const owner=runtimeExecution?.owner;

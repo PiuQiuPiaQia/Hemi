@@ -40,6 +40,7 @@ try {
   if(!process.argv.includes('--native-only')){vite=await createServer({configFile:path.join(repo,'vite.config.ts'),logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false}});await vite.listen();}
   for(const mode of process.argv.includes('--native-only')?['native']:['dev','built']) {
     const {id}=await request('session.create'),folder=path.join(root,mode);await fs.mkdir(folder);
+    if(process.argv.includes('--large-snapshot'))await request('session.draft',{id,revision:1,references:[{key:'large-native-history',title:'x'.repeat(3*1024*1024)}]});
     const invitation=await request('pairing.create');await fs.writeFile(path.join(folder,'invite.json'),invitation.qr);await fs.writeFile(path.join(folder,'options.json'),JSON.stringify({id}));
     nativeError='';native=spawn(binary,[folder],{stdio:['ignore','ignore','pipe']});native.stderr.on('data',chunk=>nativeError+=chunk);
     await wait(async()=>{if(native.exitCode!==null)throw new Error(nativeError);return !!await read(path.join(folder,'request.json'));},'native pairing');
@@ -47,6 +48,7 @@ try {
     await request('pairing.approve',{operationId:randomUUID(),inviteId:state.invitation.inviteId,deviceRequestId:pending.requestId,deviceId:pending.deviceId,code:pending.code});
     await fs.writeFile(path.join(folder,'approved'),'');
     await wait(async()=>{if(native.exitCode!==null)throw new Error(nativeError);return (await read(path.join(folder,'frames.json'))??[]).some(f=>f.type==='ready');},'pinned native WSS ready');
+    if(process.argv.includes('--large-snapshot'))assert.equal((await read(path.join(folder,'frames.json'))).find(f=>f.type==='reset').snapshot.detail.draft.references[0].title.length,3*1024*1024);
     check(mode+': native pinned TLS + ES256 WSS authentication and initial snapshot');
     const profile=path.join(folder,'profile');await fs.mkdir(path.join(profile,'bot'),{recursive:true});
     await fs.writeFile(path.join(profile,'onboarding.json'),JSON.stringify({version:2,phase:'complete',step:'done',permissionChoice:'skipped',completedAt:Date.now()}));
@@ -83,6 +85,7 @@ try {
     if(page){app.process().kill('SIGKILL');await app.close();app=null;await launch();await page.getByText('断线期间生成的完整回复-'+mode,{exact:false}).first().waitFor();await page.getByText('原生手机排队消息',{exact:true}).first().waitFor();await page.screenshot({path:path.join(evidence,mode+'.png')});check(mode+': desktop restart restores output/queue without duplicate input');app.process().kill('SIGKILL');await app.close();app=null;}
     assert.equal((await request('flow.snapshot',{id})).pending.filter(i=>i.inputId==='native-queue-'+id).length,1);
     await fs.writeFile(path.join(folder,'finish'),'');await wait(()=>native.exitCode!==null,'native exit');assert.equal(native.exitCode,0,nativeError);native=null;
+    await request('session.control',{id,action:'takeover'});
     await request('flow.command',{id,command:{type:'stop',targetRunId:run.spec.runId}});
   }
   assert.deepEqual(report.errors,[]);

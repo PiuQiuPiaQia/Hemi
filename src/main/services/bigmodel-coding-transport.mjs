@@ -1,7 +1,7 @@
 import { createHash, createHmac, hkdfSync, createDecipheriv, createPrivateKey, sign, randomBytes, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { setImmediate as yieldToLoop } from 'node:timers/promises';
-import { codingJson, tokenClaims, ZCODE_ORIGIN, ZCODE_VERSION } from './bigmodel-coding-auth.mjs';
+import { codingAuthKey, codingJson, tokenClaims, ZCODE_ORIGIN, ZCODE_VERSION } from './bigmodel-coding-auth.mjs';
 
 const MODEL_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages';
 const GATEWAY_URL = `${ZCODE_ORIGIN}/api/v1/ultra/anthropic/v1/messages`;
@@ -106,7 +106,7 @@ export function createCodingTransport(credentials) {
       'X-Client-Sig': signature, 'X-Session-Id': sessionId, 'X-Client-Nonce': nonce, 'X-App-Id': 'zcode', 'X-Client-Pow': proof });
   }
   return {
-    forRequest({ fetchImpl, sessionId = randomUUID(), token }) {
+    forRequest({ fetchImpl, sessionId = randomUUID(), authKey }) {
       return async (input, init) => {
         const request = new Request(input, init);
         const signal = request.signal;
@@ -114,36 +114,48 @@ export function createCodingTransport(credentials) {
           const source = new URL(request.url);
           if (`${source.origin}${source.pathname}` !== MODEL_URL || request.method !== 'POST') throw new Error('GLM 编程套餐请求地址无效。');
           signal.throwIfAborted();
-          const credential = await credentials.read('bigmodel', { signal });
-          if (!credential || credential.access !== token || credential.expires <= Date.now()) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
-          const state = stateFor(credential);
-          const target = await route(state, credential, fetchImpl, signal);
-          const headers = new Headers(request.headers);
-          headers.delete('content-length'); headers.delete('host');
-          for (const name of [...headers.keys()]) if (name.startsWith('x-stainless-') || name.startsWith('x-client-') || name === 'anthropic-beta') headers.delete(name);
-          for (const [name, value] of Object.entries(codingIdentity(credential.deviceId, true))) headers.set(name, value);
-          headers.set('authorization', `Bearer ${credential.access}`);
-          headers.set('x-api-key', credential.access);
-          if (target.jwt) {
-            if (Number(tokenClaims(credential.zcodeToken).exp) * 1000 <= Date.now()) throw new Error('GLM 编程套餐登录已失效，请重新登录。');
-            headers.set('X-ZCode-Authorization', `Bearer ${credential.zcodeToken}`);
-          }
-          headers.set('x-request-id', randomUUID()); headers.set('x-query-id', randomUUID());
-          headers.set('x-zcode-trace-id', randomUUID()); headers.set('x-zcode-session-type', 'main');
+          const readCredential = async () => {
+            const credential = await credentials.read('bigmodel', { signal });
+            if (!credential || codingAuthKey(credential) !== authKey) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
+            if (credential.expires <= Date.now()) throw new Error('GLM 编程套餐项目令牌已过期，请重新发送以刷新登录。');
+            return credential;
+          };
           const body = JSON.parse(await request.text());
-          body.metadata = { ...body.metadata, user_id: JSON.stringify({ device_id: credential.deviceId, account_uuid: '', session_id: sessionId }) };
           let response;
           for (let attempt = 0; attempt < 2; attempt++) {
-            // Signing wraps endpoint routing: key exchange belongs to the
-            // original model provider, while only inference uses the gateway.
-            const key = await privateKey(state, credential, source.origin, fetchImpl, signal);
-            const signed = await signedHeaders(key, credential, headers, sessionId, signal);
-            if ((await credentials.read('bigmodel', { signal }))?.access !== credential.access) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
+            let ready;
+            // A refresh during preflight changes both the wire token and its
+            // signing key. Rebuild once, before any inference is sent.
+            for (let revision = 0; revision < 2; revision++) {
+              const credential = await readCredential();
+              const state = stateFor(credential);
+              const target = await route(state, credential, fetchImpl, signal);
+              const headers = new Headers(request.headers);
+              headers.delete('content-length'); headers.delete('host');
+              for (const name of [...headers.keys()]) if (name.startsWith('x-stainless-') || name.startsWith('x-client-') || name === 'anthropic-beta') headers.delete(name);
+              for (const [name, value] of Object.entries(codingIdentity(credential.deviceId, true))) headers.set(name, value);
+              headers.set('authorization', `Bearer ${credential.access}`);
+              headers.set('x-api-key', credential.access);
+              if (target.jwt) {
+                if (Number(tokenClaims(credential.zcodeToken).exp) * 1000 <= Date.now()) throw new Error('GLM 编程套餐登录已失效，请重新登录。');
+                headers.set('X-ZCode-Authorization', `Bearer ${credential.zcodeToken}`);
+              }
+              headers.set('x-request-id', randomUUID()); headers.set('x-query-id', randomUUID());
+              headers.set('x-zcode-trace-id', randomUUID()); headers.set('x-zcode-session-type', 'main');
+              // Key exchange stays on the original provider; inference is routed.
+              const key = await privateKey(state, credential, source.origin, fetchImpl, signal);
+              const signed = await signedHeaders(key, credential, headers, sessionId, signal);
+              if ((await readCredential()).access !== credential.access) continue;
+              body.metadata = { ...body.metadata, user_id: JSON.stringify({ device_id: credential.deviceId, account_uuid: '', session_id: sessionId }) };
+              ready = { state, target, signed };
+              break;
+            }
+            if (!ready) throw new Error('GLM 编程套餐项目令牌连续更新，请稍后重新发送。');
             signal.throwIfAborted();
-            response = await fetchImpl(target.url, { method: 'POST', headers: signed, body: JSON.stringify(body), signal, redirect: 'error' });
+            response = await fetchImpl(ready.target.url, { method: 'POST', headers: ready.signed, body: JSON.stringify(body), signal, redirect: 'error' });
             if (attempt || !await verificationFailure(response)) break;
             await response.body?.cancel().catch(() => {});
-            state.key = null;
+            ready.state.key = null;
           }
           if (response.ok) return response;
           await response.body?.cancel().catch(() => {});

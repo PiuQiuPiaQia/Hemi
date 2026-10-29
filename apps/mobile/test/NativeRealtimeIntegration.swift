@@ -27,6 +27,7 @@ final class RealtimeFrames: @unchecked Sendable {
         try await client.openEvents(streamId:"native",options:options,receive:{frames.receive($0)},disconnected:{frames.receive(["disconnected":true])})
         try await gate("send")
         let id=options["id"] as! String
+        _=try await client.request(method:"session.control",params:["id":id,"action":"takeover"])
         try record("sent.json",try await client.request(method:"flow.command",params:["id":id,"requestId":"native-queue-operation-\(id)","command":["type":"send","input":["inputId":"native-queue-\(id)","text":"原生手机排队消息"]]]))
         try await gate("reconnect")
         await client.closeEvents(streamId:"native");try record("disconnected.json",["closed":true]);try await gate("resume")

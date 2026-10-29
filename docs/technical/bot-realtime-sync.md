@@ -76,6 +76,27 @@ WebSocket 使用 20 秒心跳检测断开的连接；SSH 流含心跳并设接�
 
 随后于同日将修复覆盖安装到已连接的 iPhone 16 Pro／iOS 27.0.1。使用 Xcode 26.6（17F113），执行 `npm run build:mobile`、移动项目内 `npx cap sync ios`，再以 App／Debug／generic iOS destination 和独立 APFS DerivedData 构建。签名校验通过，原生 App 内 JS 资源摘要与上述已验证移动构建一致；`devicectl device install app`、`process launch --terminate-existing ai.hemi.mobile` 成功，安装列表与进程读取确认新版已安装并保持运行。覆盖安装未执行卸载或清除数据。部署记录见 `.visual/workflow/mobile-reconnection/ios-update.json`；安装后未重跑真机网络切换及延迟请求场景。
 
+## 手动恢复不再等待旧读取（2026-10-28）
+
+“恢复连接”原先复用正在进行的目录读取，并在它完成后串行刷新会话；共享 SDK 的 `resume()` 也等待上一条快照读取。旧网络上的请求尚未结束时，点击无法立即发起新的完整读取。新增两个复现测试在修复前分别超时和未出现第三次读取，确认了这条阻塞路径。检查已连接手机时，将 App 带回前台后模型选择可用、断线提示消失；未取得用户最初卡住时的原生网络日志，不能据此排除其他临时网络原因。
+
+现在手动恢复和回到前台都会重新发起目录读取，目录与会话并行恢复。SDK 的恢复读取替代旧快照等待；旧请求的成功、失败及清理回调都不能覆盖新读取的状态。恢复按钮立即显示“正在连接…”，进行中禁用；失败后说明可检查网络重试，新一轮点击清除上一轮提示。读取不重放发送，保留本机草稿与原有操作回执核对机制。
+
+验证基准为 `1e1697b84fc2099a1b1165d163c5f4cd5bcbf6c9` 加本次工作区修改，macOS 26.5.1 arm64／Node 22.22.3／Xcode 26.6（17F113），使用临时隔离数据目录：
+
+- `node --test packages/conversation-flow/test/reconnection.test.mjs packages/conversation-flow/test/conversation.test.mjs apps/mobile/test/reconnection.test.mjs apps/mobile/test/workspace-client.test.mjs apps/mobile/test/realtime.test.mjs apps/mobile/test/bot-transport.test.mjs`：67 项通过。
+- `npm run build:mobile`、最终 `npm run build --workspace @hemi/mobile`、`npm run typecheck`、`node scripts/check-spacing.mjs`、`git diff --check` 通过。
+- `node scripts/verify-mobile-reconnection.mjs`：Vite 开发与构建 renderer 各 7 项通过，使用真实 Bot Host，网络和原生桥边界由夹具控制。覆盖实时恢复、两种旧读取挂起且实时通道不可用时点击恢复、即时按钮反馈、失败重试、迟到失败、草稿保留和不重复发送；375／768／1440 无横向溢出及 renderer 错误。截图在 `.visual/workflow/mobile-reconnection/`，视觉记录在 `.visual/workflow/vision-report-mobile-manual-reconnection.md`。
+- `npx cap sync ios`、App／Debug／generic iOS 真机构建和 `codesign --verify --deep --strict` 通过。修复包为 0.2.23（2026102821），内嵌 JS／CSS／HTML 与已验证移动构建哈希一致，记录在 `.visual/workflow/mobile-reconnection/native-package.json`。首次新建构建目录下载 Capacitor 二进制依赖超时，复用本机同版本依赖缓存后构建成功；第三方源与许可未修改。
+
+随后经用户明确授权，已覆盖安装到已连接的 iPhone，安装列表确认版本为 0.2.23（2026102821），首次启动成功。安装前备份 Documents／Library，并核对本机 173 条操作记录均为 accepted／rejected，没有 waiting 输入。覆盖安装后、首次启动前，本地存储、草稿／操作记录、配置及 Documents 文件哈希一致；差异仅为 WebKit 资源加载统计的 WAL／SHM 和系统启动截图。未卸载或清除数据，未发送测试消息。安装回执、数据对照及网络检查在 `.visual/workflow/mobile-reconnection/ios-install-20261028/`，私有备份位于仓库外的 `Hemi-local-backups`。
+
+真机已加载新 JS，保存的连接身份可恢复，但安装后的检查仍显示 Bot 连接超时。电脑对同一入口的 TCP 连接与 `/v1/challenge` 请求成功；这不足以证明手机网络可达，也不能声称本次代码修复已经解决用户全部连接问题。继续检查期间手机锁屏，系统拒绝再次启动，需解锁并保持 Hemi 在前台后排查手机网络及代理情况。尚未验证真机 Wi-Fi／蜂窝切换；没有修改生产 Bot，原生网络传输实现未改动。
+
+用户随后确认 Wi-Fi、无 VPN／代理，并解锁打开 Hemi。只读原生 `operation.get` 查询约 173ms 返回 `missing`，证明该次请求的手机 TLS、设备认证及 RPC 通道正常；WebView 的普通 fetch 因浏览器安全边界失败，不能用来判断原生链路。实际设备系统为 iOS 27.2（24B119）。后续目录／会话读取检查未取得结果，Web Inspector 无法稳定附着；Xcode Time Profiler 等待设备就绪后超时，未取得性能轨迹。不能据此认定所有手机请求或会话读取已经恢复。
+
+另外将当前会话的本机缓存用于隔离 Vite／Chrome 重放：76 条时间线条目、约 1MB 的序列化会话约 662ms 完成加载，100ms 定时器约 101ms 返回，无 renderer 错误。重放阻止所有外部网络请求，没有发送消息、记录聊天原文或生成包含私人内容的截图。该结果仅说明这份缓存未在 Chrome 上复现渲染卡死，不替代 iOS WebKit 及真实大响应传输验收；仍待用户确认真机按钮／列表能否响应以及是否继续超时。
+
 ## 会话活跃占用与显式抢占（2026-10-25）
 
 会话改为同一时刻只有一个设备可写。仅打开查看不占用；编辑、保存草稿、发送或执行任务时由 Bot Host 受理占用。其他端继续订阅消息和任务进展，输入区变为只读并显示“会话已被占用”和“抢占会话”。抢占转移编辑权，保留旧端本机草稿、已受理队列和当前任务，不停止或重新执行模型。

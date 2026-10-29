@@ -9,19 +9,8 @@
   background: var(--bg-canvas);
 }
 
-.setup-shell.onboarding-page .app-bar {
-  border-bottom-color: transparent;
-}
-
-.setup-shell .onboarding-back {
-  margin-left: calc(var(--sp-10) * -1);
-  padding: 0 var(--sp-10);
-  color: var(--body);
-  text-decoration: none;
-}
-
-.setup-shell .onboarding-back:hover {
-  text-decoration: none;
+.setup-shell.onboarding-page .app-topbar {
+  background: var(--bg-canvas);
 }
 
 .setup-shell .onboarding-step-count {

@@ -23,7 +23,7 @@ export async function captureAlignment({ win, js, evidence }) {
       `(()=>{document.body.getBoundingClientRect();return !document.getAnimations().some(a=>(a.playState==='running'||a.pending)&&Number.isFinite(a.effect?.getComputedTiming().endTime))})()`,
     );
     const facts = await js(
-      `({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,overflow:document.documentElement.scrollWidth>innerWidth,lines:[...document.querySelectorAll('.gedit-flow-activity-edge')].map(e=>({rect:e.getBoundingClientRect().toJSON(),html:e.innerHTML,stroke:getComputedStyle(e.querySelector('path')).stroke,color:getComputedStyle(e.querySelector('stop')).stopColor})),parts:[...document.querySelectorAll('.h24-preview,.h24-preview-strip,.h59-run-preview,.h59-steps,.h59-steps button,.app-bar,.h59-editor-title,.h59-editor-actions,.h59-editor-actions>button,.h59-editor-actions .h24-model-chip,.h59-sidebar,.h59-sidebar>.h24-sidebar-new,.h59-nav-label,.h59-nav-row,.h59-row,.h59-row-info,.h59-row-actions,.h59-workspace-toolbar,.h59-inspector,.h59-inspector-heading,.h59-inspector-body,.h59-inspector-body>label,.h59-input-sources,.h59-inspector-footer,.h59-node,.h59-detail-heading,.h59-detail-actions,.h59-consumer-section')].map(e=>({class:e.className,rect:e.getBoundingClientRect().toJSON(),text:e.textContent,opacity:getComputedStyle(e).opacity,visibility:getComputedStyle(e).visibility,display:getComputedStyle(e).display,color:getComputedStyle(e).color,bg:getComputedStyle(e).backgroundColor,font:getComputedStyle(e).font,lineHeight:getComputedStyle(e).lineHeight,padding:getComputedStyle(e).padding}))})`,
+      `({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,overflow:document.documentElement.scrollWidth>innerWidth,lines:[...document.querySelectorAll('.gedit-flow-activity-edge')].map(e=>({rect:e.getBoundingClientRect().toJSON(),html:e.innerHTML,stroke:getComputedStyle(e.querySelector('path')).stroke,color:getComputedStyle(e.querySelector('stop')).stopColor})),parts:[...document.querySelectorAll('.h24-preview,.h24-preview-strip,.h59-run-preview,.h59-steps,.h59-steps button,.app-topbar,.h59-editor-title,.h59-editor-actions,.h59-editor-actions>button,.h59-editor-actions .h24-model-chip,.h59-sidebar,.h59-sidebar>.h24-sidebar-new,.h59-nav-label,.h59-nav-row,.h59-row,.h59-row-info,.h59-row-actions,.h59-workspace-toolbar,.h59-inspector,.h59-inspector-heading,.h59-inspector-body,.h59-inspector-body>label,.h59-input-sources,.h59-inspector-footer,.h59-node,.h59-detail-heading,.h59-detail-actions,.h59-consumer-section')].map(e=>({class:e.className,rect:e.getBoundingClientRect().toJSON(),text:e.textContent,opacity:getComputedStyle(e).opacity,visibility:getComputedStyle(e).visibility,display:getComputedStyle(e).display,color:getComputedStyle(e).color,bg:getComputedStyle(e).backgroundColor,font:getComputedStyle(e).font,lineHeight:getComputedStyle(e).lineHeight,padding:getComputedStyle(e).padding}))})`,
     );
     fs.writeFileSync(
       path.join(evidence, name + ".json"),
@@ -73,7 +73,7 @@ export async function captureAlignment({ win, js, evidence }) {
         ))
       )
         throw Error("drawer width at " + width);
-      await click('.app-bar [aria-label="关闭导航"]');
+      await click('.app-topbar [aria-label="关闭导航"]');
     }
     await click(".h59-workflow-name");
     await wait(`!!document.querySelector('[data-testid="workflow-detail"]')`);

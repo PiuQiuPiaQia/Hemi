@@ -65,8 +65,9 @@ test('工具往返分段：工具后正文另起新 part；task 派单 → deleg
   const projector = createRunPartProjector({ runId: 'r2' });
   projector.handle({ kind: 'text', text: '第一段' });
   const toolStart = projector.handle({ kind: 'tool_start', tool: 'bash', toolCallId: 'tc1', args: { command: 'ls' } });
-  assert.equal(toolStart[0].part.kind, 'tool');
-  assert.equal(toolStart[0].part.status, 'running');
+  assert.ok(toolStart[0].patch.endedAt);
+  assert.equal(toolStart[1].part.kind, 'tool');
+  assert.equal(toolStart[1].part.status, 'running');
   const delegation = projector.handle({ kind: 'tool_start', tool: 'task', toolCallId: 'tc2', args: { agent: 'explorer' } });
   assert.equal(delegation[0].part.kind, 'delegation');
   const toolEnd = projector.handle({ kind: 'tool_end', toolCallId: 'tc1', isError: false });
@@ -86,7 +87,7 @@ test('思考收口后正文另起 part；finish 失败补 notice、成功不加'
   projector.handle({ kind: 'thinking_end' });
   const text = projector.handle({ kind: 'text', text: '回答' });
   assert.equal(text[0].part.kind, 'text', '思考后的正文不混进思考段');
-  assert.deepEqual(projector.finish(), []);
+  assert.ok(projector.finish()[0].patch.endedAt);
   const notice = projector.finish({ error: new Error('模型超时') });
   assert.equal(notice.length, 1);
   assert.equal(notice[0].part.kind, 'notice');

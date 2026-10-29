@@ -76,6 +76,7 @@ Emit platform 'win32'; Emit home $env:USERPROFILE; Emit arch 'x64'; Emit node $v
 // converts UTF-8 JSON and binary attachments using the current Windows code page.
 export function windowsCliScript(mode, inputSize = 0, inputFile = null) {
   if (!['rpc', 'watch', 'rpc-stream'].includes(mode)) throw new Error('Invalid Bot CLI mode');
+  const bufferedInput = mode !== 'rpc-stream' && !inputFile;
   return rootScript + String.raw`
 $active = Get-Content -LiteralPath (Join-Path $root 'current.json') -Encoding UTF8 -Raw | ConvertFrom-Json
 $node = $active.node
@@ -88,8 +89,14 @@ $start.UseShellExecute = $false
 # Persistent control inherits the raw SSH stdin handle. A redirected .NET pipe
 # can buffer tiny frames until EOF, which a long-lived channel never sends.
 $start.RedirectStandardInput = ${mode === 'rpc-stream' ? '$false' : '$true'}
+${bufferedInput ? `# Capture SSH input before launching Node. On Windows OpenSSH, starting a
+# console child first can leave the parent's stdin read waiting indefinitely.
+$payload = New-Object IO.MemoryStream
+try { ${copyWindowsInput('$payload', inputSize)}
+$inputBytes = $payload.ToArray() } finally { $payload.Dispose() }
+` : ''}
 $process = [Diagnostics.Process]::Start($start)
-try { ${mode === 'rpc-stream' ? '' : (inputFile ? `$source = [IO.File]::OpenRead((Join-Path $root ${psLiteral(inputFile)})); try { $source.CopyTo($process.StandardInput.BaseStream) } finally { $source.Dispose() }` : copyWindowsInput('$process.StandardInput.BaseStream', inputSize)) + '\n$process.StandardInput.Close();'}
+try { ${mode === 'rpc-stream' ? '' : (inputFile ? `$source = [IO.File]::OpenRead((Join-Path $root ${psLiteral(inputFile)})); try { $source.CopyTo($process.StandardInput.BaseStream) } finally { $source.Dispose() }` : '$process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)') + '\n$process.StandardInput.Close();'}
 $process.WaitForExit(); exit $process.ExitCode }
 finally { $process.Dispose() }
 `;

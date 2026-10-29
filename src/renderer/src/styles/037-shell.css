@@ -3,53 +3,8 @@
  * 稿件：requirements/040-visual-system/designs/2026-10-03-main-window。
  * 叠在 globals.css 旧规则之后，同选择器按顺序取胜；只用 tokens.css 变量。
  *
- * 结构要点：顶栏首格（红绿灯区）横跨图标栏 + 会话栏，整格会话栏底色、不画底线；
- * 图标栏从顶栏下方开始，红绿灯不压任何分隔线。
+ * 顶栏由 components/app-top-bar 独立管理；这里负责图标栏、会话栏与内容面板。
  */
-
-/* —— 顶栏 —— */
-.compact-shell.h24-shell .app-bar {
-  padding: 0 var(--sp-16) 0 0;
-  border-bottom: 0;
-  background: var(--bg-canvas);
-}
-
-/* 红绿灯区（x 22–74）宽于 48px 图标栏：顶栏首格不再按两列拼色——那样第三颗灯正压在
-   图标栏分隔线上。首格整格用会话栏底色、内部无竖线，图标栏从顶栏下方开始；
-   首格右缘的竖线与会话栏右边线连成一条。 */
-.compact-shell.h24-shell .brand-row {
-  padding-left: 88px; /* sp-ok：红绿灯让位 */
-  border-right: 1px solid var(--line);
-  background: var(--bg-rail);
-}
-
-/* 没有会话栏的页（技能市场 / 窄窗）：首格与顶栏同为画布底，红绿灯落在整条顶栏上 */
-.compact-shell.h24-shell[data-market-open='true'] .brand-row,
-.compact-shell.h24-shell[data-page='settings'] .brand-row {
-  padding-left: 0;
-  border-right: 0;
-  background: var(--bg-canvas);
-}
-
-.compact-shell.h24-shell .app-bar-title {
-  justify-content: flex-start;
-  gap: var(--sp-12);
-  padding-left: var(--sp-24);
-}
-
-/* 技能市场首格只有图标栏宽（48px），标题要让开红绿灯（右缘 74px）再留 18px */
-.compact-shell.h24-shell[data-market-open='true'] .app-bar-title {
-  padding-left: 44px; /* sp-ok：红绿灯让位 */
-}
-
-.compact-shell.h24-shell .h24-conversation-title {
-  max-width: none;
-  min-width: 0;
-  margin: 0;
-  font-size: var(--fs-14);
-  font-weight: var(--fw-medium);
-  color: var(--ink);
-}
 
 .compact-shell.h24-shell .h37-topbar-meta {
   flex: none;
@@ -59,10 +14,6 @@
   white-space: nowrap;
   font-size: var(--fs-12);
   color: var(--faint);
-}
-
-.compact-shell.h24-shell .bar-actions {
-  gap: var(--sp-4);
 }
 
 /* 顶栏按钮：幽灵「开始通话」；通话中且通话条收起时换成可点回的状态 chip。 */
@@ -418,34 +369,11 @@ html.kb-nav .compact-shell .h24-sidebar-item:focus-visible {
 .compact-shell .h24-nav-toggle {
   width: 30px;
   height: 30px;
-  margin-left: calc(var(--sp-8) * -1);
   border-radius: var(--r-sm);
   color: var(--muted);
 }
 
 @media (max-width: 880px) {
-  .compact-shell.h24-shell .app-bar {
-    grid-template-columns: var(--h24-navrail-w) minmax(0, 1fr) auto;
-  }
-
-  .compact-shell.h24-shell .brand-row {
-    padding-left: 0;
-    border-right: 0;
-    background: var(--bg-canvas);
-  }
-
-  /* 红绿灯约占窗口左 72px：标题列从 84px 起排，不被压住。 */
-  .compact-shell.h24-shell .app-bar-title {
-    padding-left: 36px; /* sp-ok：红绿灯让位 */
-  }
-
-  .compact-shell.h24-shell .h24-conversation-title {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .compact-shell .h24-sidebar {
     background: var(--bg-rail);
     border-right: 0;
@@ -489,14 +417,6 @@ html.kb-nav .compact-shell .h24-sidebar-new:focus-visible kbd {
    顶栏、图标栏、会话栏是同一张浅灰外框，主区是压在外框上的白色面板：左上圆角，
    顶边与左边一条细线。侧栏收抽屉（≤880）时主区铺满，不画面板边。
    技能市场与设置页另有布局，不套这一层。 */
-.compact-shell.h24-shell[data-market-open='false'] .app-bar {
-  background: var(--bg-rail);
-}
-
-.compact-shell.h24-shell[data-market-open='false'] .brand-row {
-  border-right: 0;
-}
-
 .compact-shell .h24-sidebar {
   border-right: 0;
 }

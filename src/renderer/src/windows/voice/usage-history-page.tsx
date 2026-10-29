@@ -18,7 +18,7 @@ import type {
   UsageHistoryStatus,
 } from '@/shared/types';
 import { NavRail } from './nav-rail';
-import { AppTopBar } from './app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import { Tooltip } from '@/components/ui/tooltip';
 import { formatNumber, formatDuration, formatTPS } from '@/utils/format-usage';
 
@@ -110,16 +110,7 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="compact-shell h24-shell h37-usage-shell" data-page="usage">
-      <AppTopBar showBrand={false} title="使用记录" actions={
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="返回对话"
-            onClick={onClose}
-          >
-            <X className="size-4" aria-hidden="true" />
-          </button>
-      } />
+      <AppTopBar showBrand={false} title="使用记录" back={{ label: '返回对话', onClick: onClose }} />
 
       <div className="h24-frame">
         <NavRail page="usage" onShowHome={onClose} />

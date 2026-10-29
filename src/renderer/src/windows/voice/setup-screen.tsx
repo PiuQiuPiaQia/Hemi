@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import { ArrowLeft, AudioLines, Check, Cpu, Mic } from 'lucide-react';
+import { AudioLines, Check, Cpu, Mic } from 'lucide-react';
 import { BrandIcon } from '@/components/brand-icon';
 import { DOUBAO_CONSOLE_API_KEY_URL, type MicrophonePermissionStatus, type OnboardingStep } from '@/shared/types';
-import { AppTopBar } from './app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import { OnboardingModelStep } from './onboarding-model-step';
 import { VisionSection } from './vision-section';
 import { BrowserSection } from './browser-section';
@@ -50,9 +50,9 @@ export function SetupScreen(props: SetupScreenProps) {
 
   return (
     <main className="setup-shell onboarding-page min-h-dvh overflow-hidden" data-step={step}>
-      <AppTopBar showBrand={false} leading={backTarget ? (
-        <button type="button" className="h37-btn h37-btn-ghost onboarding-back" disabled={busy} onClick={() => void onAdvance(backTarget)}><ArrowLeft aria-hidden="true" />返回</button>
-      ) : null} actions={
+      <AppTopBar showBrand={false} back={backTarget ? {
+        label: '返回上一步', disabled: busy, onClick: () => void onAdvance(backTarget),
+      } : undefined} actions={
         <span className="onboarding-step-count" aria-label={`引导进度 ${index} / 4`}>
           <span className="sr-only">{index} / 4</span>
           <span className="onboarding-steps" aria-hidden="true">{[1, 2, 3, 4].map(value => <i key={value} data-state={value < index ? 'done' : value === index ? 'now' : 'todo'} />)}</span>

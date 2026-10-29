@@ -4,7 +4,7 @@ import { conversationStatus, withConversationUnread } from './conversation-statu
 
 test('后台等待和资源排队显示等待，执行恢复后回到运行；离线档案不冒充等待', () => {
   const flow = { phase: 'running', activeRunId: 'r', tasks: {}, runs: {} };
-  for (const phase of ['waiting-background', 'waiting-resource']) {
+  for (const phase of ['waiting-background', 'waiting-resource', 'waiting-subagents']) {
     const waiting = { ...flow, runs: { r: { activity: { phase } } } };
     assert.equal(conversationStatus(waiting, { live: true }), 'waiting');
     assert.equal(conversationStatus(waiting), null);

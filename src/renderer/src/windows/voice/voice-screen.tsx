@@ -67,7 +67,7 @@ import type {
 } from '@/shared/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AppTopBar } from '@/windows/voice/app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import { CallActivityIndicator, CallDock } from '@/windows/voice/call-dock';
 import { formatCallElapsed } from '@/windows/voice/lib/call-dock-state';
 import { ScopePopover } from '@/windows/voice/scope-popover';
@@ -142,6 +142,7 @@ type VoiceScreenProps = {
   interimText: string;
   transcripts: TranscriptItem[];
   /** A bound conversation whose authoritative flow has not arrived yet is not an empty conversation. */
+  flowHistory?: import('@hemi/conversation-flow').FlowSurfaceState['history'];
   conversationLoading?: boolean;
   timelineGeneration?: number;
   timelineNotice?: string;
@@ -169,7 +170,7 @@ type VoiceScreenProps = {
   onRemoveContext: (id: string) => void;
   errorMessage: string;
   onToggleCall: () => void;
-  /** 模型失败后的重试。 */
+  /** 模型失败后发送「继续」。 */
   onRetryTurn: () => void;
   retryTurnBusy?: boolean;
   retryTurnBlocked?: string;
@@ -345,6 +346,7 @@ export function VoiceScreen({
   interimText,
   transcripts,
   conversationLoading = false,
+  flowHistory,
   timelineGeneration = 0,
   timelineNotice,
   taskState,
@@ -798,8 +800,9 @@ export function VoiceScreen({
     >
       <AppTopBar
         showBrand={false}
-        /* 034 v3：技能中心是图标栏平级页面，顶栏只报位置（返回＝rail 首页）。
-           037：顶栏只属于对话列——抽屉钮（≤880）、标题、工作区名依次左排。 */
+        onNewConversation={newConversationRef.current}
+        onOpenWorkspace={onWorkspacePickFolder}
+        /* 各页面共用窗口导航行；抽屉钮、标题、工作区与页面工具依次排布。 */
         title={
           <>
             <button
@@ -955,7 +958,7 @@ export function VoiceScreen({
               environmentId={environmentId}
               conversationId={currentConversationId} generation={timelineGeneration ?? 0}
               messages={visibleTranscripts} taskSnaps={flowTaskSnaps} waitingTasks={waitingTasks}
-              loading={conversationLoading} notice={timelineNotice} interimText={interimText}
+              history={flowHistory} loading={conversationLoading} notice={timelineNotice} interimText={interimText}
               busy={textModelBusy} retryBusy={retryTurnBusy} retryBlocked={retryTurnBlocked}
               readOnly={conversationReadOnly}
               editingMessageId={editingMessageId} models={modelProfiles}

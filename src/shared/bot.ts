@@ -33,6 +33,7 @@ export type BotDraft = {
   attachmentIds: string[];
 };
 export type BotSession = {
+  pinned?: boolean;
   id: string;
   control?: {ownerId: string; epoch: string; expiresAt: number} | null;
   title: string;
@@ -91,6 +92,8 @@ export type BotBinding = {
   boundAt: number;
 };
 export type BotCache = {
+  bootId?: string;
+  eventCursor?: {bootId:string;sequence:number;id:string|null;scope:string};
   hostCapabilities?: BotHostCapabilities;
   capabilities?: { nativeMemory?: number; botOAuth?: number };
   oauthAccounts?: Array<{ provider: OAuthProvider; connected: boolean }>;
@@ -228,12 +231,14 @@ export type BotMethod =
   | 'session.create'
   | 'session.update'
   | 'session.rename'
+  | 'session.pin'
   | 'session.remove'
   | 'session.order'
   | 'session.draft'
   | 'session.control'
   | 'flow.command'
   | 'flow.snapshot'
+  | 'flow.history'
   | 'permission.decide'
   | 'directory.list'
   | 'attachment.read'

@@ -431,7 +431,13 @@ export function registerConversationIpc() {
     const id = typeof payload === 'string' ? payload : String(payload?.id ?? '');
     const record = store.getSession(id);
     if (!record) throw new Error('找不到该会话（可能已被删除）');
-    return restoreTaskResults(record);
+    const session = restoreTaskResults(record);
+    if (payload?.activate === true && !session.corrupt) {
+      const result = store.refreshOrderForOpen(id);
+      if (result.ok) broadcastChanged({ kind: 'reorder' });
+      else log.warn(`会话打开后排序失败：${result.storageError}`);
+    }
+    return session;
   });
 
   ipcMain.handle(IPC.conversation.markRead, (_event, payload) => {
@@ -459,6 +465,14 @@ export function registerConversationIpc() {
     if (!result) throw new Error('找不到该会话（可能已被删除）');
     if (!result.ok) throw new Error(result.storageError ?? '会话重命名失败');
     broadcastChanged({ kind: 'rename', session: result.session });
+    return result;
+  });
+
+  ipcMain.handle(IPC.conversation.setPinned, (_event, payload) => {
+    const result = store.setPinned(payload?.id, payload?.pinned);
+    if (!result) throw new Error('找不到该会话（可能已被删除或损坏）');
+    if (!result.ok) throw new Error(result.storageError ?? '会话置顶设置失败');
+    broadcastChanged({ kind: 'pin', session: result.session });
     return result;
   });
 

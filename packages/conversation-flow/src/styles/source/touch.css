@@ -1,3 +1,8 @@
+/* Process and recovered-history rows share the compact disclosure rhythm. */
+[data-hemi-conversation-flow] .turn-activity{margin-block:0}
+[data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered']{padding-block:0}
+[data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered'] .model-recovery-row,
+[data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered'] .model-recovery-toggle{min-height:28px}
 .input-dock{flex-shrink:0;padding:var(--s2) var(--s3);background:var(--m-white)}
 .h48-usage[data-layout='touch']{display:flex;flex-shrink:0;justify-content:center;height:auto;min-width:0;padding:0 var(--s3)}
 .h48-usage[data-layout='touch'] .h48-usage-entry{position:static;transform:none;display:flex;align-items:center;justify-content:center;gap:var(--s1);height:var(--s5);line-height:var(--s5);max-width:100%;padding:0 var(--s1);border-radius:var(--r-control);color:var(--m-muted);font-size:var(--text-small);font-variant-numeric:tabular-nums;white-space:nowrap}

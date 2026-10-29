@@ -1,14 +1,23 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 // Protocol references: Z.ai's published CLI OAuth and project access token APIs.
 // Hemi owns this implementation; no ZCode runtime or proxy is bundled.
 export const ZCODE_ORIGIN = 'https://zcode.z.ai';
-export const ZCODE_VERSION = '3.16.2';
+export const ZCODE_VERSION = '3.16.3';
 export const BIGMODEL_ORIGIN = 'https://bigmodel.cn';
 const KEY_NAME = 'hemi-coding-plan';
 const loginRequired = () => new Error('GLM 编程套餐登录已失效，请重新登录。');
 const validText = value => typeof value === 'string' && value.trim().length > 0;
+
+/** Pi holds a login reference; the signed transport owns short-lived tokens.
+ * Legacy logins derive the same reference across project-token refreshes. */
+export function codingAuthKey(credential) {
+  return `hemi-bigmodel-${createHash('sha256').update(JSON.stringify([
+    credential.authSessionId, credential.refresh, credential.zcodeToken, credential.deviceId,
+    credential.organizationId, credential.projectId, credential.apiKeyId,
+  ])).digest('hex')}`;
+}
 
 export function tokenClaims(token) {
   try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')); }
@@ -110,13 +119,13 @@ export function bigModelCodingAuth({ fetchImpl = (...args) => globalThis.fetch(.
           const location = await locateProject(fetchImpl, loginToken, signal);
           // Pi's refresh field holds the account authorization used to renew the
           // short-lived project token, rather than an invented OAuth refresh token.
-          return projectCredential(fetchImpl, { type: 'oauth', refresh: loginToken, zcodeToken: result.token,
+          return projectCredential(fetchImpl, { type: 'oauth', authSessionId: randomUUID(), refresh: loginToken, zcodeToken: result.token,
             deviceId: await options.getDeviceId(), ...location }, signal);
         }
         await delay(Math.min(flow.poll_interval_sec * 1000, Math.max(1, deadline - Date.now())), undefined, { signal });
       }
     },
     async refresh(credential, signal) { return projectCredential(fetchImpl, credential, signal); },
-    async toAuth(credential) { return { apiKey: credential.access }; },
+    async toAuth(credential) { return { apiKey: codingAuthKey(credential) }; },
   };
 }

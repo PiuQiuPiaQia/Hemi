@@ -186,7 +186,8 @@ export function projectFlowTimeline(
         ...(parts?.length ? { parts } : {}),
         ...(!run.closedAt && !run.legacy ? { live: true } : {}),
         streaming: !run.closedAt && !run.legacy && !['waiting','connecting','offline'].includes(String(run.recovery?.phase))
-          && !String(run.activity?.phase ?? '').startsWith('waiting-')
+          && (!run.activity?.phase || run.activity.phase === 'running')
+          && segment.parts.at(-1)?.endedAt == null
           && isTailItem && segment.parts.at(-1) === item.parts.at(-1),
         ...(run.outcome === 'stopped' ? { replyStatus: 'stopped' as const } : {}),
         ...(waitingForUser && isTailItem && segment.parts.at(-1) === item.parts.at(-1) ? {replyStatus:'awaiting-user' as const} : {}),

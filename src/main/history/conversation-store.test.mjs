@@ -25,6 +25,50 @@ function turn(author, text, extra = {}) {
   return { id: `id-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: 1, author, ...extra };
 }
 
+test('置顶独立落盘，保存、改名、排序、重启不丢失；取消保留原时间，删除后重建不继承', t => {
+  const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ dir });
+  const id = 'conv-pin', turns = [turn('user', '长期工作')];
+  store.saveSession({ id, turns, now: 50 });
+  const before = store.getSession(id);
+  const pinned = store.setPinned(id, true);
+  assert.equal(pinned.ok, true);
+  assert.equal(pinned.session.pinned, true);
+  assert.equal(store.getSession(id).updatedAt, before.updatedAt);
+  assert.equal(store.getSession(id).lastOpenedAt, before.lastOpenedAt);
+  store.saveSession({ id, turns: [...turns, turn('hemi', '新回复')], now: 100 });
+  store.renameSession(id, '已改名');
+  store.reorderSessions([id]);
+  const restarted = createConversationStore({ dir });
+  assert.equal(restarted.listSessions().sessions[0].pinned, true);
+  assert.equal(restarted.getSession(id).pinned, true);
+  assert.equal(restarted.setPinned(id, false).session.pinned, false);
+  assert.equal(restarted.getSession(id).updatedAt, 100);
+  assert.equal(restarted.getSession(id).lastOpenedAt, before.lastOpenedAt);
+  assert.equal(restarted.setPinned('conv-missing', true), null);
+  assert.throws(() => restarted.setPinned(id, 'true'), /置顶状态无效/);
+  writeFileSync(path.join(dir, 'conv-corrupt.json'), '{');
+  assert.equal(restarted.setPinned('conv-corrupt', true), null);
+  restarted.setPinned(id, true);
+  restarted.deleteSession(id);
+  restarted.saveSession({ id, turns, now: 150 });
+  assert.equal(restarted.listSessions().sessions.find(s => s.id === id).pinned, false);
+});
+
+test('容量裁剪优先保留置顶会话，全部置顶时仍保留新保存的会话', t => {
+  const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ dir, maxSessions: 2 });
+  const save = (id, now) => store.saveSession({ id, now, turns: [turn('user', id)] });
+  save('conv-pin-old', 1); store.setPinned('conv-pin-old', true);
+  save('conv-old', 2); save('conv-new', 3);
+  assert.equal(store.getSession('conv-old'), null);
+  assert.equal(store.getSession('conv-pin-old').pinned, true);
+  store.setPinned('conv-new', true);
+  save('conv-over-capacity', 4);
+  assert.equal(store.listSessions().sessions.length, 3);
+  assert.equal(store.getSession('conv-over-capacity').title, 'conv-over-capacity');
+});
+
 test('原生会话引用跨重启保留聊天，编辑仅记录回卷目标且不把条目写回公开档案', t => {
   const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const store = createConversationStore({ dir }), id = 'conv-native';
@@ -502,7 +546,7 @@ test('033 saveSession：workspaceId 缺省保留旧值、null 显式解绑、视
   }
 });
 
-test('saveSession：内容没变的回写不刷新 updatedAt（打开会话不改变列表顺序）', () => {
+test('saveSession：内容没变的回写不刷新 updatedAt，真实内容更新时间照常保留', () => {
   const dir = makeDir();
   try {
     const store = createConversationStore({ dir });
@@ -526,7 +570,7 @@ test('saveSession：内容没变的回写不刷新 updatedAt（打开会话不�
     assert.equal(store.getSession(older).updatedAt, 1000);
     assert.deepEqual(store.listSessions().sessions.map((session) => session.id), [newer, older]);
 
-    // 真有新内容才顶到最前（写了盘、无 unchanged，广播该发）。
+    // 真有新内容照常保存真实更新时间；界面决定何时应用新排序。
     const changed = store.saveSession({
       id: older,
       turns: [...opened.turns, turn('user', '接着聊')],
@@ -536,6 +580,58 @@ test('saveSession：内容没变的回写不刷新 updatedAt（打开会话不�
     assert.notEqual(changed.unchanged, true);
     assert.equal(store.getSession(older).updatedAt, 4000);
     assert.deepEqual(store.listSessions().sessions.map((session) => session.id), [older, newer]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('打开时按真实更新时间重新排序，不把选中的旧会话置顶或改时间', () => {
+  const dir = makeDir();
+  try {
+    const store = createConversationStore({ dir });
+    for (const [id, now] of [['conv-a', 1000], ['conv-b', 2000], ['conv-c', 3000]]) {
+      store.saveSession({ id, turns: [turn('user', id)], now });
+    }
+    store.reorderSessions(['conv-b', 'conv-c', 'conv-a']);
+    const before = store.getSession('conv-a');
+    assert.equal(store.refreshOrderForOpen('conv-a').ok, true);
+    const opened = store.getSession('conv-a');
+    assert.deepEqual(opened, before, '打开不改任何会话字段');
+    const order = () => createConversationStore({ dir }).listSessions().sessions.map(session => session.id);
+    assert.deepEqual(order(), ['conv-c', 'conv-b', 'conv-a'], '按内容更新时间排序，选中的旧会话留在最后');
+    store.saveSession({ id: 'conv-a', turns: [...before.turns, turn('hemi', '后台持续输出')], now: 2500 });
+    store.renameSession('conv-b', '改名');
+    store.getSession('conv-a');
+    store.markRead('conv-a', 0);
+    assert.deepEqual(order(), ['conv-c', 'conv-b', 'conv-a'], '后台更新不覆盖已保存的显示顺序');
+    assert.equal(store.refreshOrderForOpen('conv-a').ok, true);
+    assert.deepEqual(order(), ['conv-c', 'conv-a', 'conv-b'], '选中会话按真实更新时间插入中间，不是无条件到最前');
+    assert.equal(store.getSession('conv-a').updatedAt, 2500);
+    store.saveSession({ id: 'conv-d', turns: [turn('user', '新会话')], now: 6000 });
+    assert.deepEqual(order(), ['conv-d', 'conv-c', 'conv-a', 'conv-b']);
+    assert.equal(store.refreshOrderForOpen('conv-c').ok, true);
+    assert.deepEqual(order(), ['conv-d', 'conv-c', 'conv-a', 'conv-b']);
+    assert.equal(store.refreshOrderForOpen('conv-missing').ok, false);
+    assert.deepEqual(order(), ['conv-d', 'conv-c', 'conv-a', 'conv-b']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('按更新时间重排保留置顶组的手动顺序与全部会话元数据', () => {
+  const dir = makeDir();
+  try {
+    const store = createConversationStore({ dir });
+    for (const [id, now] of [['conv-pin-a', 1000], ['conv-pin-b', 2000], ['conv-old', 3000], ['conv-new', 4000]]) {
+      store.saveSession({ id, turns: [turn('user', id)], now });
+    }
+    store.setPinned('conv-pin-a', true);
+    store.setPinned('conv-pin-b', true);
+    store.reorderSessions(['conv-pin-a', 'conv-pin-b', 'conv-old', 'conv-new']);
+    const before = store.listSessions().sessions.map(session => store.getSession(session.id));
+    assert.equal(store.refreshOrderForOpen('conv-old').ok, true);
+    assert.deepEqual(store.listSessions().sessions.map(session => session.id), ['conv-pin-a', 'conv-pin-b', 'conv-new', 'conv-old']);
+    for (const record of before) assert.deepEqual(store.getSession(record.id), record);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -505,7 +505,7 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 }
 
 /* 067: positioning is internal to the existing reading column. Child margins stay unchanged. */
-.h67-virtual-transcript { position: relative; width: 100%; overflow-anchor: none; }
+.h67-virtual-transcript { position: relative; width: 100%; overflow-anchor: none; overflow: hidden; overflow: clip; }
 .h67-virtual-row { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-direction: column; }
 
 /* Model recovery uses the approved compact inline presentation. */
@@ -540,3 +540,11 @@ html.kb-nav .compact-shell .h24-edit-btn:focus-visible {
 
 .compact-shell .turn-error-notice .turn-error-details:not([open]) { display: none; }
 .compact-shell .model-recovery-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-12)/1.6 var(--mono); margin: var(--sp-8) 0 0; }
+
+.h24-history-load { position: relative; flex: none; display: flex; align-items: center; justify-content: center; min-height: var(--sp-48); margin-bottom: var(--sp-12); gap: var(--sp-8); color: var(--muted); font-size: var(--fs-13); line-height: 1.5; }
+.h24-history-progress { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-8); min-height: var(--sp-48); }
+.h24-history-button { flex: none; min-height: var(--sp-48); padding: var(--sp-8) var(--sp-12); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: inherit; cursor: default; }
+.h24-history-button:hover { background: var(--n-100); color: var(--ink); }
+.h24-history-error { min-width: 0; color: var(--muted); }
+.h24-history-error p { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .h24-history-progress .h37-spinner { animation: none; } }

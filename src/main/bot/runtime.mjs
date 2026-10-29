@@ -132,6 +132,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         if (event.type === 'text_delta') fact({kind: 'text', text: event.delta});
         else if (event.type === 'thinking_delta') fact({kind: 'thinking', text: event.delta});
         else if (event.type === 'thinking_end') fact({kind: 'thinking_end'});
+        else if (event.type === 'hemi_message_end') fact({kind: 'message-end'});
         else if (event.type === 'hemi_request_start') fact({kind: 'request-start'});
         else if (event.type === 'hemi_request_reset') fact({kind: 'request-reset'});
       };

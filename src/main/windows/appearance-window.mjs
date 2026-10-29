@@ -4,6 +4,7 @@ import {getSkin} from '../../shared/appearance/skins.mjs';
 import {IPC} from '../../shared/ipc-channels.mjs';
 import {isSmokeTest} from '../state.mjs';
 import {createLogger} from '../lib/logger.mjs';
+import {updateMainWindowChrome} from './main-window-chrome.mjs';
 const entries=new Map(),log=createLogger('appearance');
 const activity=entry=>({visible:entry.window.isVisible()&&!entry.window.isMinimized(),focused:entry.window.isFocused()});
 function matches(entry){const s=getAppearanceService().getSnapshot();return entry.applied?.sessionId===s.sessionId&&entry.applied.revision===s.revision;}
@@ -16,7 +17,11 @@ const sendSnapshot=entry=>{if(!entry.window.isDestroyed())entry.window.webConten
 onAppearanceCommit(snapshot=>{
   for(const entry of entries.values()){
     if(entry.window.isDestroyed())continue;
-    if(entry.mode==='main')entry.window.setBackgroundColor(getSkin(snapshot.preference.skinId).windowBackground);
+    if(entry.mode==='main'){
+      const skin=getSkin(snapshot.preference.skinId);
+      entry.window.setBackgroundColor(skin.windowBackground);
+      updateMainWindowChrome(entry.window,process.platform,skin);
+    }
     try{entry.window.webContents.send(IPC.appearance.changed,snapshot);}catch{log.warn('外观窗口广播失败');}
   }
 });

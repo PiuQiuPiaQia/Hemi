@@ -139,6 +139,19 @@ async function fixture(t, extra = {}) {
     },
   };
 }
+test('desktop pin command reaches actual Host, refreshes cached sessions and survives restart', async t => {
+  const f = await fixture(t, {authenticated: true});
+  const {id} = await f.client.command('session.create');
+  await f.client.command('session.open', {id});
+  await f.client.command('session.control', {id, action: 'acquire'});
+  assert.equal((await f.client.command('session.pin', {id, pinned: true})).session.pinned, true);
+  assert.equal(f.client.getState().cache.sessions.find(s => s.id === id).pinned, true);
+  await f.restart();
+  assert.equal(f.client.getState().cache.sessions.find(s => s.id === id).pinned, true);
+  await f.client.command('session.pin', {id, pinned: false});
+  assert.equal((await f.host.request('session.open', {instanceId: f.hello.instanceId, id})).pinned, false);
+});
+
 test('transient connection failures keep retrying after four attempts and clear the stale error on recovery', async t => {
   t.mock.timers.enable({apis: ['Date', 'setInterval'], now: Date.now()});
   const f = await fixture(t);

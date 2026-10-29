@@ -32,6 +32,7 @@ type Props = {
   messages: TranscriptItem[];
   taskSnaps?: Record<string, TaskStateSnapshot>;
   waitingTasks: TaskStateSnapshot[];
+  history?: import('@hemi/conversation-flow').FlowSurfaceState['history'];
   loading?: boolean;
   notice?: string;
   interimText?: string;
@@ -428,6 +429,7 @@ export function DesktopConversationFlow(props: Props) {
         state={{
           tasks: Object.values(props.taskSnaps ?? {}),
           permissionRequests: props.waitingTasks.map((task) => ({ task })),
+          history: props.history,
           loading: props.loading,
           notice: props.notice,
           interimText: props.interimText,

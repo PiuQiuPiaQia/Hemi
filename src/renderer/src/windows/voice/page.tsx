@@ -76,7 +76,7 @@ import { SetupScreen } from '@/windows/voice/setup-screen';
 import { createLogger } from '@/shared/log';
 import { buildInputHistory } from '@/windows/voice/lib/input-history';
 import { VoiceScreen } from '@/windows/voice/voice-screen';
-import { useConversationFlow } from '@/windows/voice/lib/use-conversation-flow';
+import { useConversationFlow,sendLocalConversationCommand } from '@/windows/voice/lib/use-conversation-flow';
 import { deriveModelBusy } from '@/windows/voice/lib/turn-busy';
 import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
 import { createConversationResume, DRAFT_NEW_KEY } from '@/windows/voice/lib/conversation-resume';
@@ -526,7 +526,7 @@ export default function Home() {
   const invalidateTurn = useCallback(({ reason = 'stop' as 'stop' | 'preempt' } = {}) => {
     const runId = flowSnapshotRef.current?.activeRunId;
     if (runId && conversationIdRef.current) {
-      void window.hemiVoice?.flowCommand(conversationIdRef.current, { type: 'stop', targetRunId: runId, reason }).catch(() => {});
+      void sendLocalConversationCommand(conversationIdRef.current, { type: 'stop', targetRunId: runId, reason }).catch(() => {});
     }
     detachTurn();
   }, [detachTurn]);
@@ -1213,7 +1213,7 @@ export default function Home() {
     try {
       await draftLoadRef.current;
       if (conversationIdRef.current !== cid) return;
-      const result = await window.hemiVoice?.flowCommand(cid, { type: 'withdrawInput', inputId, restoreToDraft: true, expectedEditRevision: source.editRevision });
+      const result = await sendLocalConversationCommand(cid, { type: 'withdrawInput', inputId, restoreToDraft: true, expectedEditRevision: source.editRevision });
       if (!result?.ok) throw new Error('这条消息已经开始发送，或暂时无法取回。');
       const input = result.input ?? source;
       const saved = input.editDraft ?? input;
@@ -1238,7 +1238,7 @@ export default function Home() {
     const conversationId = conversationIdRef.current;
     if (!conversationId || !window.hemiVoice) return;
     try {
-      const result = await window.hemiVoice.promoteTurnQueueItem({ conversationId, queueItemId });
+      const result = await sendLocalConversationCommand(conversationId,{type:'promoteInput',inputId:queueItemId});
       if (!result?.ok) { flashAttachError(result?.message ?? '优先处理失败'); return; }
       logChain(`优先处理 ${queueItemId}（${result.disposition ?? '?'}）`);
     } catch (error) {
@@ -1250,7 +1250,7 @@ export default function Home() {
     const cid = conversationIdRef.current;
     if (!cid || !window.hemiVoice) return;
     try {
-      const result = await window.hemiVoice.flowCommand(cid, { type: 'reorderInput', inputId, overInputId, expectedInputIds });
+      const result = await sendLocalConversationCommand(cid, { type: 'reorderInput', inputId, overInputId, expectedInputIds });
       if (!result.ok) {
         const message = result.code === 'storage-failed' ? '顺序已调整，但暂未保存，请重试。'
           : result.code === 'locked' ? '编辑或等待交接的消息不能被移过。' : '队列已变化，请按当前顺序重新拖动。';
@@ -1263,7 +1263,7 @@ export default function Home() {
     const conversationId = conversationIdRef.current;
     if (!conversationId || !window.hemiVoice) return;
     try {
-      const result = await window.hemiVoice.withdrawTurnQueueItem({ conversationId, queueItemId });
+      const result = await sendLocalConversationCommand(conversationId,{type:'withdrawInput',inputId:queueItemId});
       if (!result?.ok) { flashAttachError(result?.message ?? '没有撤回成功'); return; }
       // 060 R-06：撤回只操作该身份——待发送区行消失（flow 快照驱动），正式流无需改动。
       logChain(`撤回排队 ${queueItemId}`);
@@ -1792,13 +1792,13 @@ export default function Home() {
   const runTurn = useCallback(async (
     messages: Array<{ role: string; content: string }>, inputSource: InputSource = 'voice',
     attachmentIds: string[] = [], opts: { voiceMode?: ListenMode; attachmentViews?: MessageAttachmentView[];
-      references?: MessageReferenceView[]; skills?: SkillSelectionView[];
+      references?: MessageReferenceView[]; skills?: SkillSelectionView[];submissionToken?:string;
       onAccepted?: (receipt: Extract<ChatTurnReceipt, { ok: true }>) => void; onRejected?: () => void } = {},
   ) => {
     const bridge = window.hemiVoice;
     if (!bridge || workspaceMissingRef.current) { opts.onRejected?.(); return; }
     const turnId = ++turnCounterRef.current;
-    const requestId = `request-${createTranscriptId()}`;
+
     const epoch = viewEpochRef.current;
     if (!conversationIdRef.current) {
       conversationIdRef.current = createConversationId();
@@ -1813,13 +1813,12 @@ export default function Home() {
     // 只送身份字段会让行内标签的 token 匹配与队列/历史回显丢名称。
     const references = (opts.references ?? lastReferencesRef.current).map((item) => ({ ...item }));
     try {
-      const receipt = await bridge.submitChatTurn({
-        turnId, requestId, messages, conversationId: id, inputSource, attachmentIds,
-        attachmentViews: opts.attachmentViews ?? lastAttachmentViewsRef.current, references,
-        skills: opts.skills ?? lastSkillsRef.current,
-        profileId: conversationProfileRef.current, workspaceId: conversationWorkspaceRef.current,
-        ...(inputSource === 'voice' && opts.voiceMode ? { voiceMode: opts.voiceMode } : {}),
-      });
+      const result = await sendLocalConversationCommand(id,{type:'send',preempt:inputSource==='voice'&&opts.voiceMode==='continuous'?'active':'none',input:{
+        turnId,text:[...messages].reverse().find(message=>message.role==='user')?.content??'',inputSource,attachmentIds,
+        attachmentViews:opts.attachmentViews??lastAttachmentViewsRef.current,references,skills:opts.skills??lastSkillsRef.current,
+        profileId:conversationProfileRef.current,workspaceId:conversationWorkspaceRef.current,
+      }},opts.submissionToken);
+      const receipt = result as ChatTurnReceipt;
       if (epoch !== viewEpochRef.current || id !== conversationIdRef.current) return;
       if (!receipt.ok) throw new Error(receipt.message);
       opts.onAccepted?.(receipt);
@@ -1857,6 +1856,7 @@ export default function Home() {
     lastSkillsRef.current = [];
     void runTurn(messages, 'voice', [], {
       voiceMode: sessionModeRef.current === 'continuous' ? 'continuous' : 'hold',
+      submissionToken:`speech:${conversationIdRef.current??'new'}:${start}:${boundary}`,
       onAccepted: receipt => {
         if (receipt.disposition === 'preempting') {
           // 停止旧目标只表示已受理；同一 inputId 正式派发前继续保留可见草稿。
@@ -1884,7 +1884,7 @@ export default function Home() {
     if (!bridge || !cid || workspaceMissingRef.current) return;
     if ((flowPhaseRef.current ?? 'idle') !== 'idle') return;
     // 先解除停止暂停（旧主进程没有「直发即解除」；新主进程两道都通）。
-    bridge.resumeTurnQueue(cid).catch(() => {});
+    sendLocalConversationCommand(cid,{type:'resumeQueue'}).catch(() => {});
     const messages = contextWindow(historyFromTurns(transcriptsRef.current)).map((entry) => ({
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
@@ -1900,19 +1900,19 @@ export default function Home() {
     const cid = conversationIdRef.current;
     if (!cid || retryingRef.current === cid || flowRunActiveRef.current) return;
     if (!window.hemiVoice || !modelReadyRef.current || workspaceMissingRef.current) {
-      flashAttachError(workspaceMissingRef.current ? '请先选择可用的工作区，再重试。' : '请先配置可用的模型，再重试。');
+      flashAttachError(workspaceMissingRef.current ? '请先选择可用的工作区，再继续。' : '请先配置可用的模型，再继续。');
       return;
     }
     const input = retryInput(transcriptsRef.current, flowSnapshotRef.current);
-    if (!input) { flashAttachError('没有找到这轮的原始输入，请重新发送消息。'); return; }
-    // 只从本会话持久化事实取原输入；草稿、其他会话及旧的临时缓存不参与重试。
+    if (!input) { flashAttachError('没有可继续的失败回合，请重新发送消息。'); return; }
+    // 补一条纯文字「继续」；原输入保留在历史中，当前草稿不参与发送。
     const messages = contextWindow(historyFromTurns(transcriptsRef.current)).map(entry => ({
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
     messages.push({ role: 'user', content: input.text });
     retryingRef.current = cid;
     setRetryingConversation(cid);
-    logChain('retry → 模型（从会话恢复原输入）');
+    logChain('错误后继续 → 补「继续」回合');
     void runTurn(messages, input.inputSource, input.attachmentIds, input).finally(() => {
       if (retryingRef.current === cid) { retryingRef.current = null; setRetryingConversation(null); }
     });
@@ -1978,6 +1978,7 @@ export default function Home() {
     }));
     messages.push({ role: 'user', content: text });
     void runTurn(messages, 'text', attachmentIds, {
+      submissionToken:composerDraft.getSnapshot().token,
       onAccepted: () => { if (composerDraft.accept(version)) setDiscussContext(null); },
     }).finally(() => submittingDraftsRef.current.delete(version));
   }, [draft, draftAttachments, draftReferences, draftSkills, runTurn, stopTtsPlayback, composerDraft]);
@@ -2752,7 +2753,10 @@ export default function Home() {
       setWorkflowStudioOpen(false); // 059：切回对话页
       // 024：只有实际切到别的会话才清草稿；重复打开当前会话不误清。
       const switching = conversationIdRef.current !== id;
-      if (!switching && !navigationTargetRef.current) return;
+      if (!switching && !navigationTargetRef.current) {
+        await window.hemiVoice.openConversation(id, { activate: true }).catch(() => {});
+        return;
+      }
       const navigation = ++navigationSeqRef.current;
       navigationTargetRef.current = id;
       detachTurn();
@@ -2761,7 +2765,7 @@ export default function Home() {
       setTurnPhase('idle');
       logChain(`切换会话 → ${id}`);
       try {
-        const session = await window.hemiVoice.openConversation(id);
+        const session = await window.hemiVoice.openConversation(id, { activate: true });
         if (navigation !== navigationSeqRef.current) return;
         // 只复位界面；旧会话请求留在宿主继续运行。
         stopTtsPlayback();
@@ -3836,7 +3840,7 @@ export default function Home() {
         onWithdrawQueued={handleWithdrawQueued}
         onResumeQueue={() => {
           const conversationId = conversationIdRef.current;
-          if (conversationId) void window.hemiVoice?.resumeTurnQueue(conversationId);
+          if (conversationId) void sendLocalConversationCommand(conversationId,{type:'resumeQueue'});
         }}
         onEditQueued={handleEditQueued}
         modelProfiles={modelProfiles}

@@ -38,6 +38,22 @@ test('bounded event replay has no subscription gap; old process/scope/expired cu
   assert.doesNotThrow(()=>{stream.subscribe({instanceId:'bot'},()=>{throw new Error('slow');});stream.publish({type:'catalog'});});
 });
 
+test('reset includes each subscribed conversation detail once', () => {
+  const calls = [], stream = createBotEventStream({instanceId: 'bot', snapshot: id => {
+    calls.push(id); return {sessions: ['a', 'b'], ...(id ? {detail: {id, history: 'large history'}} : {})};
+  }});
+  const single = []; stream.subscribe({instanceId: 'bot', id: 'a'}, frame => single.push(frame))();
+  assert.deepEqual(calls, ['a']);
+  assert.equal(single[0].snapshot.detail.id, 'a');
+  assert.equal(single[0].snapshot.details, undefined);
+  calls.length = 0;
+  const multiple = []; stream.subscribe({instanceId: 'bot', ids: ['a', 'b']}, frame => multiple.push(frame))();
+  assert.deepEqual(calls, [null, 'a', 'b']);
+  assert.equal(multiple[0].snapshot.detail, undefined);
+  assert.deepEqual(multiple[0].snapshot.details.map(detail => detail.id), ['a', 'b']);
+  stream.close();
+});
+
 test('one device writes while both receive output; explicit takeover fences the previous writer',async t=>{
   const f=await fixture(t),pc=[],phone=[];
   const release=f.host.watch({instanceId:f.instanceId,id:f.id},frame=>pc.push(frame),undefined,{clientId:'pc'});

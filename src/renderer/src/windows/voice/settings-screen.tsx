@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Brain, ChevronDown, Cpu, Menu, Mic, Monitor, Search, Settings as SettingsIcon, X } from 'lucide-react';
+import { Brain, ChevronDown, Cpu, Menu, Mic, Monitor, Search, Settings as SettingsIcon } from 'lucide-react';
 
 import { openExternal } from '@/shared/open-external';
 import { SaveIndicator, type SaveState } from '@/components/save-indicator';
@@ -11,7 +11,7 @@ import {
   type TextModelConfigForm,
   type TtsConfigForm,
 } from '@/shared/types';
-import { AppTopBar } from '@/windows/voice/app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import { CallDockChip } from '@/windows/voice/call-dock';
 import { AboutUpdateSection } from '@/windows/voice/about-update-section';
 import { BrowserDecisionSection } from '@/windows/voice/browser-decision-model-section';
@@ -217,8 +217,9 @@ export function SettingsScreen({
     >
       <AppTopBar
         showBrand={false}
-        /* 037：宽窗「设置」标题在二级栏顶部；≤880 换成「分类 · 当前页」抽屉入口。 */
-        title={
+        back={{ label: '返回主窗口', onClick: close }}
+        title={<>
+          <span className="h37-settings-topbar-label app-topbar-label">{currentLabel}</span>
           <button
             type="button"
             className="h37-settings-drawer-trigger"
@@ -229,7 +230,7 @@ export function SettingsScreen({
             分类 · {currentLabel}
             <ChevronDown aria-hidden="true" />
           </button>
-        }
+        </>}
         actions={
           <>
             {callStatus && onCallExpand && onCallEnd ? (
@@ -240,15 +241,6 @@ export function SettingsScreen({
                 onEndCall={onCallEnd}
               />
             ) : null}
-            <button
-              type="button"
-              className="icon-btn h37-settings-close"
-              onClick={close}
-              aria-label="返回主窗口"
-              title="返回"
-            >
-              <X />
-            </button>
           </>
         }
       />

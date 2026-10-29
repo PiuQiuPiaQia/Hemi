@@ -102,6 +102,11 @@ for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['no-
 
 for(const mode of ['cancel','cancel-blocked'])test(`stop during completion verification rejects late ${mode==='cancel-blocked'?'blocked':'success'} and never starts a continuation`, {timeout:45000}, async t=>{
   const f=await fixture(t,mode);await f.send();await until(()=>f.checks===1);
+  const checking=await f.flow();
+  assert.equal(checking.phase,'running');
+  assert.equal(checking.runs[checking.activeRunId].activity.phase,'verifying');
+  const answer=checking.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='text').at(-1);
+  assert.ok(answer?.endedAt, 'Bot 在校验前也必须关闭正文输出，快照可恢复该事实');
   await f.call('flow.command',{id:f.id,command:{type:'stop'}});f.release();
   const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'?v:null;});
   assert.equal(Object.values(flow.runs)[0].outcome,'stopped');await wait(100);assert.equal(f.checks,1);
@@ -122,5 +127,5 @@ test('real background child report is consumed once when the shared request chun
 test('accepted background command finishes despite a shared chunk limit before completion is verified', {timeout:45000}, async t=>{
  const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});assert.equal(Object.values(flow.runs)[0].outcome,'completed',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');const j=await f.journal(),processes=Object.values(j.processes).filter(item=>item.owner.conversationId===f.id);assert.equal(processes.length,1);assert.equal(processes[0].state,'finished');assert.equal(processes[0].cleanupConfirmed,true);assert.notEqual(processes[0].status,'cancelled');
- const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.equal(root.goal.round,1);assert.ok(root.requestLimitReached);
+ const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.equal(root.goal.round,2);assert.equal(root.goal.checkpoints.length,1);assert.equal(root.goal.checkpoints[0].work.processes[0].id,processes[0].id);
 });

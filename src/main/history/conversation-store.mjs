@@ -27,7 +27,7 @@ import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs
 // 057 S3-2d：v2＝flow 快照随档（骨架；turns 仍是载荷/档案层）。旧档启动时一次性
 // 迁移（备份原档后写 v2，幂等）；缺 flow 的旧档由流服务打开时现场引导兜底。
 export const CONVERSATION_VERSION = 2;
-/** 会话数量上限（R-06）：保存时按 updatedAt 裁最旧。 */
+/** 常规会话容量：保存时优先保留置顶，再按 updatedAt 裁最旧；置顶本身不裁。 */
 export const MAX_SESSIONS = 50;
 /** 单会话条目上限：超出截断最旧（防长对话无限增长）。 */
 export const MAX_TURNS = 500;
@@ -391,6 +391,7 @@ export function buildSessionView(record) {
     turnCount: Array.isArray(record.turns) ? record.turns.length : 0,
     status: conversationStatus(record.flow),
     unreadAt: typeof record.unreadAt === 'number' && record.unreadAt > 0 ? record.unreadAt : null,
+    pinned: record.pinned === true,
     // 031：会话选中的模型配置组（缺省/null＝用默认组；旧档无此字段）。
     profileId: record.profileId ?? null,
     // 033：会话绑定的工作区身份（缺省/null＝旧会话，沿用家目录执行语义）。
@@ -577,6 +578,8 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
               : null,
       createdAt: existing && !existing.corrupt ? existing.createdAt : now,
       updatedAt: now,
+      // 置顶由独立元数据操作维护，普通内容保存不得覆盖。
+      ...(existing?.pinned === true ? { pinned: true } : {}),
       turns: clean,
       ...(cutKeys.length ? { cutKeys } : {}),
       ...(usageLedger.length ? { usageLedger } : {}),
@@ -717,6 +720,23 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
       return { ok: false, storageError };
     }
     return { ok: true, session: buildSessionView(next) };
+  }
+
+  /** 置顶只改元数据，不改变最近打开时间或内容更新时间。 */
+  function setPinned(id, pinned) {
+    if (typeof pinned !== 'boolean') throw new Error('置顶状态无效');
+    const record = readSessionFile(String(id ?? ''));
+    if (!record || record.corrupt) return null;
+    const next = { ...record, pinned };
+    try {
+      writeFile(next);
+      storageError = null;
+      return { ok: true, session: buildSessionView(next) };
+    } catch (error) {
+      storageError = `会话置顶设置失败：${error.message}`;
+      log?.warn(`[conversation] 置顶设置失败（${id}）：${error.message}`);
+      return { ok: false, storageError };
+    }
   }
 
   /** P1 自动标题候选：没手动标题、没有对得上当前首条消息的自动标题、且首轮已有回复。 */
@@ -953,7 +973,18 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     }
   }
 
-  /** 列表：未进手动序的按新→旧在前（新会话置顶），手动序过的按用户顺序
+  /** 用户打开时按真实更新时间重排普通会话，不改会话时间或置顶组的手动序。 */
+  function refreshOrderForOpen(id) {
+    const record = readSessionFile(id);
+    if (!record || record.corrupt) return { ok: false, storageError: '会话不存在或已损坏' };
+    const { sessions } = listSessions();
+    const pinned = sessions.filter(session => session.pinned);
+    const recent = sessions.filter(session => !session.pinned)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return reorderSessions([...pinned, ...recent].map(session => session.id));
+  }
+
+  /** 列表：未进手动序的按更新时间新→旧在前（新会话置顶），手动序过的按用户顺序
    *  稳定在后；损坏文件以 corrupt 条目殿后呈现，外来 JSON 直接跳过。 */
   function listSessions() {
     let ids = [];
@@ -999,15 +1030,15 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     }
   }
 
-  /** 容量裁剪（R-06）：按 updatedAt 留最新 maxSessions 个；刚保存的会话不裁。 */
+  /** 容量裁剪：置顶优先占位，再按 updatedAt 留最近会话；置顶与刚保存的会话不裁。 */
   function prune({ keep = null } = {}) {
     const { sessions } = listSessions();
     const ordered = sessions
       .filter((view) => !view.corrupt)
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.updatedAt || 0) - (a.updatedAt || 0));
     let removed = 0;
     for (const view of ordered.slice(maxSessions)) {
-      if (view.id === keep) continue;
+      if (view.id === keep || view.pinned) continue;
       deleteSession(view.id);
       removed += 1;
     }
@@ -1020,7 +1051,9 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     appendHostTurns,
     appendRuntimeDiagnostic,
     renameSession,
+    setPinned,
     reorderSessions,
+    refreshOrderForOpen,
     getSession,
     markRead,
     lastSession,

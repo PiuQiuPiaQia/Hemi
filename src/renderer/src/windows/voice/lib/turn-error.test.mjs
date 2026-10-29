@@ -7,6 +7,8 @@ test('connection failures have concise copy and retain exact routing diagnostics
   const copy = turnErrorCopy(raw);
   assert.equal(copy.title, '连接模型失败');
   assert.equal(copy.detail, raw);
+  assert.match(copy.description, /发送“继续”/);
+  assert.doesNotMatch(copy.description, /重试/);
   assert.doesNotMatch(copy.description, /HEMI_|底层/);
 });
 
@@ -19,6 +21,8 @@ test('provider errors give appropriate recovery guidance without dropping detail
     ['maximum context length exceeded', '对话超出模型上下文限制'],
     ['HTTP 400 invalid request', '模型未接受这次请求'],
     ['未知故障', '这轮未能完成'],
+    ['ENOSPC: no space left on device, write', '本机存储空间不足'],
+    ['运行状态尚未保存：EACCES permission denied', '运行状态未能保存'],
   ]) {
     assert.equal(turnErrorCopy(raw).title, title);
     assert.equal(turnErrorCopy(raw).detail, raw);

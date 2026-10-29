@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import electronPath from 'electron';
+import {GOAL_CHECK_SYSTEM} from '../src/main/agent-runtime/goal-driver.mjs';
 
 const runtime = process.env.HEMI_PLAYWRIGHT_MODULE ?? path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const { _electron } = await import(pathToFileURL(runtime).href);
@@ -41,8 +42,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const chunk = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: 'retry-check', model: body.model,
       choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
-    chunk({ role: 'assistant', content: main ? '重试请求已到达实际模型边界。' : '重试验证' });
-    const done = () => { if (!res.destroyed) { chunk({ content: '处理完成。' }); chunk({}, 'stop'); res.end('data: [DONE]\n\n'); } held.delete(done); };
+    const checking = JSON.stringify(body.messages.filter(message => message.role === 'system')).includes(GOAL_CHECK_SYSTEM);
+    chunk({ role: 'assistant', content: checking
+      ? JSON.stringify({status:'complete',reason:'继续请求已经接收并输出结果',evidence:['模型已输出回应'],remaining:[],nextAction:''})
+      : main ? '继续请求已到达实际模型边界。' : '继续验证' });
+    const done = () => { if (!res.destroyed) { if (!checking) chunk({ content: '处理完成。' }); chunk({}, 'stop'); res.end('data: [DONE]\n\n'); } held.delete(done); };
     if (main) { held.add(done); res.on('close', () => held.delete(done)); } else done();
   } catch (error) { report.errors.push(String(error)); res.destroy(); }
 });
@@ -90,6 +94,7 @@ async function openChat(marker) {
 async function waitFailure(cid) {
   await wait(async () => (await flow(cid))?.phase === 'idle' && Object.values((await flow(cid))?.runs ?? {}).at(-1)?.outcome === 'failed', 'failed run settled');
   await retry().waitFor(); assert.equal(await retry().count(), 1);
+  assert.equal(await retry().innerText(), '继续');
 }
 try {
   await start();
@@ -141,17 +146,21 @@ try {
   await retry().dblclick();
   await wait(() => held.size > 0, 'retry actually reaches provider');
   assert.equal(requests.length, before + 1, 'double click must submit exactly once');
-  assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /RETRY_ALPHA/);
+  const lastUser = requests.at(-1).messages.findLast(item => item.role === 'user');
+  assert.equal(lastUser.content.filter(part => part.type === 'text').map(part => part.text).join('').split('\n')[0], '继续');
   const current = await flow(cid), user = current.timeline.filter(item => item.kind === 'user').at(-1);
-  assert.deepEqual(user.attachmentIds, original.attachmentIds);
+  assert.equal(user.text, '继续');
+  assert.deepEqual(user.attachmentIds, []);
+  assert.deepEqual(current.timeline.find(item => item.id === original.id).attachmentIds, original.attachmentIds);
   assert.equal(user.inputSource, 'text');
   assert.equal(Object.keys(current.runs).length, runsBefore + 1);
   assert.equal(current.pending.length, 0);
-  const lastUser = requests.at(-1).messages.findLast(item => item.role === 'user');
-  assert.equal(lastUser.content.filter(part => part.type === 'image_url').length, 1, 'original image must reach provider');
+  assert.equal(lastUser.content.filter(part => part.type === 'image_url').length, 0, 'continuation must not resend the original image');
+  assert.ok(JSON.stringify(requests.at(-1).messages).includes('RETRY_ALPHA'), 'original input remains in model history');
   assert.equal(await input().inputValue(), '尚未发送的草稿');
   release(); await wait(async () => (await flow(cid)).phase === 'idle', 'retried run completes');
-  check('切走再回来重试实际执行，连点只提交一次，原附件送达模型且当前草稿保留');
+  assert.equal(Object.values((await flow(cid)).runs).at(-1).outcome, 'completed');
+  check('切走再回来点击继续只提交一次，实际模型收到纯文字“继续”，原输入留在历史且当前草稿保留');
   failProvider = true; await submit('RETRY_RELOAD 重载和重启后的重试'); await waitFailure(cid);
   await page.reload(); await input().waitFor(); await retry().waitFor();
   assert.equal(await page.locator('.h24-turn-error').count(), 0);
@@ -161,11 +170,13 @@ try {
   await page.keyboard.press('Tab'); await retry().focus(); await page.keyboard.press('Enter');
   await wait(() => held.size > 0, 'restart retry provider request');
   assert.equal(requests.length, restartBefore + 1);
-  assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /RETRY_RELOAD/);
+  const restartedUser = requests.at(-1).messages.findLast(item => item.role === 'user');
+  assert.equal(restartedUser.content.filter(part => part.type === 'text').map(part => part.text).join('').split('\n')[0], '继续');
   release(); await wait(async () => (await flow(cid)).phase === 'idle', 'restart retry complete');
+  assert.equal(Object.values((await flow(cid)).runs).at(-1).outcome, 'completed');
   assert.equal(await retry().count(), 0, 'historical errors have no stale retry actions');
   await screenshot('retried-success');
-  check('应用重启后键盘重试到达正确模型输入，成功后历史错误不显示过期重试按钮');
+  check('应用重启后键盘发送“继续”到达模型，成功后历史错误不显示过期继续按钮');
   assert.deepEqual(report.errors, []);
 } catch (error) {
   report.failure = String(error?.stack ?? error);

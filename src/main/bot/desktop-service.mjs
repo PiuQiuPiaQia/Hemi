@@ -17,6 +17,7 @@ import { applyFlowChange } from '../../shared/conversation-flow.mjs';
 import {readComponentVersion, componentUpdateNeeded} from './component-version.mjs';
 import { createBotOAuthLogin } from './oauth-login.mjs';
 import { deviceEndpoint } from './device-gateway.mjs';
+import {applyConversationControl} from '@hemi/conversation-flow/core';
 
 const METHODS = new Set([
   'agent-environment.inspect',
@@ -27,11 +28,13 @@ const METHODS = new Set([
   'session.create',
   'session.update',
   'session.rename',
+  'session.pin',
   'session.remove',
   'session.order',
   'session.draft',
   'flow.command',
   'flow.snapshot',
+  'flow.history',
   'permission.decide',
   'directory.list',
   'attachment.read',
@@ -269,7 +272,8 @@ export function createBotDesktopService({
     await componentWork;
     return getState();
   }
-  let stream=null, streamCursor=null, streamScope='', streamRetryAt=0, streamFailures=0, refreshAgain=false, eventRefresh=null, streamReconnect=null;
+  let stream=null, streamCursor=null, streamScope='', streamRetryAt=0, streamFailures=0, refreshAgain=false, eventRefresh=null, streamReconnect=null, streamReady=false;
+  const incompleteFlows=new Set();
   const olderCatalog = value => cache?.bootId && value.bootId === cache.bootId && value.revision < cache.revision;
   function applySessionReceipt(value, method, params, result) {
     if (!value || value.instanceId !== binding?.instanceId) return false;
@@ -299,11 +303,12 @@ export function createBotDesktopService({
   function ensureRealtime() {
     const id=activeId ?? cache?.sessions[0]?.id ?? null;
     const scope=binding ? `${binding.host}:${binding.instanceId}:${id}` : '';
-    if(stream && (scope!==streamScope || closed || disconnected || stoppedConfirmed || !online)){stream.abort();stream=null;}
+    if(stream && (scope!==streamScope || closed || disconnected || stoppedConfirmed || !online)){stream.abort();stream=null;streamReady=false;}
     if(scope!==streamScope){streamCursor=null;streamScope=scope;streamFailures=0;streamRetryAt=0;}
     if(!transport.watch || stream || !binding || !online || closed || disconnected || stoppedConfirmed || Date.now()<streamRetryAt)return;
+    if(!streamCursor && cache?.details?.[id]?.flow && cache?.eventCursor?.id===id)streamCursor=cache.eventCursor;
     const controller=new AbortController(), identity=binding.instanceId;stream=controller;
-    void transport.watch(binding.host,{instanceId:identity,id,cursor:streamCursor},{signal:controller.signal,clientId,onEvent(frame){
+    void transport.watch(binding.host,{instanceId:identity,id,cursor:streamCursor,windowed:true},{signal:controller.signal,clientId,onEvent(frame){
       if(controller.signal.aborted || binding?.instanceId!==identity)return;
       if(frame.type==='heartbeat')return;
       if(frame.version!==1 || frame.instanceId!==identity || !Number.isSafeInteger(frame.sequence))throw new Error('Invalid Bot event');
@@ -317,15 +322,16 @@ export function createBotDesktopService({
           const previous=details[value.detail.id];
           if(cache?.bootId===frame.bootId && previous?.flow?.revision>value.detail.flow.revision)value.detail.flow=previous.flow;
           details[value.detail.id]=value.detail;
+          incompleteFlows.delete(value.detail.id);
         }
         for(const [key,draft] of Object.entries(localDrafts.items))if(details[key])details[key].draft=localDraftView(draft);
         cache={...value,details,detailRevisions:{},selectedId:activeId,syncedAt:Date.now()};delete cache.detail;
       } else if(frame.type==='flow'){
         const detail=cache?.details?.[frame.id];
-        if(!detail){changedCatalog();}
-        else if(frame.change.revision>detail.flow.revision){
+        if(!detail?.flow){incompleteFlows.add(frame.id);changedCatalog();}
+        else if((frame.change.kind==='snapshot'?frame.change.snapshot.revision:frame.change.revision)>detail.flow.revision){
           const next=applyFlowChange(detail.flow,frame.change);
-          if(!next.ok)changedCatalog();else{
+          if(!next.ok){incompleteFlows.add(frame.id);changedCatalog();}else{
             const fresh=newSettledRuns({flow:detail.flow},next.snapshot);
             detail.flow=next.snapshot;
             for(const run of fresh){const input=detail.flow.timeline.find(x=>x.kind==='user'&&run.inputIds?.includes(x.id));onConversationResult({conversationId:frame.id,conversationTitle:detail.title,outcome:run.outcome,preview:input?.text??''});}
@@ -333,12 +339,14 @@ export function createBotDesktopService({
           }
         }
       } else if(frame.type==='catalog')changedCatalog();
+      if(frame.type==='ready')streamReady=true;
       streamCursor={bootId:frame.bootId,sequence:frame.sequence,id};
       streamFailures=0;lastConnectedAt=Date.now();
       if(frame.type==='reset' || frame.type==='flow')onChanged(getState());
     }}).catch(()=>{}).finally(()=>{
       if(stream!==controller)return;
       stream=null;
+      streamReady=false;
       if(!controller.signal.aborted){
         const delay=Math.min(30000,500*2**Math.min(streamFailures++,6));streamRetryAt=Date.now()+delay;
         clearTimeout(streamReconnect);streamReconnect=setTimeout(()=>{streamReconnect=null;ensureRealtime();void refresh();},delay);
@@ -367,14 +375,21 @@ export function createBotDesktopService({
         const canReuse =
           !Object.keys(localDrafts.items).length &&
           syncStatus?.phase !== 'unknown';
+        const metadata = Boolean(stream && target && cache?.details?.[target]?.flow && !incompleteFlows.has(target) && !Object.keys(localDrafts.items).length);
         let snapshot = await direct('snapshot', {
-          ...(target ? { id: target } : {}),
+          ...(target ? { id: target } : {}),windowed:true,
+          ...(metadata ? {detail: 'metadata'} : {}),
+          bootId: cache?.bootId,
           revision: canReuse
-            ? target
+            ? metadata ? cache?.revision
+            : target
               ? cache?.detailRevisions?.[target]
               : cache?.revision
             : -1,
         });
+        if(metadata && snapshot.bootId && cache?.bootId && snapshot.bootId!==cache.bootId)
+          snapshot=await direct('snapshot',{...(target?{id:target}:{}),revision:-1,windowed:true});
+        else if(metadata && !snapshot.notModified)snapshot.eventCursor=cache?.eventCursor;
         if (stale()) return getState();
         // A command receipt may overtake a poll already on the wire. It must
         // never resurrect a removed session or revert a confirmed model change.
@@ -413,8 +428,12 @@ export function createBotDesktopService({
         );
         if (snapshot.detail) {
           const previous=details[snapshot.detail.id];
-          if((!snapshot.bootId||snapshot.bootId===cache?.bootId)&&previous?.flow?.revision>snapshot.detail.flow.revision)snapshot.detail.flow=previous.flow;
-          details[snapshot.detail.id] = snapshot.detail;
+          if(!snapshot.detail.flow && previous)details[snapshot.detail.id]={...previous,...snapshot.detail};
+          else {
+            if((!snapshot.bootId||snapshot.bootId===cache?.bootId)&&previous?.flow?.revision>snapshot.detail.flow?.revision)snapshot.detail.flow=previous.flow;
+            details[snapshot.detail.id] = snapshot.detail;
+            if(snapshot.detail.flow)incompleteFlows.delete(snapshot.detail.id);
+          }
         }
         for (const [id, draft] of Object.entries(localDrafts.items)) {
           if (!snapshot.sessions.some((s) => s.id === id)) {
@@ -444,7 +463,7 @@ export function createBotDesktopService({
             if (e.code !== 'conflict') throw e;
             // A takeover can race the upload after the snapshot above. Adopt
             // the new owner without misclassifying a write rejection as offline.
-            snapshot = await direct('snapshot', {...(target ? {id: target} : {}), revision: -1});
+            snapshot = await direct('snapshot', {...(target ? {id: target} : {}), revision: -1,windowed:true});
             if (stale()) return getState();
             if (snapshot.instanceId !== identity) fail('Bot 身份不同，已停止连接。', 'conflict');
             if (snapshot.detail) details[snapshot.detail.id] = snapshot.detail;
@@ -484,7 +503,7 @@ export function createBotDesktopService({
         if (!snapshot.bootId || snapshot.bootId === cache?.bootId) {
           for (const [id, detail] of Object.entries(details)) {
             const latest = cache?.details?.[id]?.flow;
-            if (latest && latest.revision > detail.flow.revision) {
+            if (latest && latest.revision > (detail.flow?.revision ?? -1)) {
               details[id] = {...detail, flow: latest};
               snapshot.sessions = snapshot.sessions.map(session => session.id === id
                 ? {...session, status: latest.phase === 'idle' ? null : 'running', turnCount: latest.timeline.length}
@@ -535,7 +554,7 @@ export function createBotDesktopService({
         return publish();
       } catch (e) {
         if (!stale()) {
-          online = false;
+          if(!streamReady || ['permission','conflict','unsupported'].includes(e.code))online = false;
           retryBlocked = ['permission', 'conflict', 'unsupported'].includes(e.code);
           retryCount = Math.min(4, retryCount + 1);
           retryAt =
@@ -1011,6 +1030,8 @@ export function createBotDesktopService({
     }
 
     if (!online) fail('连接已断开，草稿保留；请重新连接后操作。', 'offline');
+    if(method==='flow.snapshot' && !incompleteFlows.has(params.id) && cache?.details?.[params.id]?.flow)
+      return structuredClone(cache.details[params.id].flow);
     const identity = binding.instanceId, commandHost = binding.host, commandBoot = cache?.bootId;
     if (method === 'pairing.configure' && params.endpoint === undefined) {
       const access = await direct('pairing.status');
@@ -1032,7 +1053,7 @@ export function createBotDesktopService({
         return structuredClone(cache.details[params.id]);
       }
     }
-    if (params.id && ['flow.command', 'session.draft', 'session.update', 'permission.decide', 'context.capture'].includes(method)) {
+    if (params.id && ['flow.command', 'session.draft', 'session.update', 'session.pin', 'permission.decide', 'context.capture'].includes(method)) {
       const control = cache?.sessions.find(item => item.id === params.id)?.control;
       if (control?.ownerId === clientId && params.controlEpoch === undefined) params = {...params, controlEpoch: control.epoch};
     }
@@ -1040,15 +1061,20 @@ export function createBotDesktopService({
       const hello = await direct('handshake');
       if (hello.capabilities?.nativeMemory !== 1) fail('请更新 Bot 运行组件后使用共享记忆。', 'unsupported');
     }
+    if(['session.open','flow.snapshot'].includes(method))params={...params,windowed:true};
     const fastSession = ['session.create', 'session.update', 'session.remove'].includes(method);
     const result = await direct(method, fastSession ? {...params, includeSnapshot: true} : params);
-    if (method === 'session.control' && result.control && cache) {
-      cache.sessions = cache.sessions.map(item => item.id === params.id ? {...item, control: result.control} : item);
-      if (cache.details[params.id]) cache.details[params.id].control = result.control;
-      publish();
-    }
     if (binding?.instanceId !== identity || binding?.host !== commandHost || closed || disconnected || stoppedConfirmed)
       fail('连接已更换，旧结果已丢弃。', 'conflict');
+    if (method === 'session.control') {
+      if (cache) {
+        cache.sessions = applyConversationControl(cache.sessions, params.id, result);
+        if (cache.details[params.id]) cache.details[params.id] = applyConversationControl([cache.details[params.id]], params.id, result)[0];
+        publish();
+      }
+      changedCatalog();
+      return result;
+    }
     if (fastSession && result.snapshot && cache?.bootId !== commandBoot && result.snapshot.bootId !== cache?.bootId) {
       changedCatalog();
       return result;
@@ -1077,6 +1103,7 @@ export function createBotDesktopService({
       ![
         'snapshot',
         'flow.snapshot',
+  'flow.history',
         'directory.list',
         'attachment.read',
         'attachment.document',

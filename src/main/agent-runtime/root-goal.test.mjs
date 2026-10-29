@@ -51,12 +51,19 @@ for (const chunked of [false, true]) test(`shared PC runtime ${chunked ? 'contin
     loadArchiveAgent:() => null,loadArchiveTurns:() => [],saveArchiveAgent:() => true,
     ...(chunked ? {goalPolicy:{maxRequestsPerRound:1}} : {}),onGoalVerification:(_id,call) => calls.push(call)});
   const agent = await runtime.obtain(ctx);
+  const activities = [], streams = [];
+  agent.on('activity', activity => activities.push(activity.phase));
+  agent.on('stream', event => streams.push(event.type));
   const result = await runtime.runRootTurn(ctx.conversationId, {userText:'写入 proof.txt，内容 SHARED_GOAL_PROOF',inputId:'one-input'});
   assert.equal(goalRunOutcome(result), 'completed');
   await runtime.completeConversation(ctx.conversationId, goalRunOutcome(result), null, ctx.runId);
   const journal = await runtime.journal.snapshot(), goal = journal.roots[ctx.runId].goal;
   assert.equal(journal.roots[ctx.runId].status, 'completed');
   assert.equal(goal.round, 2); assert.deepEqual(checks, ['continue','complete']); assert.equal(calls.length, 2);
+  assert.equal(activities.filter(phase => phase === 'verifying').length, 2);
+  assert.ok(activities.includes('continuing'));
+  assert.equal(activities.at(-1), 'finishing');
+  assert.ok(streams.includes('hemi_message_end'));
   assert.equal(await fs.readFile(path.join(root,'proof.txt'),'utf8'), 'SHARED_GOAL_PROOF');
   assert.equal(Object.keys(journal.requests).length, requests.length, 'every execution and verification HTTP request is accounted');
   assert.ok(Object.values(journal.requests).every(row => row.owner.rootRunId === ctx.runId && row.endedAt));

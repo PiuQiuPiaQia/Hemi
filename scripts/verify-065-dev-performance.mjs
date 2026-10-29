@@ -152,7 +152,7 @@ try {
     check(`${width} 长历史实际可以滚动`, await viewport.evaluate(el => el.scrollTop) < before);
     const layout = await page.evaluate(() => {
       const rect = selector => { const e = document.querySelector(selector); if (!e) return null; const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; };
-      return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, monitor: rect('[data-dev-performance]'), call: rect('.h24-call-nav'), title: rect('.app-bar-title'), header: rect('.app-bar') };
+      return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, monitor: rect('[data-dev-performance]'), call: rect('.h24-call-nav'), title: rect('.app-topbar-title'), header: rect('.app-topbar') };
     });
     const inside = r => r && r.left >= 0 && r.right <= layout.width && r.top >= 0 && r.bottom <= layout.header.bottom;
     const overlayInside = layout.monitor && layout.monitor.left >= 0 && layout.monitor.right <= layout.width && layout.monitor.top >= layout.header.bottom;
@@ -160,7 +160,7 @@ try {
     if (dev) {
       const isolation = await page.evaluate(() => {
         const panel = document.querySelector('[data-dev-performance]');
-        const selectors = ['.app-bar-title', '.bar-actions', '.conversation-list', 'textarea.text-composer-input'];
+        const selectors = ['.app-topbar-title', '.app-topbar-actions', '.conversation-list', 'textarea.text-composer-input'];
         const rects = () => selectors.map(selector => { const r = document.querySelector(selector).getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
         const before = rects();
         panel.style.display = 'none';

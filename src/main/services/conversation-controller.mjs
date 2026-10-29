@@ -59,13 +59,13 @@ export function createConversationController({
   // ------------------------------------------------------------ 状态与发布
 
   function commit(fact) {
-    if(fact.type==='run-closed'&&fact.cleanupUnconfirmed&&snapshot.activeRunId===fact.runId&&snapshot.generation===(fact.generation??snapshot.generation)){
-      // A replacement awaiting handoff must survive an unconfirmed cleanup as reviewable input.
+    if(fact.type==='run-closed'&&(fact.cleanupUnconfirmed||fact.dispatchPaused)&&snapshot.activeRunId===fact.runId&&snapshot.generation===(fact.generation??snapshot.generation)){
+      // A failed handoff/save preserves its replacement for review, without dispatching it.
       if(pendingNext){
         const next=pendingNext;pendingNext=null;
         if(!snapshot.pending.some(input=>input.inputId===next.input.inputId))commit({type:'input-accepted',input:next.input,needsReview:true,generation:snapshot.generation});
       }
-      // Promotion only authorizes dispatch after confirmed cleanup of the old run.
+      // Promotion cannot bypass failed cleanup or persistence of the old run.
       for(const input of snapshot.pending.filter(input=>input.state==='pending'&&input.promoteTarget===fact.runId)){
         commit({type:'input-promoted',inputId:input.inputId,targetRunId:null,at:null,generation:snapshot.generation});
       }

@@ -77,6 +77,7 @@ export const IPC = {
   flow: {
     /** 057：对话流统一状态——命令受理 / 快照获取 / 补丁推送（契约 §3/§7）。 */
     command: 'flow:command',
+    lookupOperation:'flow:lookup-operation',
     getSnapshot: 'flow:get-snapshot',
     changed: 'flow:changed',
     /** S3-2d：编辑回卷——档案剪除（cutKeys＋主 agent 作废）＋flow 时间线裁剪。 */
@@ -230,6 +231,7 @@ export const IPC = {
     state: 'duplex:state',
   },
   app: {
+    showMenu: 'app:show-menu',
     log: 'app:log',
     /** 在 Finder 中定位 hemi.log。 */
     revealLog: 'app:reveal-log',
@@ -454,6 +456,7 @@ export const IPC = {
     remove: 'conversation:remove',
     /** 024：双击重命名（空标题＝回退派生标题；不动 updatedAt）。 */
     rename: 'conversation:rename',
+    setPinned: 'conversation:set-pinned',
     /** 024：侧栏拖拽排序（全量 id 序落 order-index.json）。 */
     reorder: 'conversation:reorder',
     /** 档案落盘/改名/删除/排序后向所有窗口广播（侧栏列表及时对齐）。 */

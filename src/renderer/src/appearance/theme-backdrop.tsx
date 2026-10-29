@@ -19,11 +19,11 @@ export function CharacterMedia({asset,load,videoRef,staticOnly=false,className='
 export function ThemeBackdrop({intro,videoRef}:{intro:boolean;videoRef:RefObject<HTMLVideoElement|null>}){
   const {snapshot,activity}=useAppearance(),scene=useAppearanceScene(),reduced=useReducedMotion(),skin=getSkin(snapshot.preference.skinId),asset=assetsFor(skin.id);
   const [documentVisible,setDocumentVisible]=useState(()=>!document.hidden);
-  const [focusedInput,setFocusedInput]=useState(false),[requested,setRequested]=useState(false),[mediaVersion,setMediaVersion]=useState(0);
+  const [requested,setRequested]=useState(false),[mediaVersion,setMediaVersion]=useState(0);
   const requestedSkin=useRef(skin.id);if(requestedSkin.current!==skin.id){requestedSkin.current=skin.id;requested&&setRequested(false);}
-  useEffect(()=>{const check=()=>setFocusedInput(!!document.activeElement?.matches('input:not([type=range]):not([type=checkbox]),textarea,[contenteditable="true"]'));document.addEventListener('focusin',check);document.addEventListener('focusout',check);check();return()=>{document.removeEventListener('focusin',check);document.removeEventListener('focusout',check);};},[]);
-  const staticOnly=!intro&&scene.view!=='home';
-  const idle=!staticOnly&&scene.view==='home'&&!scene.inputActive&&!focusedInput&&activity.visible&&activity.focused&&documentVisible&&!reduced;
+  // StartupStage owns intro playback; ordinary scenery does not depend on typing or focus.
+  const staticOnly=reduced||!intro&&scene.view==='other';
+  const idle=!staticOnly&&activity.visible&&documentVisible;
   useEffect(()=>{if(intro||idle)setRequested(true);},[intro,idle,skin.id]);
   useEffect(()=>{
     const video=videoRef.current;if(!video||intro)return;

@@ -16,41 +16,6 @@
   background: var(--bg-canvas);
 }
 
-/* 宽窗：顶栏首格整格用二级栏底色（与主页会话栏同一做法，红绿灯不压分隔线；
-   覆盖 037-shell 里设置态的画布底；≤880 仍走 037-shell 的窄窗规则）。
-   设置标题在二级栏顶部，顶栏只留拖拽区与右侧动作。 */
-@media (min-width: 881px) {
-  .compact-shell.h24-shell.h37-settings-shell[data-page='settings'] .brand-row {
-    padding-left: 88px; /* sp-ok：红绿灯让位 */
-    border-right: 1px solid var(--line);
-    background: var(--bg-rail);
-  }
-
-  .compact-shell.h24-shell.h37-settings-shell .h37-settings-topbar-title {
-    display: none;
-  }
-}
-
-/* 返回钮：幽灵 30px，与顶栏其他按钮同档。 */
-.compact-shell.h37-settings-shell .bar-actions .h37-settings-close {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--r-sm);
-  color: var(--muted);
-  transition:
-    background-color var(--dur-1) linear,
-    color var(--dur-1) linear;
-}
-
-.compact-shell.h37-settings-shell .bar-actions .h37-settings-close:hover {
-  background: var(--bg-hover);
-  color: var(--ink);
-}
-
-html.kb-nav .compact-shell.h37-settings-shell .bar-actions .h37-settings-close:focus-visible {
-  outline: 0;
-}
-
 /* —— 二级栏：设置分页导航（224，--bg-rail）—— */
 .h37-settings-shell .settings-nav.h37-settings-side {
   display: flex;
@@ -328,6 +293,10 @@ html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-
 
 /* —— 窄窗（≤880）：二级栏收起，顶栏换「分类 · 当前页」抽屉入口 —— */
 @media (max-width: 880px) {
+  .h37-settings-shell .h37-settings-topbar-label {
+    display: none;
+  }
+
   .h37-settings-shell .settings-nav.h37-settings-side {
     display: none;
   }
@@ -338,7 +307,6 @@ html.kb-nav .h37-settings-shell :is(.settings-nav, .h37-settings-drawer) > .h37-
     gap: var(--sp-6);
     height: 30px;
     padding: 0 var(--sp-8);
-    margin-left: calc(var(--sp-8) * -1);
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
@@ -470,15 +438,10 @@ html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; }
 
 /* —— P2 窗口外框 + 内容面板（与主窗口同一套）——
    顶栏、图标栏、设置二级栏同一张浅灰外框，内容列是白色面板（左上圆角＋细边）；
-   图标栏在宽窗即是返回入口，右上角 × 只在窄窗（二级栏收抽屉）保留。 */
+   返回入口由共用顶栏提供。 */
 @media (min-width: 881px) {
-  .compact-shell.h37-settings-shell .app-bar,
   .compact-shell.h37-settings-shell .h24-workspace {
     background: var(--bg-rail);
-  }
-
-  .compact-shell.h24-shell.h37-settings-shell[data-page='settings'] .brand-row {
-    border-right: 0;
   }
 
   .h37-settings-shell .settings-nav.h37-settings-side {
@@ -490,9 +453,5 @@ html.kb-nav .h37-access-dialog-close:focus-visible { outline: 0; }
     border-left: 1px solid var(--line);
     border-top-left-radius: var(--r-lg);
     background: var(--bg-canvas);
-  }
-
-  .compact-shell.h37-settings-shell .bar-actions .h37-settings-close {
-    display: none;
   }
 }

@@ -28,7 +28,7 @@ export function createBotEventStream({ instanceId, snapshot, bootId = randomUUID
     pending.set(id,coalesceFlowChanges(pending.get(id),change));
     if(!batchTimer){batchTimer=setTimeout(flush,40);batchTimer.unref?.();}
   }
-  function subscribe(options, send, disconnected = () => {}) {
+  function subscribe(options, send, disconnected = () => {}, project = frame => frame) {
     if (closed) fail('Bot 已关闭。', 'offline');
     if (options.instanceId !== instanceId) fail('Bot 身份不匹配。', 'conflict');
     if(options.ids!==undefined&&!Array.isArray(options.ids))fail('会话订阅无效。');
@@ -39,7 +39,7 @@ export function createBotEventStream({ instanceId, snapshot, bootId = randomUUID
     const deliver = frame => {
       if (disposed) return;
       if (frame.type === 'flow' && !ids.includes(frame.id)) return;
-      try { send(structuredClone(frame)); } catch { dispose(); disconnected(); }
+      try { send(structuredClone(project(frame))); } catch { dispose(); disconnected(); }
     };
     function dispose() { disposed = true; listeners.delete(deliver); }
     // Snapshot capture, listener attachment and replay are synchronous: no subscription gap.
@@ -51,7 +51,10 @@ export function createBotEventStream({ instanceId, snapshot, bootId = randomUUID
     if (resumable) {
       for (const item of log) if (item.frame.sequence > previous.sequence) deliver(item.frame);
     } else {
-      deliver({ version: 1, instanceId, ...cursor(), type: 'reset', snapshot: { ...snapshot(id), details: ids.map(id=>snapshot(id).detail).filter(Boolean) } });
+      // Keep the single-conversation shape for desktop clients. Multiple
+      // subscriptions carry their details once, without repeating the first.
+      const fresh = ids.length > 1 ? {...snapshot(null,options), details: ids.map(id=>snapshot(id,options).detail).filter(Boolean)} : snapshot(id,options);
+      deliver({ version: 1, instanceId, ...cursor(), type: 'reset', snapshot: fresh });
     }
     deliver({ version: 1, instanceId, ...cursor(), type: 'ready' });
     if (!disposed) listeners.add(deliver);

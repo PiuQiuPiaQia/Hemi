@@ -1,0 +1,164 @@
+/* Window chrome belongs to this component, independent of the page/sidebar grid.
+   52px matches main-window-chrome.mjs and the existing workspace height token. */
+.app-topbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--sp-12);
+  height: var(--hemi-topbar-h);
+  min-width: 0;
+  padding: 0 var(--sp-16);
+  background: var(--bg-rail);
+  color: var(--ink);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+}
+
+.app-topbar[data-platform='darwin'] {
+  padding-left: calc(var(--sp-64) + var(--sp-32));
+}
+
+.app-topbar[data-platform='win32'] {
+  /* WCO publishes the usable titlebar rectangle, including DPI/maximize changes.
+     The fallback reserves the three standard 46px native caption buttons. */
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + var(--sp-16)); /* sp-ok: native window controls */
+}
+
+.app-topbar-leading,
+.app-topbar-brand,
+.app-topbar-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--sp-8);
+}
+
+.app-topbar-title {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: var(--sp-12);
+}
+
+.app-topbar-label,
+.app-topbar .app-topbar-title > .h24-conversation-title {
+  display: block;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: inherit;
+}
+
+.app-topbar-actions {
+  gap: var(--sp-4);
+}
+
+.app-topbar-actions:empty {
+  display: none;
+}
+
+.app-topbar button,
+.app-topbar input,
+.app-topbar a,
+.app-topbar [role='button'],
+.app-topbar [role='tab'],
+.app-topbar-actions {
+  -webkit-app-region: no-drag;
+}
+
+.app-topbar-back {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--sp-32);
+  height: var(--sp-32);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background-color var(--dur-1), color var(--dur-1);
+}
+
+.app-topbar-back:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.app-topbar-back:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.app-topbar-back:disabled {
+  color: var(--faint);
+}
+
+html.kb-nav .app-topbar-back:focus {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+/* Windows keeps the application menu inside the native caption row. */
+.app-menubar {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  -webkit-app-region: no-drag;
+}
+.app-topbar[data-platform='win32'] .app-menubar {
+  display: flex;
+}
+.app-menubar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  height: var(--sp-32);
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--body);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+}
+.app-menubar > button:hover:not(:disabled),
+.app-menubar > button[aria-expanded='true'],
+html.kb-nav .app-menubar > button:focus {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+.app-menubar > button:disabled {
+  color: var(--faint);
+}
+.app-menubar > .app-menubar-compact {
+  display: none;
+}
+.app-menubar-error {
+  position: absolute;
+  top: var(--hemi-topbar-h);
+  left: var(--sp-16);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-2);
+  color: var(--danger);
+  font-size: var(--fs-12);
+  z-index: 80;
+}
+@media (max-width: 880px) {
+  .app-menubar > .app-menubar-item {
+    display: none;
+  }
+  .app-menubar > .app-menubar-compact {
+    display: inline-flex;
+  }
+}

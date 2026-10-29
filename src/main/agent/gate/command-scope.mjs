@@ -36,6 +36,15 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   });
   const publish = () => onChange([...active].filter(r => r.background).map(view));
   const backgroundFor = owner => [...active, ...completed].filter(r => r.background && sameOwner(r.owner, owner));
+  const acknowledgeReview = (owner, update) => {
+    if (!sameOwner(reviewOwner, owner)) throw new Error('观察不属于当前目标');
+    if (update.requested && sameOwner(reviewRequest, owner)) reviewRequest = null;
+    reviews++;
+    for (const job of update.jobs) {
+      const record = recordsById.get(job.id);
+      if (record && sameOwner(record.owner, owner)) record.reviewedAtOutput = job.lastOutputAt ?? job.startedAt;
+    }
+  };
   // 工具批次边界与整轮收口共享同一个消费入口，不等待仍在运行的命令。
   const takeCompleted = owner => {
     const ready = completed.filter(r => sameOwner(r.owner, owner));
@@ -216,27 +225,35 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       if(![...active].some(r=>sameOwner(r.owner,owner)&&r.background))return false;
       reviewRequest=owner;changed();return true;
     },
-    async waitForUpdate(owner) {
+    async waitForUpdate(owner, {signal, collect = true} = {}) {
       if(!sameOwner(reviewOwner,owner)){reviewOwner=owner;reviews=0;if(!sameOwner(reviewRequest,owner))reviewRequest=null;}
       while(true){
+        signal?.throwIfAborted();
         const pending=backgroundFor(owner);
-        if(pending.some(r=>r.settled)||!pending.length)return {kind:'settled',events:takeCompleted(owner)};
+        if(pending.some(r=>r.settled)||!pending.length)return {kind:'settled',events:collect ? takeCompleted(owner) : []};
         const due=pending.filter(r=>r.reviewedAtOutput!==(r.lastOutputAt??r.startedAt));
         const quiet=quietReviewMs>0 && reviews<maxQuietReviews && due.some(r=>now()-(r.lastOutputAt??r.startedAt)>=quietReviewMs);
         if(reviewRequest||quiet){
-          const requested=Boolean(reviewRequest);reviewRequest=false;reviews++;
-          for(const r of pending)r.reviewedAtOutput=r.lastOutputAt??r.startedAt;
-          return {kind:'review',requested,jobs:pending.map(view)};
+          const update={kind:'review',requested:Boolean(reviewRequest),jobs:pending.map(view)};
+          if(collect)acknowledgeReview(owner,update);
+          return update;
         }
         const deadlines=pending.map(r=>r.deadlineAt-now());
         if(quietReviewMs>0&&reviews<maxQuietReviews)deadlines.push(...due.map(r=>quietReviewMs-(now()-(r.lastOutputAt??r.startedAt))));
-        const ms=Math.max(1,Math.min(...deadlines));let timer;
-        try{await Promise.race([wake.promise,Promise.race(pending.map(r=>r.promise)),new Promise(resolve=>{timer=setTimeout(resolve,ms);})]);}
-        finally{clearTimeout(timer);}
+        const ms=Math.max(1,Math.min(...deadlines));let timer,abort;
+        try{await Promise.race([wake.promise,Promise.race(pending.map(r=>r.promise)),new Promise(resolve=>{timer=setTimeout(resolve,ms);}),new Promise((_,reject)=>{abort=()=>reject(signal.reason ?? new DOMException('等待已取消','AbortError'));signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();})]);}
+        finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
         if(pending.some(r=>!r.settled&&now()>r.deadlineAt))throw uncertain(pending.find(r=>!r.settled)?.execution,'后台命令结果未能确认，已阻止继续执行');
       }
     },
     takeCompleted,
+    acknowledgeReview,
+    async collectCompleted(owner) {
+      // An exited process may still be saving its result. Join only that bounded settlement, never live work.
+      const finishing = [...active].filter(record => record.background && sameOwner(record.owner, owner) && (record.result || record.error));
+      await Promise.all(finishing.map(record => commandDeadline(record.promise, settleTimeoutMs, '后台命令结果保存未能确认')));
+      return takeCompleted(owner);
+    },
     hasBackground: owner => backgroundFor(owner).length > 0,
     async waitForCompletion(owner) {
       const records = backgroundFor(owner);

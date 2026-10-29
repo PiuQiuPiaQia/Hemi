@@ -669,11 +669,21 @@ export function createAgentRuntime({
     try {
       const result = await driveGoal({journal, owner, objective:args.userText, policy:normalizeGoalPolicy(goalPolicy), signal:controller.signal,
         continuation:ctx.continuationOf ? {rootRunId:ctx.continuationOf,inputId:args.inputId,answer:args.userText} : null,
-        run: hostEvent => runOwnedTurn(entry, {...args, hostEvent, goalRound:true}),
-        verify: (objective, evidence) => verifyGoalCompletion({execution:{...executionFor(ctx, ctx.modelPlan), actualCandidate:entry.actualCandidate}, objective, evidence, signal:controller.signal, onCall:call=>onGoalVerification?.(conversationId,call)}),
+        run: hostEvent => {
+          entry.agent.setActivityPhase(hostEvent ? 'continuing' : 'running');
+          return runOwnedTurn(entry, {...args, hostEvent, goalRound:true});
+        },
+        verify: (objective, evidence) => {
+          entry.agent.setActivityPhase('verifying');
+          return verifyGoalCompletion({execution:{...executionFor(ctx, ctx.modelPlan), actualCandidate:entry.actualCandidate}, objective, evidence, signal:controller.signal, onCall:call=>onGoalVerification?.(conversationId,call)});
+        },
         evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
-        persist: () => entry.agent.persistExecution(),
+        persist: () => entry.agent.checkpointExecution(),
+        cleanup: async () => {
+          await Promise.all([entry.agent.abort(), subagents.cancelByRootRun(owner.rootRunId, {reason:'stop'})]);
+        },
       });
+      entry.agent.setActivityPhase('finishing');
       if (result.completionText) {
         await entry.agent.recordGoalCompletion(result.completionText, controller.signal);
         result.texts = [...result.texts, result.completionText];
@@ -705,11 +715,23 @@ export function createAgentRuntime({
     try {
       append(await agent.runTurn(args));
       if (combined.modelError) throw new Error(`回合未完成：${describeModelError(combined.modelError)}`);
+      if (combined.budgetLimited) throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
       while (!ctx.cancelled && !combined.aborted) {
         const owned = [...subagents._internals.tasks.values()].filter(task => task.rootRunId === owner.rootRunId);
-        await Promise.all(owned.filter(task => !task.finalized).map(task => task.running ?? task.terminalWait));
+        const pending = owned.filter(task => !task.finalized);
+        if (pending.length) agent.setActivityPhase('waiting-subagents');
+        if (args.goalRound && pending.length) {
+          const waitAbort = new AbortController();
+          try {
+            const boundary = await Promise.race([
+              Promise.all(pending.map(task => task.running ?? task.terminalWait)),
+              journal.waitForRequestLimit(owner, {signal:waitAbort.signal}).then(() => 'budget'),
+            ]);
+            if (boundary === 'budget') throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
+          } finally { waitAbort.abort(); }
+        } else await Promise.all(pending.map(task => task.running ?? task.terminalWait));
         if (ctx.cancelled) break;
-        if ((await journal.root(owner))?.requestLimitReached) throw new Error('执行请求已达上限');
+        if ((await journal.root(owner))?.requestLimitReached) throw Object.assign(new Error('执行请求已达上限'), {code:'request-limit'});
         const events = await journal.pending(owner);
         if (!events.length) break;
         const content = ['［子任务完成 · 宿主观察，不是用户新指令］', ...events.map(event => formatSubagentResult(event.result))].join('\n\n');
@@ -724,13 +746,12 @@ export function createAgentRuntime({
       return { ...combined, aborted: combined.aborted || Boolean(ctx.cancelled) };
     } catch (error) {
       const limited = (await journal.root(owner))?.requestLimitReached;
-      if (limited && !ctx.cancelled && !combined.aborted) {
+      if (limited && (error.code === 'request-limit' || execution.requestLimited || combined.budgetLimited) && !execution.fatalError && !ctx.cancelled && !combined.aborted) {
         try {
-          // 仅等待已经受理的工作，工具继续沿用原超时；触顶账本拒绝新请求／工具／派单。
           const owned = [...subagents._internals.tasks.values()].filter(task => task.rootRunId === owner.rootRunId);
-          await Promise.all(owned.filter(task => !task.finalized).map(task => task.running ?? task.terminalWait));
           if (ctx.cancelled) throw new DOMException('任务已停止', 'AbortError');
           if (args.goalRound) {
+            // Persist reports already available; the goal driver can hand off while accepted work remains live.
             const events = await journal.pending(owner);
             let entries = (await agent.exportEntries())?.entries ?? [];
             const anchor = event => entries.findLast(item => item.type === 'custom_message' && item.details?.eventIds?.includes(event.eventId));
@@ -745,6 +766,8 @@ export function createAgentRuntime({
             }
             return {...combined, modelError:null, aborted:false, budgetLimited:true};
           }
+          await Promise.all(owned.filter(task => !task.finalized).map(task => task.running ?? task.terminalWait));
+          if (ctx.cancelled) throw new DOMException('任务已停止', 'AbortError');
           const state = await journal.snapshot();
           const observations = Object.values(state.observations).filter(item => item.owner.rootRunId === owner.rootRunId);
           // 仅取本轮已通过工具边界投影的历史文本，不从 outputRef 旁路读取未经复核的原始结果。
@@ -777,13 +800,19 @@ export function createAgentRuntime({
     const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status;
     let root = (await journal.snapshot()).roots[rootRunId];
     if (root?.owner.conversationId !== conversationId) return;
-    if (['running','waiting','awaiting_user','stopping'].includes(root.status)) root = await journal.finishRoot(root.owner, normalized, reason);
-    const entry = agents.get(conversationId);
-    if (entry?.ctx.runId === rootRunId) {
-      entry.waitingForUser = root.status === 'awaiting_user';
-      if (!entry.waitingForUser) await entry.agent.reclaimBrowserPages();
+    try {
+      if (['running','waiting','awaiting_user','stopping'].includes(root.status)) root = await journal.finishRoot(root.owner, normalized, reason);
+    } finally {
+      // Read the retained in-memory fact after a failed write; a late call must
+      // not turn an already cancelled/completed root back into a user wait.
+      const finishedRoot = await journal.root(root.owner);
+      const entry = agents.get(conversationId);
+      if (entry?.activeRootRunId === rootRunId) entry.activeRootRunId = null;
+      if (entry?.ctx.runId === rootRunId) {
+        entry.waitingForUser = finishedRoot?.status === 'awaiting_user';
+        if (!entry.waitingForUser) await entry.agent.reclaimBrowserPages();
+      }
     }
-    if (entry?.activeRootRunId === rootRunId) entry.activeRootRunId = null;
   }
 
   async function suspendWorkflow(conversationId, rootRunId) {
@@ -896,7 +925,7 @@ export function createAgentRuntime({
       const failed=[...stops,...closes,...releases].find(result=>result.status==='rejected');
       if(failed)throw failed.reason;
       await commandDeadline(Promise.all([sessionStore.flush(),journal.flush()]),10000,'执行器退出记录保存未确认');
-    } finally {disposeAll();environment?.release();}
+    } finally {journal.dispose();disposeAll();environment?.release();}
   }
 
   return { backgroundCommand, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };

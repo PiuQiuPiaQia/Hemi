@@ -38,7 +38,10 @@ export type FlowSnapshotView = {
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
+  /** Negotiated active window; older items remain available through history paging. */
+  history?: {start:number;total:number};
 };
+export type FlowHistoryPage = {conversationId:string;generation:number;revision:number;start:number;end:number;total:number;snapshot:FlowSnapshotView};
 
 export type FlowInputView = {
   workflow?: {invocationId:string;workflowId?:string;workflowRunId?:string};
@@ -85,7 +88,7 @@ export type FlowItemView =
     };
 
 export type FlowChangeView = { conversationStatus?: unknown } & (
-  | { kind: 'snapshot'; snapshot: FlowSnapshotView }
+  | { kind: 'snapshot'; snapshot: FlowSnapshotView; epoch?: string }
   | {
       kind: 'patch';
       conversationId: string;

@@ -19,7 +19,7 @@ export function TurnErrorNotice({message, onRetry, busy = false, blocked, speech
       <span className="model-recovery-title" role="status">{copy.title}</span>
       {onRetry ? <button type="button" className="turn-error-retry model-recovery-action primary" onClick={onRetry}
         disabled={busy || Boolean(blocked)} aria-busy={busy} aria-description={blocked}>
-        {busy ? '正在重试…' : '重试'}
+        {busy ? '正在发送…' : '继续'}
       </button> : null}
       <button type="button" className="model-recovery-toggle" aria-label="错误详情" aria-expanded={detailsOpen} aria-controls={detailId} onClick={() => setDetailsOpen(value => !value)}><ChevronDown size={13} aria-hidden="true"/></button>
     </div>

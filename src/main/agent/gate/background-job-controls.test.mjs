@@ -31,3 +31,19 @@ test('quiet observation fires once per output episode, manual review wakes immed
  assert.equal(c.requestReview(other),false);assert.equal(c.requestReview(owner),true);assert.equal((await wait).requested,true);
  await c.stop(owner,j.jobId);assert.equal((await c.waitForUpdate(owner)).kind,'settled');
 });
+test('an abandoned scheduler wait never consumes completion; the next reader collects it once',{timeout:10000},async t=>{
+ const c=createCommandScope({quietReviewMs:0});t.after(()=>c.abort());
+ const j=await withExecutionScope({owner},null,()=>c.run({command:command("setTimeout(()=>process.stdout.write('REAL_RESULT'),150)"),runInBackground:true,timeoutMs:5000}));
+ const controller=new AbortController(),waiting=c.waitForUpdate(owner,{signal:controller.signal,collect:false});controller.abort();await assert.rejects(waiting,{name:'AbortError'});
+ assert.equal((await c.waitForUpdate(owner,{collect:false})).kind,'settled');
+ const events=await c.collectCompleted(owner);assert.equal(events.length,1);assert.equal(events[0].id,j.jobId);assert.match(events[0].text,/REAL_RESULT/);assert.deepEqual(await c.collectCompleted(owner),[]);
+});
+test('a budget race cannot consume an unacknowledged quiet or manual review',{timeout:10000},async t=>{
+ const c=createCommandScope({quietReviewMs:30,maxQuietReviews:1});t.after(()=>c.abort());
+ const j=await withExecutionScope({owner},null,()=>c.run({command:command('setTimeout(()=>{},8000)'),runInBackground:true,timeoutMs:9000}));
+ assert.equal((await c.waitForUpdate(owner,{collect:false})).kind,'review');
+ assert.equal((await c.waitForUpdate(owner)).requested,false,'the quiet episode was not spent by the losing waiter');
+ c.requestReview(owner);assert.equal((await c.waitForUpdate(owner,{collect:false})).requested,true);
+ assert.equal((await c.waitForUpdate(owner)).requested,true,'manual review remains pending until accepted');
+ await c.stop(owner,j.jobId);
+});

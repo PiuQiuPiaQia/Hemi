@@ -51,7 +51,7 @@ try{
   await away();const active=await color(current);await current.hover();await page.waitForTimeout(160);const activeHover=await color(current);
   check(`${skin.id}: selection and selected hover remain distinct`,same(active.bg,active.active)&&same(activeHover.bg,activeHover.activeHover)&&distance(hover.bg,active.bg)>0,{active,activeHover});
   report.hover[skin.id]={base,hover,active,activeHover};
-  if(skin.assets)check(`${skin.id}: reading displays the configured static image without video`,await page.locator('.theme-home-actor>img').evaluate(el=>el.complete&&el.naturalWidth>0)&&await page.locator('video').count()===0);
+  if(skin.assets){await page.waitForFunction(()=>document.querySelector('.theme-home-actor>video')?.paused===false);check(`${skin.id}: reading plays the configured character video`,await page.locator('.theme-home-actor>video').count()===1);}
   check(`${skin.id}: same input and unsaved draft survive switching`,await instance.evaluate(el=>el.isConnected&&el.value==='换肤保留的草稿'));
   await inactive.hover();await snap(`${skin.id}-reading-hover`);
   await page.getByRole('button',{name:'设置',exact:true}).click();await away();

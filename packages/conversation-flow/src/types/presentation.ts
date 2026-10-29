@@ -253,7 +253,8 @@ export type TaskOutcome =
 
 export type RunActivityView = {
   runId?: string;
-  phase: "running" | "waiting-background" | "waiting-resource";
+  phase: "running" | "waiting-background" | "waiting-resource" | "waiting-subagents"
+    | "compacting" | "verifying" | "continuing" | "finishing";
   since: number | null;
   jobs: Array<{
     id: string;

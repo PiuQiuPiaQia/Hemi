@@ -58,7 +58,7 @@ export function createConversationActionHandler(client: ConversationClient, fall
         input: { text: action.nextText, inputSource: source.inputSource, attachmentIds: source.attachmentIds, references: source.references, skills: source.skills } };
     } else if (action.type === 'message.retry') {
       const input = snapshot ? retryInput(createFlowTimelineProjector()(snapshot).transcripts, snapshot) : null;
-      if (!input) return { ok: false, error: { code: 'not-found', message: '没有可重试的输入' } };
+      if (!input) return { ok: false, error: { code: 'not-found', message: '没有可继续的失败回合' } };
       command = { type: 'send', input };
     } else return fallback ? fallback(action, context) : { ok: false, error: { code: 'unsupported', message: '宿主尚未提供此操作' } };
     const result = await client.sendCommand(command);

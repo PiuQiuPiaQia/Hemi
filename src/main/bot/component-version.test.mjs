@@ -30,6 +30,7 @@ test('runtime manifest identifies packaged source content and verifies the exact
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   for (const folder of ['src/main', 'src/shared', 'third-party']) await fs.mkdir(path.join(root, folder), {recursive: true});
   await fs.cp(path.resolve(import.meta.dirname, '../../../extensions/chrome-extension'), path.join(root, 'extensions/chrome-extension'), {recursive: true});
+  const windowPath='packages/conversation-flow/src/core/flow-window.mjs';await fs.mkdir(path.dirname(path.join(root,windowPath)),{recursive:true});await fs.copyFile(path.resolve(import.meta.dirname,'../../..',windowPath),path.join(root,windowPath));
   await fs.writeFile(path.join(root, 'src/main/example.mjs'), 'export const value = 1;\n');
   await fs.writeFile(path.join(root, 'third-party/example.bin'), Buffer.from([0, 13, 10, 255]));
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({version: '0.2.15', dependencies: {}}));
@@ -39,6 +40,7 @@ test('runtime manifest identifies packaged source content and verifies the exact
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) await fs.writeFile(path.join(root, file), 'test license\n');
   const output = path.join(root, 'first.tgz');
   await buildBotRuntime({root, output});
+  assert.deepEqual(execFileSync('tar',['-xOf',output,'./'+windowPath]),await fs.readFile(path.join(root,windowPath)));
   const first = readComponentVersion(output + '.manifest.json');
   assert.equal(first.version, '0.2.15.1', 'component version combines the application version and its revision');
   const embedded = JSON.parse(execFileSync('tar', ['-xOf', output, './' + COMPONENT_MANIFEST], {encoding: 'utf8'}));
@@ -84,6 +86,7 @@ test('runtime includes a matching Windows supervisor binary and refuses stale na
   const gate=path.join(root,'src/main/agent/gate');
   for(const folder of [gate,path.join(root,'src/shared'),path.join(root,'third-party')])await fs.mkdir(folder,{recursive:true});
   await fs.cp(path.resolve(import.meta.dirname, '../../../extensions/chrome-extension'), path.join(root, 'extensions/chrome-extension'), {recursive: true});
+  const windowPath='packages/conversation-flow/src/core/flow-window.mjs';await fs.mkdir(path.dirname(path.join(root,windowPath)),{recursive:true});await fs.copyFile(path.resolve(import.meta.dirname,'../../..',windowPath),path.join(root,windowPath));
   const actual=path.resolve(import.meta.dirname,'../agent/gate');
   for(const extension of ['cs','exe','json'])await fs.copyFile(path.join(actual,'windows-command-job.'+extension),path.join(gate,'windows-command-job.'+extension));
   await fs.writeFile(path.join(root,'package.json'),JSON.stringify({version:'0.2.19',dependencies:{}}));

@@ -39,6 +39,9 @@ export async function buildBotRuntime({
     }
     for (const dir of ['src/main', 'src/shared'])
       await copy(path.join(root, dir), dir);
+    const flowWindow='packages/conversation-flow/src/core/flow-window.mjs';
+    await fs.mkdir(path.dirname(path.join(stage,flowWindow)),{recursive:true});
+    await fs.copyFile(path.join(root,flowWindow),path.join(stage,flowWindow));
     // The headless backend executes these same DOM operations as the extension.
     await fs.cp(path.join(root, 'extensions/chrome-extension'), path.join(stage, 'extensions/chrome-extension'), {
       recursive: true, filter: source => !path.basename(source).startsWith('._'),

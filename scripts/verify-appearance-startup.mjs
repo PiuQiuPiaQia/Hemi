@@ -50,7 +50,7 @@ for(const test of selected){
     await page.evaluate(()=>{
       const start=performance.now(),samples=[],activity=[];window.__startupHandoffSamples=samples;window.__startupHandoffActivity=activity;
       window.hemiVoice.onAppearanceActivity(value=>activity.push({ms:performance.now()-start,...value}));
-      const selectors=['.appearance-app-surface','.app-bar','.text-composer','.theme-home-actor'];
+      const selectors=['.appearance-app-surface','.app-topbar','.text-composer','.theme-home-actor'];
       const frame=()=>{
         const ms=performance.now()-start;
         samples.push({ms,phase:document.querySelector('.appearance-stage')?.dataset.startup,viewport:[innerWidth,innerHeight],document:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],scroll:[scrollX,scrollY],layoutWidth:document.querySelector('.appearance-app-surface').clientWidth,transform:document.querySelector('.appearance-app-surface').style.transform,boxes:selectors.map(selector=>{const r=document.querySelector(selector)?.getBoundingClientRect();return r?[r.x,r.y,r.width,r.height]:null;})});

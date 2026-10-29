@@ -1,5 +1,5 @@
 import { useRunningClock } from '@/shared/use-running-clock';
-import { Check, Square, X } from 'lucide-react';
+import { Check, CircleStop, Square, X } from 'lucide-react';
 
 import type { TaskActionName, TaskOutcome, TaskStateSnapshot } from '@/shared/types';
 
@@ -9,7 +9,7 @@ import type { TaskActionName, TaskOutcome, TaskStateSnapshot } from '@/shared/ty
  * 预览同宿主，多个角色可各开一页切换）；不再在行内展开步骤。运行中带状态（已运行
  * 12s／✓ 用时 7s／失败原因）与一个轻量「停止」。授权等待不在这里出现——确认卡照旧
  * 在输入区上方统一排队。
- * 057 AC-28：主动停止是用户动作不是执行失败——已停止不再共用失败红叉（Square＋
+ * 057 AC-28：主动停止是用户动作不是执行失败——已停止用独立静态标记（CircleStop＋
  * data-state=stopped），文案与过程页 stateLabelOf 同一份词汇表。
  */
 export const DELEGATION_OUTCOME_TEXT: Partial<Record<TaskOutcome, string>> = {
@@ -56,9 +56,11 @@ export function CompactDelegation({
       : snap.phase === 'stopping'
         ? '停止中'
         : startedAt ? `已运行 ${formatSeconds(now - startedAt)}` : ''
-    : failed || stopped
-      ? snap.outcomeReason || DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome] || '没有完成'
-      : startedAt && endedAt && endedAt > startedAt ? `用时 ${formatSeconds(endedAt - startedAt)}` : '';
+    : stopped
+      ? DELEGATION_OUTCOME_TEXT.stopped
+      : failed
+        ? snap.outcomeReason || DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome] || '没有完成'
+        : startedAt && endedAt && endedAt > startedAt ? `用时 ${formatSeconds(endedAt - startedAt)}` : '';
   return (
     <div
       className="h56-tools h56-delegation"
@@ -82,9 +84,9 @@ export function CompactDelegation({
             {title}
             {snap.background ? <span className="h56-delegation-tag"> · 后台</span> : null}
           </span>
-          {meta ? <span className="h56-tools-count h56-delegation-meta">{meta}</span> : null}
+          {meta ? <span className="h56-tools-count h56-delegation-meta" title={stopped ? snap.outcomeReason || undefined : undefined}>{meta}</span> : null}
           {!running ? (
-            stopped ? <Square className="h56-delegation-stop-mark" aria-label="已停止" /> :
+            stopped ? <CircleStop className="h56-delegation-stop-mark" role="img" aria-label="已停止"><title>已停止</title></CircleStop> :
             failed ? <X className="h56-delegation-fail" aria-label="没有完成" /> :
             <Check className="h56-delegation-done" aria-label="已完成" />
           ) : null}

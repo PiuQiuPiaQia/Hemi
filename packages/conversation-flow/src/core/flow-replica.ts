@@ -73,6 +73,7 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
   let retry: ReturnType<typeof setTimeout> | null = null;
   let buffered: FlowChangeView[] = [];
   let connectionEpoch = 0;
+  let authorityEpoch: string | undefined;
   const connected = () => {
     if (disposed || suspended) return;
     connectionEpoch++; failures = 0;
@@ -102,7 +103,8 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
     controller = new AbortController();
     const signal = controller.signal;
     const epoch = connectionEpoch;
-    fetching = Promise.resolve().then(() => fetchSnapshot(signal)).then(fresh => {
+    onConnection?.('connecting');
+    const work = Promise.resolve().then(() => fetchSnapshot(signal)).then(fresh => {
       if (disposed || signal.aborted) return;
       if (!isFlowSnapshot(fresh) || (conversationId && fresh.conversationId !== conversationId)) throw new Error('Invalid conversation snapshot');
       commit(fresh);
@@ -113,12 +115,14 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
         failures += 1; onConnection?.('offline');
       }
     }).finally(() => {
+      if (fetching !== work) return;
       fetching = null;
       if (!disposed && !suspended && (!current || failures || buffered.length) && !retry) {
         retry = setTimeout(() => { retry = null; void refresh(); }, Math.min(maxRetryMs, retryMs * 2 ** Math.min(failures, 8)));
       }
     });
-    return fetching;
+    fetching = work;
+    return work;
   };
   return {
     refresh,
@@ -129,6 +133,10 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
       if (!change || typeof change !== 'object' || !['snapshot', 'patch'].includes(change.kind)) { void refresh(); return; }
       const source = change.kind === 'snapshot' ? change.snapshot?.conversationId : change.conversationId;
       if (source !== (conversationId ?? current?.conversationId ?? source)) return;
+      if (change.kind === 'snapshot' && change.epoch && change.epoch !== authorityEpoch) {
+        controller?.abort();fetching=null;if(retry)clearTimeout(retry);retry=null;
+        authorityEpoch = change.epoch; current = null; buffered = [];
+      }
       if (buffered.length >= 512) buffered = [];
       const before = current;
       buffered.push(change); drain();
@@ -136,7 +144,13 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
       if (!current || buffered.length) void refresh();
     },
     suspend() { suspended = true; controller?.abort(); if (retry) clearTimeout(retry); retry = null; },
-    resume() { suspended = false; return fetching ? fetching.then(refresh) : refresh(); },
+    resume(refreshSnapshot = true) {
+      suspended = false;
+      if (!refreshSnapshot) return Promise.resolve();
+      // Recovery must not queue behind a request from the previous connection.
+      controller?.abort(); fetching = null;
+      return refresh();
+    },
     dispose() { disposed = true; buffered = []; controller?.abort(); if (retry) clearTimeout(retry); retry = null; },
   };
 }

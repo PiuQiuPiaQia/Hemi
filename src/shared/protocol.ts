@@ -460,6 +460,7 @@ export type LlmDeltaEvent = { conversationId?: string | null; requestId?: string
   | { turnId: number; kind: 'thinking_start' }
   | { turnId: number; kind: 'thinking'; text: string }
   | { turnId: number; kind: 'thinking_end' }
+  | { turnId: number; kind: 'message-end' }
   | { turnId: number; kind: 'restart' }
   | { turnId: number; kind: 'activity'; activity: RunActivityView }
   /** 056：主 agent 自己的工具调用（对话流折叠展示；args 为有界摘要）。 */
@@ -1349,6 +1350,8 @@ export type ConversationSummary = {
   updatedAt: number;
   turnCount: number;
   corrupt?: boolean;
+  /** 置顶会话在侧栏顶部单独分组，普通保存不改此状态。 */
+  pinned?: boolean;
   status?: ConversationStatus | null;
   /** 宿主新结果的未读版本；清读须带 expectedUnreadAt，避免迟到回执吞掉新结果。 */
   unreadAt?: number | null;
@@ -1566,7 +1569,8 @@ export type FlowPhase = 'idle' | 'preparing' | 'running' | 'stopping';
 
 export type RunActivityView = {
   runId?: string;
-  phase: 'running' | 'waiting-background' | 'waiting-resource';
+  phase: 'running' | 'waiting-background' | 'waiting-resource' | 'waiting-subagents'
+    | 'compacting' | 'verifying' | 'continuing' | 'finishing';
   since: number | null;
   jobs: Array<{
     id: string; toolCallId?: string; command: string;
@@ -2149,6 +2153,7 @@ export type HemiVoiceBridge = {
   logLine: (line: string) => void;
   /** 在 Finder 中定位 hemi.log。 */
   revealLogFile: () => Promise<boolean>;
+  showAppMenu?: (request: import('./app-menu.mjs').AppMenuRequest) => Promise<import('./app-menu.mjs').AppMenuCommand | null>;
   /** 044 应用内更新：状态快照 / 检查 / 下载 / 立刻重启安装 / 状态订阅。 */
   updaterGetState: () => Promise<UpdaterState>;
   updaterCheck: () => Promise<UpdaterActionResult>;
@@ -2334,6 +2339,7 @@ export type HemiVoiceBridge = {
   ) => Promise<FlowCommandResult>;
   flowLookupOperation?: (conversationId: string, requestId: string) => Promise<FlowCommandResult | null>;
   onFlowDisconnected?: (receive: () => void) => () => void;
+  flowGetHistory?: (conversationId:string,cursor:{before:number;generation:number})=>Promise<import('@hemi/conversation-flow/core').FlowHistoryPage>;
   flowGetSnapshot: (conversationId: string) => Promise<FlowSnapshotView | null>;
   /** 059 工作流：列表／定义只读＋两入口受理（渲染层零 store 访问）。 */
   workflowApplications: () => Promise<Array<{name:string;applicationRef:string}>>;
@@ -2539,9 +2545,11 @@ export type HemiVoiceBridge = {
     },
   ) => Promise<{ ok: boolean; unchanged?: boolean; storageError?: string }>;
   listConversations: () => Promise<ConversationList>;
-  openConversation: (id: string) => Promise<ConversationSession>;
+  /** activate 仅在用户点击打开时按真实更新时间重排；启动恢复和只读加载不重排。 */
+  openConversation: (id: string, options?: { activate?: boolean }) => Promise<ConversationSession>;
   markConversationRead: (id: string, expectedUnreadAt: number) => Promise<{ ok: boolean; unreadAt: number | null; unchanged?: boolean }>;
   removeConversation: (id: string) => Promise<{ ok: boolean }>;
+  setConversationPinned: (id: string, pinned: boolean) => Promise<{ ok: boolean; session?: ConversationSummary; storageError?: string }>;
   /** 024：双击重命名（空标题回退派生标题；不动 updatedAt）。 */
   renameConversation: (
     id: string,
@@ -2554,7 +2562,7 @@ export type HemiVoiceBridge = {
   /** 档案落盘/改名/删除/排序/自动起名后的变更广播（收到即重读列表；title 载荷带新标题供顶栏同步）。 */
   onConversationsChanged: (
     callback: (event: {
-      kind: 'save' | 'rename' | 'remove' | 'reorder' | 'title' | 'unread' | 'read';
+      kind: 'save' | 'rename' | 'remove' | 'reorder' | 'title' | 'unread' | 'read' | 'pin';
       session?: ConversationSummary;
       id?: string;
     }) => void,

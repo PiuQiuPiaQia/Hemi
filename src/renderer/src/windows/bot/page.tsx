@@ -22,7 +22,7 @@ import type {
 } from '@shared/protocol';
 import { VoiceScreen } from '../voice/voice-screen';
 import { NavRail } from '../voice/nav-rail';
-import { AppTopBar } from '../voice/app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import {PermissionRequestCard} from '@hemi/conversation-flow/parts';
 import {LoadingState, StateView, StatusNotice, TimedToast} from '@hemi/ui';
 import {
@@ -830,6 +830,7 @@ export function BotPage({
               turnError=""
               streamingReply=""
               interimText=""
+              flowHistory={conversation.history?{...conversation.history,load:()=>void conversation.client.loadHistory()}:undefined}
               transcripts={transcripts}
               timelineGeneration={flow?.generation ?? 0}
               taskState={null}

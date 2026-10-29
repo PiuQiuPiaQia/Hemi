@@ -50,19 +50,21 @@ BOOT_VISUAL_READY 只说明同主题舞台可以绘制，与 ready-to-show 和�
 
 跳过只跳过视觉演出。业务未就绪时继续 waiting；业务已就绪时直接进入真实页面。不会为演出重建会话、恢复任务或调用模型。
 
-## 4 主页播放规则
+## 4 主页与对话流播放规则
+
+以下为用户澄清后的现行规则，替代早期“阅读静态、输入暂停”的政策；片头自身的焦点中断规则不变。
 
 | 场景 | 动画行为 |
 | --- | --- |
-| 空主页、无输入、窗口可见且聚焦 | 继续循环 |
-| 文本框聚焦或有草稿、通话进行中 | 暂停并保留当前帧 |
-| 对话流（历史、回复中、任务）、设置、技能、工作流 | 使用同角色静态 WebP，卸载 video 并清除 src；阅读态保留淡题字，位于正文下方 |
-| 窗口隐藏/最小化/失焦或 document.hidden | 暂停；依赖原生 activity，兼容 backgroundThrottling=false |
-| prefers-reduced-motion | 取消片头；已加载视频暂停在当前帧，未加载时使用静态人物 |
+| 主页、对话流（历史、回复中、任务），窗口可见 | 继续同角色视频循环 |
+| 文本框聚焦、有草稿、通话/生成进行中、窗口失焦但仍可见 | 不暂停普通背景视频 |
+| 设置、技能、工作流等 other 页面 | 使用同角色静态 WebP，卸载 video 并清除 src |
+| 窗口隐藏/最小化或 document.hidden | 暂停并保留进度；依赖原生 activity，兼容 backgroundThrottling=false |
+| prefers-reduced-motion | 取消片头；卸载背景 video，使用静态人物 |
 | 更换皮肤 | 旧视频 pause、移除 src、load 释放；新角色按当前场景决定是否加载 |
 | 视频损坏或无法播放 | 同人物 WebP 静态回退；现有 UI 可继续操作 |
 
-静止状态没有维护人物的永久 rAF 或轮询。空主页只保留当前角色的一路视频；片头临时增加前景一路，结束后卸载。若落到已有对话，主页播放器也一并释放，仅显示静态图。侧栏水印独立于视频，透明度由 13% 降至 6.5%，只是固定底层图片，不影响列表滚动、点击、选择或重命名。
+静止状态没有维护人物的永久 rAF 或轮询。主页及对话流只保留当前角色的一路视频；片头临时增加前景一路，结束后卸载前景。若落到已有对话，背景播放器继续循环，不因 reading 切换而重建。侧栏水印独立于视频，透明度由 13% 降至 6.5%，只是固定底层图片，不影响列表滚动、点击、选择或重命名。
 
 ## 5 资源与打包
 
@@ -78,7 +80,7 @@ BOOT_VISUAL_READY 只说明同主题舞台可以绘制，与 ready-to-show 和�
 
 ## 6 验证边界
 
-真实 Electron 的 Vite 与构建 renderer 使用同一套 `scripts/verify-appearance.mjs`，验证冷启动、结束释放、跳过、reload/恢复不重播、草稿暂停与阅读静态图/播放器释放、减少动态效果、五路真实 alpha 解码、多窗口同步和窄窗面板。本轮静态阅读优化另由 `scripts/verify-appearance-reading.mjs` 覆盖。准确命令、基线和结果统一记录在[实施记录](appearance-implementation.md)。
+真实 Electron 的 Vite 与构建 renderer 使用同一套 `scripts/verify-appearance.mjs` 覆盖主题生命周期。现行阅读视频策略由 `scripts/verify-appearance-reading.mjs` 定向检查 src、paused、currentTime 推进、输入/失焦、换肤释放、other 静态与减少动态效果；报告明确区分原生事件和测试注入事件。准确命令、基线、结果和验证缺口统一记录在[实施记录](appearance-implementation.md)。
 
 当前平台为 macOS Apple Silicon。Windows 的标题栏、透明窗口、字体回退、VP9 解码和性能需在 Windows 实机补验；未以 macOS 结果声称已经覆盖。正式 Live2D 拆层、模型绑定、转头和挥手另属后续素材制作需求。
 

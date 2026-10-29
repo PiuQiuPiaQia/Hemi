@@ -88,7 +88,7 @@ export function ConversationSidebar({
   interactionProps?: Pick<ComponentProps<'aside'>, 'id' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
 }) {
   const bridge = useConversationBridge();
-  const { list, setList, error, setError, loadList } = useConversationList(true, conversationVisible ? currentConversationId : null);
+  const { list, setList, error, setError, loadList, setPinned } = useConversationList(true, conversationVisible ? currentConversationId : null);
   /** 行内重命名：editingId 命中的行渲染输入框。 */
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -223,7 +223,7 @@ export function ConversationSidebar({
           }}
           renderItem={session=><SidebarRow session={session} current={session.id===currentConversationId} fresh={freshIds.has(session.id)} editing={editingId===session.id} draft={draft} onDraftChange={setDraft}
             onStartEdit={()=>{setEditingId(session.id);setDraft(displayTitle(session.title));}}
-            onCancelEdit={()=>setEditingId(null)} onCommitEdit={title=>void commitRename(session.id,title)} onRemove={()=>void commitDelete(session.id)} onOpen={()=>{if(!session.corrupt)onOpenConversation(session.id);}}/>}
+            onCancelEdit={()=>setEditingId(null)} onCommitEdit={title=>void commitRename(session.id,title)} onRemove={()=>void commitDelete(session.id)} onTogglePin={()=>void setPinned(session.id,!session.pinned)} onOpen={()=>{if(!session.corrupt)onOpenConversation(session.id);}}/>}
         />
       )}
     </aside>
@@ -251,6 +251,7 @@ function SidebarRow({
   onCancelEdit,
   onCommitEdit,
   onRemove,
+  onTogglePin,
   onOpen,
 }: {
   session: ConversationSummary;
@@ -264,6 +265,7 @@ function SidebarRow({
   onCommitEdit: (title: string) => void;
   /** 右键菜单确认删除后回调（两步确认在菜单里完成）。 */
   onRemove: () => void;
+  onTogglePin: () => void;
   onOpen: () => void;
 }) {
   const sortable = useSortable({ id: session.id, disabled: Boolean(session.corrupt) || editing });
@@ -303,6 +305,7 @@ function SidebarRow({
         point={menuAt}
         onRename={onStartEdit}
         onDelete={onRemove}
+        onTogglePin={onTogglePin}
         onClose={() => setMenuAt(null)}
       />
     </div>

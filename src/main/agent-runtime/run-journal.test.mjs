@@ -1,11 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, rename, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createRunJournal, dispatchIdentity, BUDGET_SUMMARY_PURPOSE } from './run-journal.mjs';
 const owner = { conversationId: 'c', rootRunId: 'r', generation: 1 };
 async function fixture(t) { const dir = await mkdtemp(path.join(os.tmpdir(),'h64-journal-')); t.after(() => rm(dir,{recursive:true,force:true})); const journal = createRunJournal({dir}); await journal.ready(); return { dir, journal };  }
+test('terminal write failure retains its execution fence and retries only state after storage recovery', async t => {
+  const {journal,dir}=await fixture(t);t.after(()=>journal.dispose());
+  await journal.beginRoot(owner);
+  const file=path.join(dir,'run-journal.json'),backup=file+'.last-good';
+  await rename(file,backup);await mkdir(file);
+  await assert.rejects(journal.finishRoot(owner,'failed','storage failure'));
+  assert.equal((await journal.root(owner)).status,'failed','confirmed end survives failed persistence in memory');
+  assert.equal(JSON.parse(await readFile(backup,'utf8')).roots.r.status,'running','failed commit does not replace the last good file');
+  await assert.rejects(journal.requestStart(owner,{requestId:'replayed'},10),/停止/);
+  const next={...owner,rootRunId:'explicit-new-task'};
+  await assert.rejects(journal.beginRoot(next));
+  assert.equal((await journal.snapshot()).roots[next.rootRunId],undefined,'failed admission never enters executable memory state');
+  assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[]);
+  await rm(file,{recursive:true});await rename(backup,file);
+  const deadline=Date.now()+3000;
+  while(JSON.parse(await readFile(file,'utf8')).roots.r.status!=='failed') {
+    assert.ok(Date.now()<deadline,'pending terminal state should be retried without new work');
+    await new Promise(resolve=>setTimeout(resolve,30));
+  }
+  const saved=JSON.parse(await readFile(file,'utf8'));
+  assert.deepEqual(saved.requests,{});
+  assert.equal(saved.roots[next.rootRunId],undefined);
+  await journal.beginRoot(next);
+  await journal.flush();
+});
 test('同一持久派单重投只有一个 reservation；不同条目短 call id 重用不碰撞', async t => {
   const {journal}=await fixture(t); await journal.beginRoot(owner);
   const fields={...owner,sessionId:'s',callAnchorId:'a',toolCallId:'same'};

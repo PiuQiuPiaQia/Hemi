@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import Security
 import Network
+import zlib
 
 enum HemiDeviceError: LocalizedError {
     case message(String, String)
@@ -12,6 +13,29 @@ enum HemiDeviceError: LocalizedError {
 private func encoded(_ data: Data) -> String { data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }
 private func digest(_ data: Data) -> String { encoded(Data(SHA256.hash(data: data))) }
 private func json(_ value: Any) throws -> Data { try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]) }
+
+private func inflated(_ input: Data) throws -> Data {
+    var stream=z_stream()
+    guard inflateInit2_(&stream,15+32,ZLIB_VERSION,Int32(MemoryLayout<z_stream>.size))==Z_OK else {throw HemiDeviceError.message("无法读取 Bot 的压缩响应。","unknown")}
+    defer {inflateEnd(&stream)}
+    return try input.withUnsafeBytes { raw in
+        stream.next_in=UnsafeMutablePointer<Bytef>(mutating:raw.bindMemory(to:Bytef.self).baseAddress);stream.avail_in=uInt(raw.count)
+        var output=Data(),buffer=[UInt8](repeating:0,count:65536),status=Z_OK
+        repeat {
+            let count=try buffer.withUnsafeMutableBytes { bytes -> Int in
+                stream.next_out=bytes.bindMemory(to:Bytef.self).baseAddress;stream.avail_out=uInt(bytes.count)
+                status=inflate(&stream,Z_NO_FLUSH)
+                guard status==Z_OK||status==Z_STREAM_END else {throw HemiDeviceError.message("Bot 的压缩响应无效或未完整返回。","unknown")}
+                return bytes.count-Int(stream.avail_out)
+            }
+            guard output.count+count<=40*1024*1024 else {throw HemiDeviceError.message("Bot 响应超过大小限制。","unknown")}
+            output.append(contentsOf:buffer.prefix(count))
+            if count==0&&status != Z_STREAM_END {throw HemiDeviceError.message("Bot 的压缩响应未完整返回。","unknown")}
+        } while status != Z_STREAM_END
+        guard stream.avail_in==0 else {throw HemiDeviceError.message("Bot 的压缩响应包含额外数据。","unknown")}
+        return output
+    }
+}
 
 protocol HemiCredentialStore {
     func read(_ name: String) throws -> Data?
@@ -79,9 +103,11 @@ private final class HemiTLSExchange: @unchecked Sendable {
     let queue = DispatchQueue(label:"ai.hemi.mobile.device-tls")
     private var completion: ((Result<Data,Error>)->Void)?
     private var deadline: DispatchWorkItem?
+    private var overallDeadline: DispatchWorkItem?
     private var bytes = Data()
     private var bodyOffset: Int?
     private var bodyLength = 0
+    private var gzip = false
     private let verification: HemiTLSVerification
     private var sent = false
     init(endpoint: URL, pin: String) {
@@ -90,17 +116,23 @@ private final class HemiTLSExchange: @unchecked Sendable {
         let host=endpoint.host!.trimmingCharacters(in:CharacterSet(charactersIn:"[]"))
         connection = NWConnection(host:NWEndpoint.Host(host),port:NWEndpoint.Port(rawValue:UInt16(endpoint.port ?? 443))!,using:NWParameters(tls:options,tcp:NWProtocolTCP.Options()))
     }
-    func start(request: Data, completion: @escaping (Result<Data,Error>)->Void) {
+    private func armIdleDeadline() {
+        deadline?.cancel()
+        let timeout=DispatchWorkItem {self.finish(.failure(HemiDeviceError.message("Bot 连接超时，结果待核对。请检查网络与设备端口。","network")))}
+        deadline=timeout;queue.asyncAfter(deadline:.now()+12,execute:timeout)
+    }
+    func start(request: Data, maximumDuration: TimeInterval, completion: @escaping (Result<Data,Error>)->Void) {
         queue.async {
             self.completion=completion
-            let timeout=DispatchWorkItem {self.finish(.failure(HemiDeviceError.message("Bot 连接超时，结果待核对。请检查网络与设备端口。","network")))}
-            self.deadline=timeout;self.queue.asyncAfter(deadline:.now()+12,execute:timeout)
+            self.armIdleDeadline()
+            let limit=DispatchWorkItem {self.finish(.failure(HemiDeviceError.message("Bot 读取等待已结束，请稍后重新连接。","network")))}
+            self.overallDeadline=limit;self.queue.asyncAfter(deadline:.now()+maximumDuration,execute:limit)
             self.connection.stateUpdateHandler={ state in
                 switch state {
                 case .ready:
                     guard !self.sent else {return};self.sent=true
                     self.connection.send(content:request,completion:.contentProcessed { error in
-                        if let error=error {self.networkFailure(error)} else {self.receive()}
+                        if let error=error {self.networkFailure(error)} else {self.armIdleDeadline();self.receive()}
                     })
                 case .failed(let error): self.networkFailure(error)
                 default: break
@@ -117,14 +149,14 @@ private final class HemiTLSExchange: @unchecked Sendable {
     }
     private func finish(_ result: Result<Data,Error>) {
         guard let callback=completion else {return}
-        completion=nil;deadline?.cancel();deadline=nil
+        completion=nil;deadline?.cancel();deadline=nil;overallDeadline?.cancel();overallDeadline=nil
         connection.stateUpdateHandler=nil;connection.cancel();callback(result)
     }
     private func receive() {
         guard completion != nil else {return}
         connection.receive(minimumIncompleteLength:1,maximumLength:65536) { data, _, complete, error in
             if let error=error {self.networkFailure(error);return}
-            if let data=data {self.bytes.append(data)}
+            if let data=data,!data.isEmpty {self.bytes.append(data);self.armIdleDeadline()}
             do {
                 if self.bodyOffset==nil {
                     if let split=self.bytes.range(of:Data([13,10,13,10])) {
@@ -136,6 +168,10 @@ private final class HemiTLSExchange: @unchecked Sendable {
                             guard let colon=line.firstIndex(of:":") else {throw HemiDeviceError.message("Bot 响应头格式无效。","unknown")}
                             let name=line[..<colon].lowercased(),value=line[line.index(after:colon)...].trimmingCharacters(in:.whitespaces)
                             if name=="transfer-encoding" {throw HemiDeviceError.message("Bot 响应使用了不支持的分块协议，请更新云端组件。","unknown")}
+                            if name=="content-encoding" {
+                                guard !self.gzip,value.lowercased()=="gzip" else {throw HemiDeviceError.message("Bot 响应使用了不支持的压缩格式。","unknown")}
+                                self.gzip=true
+                            }
                             if name=="content-length" {
                                 guard length==nil,!value.isEmpty,value.allSatisfy({$0.isASCII&&$0.isNumber}),let count=Int(value),(0...40*1024*1024).contains(count) else {throw HemiDeviceError.message("Bot 响应长度无效。","unknown")}
                                 length=count
@@ -148,7 +184,7 @@ private final class HemiTLSExchange: @unchecked Sendable {
                 if let offset=self.bodyOffset {
                     let expected=offset+self.bodyLength
                     guard self.bytes.count<=expected else {throw HemiDeviceError.message("Bot 响应长度不匹配。","unknown")}
-                    if self.bytes.count==expected {self.finish(.success(Data(self.bytes[offset..<expected])));return}
+                    if self.bytes.count==expected {let body=Data(self.bytes[offset..<expected]);self.finish(.success(try self.gzip ? inflated(body) : body));return}
                 }
                 if complete {throw HemiDeviceError.message("Bot 回执未完整返回，结果待核对。","network")}
                 self.receive()
@@ -172,11 +208,11 @@ final class HemiPinnedSession: @unchecked Sendable {
         guard attach(exchange) else {throw HemiDeviceError.message("已停止本次等待，配对结果仍需核对。","network")}
         defer {_ = attach(nil)}
         let host=endpoint.host!.trimmingCharacters(in:CharacterSet(charactersIn:"[]")), authority=(host.contains(":") ? "[\(host)]" : host)+":\(endpoint.port ?? 443)"
-        var request=Data("POST /\(route) HTTP/1.1\r\nHost: \(authority)\r\nContent-Type: application/json\r\nContent-Length: \(payload.count)\r\nConnection: close\r\n\r\n".utf8);request.append(payload)
+        var request=Data("POST /\(route) HTTP/1.1\r\nHost: \(authority)\r\nContent-Type: application/json\r\nAccept-Encoding: gzip\r\nContent-Length: \(payload.count)\r\nConnection: close\r\n\r\n".utf8);request.append(payload)
         #if DEBUG
         print("HemiBot: native TLS POST started: \(route)")
         #endif
-        let data: Data=try await withCheckedThrowingContinuation {continuation in exchange.start(request:request){continuation.resume(with:$0)}}
+        let data: Data=try await withCheckedThrowingContinuation {continuation in exchange.start(request:request,maximumDuration:route=="v1/rpc" ? 60 : 12){continuation.resume(with:$0)}}
         guard let envelope=try JSONSerialization.jsonObject(with:data) as? [String:Any],envelope["ok"] is Bool else {throw HemiDeviceError.message("Bot 未返回有效回执。","unknown")}
         if envelope["ok"] as? Bool==false {throw HemiDeviceError.message(envelope["message"] as? String ?? "Bot 拒绝了请求。",envelope["code"] as? String ?? "failed")}
         return envelope
@@ -238,9 +274,11 @@ final class HemiEventSession: @unchecked Sendable {
             if let error=error {self.fail(error);return}
             let metadata=context?.protocolMetadata(definition:NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
             if metadata?.opcode == .close {self.fail(HemiDeviceError.message("Bot 实时连接已关闭。","network"));return}
-            if let data=data,!data.isEmpty,metadata?.opcode == .text {
+            if let data=data,!data.isEmpty,(metadata?.opcode == .text || metadata?.opcode == .binary) {
                 do {
-                    guard data.count<=40*1024*1024,let value=try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw HemiDeviceError.message("Bot 事件格式无效。","invalid")}
+                    guard data.count<=40*1024*1024 else {throw HemiDeviceError.message("Bot 事件超过大小限制。","invalid")}
+                    let body=try metadata?.opcode == .binary ? inflated(data) : data
+                    guard let value=try JSONSerialization.jsonObject(with:body) as? [String:Any] else {throw HemiDeviceError.message("Bot 事件格式无效。","invalid")}
                     self.receive(value)
                 } catch {self.fail(error);return}
             }
@@ -280,6 +318,9 @@ actor HemiDeviceClient {
     let store: HemiCredentialStore
     private var eventSessions: [String:HemiEventSession] = [:]
     private var pairingSessions: [UUID:HemiPinnedSession] = [:]
+    private var requests: [String:HemiPinnedSession] = [:]
+    private var cancelledRequests: [String] = []
+    private var eventProofs: [String:HemiPinnedSession] = [:]
     init(store: HemiCredentialStore = HemiKeychainStore()) { self.store = store }
     private func load(_ key: String) throws -> HemiDeviceCredential? { try store.read(key).map { try JSONDecoder().decode(HemiDeviceCredential.self, from: $0) } }
     private func save(_ key: String, _ value: HemiDeviceCredential?) throws { try store.write(key, try value.map { try JSONEncoder().encode($0) }) }
@@ -350,22 +391,36 @@ actor HemiDeviceClient {
         } else if ["cancelled","rejected","expired","revoked"].contains(result["status"] as? String ?? "") { try save("pending", nil) }
         return result
     }
-    func request(method: String, params: [String: Any]) async throws -> [String: Any] {
+    func request(method: String, params: [String: Any], requestId:String? = nil) async throws -> [String: Any] {
         guard let active = try load("active") else { throw HemiDeviceError.message("请先连接 Bot。", "missing") }
-        return try await signed("v1/rpc", body:["method":method,"params":params], credential:active)
+        let id=requestId ?? UUID().uuidString
+        guard UUID(uuidString:id) != nil,requests[id] == nil,let endpoint=URL(string:active.endpoint) else {throw HemiDeviceError.message("请求身份无效。","invalid")}
+        if let index=cancelledRequests.firstIndex(of:id) {cancelledRequests.remove(at:index);throw HemiDeviceError.message("已取消本次请求。","cancelled")}
+        let session=HemiPinnedSession(endpoint:endpoint,pin:active.certificatePin);requests[id]=session
+        defer {requests.removeValue(forKey:id)}
+        return try await session.post("v1/rpc",try await envelope("v1/rpc",body:["method":method,"params":params],credential:active,session:session))
+    }
+    func cancelRequest(_ id:String) {
+        guard UUID(uuidString:id) != nil else {return}
+        if let session=requests[id] {session.cancel()}
+        else {cancelledRequests.append(id);if cancelledRequests.count>256 {cancelledRequests.removeFirst(cancelledRequests.count-256)}}
     }
     func openEvents(streamId: String, options: [String:Any], receive: @escaping @Sendable ([String:Any]) -> Void, disconnected: @escaping @Sendable () -> Void) async throws {
         guard let active=try load("active"), let endpoint=URL(string:active.endpoint) else {throw HemiDeviceError.message("请先连接 Bot。","missing")}
         eventSessions.removeValue(forKey:streamId)?.close()
+        eventProofs.removeValue(forKey:streamId)?.cancel()
         let stream=HemiEventSession(endpoint:endpoint,pin:active.certificatePin,receive:receive,disconnected:disconnected)
         eventSessions[streamId]=stream
+        let proofSession=HemiPinnedSession(endpoint:endpoint,pin:active.certificatePin);eventProofs[streamId]=proofSession
+        defer {if eventProofs[streamId] === proofSession {eventProofs.removeValue(forKey:streamId)}}
         do {
-            let proof=try await envelope("v1/events",body:options,credential:active,session:HemiPinnedSession(endpoint:endpoint,pin:active.certificatePin))
+            var compressedOptions=options;compressedOptions["compression"]="gzip"
+            let proof=try await envelope("v1/events",body:compressedOptions,credential:active,session:proofSession)
             guard eventSessions[streamId] === stream, try load("active")?.botInstanceId==active.botInstanceId else {stream.close();return}
             try stream.start(endpoint:endpoint,envelope:proof)
         } catch {if eventSessions[streamId] === stream {eventSessions.removeValue(forKey:streamId)};stream.close();throw error}
     }
-    func closeEvents(streamId: String) {eventSessions.removeValue(forKey:streamId)?.close()}
-    func forget() throws { for stream in eventSessions.values {stream.close()};eventSessions.removeAll();try save("active", nil) }
+    func closeEvents(streamId: String) {eventSessions.removeValue(forKey:streamId)?.close();eventProofs.removeValue(forKey:streamId)?.cancel()}
+    func forget() throws { for stream in eventSessions.values {stream.close()};eventSessions.removeAll();for proof in eventProofs.values {proof.cancel()};eventProofs.removeAll();for request in requests.values {request.cancel()};requests.removeAll();try save("active", nil) }
     func forgetPairing() throws { for connection in pairingSessions.values { connection.cancel() }; try save("pending", nil) }
 }

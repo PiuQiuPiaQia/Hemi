@@ -1,5 +1,6 @@
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
 import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
+import {closeConversationRun} from '../services/run-completion.mjs';
 import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { ipcMain, app, shell, dialog, net } from 'electron';
 import { createLocalFileActions } from '../services/local-file-actions.mjs';
@@ -493,14 +494,15 @@ function createLlmFlowRuntime(conversationId) {
         controller.applyFact({ type: 'run-settled', runId, at: Date.now(), generation });
         // 057 S3：回执用量随运行收口进快照（渲染层派生回执的用量标签同一来源）。
         const outcome = goalRunOutcome(result);
-        await runtime?.completeConversation(conversationId, outcome, null, runId);
-        controller.applyFact({ type: 'run-closed', runId, outcome, at: Date.now(), generation, usage: result?.usage ?? null,
+        const saveError = await closeConversationRun({controller, runId, generation, outcome,
+          persist: () => runtime?.completeConversation(conversationId, outcome, null, runId), usage: result?.usage ?? null,
           ...(result.waitingForUser ? {waitingForUser: result.waitingForUser} : {}),
           ...(result.blocked ? {blocked:result.blocked} : {}),
           ...(result.halted ? {halted:result.halted} : {}),
         });
-        completeInput(envelope?.inputId, null, result);
-        return { modelUsed: result?.usage?.requestedModel ?? null, result, aborted: false };
+        if (saveError) llmLog.error(`turn ${runId} 终态保存失败：${saveError.message}`);
+        completeInput(envelope?.inputId, saveError, saveError ? null : result);
+        return { modelUsed: result?.usage?.requestedModel ?? null, result, aborted: false, ...(saveError ? {persistenceFailed:true} : {}) };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if(error?.code==='cleanup-unconfirmed'){
@@ -537,11 +539,11 @@ function createLlmFlowRuntime(conversationId) {
         controller.applyFact({ type: 'run-settled', runId, at: Date.now(), generation });
         const hasArtifacts = Object.values(controller.getSnapshot().artifacts).some(artifact => artifact.producerRunId === runId || artifact.producers?.some(producer => producer.runId === runId));
         const failedOutcome = hasArtifacts ? 'partial' : 'failed';
-        await runtime?.completeConversation(conversationId, cancelled ? 'cancelled' : failedOutcome, message, runId);
-        controller.applyFact({ type: 'run-closed', runId, outcome: cancelled ? 'stopped' : failedOutcome, at: Date.now(), generation });
+        const saveError = await closeConversationRun({controller,runId,generation,outcome:cancelled?'stopped':failedOutcome,
+          pauseQueue:!cancelled,persist:()=>runtime?.completeConversation(conversationId,cancelled?'cancelled':failedOutcome,message,runId)});
+        if (saveError) llmLog.error(`turn ${runId} 终态保存失败：${saveError.message}`);
         // 057 口径：已派发的输入不因执行失败自动重排（R-07 重试需用户操作）；
         // 失败事实进 flow（notice part＋failed 运行），渲染层从快照派生。
-        if (!cancelled) controller.applyFact({ type: 'queue-paused', generation });
         if (cancelled) {
           completeInput(envelope?.inputId, null, { aborted: true });
           return { aborted: true, modelUsed: null, result: null };
@@ -888,6 +890,8 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     const onStream = (assistantEvent) => {
       if (assistantEvent?.type === 'hemi_request_start') {
         streamEvent({ kind: 'request-start' });
+      } else if (assistantEvent?.type === 'hemi_message_end') {
+        streamEvent({ kind: 'message-end' });
       } else if (assistantEvent?.type === 'hemi_request_reset') {
         thinkingStartedAt = null;
         streamEvent({ kind: 'request-reset' });
@@ -1222,7 +1226,7 @@ export function registerLlmIpc() {
     const text = typeof lastUser?.content === 'string' ? lastUser.content.trim() : '';
     if (!text && !payload?.attachmentIds?.length) throw new Error('本轮没有用户消息。');
     const requestKey = typeof payload?.requestId === 'string' && payload.requestId ? `${conversationId}:${payload.requestId}` : null;
-    const inputId = `in-${requestKey ? createHash('sha256').update(requestKey).digest('hex').slice(0, 24) : randomUUID()}`;
+    const inputId = typeof payload?.inputId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(payload.inputId)?payload.inputId:`in-${requestKey ? createHash('sha256').update(requestKey).digest('hex').slice(0, 24) : randomUUID()}`;
     let modelPolicySnapshot, workspaceSnapshot;
     try {
       const accepted = flowService.controllerFor(conversationId).getSnapshot();
@@ -1237,6 +1241,7 @@ export function registerLlmIpc() {
     if (!pendingChatPayloads.has(inputId)) pendingChatPayloads.set(inputId, { ...payload, modelPolicySnapshot, workspaceSnapshot });
     let keepPayload = false;
     try {
+      if(payload?.expectedGeneration!=null&&payload.expectedGeneration!==flowService.controllerFor(conversationId).getSnapshot().generation)return {ok:false,code:'conflict',message:'会话已被编辑，请核对后重新提交。'};
       const send = await flowService.controllerFor(conversationId).command({
         type: 'send',
         input: {
@@ -1291,6 +1296,7 @@ export function registerLlmIpc() {
       if (!keepPayload) pendingChatPayloads.delete(inputId);
     }
   };
+  flowService.submitChat=payload=>submitChat(payload);
   ipcMain.handle(IPC.llm.submit, async (_event, payload) => {
     try { return await submitChat(payload); }
     catch (error) {

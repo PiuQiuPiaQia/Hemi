@@ -56,7 +56,8 @@ export function StartupStage({children,allowIntro=true}:{children:ReactNode;allo
       const target=surface.current?.querySelector<HTMLElement>('.theme-home-actor');const targetStyle=target?getComputedStyle(target):null,frontStyle=getComputedStyle(actor);
       const width=parseFloat(frontStyle.width),height=parseFloat(frontStyle.height),x=targetStyle?parseFloat(targetStyle.left)-parseFloat(frontStyle.left):0,y=targetStyle?parseFloat(targetStyle.top)-parseFloat(frontStyle.top):0,scale=targetStyle?parseFloat(targetStyle.width)/width:1;
       actor.style.opacity=String(entry*(1-leave));actor.style.transform=`translate3d(${width*.22*(1-entry)+x*expand}px,${height*.08*(1-entry)+y*expand}px,0) rotate(${2.5*(1-entry)}deg) scale(${1+(scale-1)*expand})`;
-      app.style.opacity=String(arrival);app.style.transform=expand===1?'none':`translate3d(${5.5*(1-expand)}%,${26*(1-expand)}%,0) rotateX(${4*(1-expand)}deg) rotateY(${-12*(1-expand)}deg) rotateZ(${-5*(1-expand)}deg) scale(${.58+.42*expand})`;app.style.borderRadius=`${18*(1-expand)}px`;app.style.boxShadow=expand===1?'none':`0 ${22*(1-expand)}px ${65*(1-expand)}px rgb(38 70 118 / ${.24*(1-expand)})`;
+      // 窗口 3D 旋转/缩放入场已按用户要求移除（2026-10-29）：应用内容保持原位，仅随 arrival 淡入。
+      app.style.opacity=String(arrival);
       const backdrop=app.querySelector<HTMLElement>('.theme-home-backdrop'),lettering=app.querySelector<HTMLElement>('.theme-lettering-layer');if(backdrop)backdrop.style.setProperty('--startup-character-opacity',String(leave));if(lettering)lettering.style.opacity=String(smooth((t-4.7)/.65));
     };
     void (async()=>{

@@ -207,6 +207,7 @@ export function createMainAgent({
     runTurn,
     summarizeLimit,
     recordGoalCompletion: (text, signal) => session.recordBudgetSummary({text, customType:'hemi_goal_complete', fallback:false}, signal),
+    checkpointExecution: () => session.checkpointExecution(),
     setExecutionContext: value => session.setExecutionContext(value),
     recordEvents: (events, content) => session.appendContextFact('hemi_subagent_result', content, {eventIds:events.map(event=>event.eventId)}),
     consumeEvents: (events, content) => session.prompt('', { hostEvent: { customType: 'hemi_subagent_result', content, eventIds: events.map(event => event.eventId) } }),
@@ -229,6 +230,7 @@ export function createMainAgent({
     exportEntries: () => session.exportEntries(),
     exportSession: () => session.exportSession(),
     persistExecution: () => session.persistExecution(),
+    setActivityPhase: phase => session.setActivityPhase(phase),
     /** 上下文容量快照（轮末广播给渲染层；无会话/无模型返回 null）。 */
     contextUsage: () => buildContextSnapshot({ usage: session.contextUsage?.(), breakdown: requestBreakdown.current }),
     recentUserTurns,

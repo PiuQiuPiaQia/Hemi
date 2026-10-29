@@ -3,6 +3,10 @@ export * from './core/composer-draft.js';
 export * from './core/draft-persistence.js';
 export * from './core/flow-replica.js';
 export * from './core/conversation.js';
+export * from './core/snapshot-persistence.js';
+export * from './core/session-control.js';
+export * from './core/bridge-transport.js';
+export * from './core/flow-window.mjs';
 export * from './core/queue.js';
 export * from './core/message-edit.js';
 export * from './core/input-history.js';
@@ -20,5 +24,6 @@ export {IDLE_PROGRESS, type ResourceProgress, type ResourceTransfers} from './re
 export * from './presentation/composer-tokens.js';
 export * from './composer/tag-undo.js';
 export * from './navigation/conversation-format.js';
+export * from './navigation/conversation-list-state.js';
 export * from './controls/session-usage.js';
 export type {UsageRecord} from './controls/usage-types.js';

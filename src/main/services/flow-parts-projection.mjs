@@ -40,7 +40,9 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
 
   /** 工具起跑＝上一段正文/思考收口；工具后的输出另起新段（056 分段口径）。 */
   function closeOpenParts() {
-    const facts = thinkingPart ? [{ type: 'part-updated', runId, partId: thinkingPart.partId, patch: { endedAt: now() }, ...gen() }] : [];
+    const facts = [textPart, thinkingPart].filter(Boolean).map(part => ({
+      type: 'part-updated', runId, partId: part.partId, patch: { endedAt: now() }, ...gen(),
+    }));
     textPart = null;
     thinkingPart = null;
     return facts;
@@ -53,6 +55,8 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         return [{ type: 'run-recovery', runId, recovery: event.recovery, ...gen() }];
       case 'request-start':
         requestParts = [];
+        return closeOpenParts();
+      case 'message-end':
         return closeOpenParts();
       case 'request-reset': {
         const resets = requestParts.map(partId => ({ type: 'part-updated', runId, partId, patch: { content: '' }, ...gen() }));

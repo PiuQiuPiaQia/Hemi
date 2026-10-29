@@ -97,7 +97,14 @@ export async function serve(options = {}) {
           client.setTimeout(botRpcTimeout(value.method, value.params));
           if (value.method === 'events.watch') {
             client.setTimeout(0);
-            const unsubscribe=host.watch(value.params,frame=>{if(client.destroyed || client.writableLength>2*1024*1024)throw new Error('Slow subscriber');client.write(JSON.stringify(frame)+'\n');},()=>client.destroy(),{clientId:value.clientId});
+            let largestFrame = 0;
+            const unsubscribe=host.watch(value.params,frame=>{
+              const raw = JSON.stringify(frame)+'\n', bytes = Buffer.byteLength(raw);
+              // One valid large snapshot must leave room for ready and updates.
+              const allowance = Math.max(largestFrame, bytes) + 2*1024*1024;
+              if(client.destroyed || bytes>40*1024*1024 || client.writableLength+bytes>allowance)throw new Error('Slow subscriber');
+              largestFrame = Math.max(largestFrame, bytes); client.write(raw);
+            },()=>client.destroy(),{clientId:value.clientId});
             const heartbeat=setInterval(()=>{if(!client.destroyed)client.write(JSON.stringify({type:'heartbeat'})+'\n');},20000);heartbeat.unref?.();
             client.once('close',()=>{clearInterval(heartbeat);unsubscribe();});
             return;

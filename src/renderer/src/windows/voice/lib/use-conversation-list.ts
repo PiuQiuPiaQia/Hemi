@@ -1,6 +1,7 @@
 import {useConversationBridge} from './conversation-bridge';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationList, ConversationStatus } from '@shared/protocol';
+import {reconcileConversationList} from '@hemi/conversation-flow/core';
 
 /** 两处列表共用只读状态投影。文字 token 不触发重读档案；慢列表回执不能盖掉实时状态。 */
 export function useConversationList(active = true, readConversationId: string | null = null) {
@@ -11,13 +12,22 @@ export function useConversationList(active = true, readConversationId: string | 
   const reading = useRef(new Map<string, number>());
   const statuses = useRef(new Map<string, ConversationStatus | null>());
   const loadEpoch = useRef(0);
-  const loadList = useCallback(async () => {
+  const refreshOrderPending = useRef(false);
+  const loadList = useCallback(async (refreshOrder = false) => {
+    if (refreshOrder) refreshOrderPending.current = true;
     const epoch = ++loadEpoch.current;
     try {
       const result = await bridge?.listConversations();
       if (epoch !== loadEpoch.current) return;
-      if (result) setList({ ...result, sessions: result.sessions.map(session => statuses.current.has(session.id)
-        ? { ...session, status: statuses.current.get(session.id) } : session) });
+      if (result) {
+        const reorder = refreshOrderPending.current;
+        refreshOrderPending.current = false;
+        setList(previous => {
+          const sessions = result.sessions.map(session => statuses.current.has(session.id)
+            ? { ...session, status: statuses.current.get(session.id) } : session);
+          return { ...result, sessions: reconcileConversationList(previous.sessions, sessions, reorder) };
+        });
+      }
       setError('');
     } catch (loadError) {
       if (epoch === loadEpoch.current) setError(loadError instanceof Error ? loadError.message : '会话列表读取失败');
@@ -36,7 +46,7 @@ export function useConversationList(active = true, readConversationId: string | 
         ? { ...prev, sessions: prev.sessions.map(session => session.id === conversationId
           ? { ...session, status: change.conversationStatus } : session) } : prev);
     });
-    const offList = bridge?.onConversationsChanged?.(() => void loadList());
+    const offList = bridge?.onConversationsChanged?.(event => void loadList(event?.kind === 'reorder'));
     const onFocus = () => { setFocused(document.hasFocus() && document.visibilityState === 'visible'); void loadList(); };
     const onBlur = () => setFocused(false);
     window.addEventListener('focus', onFocus);
@@ -69,5 +79,14 @@ export function useConversationList(active = true, readConversationId: string | 
       if (reading.current.get(id) === unreadAt) reading.current.delete(id);
     });
   }, [active, focused, readConversationId, unreadAt, loadList]);
-  return { list: storedList, setList, error, setError, loadList };
+  const setPinned = useCallback(async (id: string, pinned: boolean) => {
+    try {
+      const result = await bridge.setConversationPinned(id, pinned);
+      if (!result.ok) throw new Error(result.storageError || '会话置顶设置失败');
+      await loadList();
+    } catch (pinError) {
+      setError(pinError instanceof Error ? pinError.message : '会话置顶设置失败');
+    }
+  }, [bridge, loadList]);
+  return { list: storedList, setList, error, setError, loadList, setPinned };
 }

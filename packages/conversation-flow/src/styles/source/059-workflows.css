@@ -1097,9 +1097,6 @@ label.h59-resolve {
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
 }
-.compact-shell .brand-row:has(.h59-editor-title) .h24-conversation-title {
-  display: none;
-}
 @media (max-width: 600px) {
   .h59-canvas-guide,
   .h59-editor-actions small,
@@ -1274,7 +1271,7 @@ label.h59-resolve {
   display: none;
 }
 
-.compact-shell .app-bar:has(.h59-editor-title) .h24-conversation-title {
+.app-topbar .app-topbar-title:has(.h59-editor-title) > .h24-conversation-title {
   display: none;
 }
 .h59-row-actions > button:only-child {
@@ -1730,17 +1727,6 @@ label.h59-resolve {
   stroke-width: var(--row-icon-stroke);
 }
 @media (max-width: 880px) {
-  .compact-shell.h24-shell[data-workflow-open="true"] .app-bar {
-    grid-template-columns:
-      calc(var(--sp-32) * 2 + var(--sp-4)) minmax(0, 1fr)
-      auto;
-    gap: var(--sp-4);
-    padding-right: var(--sp-8);
-  }
-  .compact-shell.h24-shell[data-workflow-open="true"] .app-bar-title {
-    padding-left: 0;
-    gap: var(--sp-4);
-  }
   #h59-editor-title-slot {
     min-width: 0;
     flex: 1;

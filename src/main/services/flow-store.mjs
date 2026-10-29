@@ -10,12 +10,13 @@
  * 掉它（真机实录：selfrun 档案 turns＋agentSession 丢失）。注入的异步 fsOps
  * （测试）走带 await 的同构路径，语义一致、时序由调用方保证。
  *
- * 写失败：变更留在待写队列，随下一次 update／flush 重试；不回滚内存事实。
+ * 写失败：变更留在待写队列，退避补存或随下一次 update／flush 重试；不回滚内存事实。
  * 崩溃只恢复最近原子提交快照；drop 先排空写链（迟到写入不复活）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { retryingRenameSync } from '../lib/rename-retry.mjs';
+import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
 
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -42,6 +43,11 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
   /** 每会话串行写链（promise 尾部）。 */
   const chains = new Map();
   const failures = new Map();
+  const retries = new Map();
+  function retryFor(id) {
+    if (!retries.has(id)) retries.set(id, createPersistenceRetry(() => enqueueWrite(id)));
+    return retries.get(id);
+  }
   let tmpSeq = 0;
 
   function sessionPath(id) {
@@ -114,10 +120,12 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
       io.rename(tmp, target);
       pendingApplies.delete(conversationId);
       failures.delete(conversationId);
+      retries.get(conversationId)?.reset();
       return undefined;
     } catch (error) {
       try { io.unlink(tmp); } catch { /* 已被 rename 或本就不在 */ }
       failures.set(conversationId, error);
+      retryFor(conversationId).schedule();
       log?.warn?.(`flow-store 写入失败（${conversationId}）：${error?.message ?? error}`);
       return Promise.reject(error);
     }
@@ -145,9 +153,11 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
       await io.rename(tmp, target);
       pendingApplies.delete(conversationId);
       failures.delete(conversationId);
+      retries.get(conversationId)?.reset();
     } catch (error) {
       try { await io.unlink(tmp); } catch { /* 已被 rename 或本就不在 */ }
       failures.set(conversationId, error);
+      retryFor(conversationId).schedule();
       log?.warn?.(`flow-store 写入失败（${conversationId}）：${error?.message ?? error}`);
       throw error;
     }
@@ -157,10 +167,13 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
   async function flush(conversationId) {
     const chain = chains.get(conversationId);
     if (chain) await chain.catch(() => {});
+    if (pendingApplies.get(conversationId)?.length) await enqueueWrite(conversationId);
   }
 
   async function flushAll() {
-    for (const id of [...chains.keys()]) await flush(id);
+    const results = await Promise.allSettled([...chains.keys()].map(id => flush(id)));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
   }
 
   /** 读回最近已提交的 flow 快照（恢复用）；没有或结构不对返回 null。 */
@@ -191,6 +204,8 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
     pendingApplies.delete(conversationId);
     chains.delete(conversationId);
     failures.delete(conversationId);
+    retries.get(conversationId)?.dispose();
+    retries.delete(conversationId);
   }
 
   const hasFailure = (conversationId) => failures.has(conversationId);

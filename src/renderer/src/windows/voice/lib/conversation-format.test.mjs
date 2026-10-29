@@ -68,6 +68,32 @@ test('P1 pickRecent：按更新时间取集合，顺序沿用传入序', () => {
   assert.deepEqual(pickRecent(list, 2).map((s) => s.id), ['x', 'y']);
 });
 
+test('置顶分组在最前、保留手动序且不重复；取消后回到原时间组', () => {
+  const list = [
+    { id: 'today', updatedAt: at(0) },
+    { id: 'old-pin', updatedAt: at(30), pinned: true },
+    { id: 'recent-pin', updatedAt: at(0), pinned: true },
+  ];
+  const groups = groupByRecency(list, NOW);
+  assert.deepEqual(groups.map(g => g.label), ['置顶', '今天']);
+  assert.deepEqual(groups[0].sessions.map(s => s.id), ['old-pin', 'recent-pin']);
+  assert.deepEqual(groups.flatMap(g => g.sessions.map(s => s.id)), ['old-pin', 'recent-pin', 'today']);
+  list[1].pinned = false;
+  assert.deepEqual(groupByRecency(list, NOW).map(g => g.label), ['置顶', '今天', '更早']);
+});
+
+test('置顶始终可见，不占最近会话名额；置顶组内拖动不改其他组', () => {
+  const list = [
+    { id: 'pin-a', updatedAt: 1, pinned: true },
+    { id: 'recent', updatedAt: 20 },
+    { id: 'pin-b', updatedAt: 2, pinned: true },
+    { id: 'old', updatedAt: 10 },
+  ];
+  assert.deepEqual(pickRecent(list, 1).map(s => s.id), ['pin-a', 'recent', 'pin-b']);
+  assert.deepEqual(pickRecent(list, 0).map(s => s.id), ['pin-a', 'pin-b']);
+  assert.deepEqual(reorderWithinGroup(list.map(s => s.id), ['pin-a', 'pin-b'], 'pin-b', 'pin-a'), ['pin-b', 'recent', 'pin-a', 'old']);
+});
+
 test('P1 reorderWithinGroup：组员填回原位、组外不动、跨组拒绝', () => {
   const all = ['a', 'x', 'b', 'y', 'c'];
   assert.deepEqual(reorderWithinGroup(all, ['a', 'b', 'c'], 'c', 'a'), ['c', 'x', 'a', 'y', 'b']);

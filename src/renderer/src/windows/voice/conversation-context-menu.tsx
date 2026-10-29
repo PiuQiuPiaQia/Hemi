@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CircleAlert, Copy, PencilLine, Trash2 } from 'lucide-react'
+import { Check, CircleAlert, Copy, PencilLine, Pin, PinOff, Trash2 } from 'lucide-react'
 
 import type { ConversationSummary } from '@/shared/types'
 import { Menu, MenuSeparator } from '@/components/menu'
@@ -21,12 +21,14 @@ export function ConversationContextMenu({
   point,
   onRename,
   onDelete,
+  onTogglePin,
   onClose
 }: {
   session: ConversationSummary | null
   point: { x: number; y: number } | null
   onRename: () => void
   onDelete: () => void
+  onTogglePin: () => void
   onClose: () => void
 }) {
   /** 复制反馈：菜单已收起也继续显示，2.6s 自动消退（与记忆 toast 同节奏）。 */
@@ -82,6 +84,21 @@ export function ConversationContextMenu({
         position={point}
         autoFocusFirst={true}
       >
+        <button
+          type="button"
+          role="menuitem"
+          className="h37-menu-item"
+          disabled={Boolean(session.corrupt)}
+          title={session.corrupt ? '这条会话档案损坏，无法置顶' : undefined}
+          onClick={() => {
+            onClose()
+            onTogglePin()
+          }}
+          tabIndex={-1}
+        >
+          {session.pinned ? <PinOff aria-hidden className="size-3.5 text-(--faint)" /> : <Pin aria-hidden className="size-3.5 text-(--faint)" />}
+          <span className="flex-1">{session.pinned ? '取消置顶' : '置顶会话'}</span>
+        </button>
         <button
           type="button"
           role="menuitem"

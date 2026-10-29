@@ -46,23 +46,25 @@ export function controlledStream(stream, getExecution) {
         const hasTools = context.tools?.length || context.messages?.some(message => message.role === 'system' && message.toolsAdded?.length);
         const purpose = execution.purpose && !['main','subagent'].includes(execution.purpose) ? execution.purpose : execution.compacting?.() || !hasTools ? 'compaction' : execution.purpose;
         const canRecover = ['main', 'subagent'].includes(execution.purpose) && !execution.compacting?.();
-        const hasImages = (context.messages ?? []).some(message => Array.isArray(message.content) && message.content.some(block => block.type === 'image'));
         const originalContext = structuredClone(context.messages ?? []);
-        let projection, mediaRetried = false, lastEndpoint;
+        let projection, mediaRetried = false, lastProjectionKey;
         execution.onRequestStart?.();
         while (true) {
           options.signal?.throwIfAborted();
           if (execution.cancelled?.()) throw new DOMException('执行归属已失效', 'AbortError');
           const candidate = candidates[index];
-          if (hasImages && candidate.supportsVision !== true) throw new Error('unsupported-modality：实际候选不支持历史中的图像，未删图或发出请求');
           const live = await hydrateCandidate(candidate, execution.store);
           physical = execution.resolveModel ? execution.resolveModel(candidate, index) : piModelOf(candidate, index === 0 ? 'hemi' : index === 1 ? 'hemi-fallback' : `hemi-fallback-${index}`);
           if (!physical) throw new Error('冻结候选没有注册到模型运行时');
           execution.onCandidateSelected?.(candidate, index);
           const endpoint = `${candidate.api}:${candidate.baseUrl}`;
-          if (!projection || endpoint !== lastEndpoint) {
-            projection = await projectImages(originalContext, { mode: reducedEndpoints.has(endpoint) ? 'retry' : 'normal', signal: options.signal });
-            lastEndpoint = endpoint; mediaRetried = false;
+          const projectionKey = `${endpoint}:${candidate.supportsVision === true}`;
+          if (!projection || projectionKey !== lastProjectionKey) {
+            // 文本候选交给 Pi 替换图片占位，不在降级前解码或压缩历史图片。
+            projection = candidate.supportsVision === true
+              ? await projectImages(originalContext, { mode: reducedEndpoints.has(endpoint) ? 'retry' : 'normal', signal: options.signal })
+              : { messages: originalContext, stats: { omitted: 0, resized: 0, bytesAfter: 0 } };
+            lastProjectionKey = projectionKey; mediaRetried = false;
             if (projection.stats.omitted || projection.stats.resized) execution.onImageProjection?.(projection.stats);
           }
           await execution.beforeRequest?.();
@@ -77,7 +79,7 @@ export function controlledStream(stream, getExecution) {
             const requestId = `request-${randomUUID()}`;
             const { apiKey: _secret, encryptedApiKey: _encrypted, ...publicCandidate } = candidate;
             try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, url: sanitizedUrl(url), cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
-            catch (error) { boundaryFailure = error; throw error; }
+            catch (error) { if (error.code === 'request-limit') execution.onRequestLimit?.(); boundaryFailure = error; throw error; }
             ids.push(requestId); attempts.set(requestId, { startedAt: Date.now() }); lastRequestId = requestId;
             try {
               const response = await (options.fetch ?? globalThis.fetch)(url, { ...init, signal });
@@ -169,7 +171,8 @@ export function controlledStream(stream, getExecution) {
           }
           if (!canRecover || !failure.retryable) break;
           // 已经输出的同一次请求只在原候选恢复；已提交工具结果在请求前历史中，不会重放。
-          const next = responseStarted ? -1 : candidates.findIndex((item, i) => i > index && (!hasImages || item.supportsVision === true) && !isSameCandidate(candidate, item));
+          // 冻结计划已按任务能力筛选候选；历史图片由 Pi 按各候选能力处理。
+          const next = responseStarted ? -1 : candidates.findIndex((item, i) => i > index && !isSameCandidate(candidate, item));
           if (!await recovery.failed({ ...failure, retryAfterMs: transport.retryAfterMs })) break;
           if (next >= 0) index = next;
           retrying = true;

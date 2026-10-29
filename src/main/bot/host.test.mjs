@@ -74,6 +74,21 @@ async function fixture(t) {
     },
   };
 }
+test('Bot 置顶在目录与详情中同步，普通更新和重启保留，取消不改内容时间', async t => {
+  const f = await fixture(t), {id} = await f.req('session.create');
+  const before = await f.req('session.open', {id});
+  assert.equal((await f.req('session.pin', {id, pinned: true})).session.pinned, true);
+  await f.req('session.rename', {id, title: '长期工作'});
+  await f.req('session.update', {id, thinking: 'medium'});
+  assert.equal((await f.req('snapshot')).sessions.find(s => s.id === id).pinned, true);
+  await f.restart();
+  assert.equal((await f.req('session.open', {id})).pinned, true);
+  assert.equal((await f.req('session.pin', {id, pinned: false})).session.pinned, false);
+  assert.equal((await f.req('session.open', {id})).updatedAt, before.updatedAt);
+  await assert.rejects(f.req('session.pin', {id, pinned: 'true'}), /置顶状态无效/);
+  await assert.rejects(f.req('session.pin', {id: 'bot-missing', pinned: true}), /会话不存在/);
+});
+
 test('cloud sessions, models and credentials are isolated; duplicate request returns same creation', async (t) => {
   const f = await fixture(t),
     requestId = 'op-' + randomUUID();

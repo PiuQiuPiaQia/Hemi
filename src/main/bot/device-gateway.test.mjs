@@ -9,6 +9,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {SignJWT,generateKeyPair,exportJWK,calculateJwkThumbprint} from 'jose';
 import WebSocket from 'ws';
 import {once} from 'node:events';
+import {gunzipSync} from 'node:zlib';
 import {createBotHost} from './host.mjs';
 import {createDeviceGateway} from './device-gateway.mjs';
 
@@ -25,9 +26,9 @@ async function fixture(t,clock) {
   const cert=await fs.readFile(path.join(root,clock?'clock/device-access/tls-cert.pem':'device-access/tls-cert.pem'));
   async function post(route,body,options={}) {
     return new Promise((resolve,reject)=>{
-      const raw=Buffer.from(JSON.stringify(body)),{splitAt,...requestOptions}=options;
-      const request=https.request(endpoint+route,{method:'POST',ca:cert,agent:false,headers:{'content-type':'application/json','content-length':raw.length},...requestOptions},response=>{
-        const chunks=[];response.on('data',part=>{chunks.push(part);});response.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{reject(new Error('Invalid JSON response'));}});
+      const raw=Buffer.from(JSON.stringify(body)),{splitAt,decodeGzip=false,...requestOptions}=options;
+      const request=https.request(endpoint+route,{method:'POST',ca:cert,agent:false,...requestOptions,headers:{'content-type':'application/json','content-length':raw.length,...requestOptions.headers}},response=>{
+        const chunks=[];response.on('data',part=>{chunks.push(part);});response.on('end',()=>{try{const bytes=Buffer.concat(chunks);resolve(JSON.parse((decodeGzip&&response.headers['content-encoding']==='gzip'?gunzipSync(bytes):bytes).toString('utf8')));}catch{reject(new Error('Invalid JSON response'));}});
       });request.on('error',reject);
       if(Number.isInteger(splitAt))request.write(raw.subarray(0,splitAt),()=>setTimeout(()=>request.end(raw.subarray(splitAt)),100));
       else request.end(raw);
@@ -65,6 +66,21 @@ test('actual TLS gateway: request has no access until exact PC approval, then re
   const other=await generateKeyPair('ES256'), otherJwk=await exportJWK(other.publicKey);
   assert.equal((await f.apply(invite,randomUUID(),other,otherJwk)).ok,false);
   const disk=await fs.readFile(path.join(f.root,'device-access/state.json'),'utf8');assert.equal(disk.includes(invite.requestTicket),false);
+});
+
+test('actual TLS gateway pins sessions through authenticated RPC and preserves pins after Host restart', async t => {
+  const f = await fixture(t), invite = await f.invite(); await f.apply(invite); await f.approve(invite);
+  await f.manage('model.sync', {requestId: randomUUID(), models: [{modelKey: 'f/m', providerId: 'f', name: 'Fixture', model: 'fake', api: 'openai-completions', baseUrl: 'https://fixture.invalid', apiKey: 'TEST_ONLY'}]});
+  const {id} = await f.manage('session.create', {requestId: randomUUID()});
+  const rpc = (method, params = {}) => f.signed('/v1/rpc', {method, params: {id, requestId: randomUUID(), ...params}});
+  const control = await rpc('session.control', {action: 'takeover'});
+  const result = await rpc('session.pin', {pinned: true, controlEpoch: control.result.control.epoch});
+  assert.equal(result.result?.session.pinned, true);
+  assert.equal((await rpc('snapshot')).result.sessions.find(s => s.id === id).pinned, true);
+  await f.restart();
+  assert.equal((await rpc('snapshot')).result.sessions.find(s => s.id === id).pinned, true);
+  const acquired = await rpc('session.control', {action: 'takeover'});
+  assert.equal((await rpc('session.pin', {pinned: false, controlEpoch: acquired.result.control.epoch})).result?.session.pinned, false);
 });
 
 test('a fresh gateway creates its certificate and serves verified HTTPS with no external programs on PATH', async t => {
@@ -231,6 +247,45 @@ test('actual WSS authenticates device proofs, replays cursors, isolates subscrip
   const rejected=await connect({id});assert.equal(rejected.frames[0].code,'permission');
 });
 
+
+test('large initial WSS snapshots reach ready and remain subscribed', {timeout: 10000}, async t => {
+  const f = await fixture(t), invite = await f.invite(); await f.apply(invite); await f.approve(invite);
+  await f.manage('model.sync', {requestId: randomUUID(), models: [{modelKey: 'f/m', providerId: 'f', name: 'Fixture', model: 'fake', api: 'openai-completions', baseUrl: 'https://fixture.invalid', apiKey: 'TEST_ONLY'}]});
+  const {id} = await f.manage('session.create', {requestId: randomUUID()});
+  const content = '大'.repeat(800000);
+  await f.manage('session.draft', {id, requestId: randomUUID(), revision: 1, references: [{key: 'large-history', title: content}]});
+  const proof = await f.envelope('/v1/events', {id});
+  const ws = new WebSocket(f.endpoint.replace('https:', 'wss:') + '/v1/events', {ca: f.cert}), frames = [];
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  const ready = new Promise((resolve, reject) => {
+    ws.on('message', data => {const frame = JSON.parse(data.toString()); frames.push(frame); if (frame.type === 'ready') resolve();});
+    ws.once('close', () => reject(new Error('Large snapshot disconnected before ready')));
+  });
+  await once(ws, 'open'); ws._socket.pause(); ws.send(JSON.stringify(proof));
+  const resume = setTimeout(() => ws._socket.resume(), 200); t.after(() => clearTimeout(resume));
+  await ready;
+  assert.equal(frames[0].snapshot.detail.draft.references[0].title, content);
+  await f.manage('session.rename', {id, title: 'still-connected', requestId: randomUUID()});
+  const end = Date.now() + 3000;
+  while (!frames.some(frame => frame.type === 'catalog')) {assert.ok(Date.now() < end, 'subscription did not remain live'); await new Promise(resolve => setTimeout(resolve, 10));}
+  assert.equal(ws.readyState, WebSocket.OPEN);
+});
+
+test('gzip is negotiated for authenticated HTTP and WSS snapshots while legacy clients retain JSON', {timeout: 10000}, async t => {
+  const f=await fixture(t),invite=await f.invite();await f.apply(invite);await f.approve(invite);
+  await f.manage('model.sync',{requestId:randomUUID(),models:[{modelKey:'f/m',providerId:'f',name:'Fixture',model:'fake',api:'openai-completions',baseUrl:'https://fixture.invalid',apiKey:'TEST_ONLY'}]});
+  const {id}=await f.manage('session.create',{requestId:randomUUID()}),content='压缩传输🙂'.repeat(80000);
+  await f.manage('session.draft',{id,requestId:randomUUID(),revision:1,references:[{key:'compressed-history',title:content}]});
+  const request=await f.envelope('/v1/rpc',{method:'snapshot',params:{id}});
+  const response=await f.post('/v1/rpc',request,{headers:{'accept-encoding':'gzip'},decodeGzip:true});
+  assert.equal(response.result.detail.draft.references[0].title,content);
+  assert.equal((await f.signed('/v1/rpc',{method:'snapshot',params:{id}})).result.detail.draft.references[0].title,content);
+  const proof=await f.envelope('/v1/events',{id,compression:'gzip'}),ws=new WebSocket(f.endpoint.replace('https:','wss:')+'/v1/events',{ca:f.cert});
+  t.after(()=>ws.terminate());const frames=[];let compressed=false;
+  const ready=new Promise((resolve,reject)=>{ws.on('error',reject);ws.on('close',()=>reject(Error('compressed stream closed')));ws.on('message',(bytes,binary)=>{if(binary)compressed=true;const frame=JSON.parse((binary?gunzipSync(bytes):bytes).toString());frames.push(frame);if(frame.type==='ready')resolve();});});
+  await once(ws,'open');ws.send(JSON.stringify(proof));await ready;
+  assert.equal(compressed,true);assert.equal(frames[0].snapshot.detail.draft.references[0].title,content);
+});
 
 test('paired mobile reads only original files from its authenticated Bot',async t=>{
  const f=await fixture(t),invite=await f.invite();await f.apply(invite);await f.approve(invite);

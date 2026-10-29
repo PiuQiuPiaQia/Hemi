@@ -5,7 +5,7 @@ export function conversationStatus(flow, { live = false, isTaskLive = () => true
   const active = ['preparing', 'running', 'stopping'].includes(flow.phase);
   const tasks = Object.values(flow.tasks ?? {}).filter(task => task && typeof task === 'object');
   const working = live && tasks.filter(task => task.phase && task.phase !== 'terminal' && isTaskLive(task));
-  if (active && flow.phase !== 'stopping' && ['waiting-background', 'waiting-resource'].includes(flow.runs?.[flow.activeRunId]?.activity?.phase)) return 'waiting';
+  if (active && flow.phase !== 'stopping' && String(flow.runs?.[flow.activeRunId]?.activity?.phase ?? '').startsWith('waiting-')) return 'waiting';
   if (active || (working && working.length)) return 'running';
   return null;
 }

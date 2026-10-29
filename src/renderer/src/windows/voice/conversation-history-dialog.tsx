@@ -45,7 +45,7 @@ export function ConversationHistoryDialog({
 }) {
   const bridge = useConversationBridge();
   const [open, setOpen] = useState(false);
-  const { list, error, setError, loadList } = useConversationList(open);
+  const { list, error, setError, loadList, setPinned } = useConversationList(open);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   /** 右键菜单：命中的会话 + 落点（null＝收起）。 */
@@ -176,6 +176,9 @@ export function ConversationHistoryDialog({
         onDelete={() => {
           if (!menu) return;
           void commitDelete(menu.session.id);
+        }}
+        onTogglePin={() => {
+          if (menu) void setPinned(menu.session.id, !menu.session.pinned);
         }}
         onClose={() => setMenu(null)}
       />

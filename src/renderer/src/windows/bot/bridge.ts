@@ -82,6 +82,7 @@ export function createBotConversationBridge(
       api.onChanged(() => callback()),
     renameConversation: (id: string, title: string) =>
       command('session.rename', { id, title }),
+    setConversationPinned: (id: string, pinned: boolean) => command('session.pin', { id, pinned }),
     removeConversation: async (id: string) => {
       const result = await command('session.remove', {id});
       removeConversationOperations({environmentId: `bot:${identity}`, conversationId: id});
@@ -89,6 +90,7 @@ export function createBotConversationBridge(
     },
     reorderConversations: (ids: string[]) => command('session.order', { ids }),
     markConversationRead: async () => ({ ok: true, unreadAt: null }),
+    flowGetHistory:(id:string,cursor:{before:number;generation:number})=>command('flow.history',{id,...cursor}),
     flowGetSnapshot: (id: string) => command('flow.snapshot', { id }),
     flowCommand: async (id: string, flowCommand: Record<string, unknown>, operation?: {requestId: string; generation: number | null}) => {
       const snapshot=getState().cache?.details[id]?.flow;
@@ -114,14 +116,15 @@ export function createBotConversationBridge(
     },
     onFlowDisconnected: (receive: () => void) => api.onChanged(state=>{if(!state.online)receive();}),
     onFlowChanged: (callback: (value: unknown) => void) => {
-      const seen = new Map<string, number>();
+      const seen = new Map<string, string>();
       return api.onChanged((state) => {
         for (const detail of Object.values(state.cache?.details ?? {})) {
-          if (seen.get(detail.id) === detail.flow.revision) continue;
-          seen.set(detail.id, detail.flow.revision);
+          const version=`${state.cache?.bootId??''}:${detail.flow.revision}`;
+          if (seen.get(detail.id) === version) continue;
+          seen.set(detail.id, version);
           callback({
             conversationId: detail.id,
-            change: { kind: 'snapshot', snapshot: detail.flow },
+            change: { kind: 'snapshot', snapshot: detail.flow, epoch: state.cache?.bootId },
           });
         }
       });

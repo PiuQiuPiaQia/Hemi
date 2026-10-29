@@ -233,7 +233,7 @@ html.kb-nav .h56-route-gear:focus-visible {
   color: var(--danger);
 }
 
-/* 057 AC-28：主动停止是用户动作——中性方形标记，不吃失败红。 */
+/* 057 AC-28：主动停止使用中性终态标记，与停止按钮区分。 */
 .compact-shell .h56-delegation-stop-mark {
   flex: none;
   width: 12px;

@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   // 渲染层的排查日志经主进程落到 userData/hemi.log 与终端。
   logLine: (line) => ipcRenderer.send('app:log', String(line ?? '').slice(0, 400)),
   revealLogFile: () => ipcRenderer.invoke('app:reveal-log'),
+  showAppMenu: (request) => ipcRenderer.invoke('app:show-menu', request),
   // 044 应用内更新：状态/检查/下载/安装 + 状态订阅。
   updaterGetState: () => ipcRenderer.invoke('updater:get-state'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
@@ -366,8 +367,9 @@ contextBridge.exposeInMainWorld('hemiVoice', {
     return () => ipcRenderer.removeListener('queue:push', listener);
   },
   // 057 对话流：命令受理 / 快照获取 / 补丁订阅（契约 §3/§7；先订阅再取快照）。
-  flowCommand: (conversationId, command) =>
-    ipcRenderer.invoke('flow:command', { conversationId, command }),
+  flowCommand: (conversationId, command,operation) =>
+    ipcRenderer.invoke('flow:command', { conversationId, command,operation }),
+  flowLookupOperation:(conversationId,requestId)=>ipcRenderer.invoke('flow:lookup-operation',{conversationId,requestId}),
   flowGetSnapshot: (conversationId) =>
     ipcRenderer.invoke('flow:get-snapshot', { conversationId }),
   flowRewind: (payload) => ipcRenderer.invoke('flow:rewind', payload),
@@ -410,11 +412,12 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   listConversations: () => ipcRenderer.invoke('conversation:list'),
   // 018 原版契约：open/remove 的载荷是 { id } 对象（曾一度漂移成裸字符串，
   // 主进程取 payload.id 得 undefined → 所有会话「找不到」，2026-09-21 实录）。
-  openConversation: (id) => ipcRenderer.invoke('conversation:open', { id }),
+  openConversation: (id, options) => ipcRenderer.invoke('conversation:open', { id, activate: options?.activate === true }),
   markConversationRead: (id, expectedUnreadAt) => ipcRenderer.invoke('conversation:mark-read', { id, expectedUnreadAt }),
   removeConversation: (id) => ipcRenderer.invoke('conversation:remove', { id }),
   // 024 侧栏：双击重命名（空标题回退派生）与拖拽排序（全量 id 序）。
   renameConversation: (id, title) => ipcRenderer.invoke('conversation:rename', { id, title }),
+  setConversationPinned: (id, pinned) => ipcRenderer.invoke('conversation:set-pinned', { id, pinned }),
   reorderConversations: (ids) => ipcRenderer.invoke('conversation:reorder', { ids }),
   // 档案落盘/改名/删除/排序后的变更广播（侧栏重读列表对齐；载荷仅诊断）。
   onConversationsChanged: (callback) => {

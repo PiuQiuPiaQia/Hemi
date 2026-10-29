@@ -11,7 +11,7 @@ test('history cache failure is an optional notice; successful caching never clea
   const f = fixture({storage: {snapshots: {async load() {return null;}, async save() {if (failCache) throw new Error('quota');}}},
     transport: {async command() {return rejectCommand ? {ok: false, code: 'failed', message: '操作被拒绝'} : {ok: true};}}});
   t.after(() => f.client.dispose());
-  await f.client.start(); await tick();
+  await f.client.start(); await f.client.flushSnapshot(); await tick();
   assert.match(f.client.getSnapshot().cacheNotice, /离线聊天记录/);
   assert.equal(f.client.getSnapshot().error, '');
   f.client.draft.setText('缓存失败仍可发送');
@@ -19,7 +19,7 @@ test('history cache failure is an optional notice; successful caching never clea
   rejectCommand = true;
   await f.client.sendCommand({type: 'stop'});
   assert.equal(f.client.getSnapshot().error, '操作被拒绝');
-  failCache = false; f.set(snapshot({revision: 1})); await tick();
+  failCache = false; f.set(snapshot({revision: 1})); await f.client.flushSnapshot(); await tick();
   assert.equal(f.client.getSnapshot().cacheNotice, '');
   assert.equal(f.client.getSnapshot().error, '操作被拒绝');
 });
@@ -31,10 +31,11 @@ test('unreadable or foreign history caches are replaced by authoritative history
     t.after(() => f.client.dispose());
     f.client.subscribe(() => {if (f.client.getSnapshot().cacheNotice) notices.push(f.client.getSnapshot().cacheNotice);});
     f.client.draft.setText('保留草稿');
-    await f.client.start(); await tick();
-    assert.ok(notices.length > 0);
+    await f.client.start(); await f.client.flushSnapshot(); await tick();
+    if(cached instanceof Error)assert.ok(notices.length > 0);
+    else assert.equal(notices.length,0,'a fresh live baseline makes the unused cache irrelevant');
     assert.equal(f.client.getSnapshot().snapshot.conversationId, 'same');
-    assert.equal(f.client.getSnapshot().cacheNotice, '');
+    assert.equal(f.client.getSnapshot().cacheNotice ?? '', '');
     assert.equal(f.client.getSnapshot().error, '');
     assert.equal(f.client.draft.getSnapshot().text, '保留草稿');
   }
@@ -54,7 +55,7 @@ function fixture(options = {}) {
     lifecycle: { subscribe(listener) { event = listener; return () => { event = null; }; } },
     transport: {
       async fetchSnapshot() { return current; },
-      subscribe(_scope, listener) { receive = listener; return () => { receive = null; }; },
+      subscribe(_scope, listener, _offline, online) { receive = listener; listener({kind:'snapshot',snapshot:current});online?.();return () => { receive = null; }; },
       async command(request) { commands.push(request); return { ok: true }; },
       ...options.transport,
     }, storage: { operations, ...options.storage }, ...options.client,
@@ -375,7 +376,7 @@ test('online submissions serialize acceptance so slow ports cannot reorder input
 });
 
 test('an offline restart can restore cached history without treating it as a live connection', async () => {
-  const f=fixture({storage:{snapshots:{async load(){return snapshot({revision:8});},async save(){}}},transport:{async fetchSnapshot(){throw Error('Offline');}}});
+  const f=fixture({storage:{snapshots:{async load(){return snapshot({revision:8});},async save(){}}},transport:{subscribe(_scope,_receive,offline){offline();return()=>{};},async fetchSnapshot(){throw Error('Offline');}}});
   await f.client.start();assert.equal(f.client.getSnapshot().snapshot.revision,8);assert.equal(f.client.getSnapshot().connection,'offline');f.client.dispose();
 });
 
@@ -396,7 +397,7 @@ test('a durable draft token reconciles after restart; equal text with a newer to
 });
 
 test('SDK owns optional polling and clears it on disposal', async () => {
-  let calls=0;const f=fixture({client:{pollIntervalMs:5},transport:{async fetchSnapshot(){calls++;return snapshot();}}});
+  let calls=0;const f=fixture({client:{pollIntervalMs:5},transport:{subscribe:undefined,async fetchSnapshot(){calls++;return snapshot();}}});
   await f.client.start();await new Promise(resolve=>setTimeout(resolve,18));assert.ok(calls>=2);f.client.dispose();
   const stopped=calls;await new Promise(resolve=>setTimeout(resolve,12));assert.equal(calls,stopped);
 });

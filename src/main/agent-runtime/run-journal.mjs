@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
 
 const terminal = new Set(['completed','partial','failed','blocked','cancelled','interrupted','continued']);
 const suspended = root => root?.status === 'awaiting_user' || (root?.kind === 'workflow' && root.status === 'waiting');
@@ -18,6 +19,25 @@ const goalRequests = (s, root) => Object.values(s.requests).filter(item => ![BUD
 const assertExecuting = (s, owner) => {
   if (sourceRoot(s, owner)?.requestLimitReached) throw new Error('执行请求已达上限，不能开始新动作');
 };
+const pendingGoalWork = (s, owner) => {
+  const belongs = item => item.owner.rootRunId === owner.rootRunId;
+  return {
+    requests: Object.values(s.requests).filter(item => belongs(item) && !item.endedAt).map(item => item.requestId),
+    tools: Object.values(s.observations).filter(item => belongs(item) && item.phase !== 'finished').map(item => item.id),
+    processes: Object.values(s.processes).filter(item => belongs(item) && (!item.cleanupConfirmed || item.state !== 'finished'))
+      .map(item => ({id:item.id, description:item.description, state:item.state, background:Boolean(item.background)})),
+    tasks: Object.values(s.dispatches).filter(item => belongs(item) && item.state !== 'terminal').map(item => item.taskId),
+    reports: Object.values(s.inbox).filter(item => belongs(item) && item.state === 'pending').map(item => item.eventId),
+  };
+};
+const hasPendingWork = work => Object.values(work).some(items => items.length);
+function advanceGoalRound(s, root) {
+  const goal = root.goal, used = goalRequests(s, root);
+  if (goal.round >= goal.policy.maxRounds || used >= goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code:'goal-budget-limit'});
+  goal.round++; goal.requestOffset = used;
+  if (root.requestLimitReached) { (goal.limitHistory ??= []).push(root.requestLimitReached); delete root.requestLimitReached; }
+  return goal;
+}
 export const dispatchIdentity = ({ conversationId, rootRunId, generation = 0, sessionId, callAnchorId, toolCallId }) => {
   if (![conversationId,rootRunId,sessionId,callAnchorId,toolCallId].every(x => typeof x === 'string' && x)) throw new Error('派单缺少可信调用身份');
   return createHash('sha256').update(JSON.stringify([conversationId,rootRunId,generation,sessionId,callAnchorId,toolCallId])).digest('hex');
@@ -26,7 +46,9 @@ export const dispatchIdentity = ({ conversationId, rootRunId, generation = 0, se
 /** 同一原子提交保存终态与 outbox；磁盘损坏绝不按空状态继续。 */
 export function createRunJournal({ dir }) {
   const file = path.join(dir, 'run-journal.json');
-  let state, tail = Promise.resolve();
+  let state, tail = Promise.resolve(), pendingWrite = false;
+  const retry = createPersistenceRetry(() => transaction(s => s));
+  const watchers = new Set();
   const ready = (async () => {
     await mkdir(dir, { recursive: true });
     try { state = JSON.parse(await readFile(file, 'utf8')); }
@@ -35,13 +57,24 @@ export function createRunJournal({ dir }) {
     state.processes ??= {};
     if (state.version !== 2 || ['roots','inbox','dispatches','tasks','requests','observations','processes'].some(key => !state[key] || typeof state[key] !== 'object' || Array.isArray(state[key]))) throw new Error('运行事实库版本或结构损坏');
   })();
-  const transaction = operation => {
+  const transaction = (operation, { retainOnFailure = false } = {}) => {
     const run = tail.then(async () => {
       await ready;
       const next = structuredClone(state), result = operation(next);
       const tmp = `${file}.${randomUUID()}.tmp`;
-      await writeFile(tmp, JSON.stringify(next), { mode: 0o600 });
-      await rename(tmp, file); state = next;
+      try {
+        await writeFile(tmp, JSON.stringify(next), { mode: 0o600 });
+        await rename(tmp, file);
+      } catch (error) {
+        await unlink(tmp).catch(() => {});
+        // A confirmed end remains an execution fence even when storage fails.
+        // Admissions still roll back and may not execute until their write succeeds.
+        if (retainOnFailure) { state = next; pendingWrite = true; for (const watch of watchers) watch(); }
+        if (pendingWrite) retry.schedule();
+        throw error;
+      }
+      state = next; pendingWrite = false; retry.reset();
+      for (const watch of watchers) watch();
       return structuredClone(result);
     });
     tail = run.catch(() => {}); return run;
@@ -51,6 +84,23 @@ export function createRunJournal({ dir }) {
     ready: () => ready,
     snapshot: () => read(s => s),
     root: owner => read(s => s.roots[owner.rootRunId] ?? null),
+    // Event-driven budget fence. Abandoning a wait removes its listener; it never consumes work/results.
+    async waitForRequestLimit(owner, {signal, cleared = false} = {}) {
+      await ready;
+      signal?.throwIfAborted();
+      return new Promise((resolve, reject) => {
+        const dispose = () => { watchers.delete(check); signal?.removeEventListener('abort', abort); };
+        const abort = () => { dispose(); reject(signal.reason ?? new DOMException('等待已取消','AbortError')); };
+        const check = () => {
+          if (!owns(state.roots[owner.rootRunId], owner)) {dispose(); reject(new Error('执行归属已失效')); return;}
+          const root = sourceRoot(state, owner);
+          if (!root || terminal.has(root.status) || root.goal?.phase !== 'active' || Boolean(root.requestLimitReached) !== cleared) {
+            dispose(); resolve(structuredClone(root));
+          }
+        };
+        watchers.add(check); signal?.addEventListener('abort', abort, {once:true}); check();
+      });
+    },
     beginRoot: (owner, facts = {}) => transaction(s => {
       const old = s.roots[owner.rootRunId];
       if (old) {
@@ -93,12 +143,7 @@ export function createRunJournal({ dir }) {
     checkGoal: owner => transaction(s => {
       const root = s.roots[owner.rootRunId];
       if (!owns(root, owner) || terminal.has(root.status) || !root.goal || root.goal.phase !== 'active') throw new Error('目标不能校验');
-      const belongs = item => item.owner.rootRunId === owner.rootRunId;
-      if (Object.values(s.requests).some(item => belongs(item) && !item.endedAt)
-        || Object.values(s.observations).some(item => belongs(item) && item.phase !== 'finished')
-        || Object.values(s.processes).some(item => belongs(item) && (!item.cleanupConfirmed || item.state !== 'finished'))
-        || Object.values(s.dispatches).some(item => belongs(item) && item.state !== 'terminal')
-        || Object.values(s.inbox).some(item => belongs(item) && item.state === 'pending')) throw new Error('目标仍有未确认的执行，不能判定完成');
+      if (hasPendingWork(pendingGoalWork(s, owner))) throw new Error('目标仍有未确认的执行，不能判定完成');
       root.goal.phase = 'checking';
       return root.goal;
     }),
@@ -113,11 +158,22 @@ export function createRunJournal({ dir }) {
     continueGoal: owner => transaction(s => {
       const root = s.roots[owner.rootRunId], goal = root?.goal;
       if (!owns(root, owner) || terminal.has(root.status) || (goal?.phase !== 'active' || goal.verifications.at(-1)?.status !== 'continue' || goal.verifications.at(-1)?.round !== goal.round)) throw new Error('目标已停止或缺少续跑校验，不能续跑');
-      const used = goalRequests(s,root);
-      if (goal.round >= goal.policy.maxRounds || used >= goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code: 'goal-budget-limit'});
-      goal.round++; goal.requestOffset = used;
-      if (root.requestLimitReached) { (goal.limitHistory ??= []).push(root.requestLimitReached); delete root.requestLimitReached; }
-      return goal;
+      return advanceGoalRound(s, root);
+    }),
+    // A segment handoff is not a completion verdict. Already accepted background work keeps its owner.
+    checkpointGoal: (owner, {signal} = {}) => transaction(s => {
+      signal?.throwIfAborted();
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || owner.taskId || root.kind === 'auxiliary' || terminal.has(root.status)
+        || root.goal?.phase !== 'active' || !root.requestLimitReached) throw new Error('目标已停止或未触顶，不能交接');
+      const work = pendingGoalWork(s, owner);
+      if (!hasPendingWork(work)) return null;
+      if (Object.values(s.requests).some(item => item.owner.rootRunId === owner.rootRunId && !item.owner.taskId && !item.endedAt)
+        || Object.values(s.observations).some(item => item.owner.rootRunId === owner.rootRunId && !item.owner.taskId && item.phase !== 'finished')) throw new Error('主执行尚未到达安全交接边界');
+      const round = root.goal.round;
+      advanceGoalRound(s, root);
+      (root.goal.checkpoints ??= []).push({round, at:Date.now(), work});
+      return {goal:root.goal, work};
     }),
     endGoal: (owner, phase, reason) => transaction(s => {
       const root = s.roots[owner.rootRunId];
@@ -143,7 +199,7 @@ export function createRunJournal({ dir }) {
       root.status = status; root.reason = reason ?? (status === 'blocked' ? root.goal.reason : null); root.terminalAt = Date.now();
       if (status !== 'completed') for (const item of Object.values(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') item.state = 'obsolete';
       return root;
-    }),
+    }, { retainOnFailure: true }),
     reserveDispatch: (key, facts) => transaction(s => {
       if (s.dispatches[key]) {
         if (!owns(s.dispatches[key], facts.owner)) throw new Error('派单身份不属于当前目标');
@@ -275,6 +331,7 @@ export function createRunJournal({ dir }) {
       for (const event of Object.values(s.inbox)) if (event.state !== 'consumed') event.state = 'obsolete';
       return { recovered: true };
     }),
-    flush: () => tail,
+    async flush() { await tail; if (pendingWrite) await transaction(s => s); },
+    dispose: () => retry.dispose(),
   };
 }

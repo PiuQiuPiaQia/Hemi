@@ -102,3 +102,25 @@ test('答复时预算已耗尽正常返回 partial，不调用模型或重置原
  assert.equal(result.halted.kind,'budget_limited');assert.deepEqual(result.texts,[]);assert.equal(goalRunOutcome(result),'partial');
  await journal.finishRoot(reply,'partial');assert.equal((await journal.root(reply)).goal.phase,'budget_limited');
 });
+
+test('分段检查点保留后台归属，完成门仍拒绝活动进程；重启不自动重放',async t=>{
+ const {journal,dir}=await fixture(t);
+ await journal.processStart({id:'live',owner,pid:99999,token:'fixture',description:'长任务'});await journal.processBackground('live');
+ await request(journal,'one');await finish(journal,'one');await request(journal,'two');await finish(journal,'two');await assert.rejects(request(journal,'cap'),{code:'request-limit'});
+ const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.goal.round,2);assert.equal(checkpoint.goal.requestOffset,2);assert.equal(checkpoint.work.processes[0].id,'live');
+ assert.equal((await journal.snapshot()).processes.live.state,'active');await assert.rejects(journal.checkGoal(owner),/未确认/);
+ await assert.rejects(journal.checkpointGoal(owner),/未触顶/);
+ const restored=createRunJournal({dir});await restored.recover();const root=await restored.root(owner);assert.equal(root.status,'interrupted');assert.equal(root.goal.checkpoints.length,1);
+ await assert.rejects(restored.checkpointGoal(owner),/停止/);
+});
+
+test('分段触顶与续跑通知可取消、按归属隔离，子请求仍阻止完成',async t=>{
+ const {journal}=await fixture(t),aux={...owner,rootRunId:'wait-aux'};
+ await assert.rejects(journal.waitForRequestLimit({...owner,generation:2}),/归属/);
+ await journal.beginRoot(aux,{kind:'auxiliary',sourceRootRunId:owner.rootRunId});
+ const controller=new AbortController();const cancelled=journal.waitForRequestLimit(owner,{signal:controller.signal});controller.abort();await assert.rejects(cancelled,{name:'AbortError'});
+ const limited=journal.waitForRequestLimit(owner);await request(journal,'one');await finish(journal,'one');await request(journal,'two',{...owner,taskId:'child'},'subagent');
+ await assert.rejects(request(journal,'cap'),{code:'request-limit'});assert.ok((await limited).requestLimitReached);
+ const resumed=journal.waitForRequestLimit(aux,{cleared:true});const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.work.requests[0],'two');assert.equal((await resumed).goal.round,2);
+ await assert.rejects(journal.checkGoal(owner),/未确认/);await finish(journal,'two');await journal.checkGoal(owner);
+});

@@ -18,7 +18,7 @@ export function TurnErrorNotice({ message, onRetry, busy = false, blocked, speec
         <p className="turn-error-title">{copy.title}</p>
         {onRetry ? <button type="button" className="turn-error-retry" onClick={onRetry}
           disabled={busy || Boolean(blocked)} aria-busy={busy}>
-          <RotateCcw aria-hidden="true" />{busy ? '正在重试…' : '重试'}
+          <RotateCcw aria-hidden="true" />{busy ? '正在发送…' : '继续'}
         </button> : null}
       </div>
       <p className="turn-error-description">{copy.description}</p>

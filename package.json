@@ -122,6 +122,7 @@
       "src/main/**/*",
       "src/preload/**/*",
       "src/shared/**/*",
+      "packages/conversation-flow/src/core/flow-window.mjs",
       "build/icon.png",
       "LICENSE*",
       "THIRD-PARTY-NOTICES.md",

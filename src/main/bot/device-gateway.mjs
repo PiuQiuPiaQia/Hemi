@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
 import net from 'node:net';
+import {gzipSync} from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import {createHash, randomBytes, randomInt, randomUUID, timingSafeEqual, X509Certificate} from 'node:crypto';
 import {calculateJwkThumbprint, decodeProtectedHeader, importJWK, jwtVerify} from 'jose';
@@ -11,7 +12,7 @@ import {createDeviceCertificate} from './device-certificate.mjs';
 const hash = value => createHash('sha256').update(value).digest('base64url');
 const equal = (left, right) => typeof left === 'string' && typeof right === 'string' && left.length === right.length && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) && !['__proto__','constructor','prototype'].includes(value);
-const RPC = new Set(['snapshot','session.open','session.control','session.create','session.update','session.rename','session.remove','session.order','session.draft','flow.snapshot','flow.command','operation.get','permission.decide','directory.list','attachment.read','attachment.document','file.read','file.resolve','references','skills','agent-environment.inspect','agent-environment.read-file']);
+const RPC = new Set(['snapshot','session.open','session.control','session.create','session.update','session.rename','session.pin','session.remove','session.order','session.draft','flow.snapshot','flow.history','flow.command','operation.get','permission.decide','directory.list','attachment.read','attachment.document','file.read','file.resolve','references','skills','agent-environment.inspect','agent-environment.read-file']);
 RPC.add('resource.stat');RPC.add('resource.chunk');
 for (const method of ['capabilities.inspect', 'context.windows', 'context.capture']) RPC.add(method);
 for(const operation of ['begin','chunk','status','complete','cancel'])RPC.add('attachment.upload.'+operation);
@@ -214,6 +215,13 @@ export async function createDeviceGateway({dataDir, instanceId, request, watch, 
     const tls = {key:await fs.readFile(path.join(dir,'tls-key.pem')),cert,minVersion:'TLSv1.2',maxHeaderSize:8192};
     const candidate = https.createServer(tls,async(req,res)=>{
       res.setHeader('Cache-Control','no-store'); res.setHeader('Content-Type','application/json'); res.setHeader('X-Content-Type-Options','nosniff');
+      const reply = value => {
+        let bytes=Buffer.from(JSON.stringify(value));
+        if(bytes.length>=1024 && String(req.headers['accept-encoding']??'').split(',').some(value=>value.trim()==='gzip')) {
+          bytes=gzipSync(bytes,{level:1});res.setHeader('Content-Encoding','gzip');res.setHeader('Vary','Accept-Encoding');
+        }
+        res.setHeader('Content-Length',bytes.length);res.end(bytes);
+      };
       try {
         rate(req.socket.remoteAddress ?? 'unknown');
         if (req.method!=='POST' || !['/v1/challenge','/v1/pair/request','/v1/pair/status','/v1/pair/cancel','/v1/rpc'].includes(req.url) || req.headers.origin || !/^application\/json(?:;|$)/i.test(req.headers['content-type']??'')) fail('不支持的设备请求。','permission');
@@ -221,8 +229,8 @@ export async function createDeviceGateway({dataDir, instanceId, request, watch, 
         for await (const chunk of req) {length+=chunk.length;if(length>1100000) {req.destroy();return;} chunks.push(chunk);}
         // HTTP chunks can split a UTF-8 codepoint; decode the bounded body only once.
         const result = await publicRequest(req.url,JSON.parse(Buffer.concat(chunks,length).toString('utf8')),req.socket);
-        res.end(JSON.stringify({ok:true,result}));
-      } catch(error) {res.statusCode=error?.code==='busy'?429:error?.code==='permission'?403:400;res.end(JSON.stringify(errorView(error)));}
+        reply({ok:true,result});
+      } catch(error) {res.statusCode=error?.code==='busy'?429:error?.code==='permission'?403:400;reply(errorView(error));}
     });
     const wss = new WebSocketServer({noServer:true, maxPayload:16384, perMessageDeflate:false});
     candidate.on('upgrade',(req,socket,head)=>{
@@ -249,9 +257,15 @@ export async function createDeviceGateway({dataDir, instanceId, request, watch, 
           if(owned.size>=8)fail('设备连接过多。','busy');
           owned.add(req.socket);sockets.set(deviceId,owned);req.socket.once('close',()=>owned.delete(req.socket));
           clearTimeout(deadline);
+          let largestFrame = 0;
           unsubscribe=watch({...body,instanceId},frame=>{
-            if(ws.readyState!==1 || ws.bufferedAmount>2*1024*1024)throw new Error('Slow event consumer');
-            ws.send(JSON.stringify(frame));
+            const raw = JSON.stringify(frame), bytes = Buffer.byteLength(raw);
+            if(ws.readyState!==1 || bytes>40*1024*1024)throw new Error('Slow event consumer');
+            const compressed=body.compression==='gzip' && bytes>=1024, payload=compressed ? gzipSync(raw,{level:1}) : raw;
+            const wireBytes=compressed ? payload.length : bytes;
+            const allowance = Math.max(largestFrame, wireBytes) + 2*1024*1024;
+            if(ws.bufferedAmount+wireBytes>allowance)throw new Error('Slow event consumer');
+            largestFrame = Math.max(largestFrame, wireBytes); ws.send(payload,{binary:compressed});
           },()=>ws.terminate(),{clientId:deviceId});
         } catch(error) {if(ws.readyState===1)ws.send(JSON.stringify(errorView(error)));ws.close(1008);}
       });

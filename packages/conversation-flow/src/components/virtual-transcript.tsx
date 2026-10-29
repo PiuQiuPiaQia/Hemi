@@ -99,21 +99,22 @@ export function VirtualTranscript({
     count: rowIds.length,
     directDomUpdates: true,
     directDomUpdatesMode: "position",
-    useFlushSync: false,
-    useAnimationFrameWithResizeObserver: true,
+    useFlushSync: true,
+    useAnimationFrameWithResizeObserver: false,
     getScrollElement: () => viewport,
     getItemKey: getKey,
     estimateSize: () => 220,
-    measureElement: (element, entry, instance) =>
+    // A remounted/backfilled row may have different content than its cached size.
+    // Measure the mounted DOM before positioning its neighbours, including on iOS.
+    measureElement: (element, entry) =>
       entry?.borderBoxSize?.[0]?.blockSize ??
-      instance.itemSizeCache.get(
-        instance.options.getItemKey(instance.indexFromElement(element)),
-      ) ??
       element.getBoundingClientRect().height,
     overscan: 4,
     rangeExtractor: extract,
     scrollMargin: margin,
-    anchorTo: pinned.current ? "end" : "start",
+    // End anchoring also preserves the visible row when history is prepended.
+    // Following new output is controlled separately by the reader's intent.
+    anchorTo: "end",
     followOnAppend: pinned.current ? "auto" : false,
     scrollEndThreshold: pinned.current ? 1 : 0,
     onChange: (instance) => {

@@ -21,6 +21,7 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
+fs.copyFileSync("src/core/flow-window.d.mts", "dist/core/flow-window.d.mts");
 const entries = [
   "index",
   "core",

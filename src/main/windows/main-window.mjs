@@ -11,6 +11,7 @@ import { getAppearanceService, onAppearanceCommit } from '../services/appearance
 import { getSkin } from '../../shared/appearance/skins.mjs';
 import { mainWindowSizeFor } from './main-window-size.mjs';
 import { attachWindowsWindowRepaint, buildWindowsTitleBarOverlay } from './windows-chrome.mjs';
+import { mainWindowChromeFor } from './main-window-chrome.mjs';
 import { createWindowStateStore, restoreBounds, SAVE_DEBOUNCE_MS } from './window-state-store.mjs';
 import { markCurrentCaptionRead } from '../services/caption-read-state.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
@@ -100,7 +101,6 @@ export async function createMainWindow() {
     }
   }
   const skin = getSkin(getAppearanceService().getSnapshot().preference.skinId);
-  const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
   state.mainWindow = new BrowserWindow({
     ...bounds,
@@ -118,17 +118,11 @@ export async function createMainWindow() {
     title: BRAND_NAME,
     icon: appIconPath,
     backgroundColor: skin.windowBackground,
-    // Windows titleBarOverlay：集成系统标题栏控件到 52px 应用顶栏，回收垂直空间。
-    // overlay 底色保持全透明（ZCode 经验），顶栏背景由渲染层自绘（windows-chrome.css），
-    // 避免 resize／换肤窗口期两层底色错位；macOS 保持 hiddenInset + 红绿灯悬浮；Linux 保持 default。
-    titleBarStyle: isMac ? 'hiddenInset' : (isWin ? 'hidden' : 'default'),
-    ...(isWin ? { titleBarOverlay: buildWindowsTitleBarOverlay(skin) } : {}),
-    // 红绿灯与 52px 顶栏（2026-10-03 用户裁决自 62 调低，渲染层
-    // --hemi-topbar-h）的中线对齐：灯钮高 ~12px，y = 26 - 6 = 20；
-    // x 与设计稿一致（左内边距 22），品牌区从 88px 起。
-    ...(isMac ? {
-      trafficLightPosition: { x: 22, y: 20 },
-    } : {}),
+    // 平台窗口 chrome 集中配置（a3a72921）：mac hiddenInset + 红绿灯悬浮、
+    // win hidden + titleBarOverlay（委托 windows-chrome：透明底 + --body 符号色，
+    // 与下方换肤订阅同源）、Linux default。win 另有 autoHideMenuBar，
+    // 开发菜单不再叠出第二行导航。
+    ...mainWindowChromeFor(process.platform, skin),
     webPreferences: {
       preload: preloadPath,
       backgroundThrottling: false,
@@ -138,6 +132,8 @@ export async function createMainWindow() {
     },
   });
   const mainWindow = state.mainWindow;
+  // The Windows titlebar opens native popups itself; no second menu row on Alt.
+  if (process.platform === 'win32') mainWindow.setMenu(null);
 
   // Windows：titleBarOverlay 符号色运行时跟随皮肤（底色恒透明，无需跟随）；
   // 另接 resized/show 双帧重绘兜底（ZCode 经验：WCO 窗口偶发最后一帧不重绘，

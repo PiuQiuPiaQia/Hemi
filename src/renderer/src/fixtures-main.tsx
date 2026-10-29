@@ -35,7 +35,7 @@ import { ConversationContextMenu } from '@/windows/voice/conversation-context-me
 import { FloatingCaption } from '@/windows/caption/floating-caption';
 import { FloatingOrb } from '@/windows/orb/floating-orb';
 import { BrandIcon } from '@/components/brand-icon';
-import { AppTopBar } from '@/windows/voice/app-top-bar';
+import { AppTopBar } from '@/components/app-top-bar';
 import { TaskPopover } from '@/windows/orb/task-popover';
 import { installNativeInput } from '@/lib/native-input';
 import '@/globals.css';
@@ -2730,6 +2730,7 @@ const scenes: Record<string, () => React.ReactElement> = {
           point={{ x: 210, y: 196 }}
           onRename={() => {}}
           onDelete={() => {}}
+          onTogglePin={() => {}}
           onClose={() => {}}
         />
       </>
@@ -2763,6 +2764,7 @@ const scenes: Record<string, () => React.ReactElement> = {
           point={{ x: 210, y: 196 }}
           onRename={() => {}}
           onDelete={() => {}}
+          onTogglePin={() => {}}
           onClose={() => {}}
         />
         {/* 菜单走 portal 挂 body，武装态是组件内部 state——挂载后对

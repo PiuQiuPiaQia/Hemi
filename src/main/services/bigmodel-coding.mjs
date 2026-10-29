@@ -29,7 +29,7 @@ export function bigModelCodingProvider(credentials, { fetchImpl } = {}) {
       } else if (body.thinking) delete body.thinking.display;
       return options.onPayload ? await options.onPayload(body, model) : body;
     },
-    fetch: transport.forRequest({ token: options.apiKey, sessionId: options.sessionId, fetchImpl: fetchImpl ?? options.fetch ?? ((...args) => globalThis.fetch(...args)) }),
+    fetch: transport.forRequest({ authKey: options.apiKey, sessionId: options.sessionId, fetchImpl: fetchImpl ?? options.fetch ?? ((...args) => globalThis.fetch(...args)) }),
   });
   return { ...provider,
     stream: (model, context, options = {}) => provider.stream(model, context, requestOptions(options)),

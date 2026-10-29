@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { ArrowDown } from "lucide-react";
+import {HistoryLoader} from './history-loader.js';
 import {TimedToast} from '@hemi/ui';
 import type {
   ConversationFlowHandle,
@@ -71,6 +72,10 @@ function ConversationFlowBody({
       setEditingId(state.editingMessageId);
   }, [state?.editingMessageId]);
   const [pinned, setPinned] = useState(true);
+  const [historyVisible, setHistoryVisible] = useState(false);
+  useEffect(() => {
+    if (state?.history?.hasMore) setHistoryVisible(true);
+  }, [state?.history?.hasMore]);
   const virtual = useRef<VirtualTranscriptHandle>(null);
   const items = useMemo(
     () =>
@@ -438,8 +443,8 @@ function ConversationFlowBody({
             onRecoveryAction={runtime.actionable ? (action, recoveryId) => open(action === 'stop'
               ? { type: 'run.stop', targetId: view.runId ?? '' }
               : { type: 'recovery.retry', targetId: item.id, runId: view.runId ?? '', recoveryId }) : undefined}
-            retryBusy={state?.retryBusy || state?.busy || busy}
-            retryBlocked={state?.retryBlocked}
+            retryBusy={state?.retryBusy}
+            retryBlocked={state?.retryBlocked || (state?.busy || busy ? '当前运行尚未结束。' : undefined)}
           />
         )}
         {copy ? <ReplyCopyActions text={copy} /> : null}
@@ -458,12 +463,9 @@ function ConversationFlowBody({
           className="transcript-scroll min-h-0 flex-1"
           data-transcript-scroll
         >
-          {state?.notice ? (
-            <p className="h24-reply-status" role="status">
-              {state.notice}
-            </p>
-          ) : null}
           <div className="conversation-list h24-reading">
+            {state?.history && (state.history.hasMore || historyVisible) ? <HistoryLoader history={state.history}/> : null}
+            {state?.notice ? <p className="h24-reply-status" role="status">{state.notice}</p> : null}
             <VirtualTranscript
               ref={virtual}
               rowIds={rowIds}

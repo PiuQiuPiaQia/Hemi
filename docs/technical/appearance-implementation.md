@@ -53,7 +53,7 @@ BOOT_VISUAL_READY 与 APP_READY 分开：前者允许原生窗口展示同主题
 
 右侧人物、左侧 Smile/Sister/Suspended/Sweet/Stupid 与名称沿用确认稿。阅读态保留淡色题字，放在正文后方，并用阅读列渐变遮盖降低正文区域的干扰；设置、工作流等内容表面保持清晰。侧栏底色进一步混白，人物水印透明度为 6.5%。侧栏水印是局部绝对层，不占列表高度；滚动、抽屉和 50 条会话不改变水印锚点。
 
-当前业务状态派生主页/阅读/其他页面、草稿/通话状态；焦点、原生窗口 activity、visibility、reduced-motion 决定是否播放。空主页输入聚焦或有草稿、失焦/隐藏时暂停并保留当前帧，恢复只继续主页循环。进入对话流（历史、回复中、任务）或其他业务页后，CharacterMedia 使用 staticOnly，不创建 video；模式切换时只重建人物媒体节点，清除旧视频 src 并 load 释放解码器，现有业务 DOM 保持。新建对话空主页和冷启动使用 motion 模式；冷启动即使恢复的是历史会话也照常演出，交接结束再切为静态图。没有永久 rAF 或轮询来维持静止状态。
+当前业务状态派生主页/阅读/其他页面、草稿/通话状态。用户澄清后，主页与对话流（历史、回复中、任务）均播放角色视频，不因输入、生成或失焦暂停；仅原生窗口隐藏/最小化、document.hidden 暂停并保留进度。reduced-motion 与其他业务页使用 staticOnly，不创建 video；模式切换时只重建人物媒体节点，清除旧视频 src 并 load 释放解码器，现有业务 DOM 保持。冷启动仍由 StartupStage 管理焦点与中断，交接到 reading 时保留背景播放器继续循环。没有永久 rAF 或轮询来维持静止状态。下文早期静态阅读验证记录是历史结果，不代表现行政策。
 
 人物制作采用已验证的局部参数网格离线导出透明 VP9，应用仅本地视频解码。普通卡片、头像和静态人物另行压缩，未选择皮肤不预解码高清影片。媒体失败使用同人物静态 WebP，应用功能继续可用。
 
@@ -177,3 +177,13 @@ hover 改为不透明的主题混色：人物皮肤默认为 16% 主色混白，
 第七款验证在临时项目副本中只追加 `trial-mint` 配置和三份新文件名的 WebP/WebM（复用现有蓝色人物作为测试物料），没有手改副本的类型、bootstrap、资源导入或业务代码。普通 `npm run build` 自动完成注册；实际卡片选择、主进程提交、保存、重启后 bootstrap、冷启动双路影片、主页影片、阅读静态图、1440/980/560px 自定义题字和抽屉 hover 全部通过。该测试皮肤没有加入正式配置。
 
 本地回归为 `VITE_DEV_SERVER_URL=http://127.0.0.1:5317 node scripts/verify-appearance-catalog.mjs` 和构建后的 `node scripts/verify-appearance-catalog.mjs`；可通过 `HEMI_APPEARANCE_APP_ROOT` 指向隔离的扩展项目。证据位于 `.visual/workflow/vision/appearance-catalog/{current-dev,current-built,extension-dev,extension-built}/`。截图复核了选中/hover 的区别、换肤面板、人物与题字、设置页和窄窗抽屉。没有新增 renderer 依赖；Windows、正式安装包与真实在线业务仍不在本轮验证范围。
+
+## 14 对话流角色视频恢复（2026-10-29）
+
+按用户澄清，ThemeBackdrop 的 motion 场景扩为 home/reading，不再读取 inputActive、输入焦点或 activity.focused 来决定普通背景播放；other 与 reduced-motion 使用静态人物。StartupStage 的 intro、visualReady 和现有 CSS 波纹、已移除的窗口旋转均未修改。
+
+基线：`1e1697b84fc2099a1b1165d163c5f4cd5bcbf6c9` 加已有未提交工作区；macOS arm64 / Node 22.21.1 / Electron 44。验证只使用脚本新建的临时 HEMI_USER_DATA_DIR、生成的两条对话记录，无凭据、无模型调用。`npm run typecheck`、`npm run build:renderer`、spacing、脚本语法与定向补丁格式检查通过；构建仅有大 chunk 警告，Git 有已有 AppleDouble pack index 诊断，未清理 Git 对象。
+
+本地命令：`HEMI_DEV_PORT=5349 npm run dev:renderer`，随后 `VITE_DEV_SERVER_URL=http://127.0.0.1:5349 node scripts/verify-appearance-reading.mjs`；构建版为 `node scripts/verify-appearance-reading.mjs`。两种模式均实际检查五款 WebM 的非空 src、readyState、paused=false 与约 650ms 内的 currentTime 推进，覆盖阅读输入焦点/草稿、可见失焦、换肤释放旧解码器、输入实例保留、reduced-motion 静态与恢复、主页输入和工作流 other 静态。原生窗口能显示、跳过后 overlay 释放；本轮没有重测完整六秒自然片头。证据在 `.visual/workflow/vision/appearance-reading/{dev,built}/report.json` 和 `reading-motion.png`；截图已复核阅读正文与角色分层。
+
+**验证缺口**：本环境 Electron 的实际 `win.hide()` 使 `isVisible()` 变 false，但没有触发 hide 监听，document.hidden 也仍为 false，视频继续播放。因此不能声称原生隐藏端到端通过，也没有扩大本次补丁去改原生窗口服务。脚本在报告 gaps 中保留诊断；后续显式注入 hide/show/minimize/restore 生命周期事件，验证现有真实 activity IPC 到播放器暂停/恢复的链路，暂停期间 currentTime 不变。Chromium 不支持所用页面可见性 CDP 命令，文档隐藏测试是显式模拟 document.hidden 与 visibilitychange。这些测试只证明对应边界，不能替代真实系统隐藏/最小化/遮挡事件。Windows、实际模型生成/通话、完整片头自然交接及安装包未覆盖。
