@@ -1119,7 +1119,7 @@ export function registerLlmIpc() {
     } catch (error) {
       return { ok: false, code: 'storage-failed', message: `回卷状态暂未保存：${error.message}` };
     }
-    return { ok: true, cutKeysGrew: Boolean(cut.cutKeysGrew) };
+    return { ok: true, cutKeysGrew: Boolean(cut.cutKeysGrew), generation: controller.getSnapshot().generation };
   });
 
   // 029/057：队列面翻译层——控制器命令的旧渲染契约兼容（S2 UI 批次切 flow 订阅后退役）。

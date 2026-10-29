@@ -2406,7 +2406,7 @@ export type HemiVoiceBridge = {
     conversationId: string;
     targetInputId: string;
     removedTurnKeys: string[];
-  }) => Promise<{ ok: boolean; code?: string; message?: string; cutKeysGrew?: boolean }>;
+  }) => Promise<{ ok: boolean; code?: string; message?: string; cutKeysGrew?: boolean; generation?: number }>;
   onFlowChanged: (
     callback: (payload: { conversationId: string; change: FlowChangeView }) => void,
   ) => () => void;

@@ -19,6 +19,26 @@ export async function sendLocalConversationCommand(conversationId:string,command
   try{await client.ready();return await client.sendCommand(command,submissionToken);}finally{release();}
 }
 
+/**
+ * 回卷后等本地副本追平宿主 generation 再提交：副本落后时 SDK 会按旧 generation
+ * 冻结 send，宿主判冲突（2026-10-29 真机：编辑重发报「会话已回卷」/「没有受理」）。
+ */
+export async function waitLocalGeneration(conversationId:string,generation:number,timeoutMs=3000) {
+  const client=getLocalConversationClient(conversationId),release=client.retain();
+  const caughtUp=()=>(client.getSnapshot().snapshot?.generation??0)>=generation;
+  try{
+    await client.ready();
+    if(caughtUp())return true;
+    let unsubscribe=()=>{};let timer:ReturnType<typeof setTimeout>|undefined;
+    const done=new Promise<boolean>(resolve=>{
+      unsubscribe=client.subscribe(()=>{if(caughtUp())resolve(true);});
+      timer=setTimeout(()=>resolve(caughtUp()),timeoutMs);
+    });
+    void Promise.resolve(client.refresh()).catch(()=>{});
+    try{return await done;}finally{unsubscribe();clearTimeout(timer);}
+  }finally{release();}
+}
+
 export type ConversationFlowState = ConversationClientState & {
   snapshot: FlowSnapshotView | null;
   client: ConversationClient;

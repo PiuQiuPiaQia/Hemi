@@ -76,7 +76,7 @@ import { SetupScreen } from '@/windows/voice/setup-screen';
 import { createLogger } from '@/shared/log';
 import { buildInputHistory } from '@/windows/voice/lib/input-history';
 import { VoiceScreen } from '@/windows/voice/voice-screen';
-import { useConversationFlow,sendLocalConversationCommand } from '@/windows/voice/lib/use-conversation-flow';
+import { useConversationFlow,sendLocalConversationCommand,waitLocalGeneration } from '@/windows/voice/lib/use-conversation-flow';
 import { deriveModelBusy } from '@/windows/voice/lib/turn-busy';
 import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
 import { createConversationResume, DRAFT_NEW_KEY } from '@/windows/voice/lib/conversation-resume';
@@ -2042,6 +2042,11 @@ export default function Home() {
             logChain(`回卷失败：${message}`);
             flashAttachError('历史回卷失败，修改尚未发送。请重试编辑。');
             return;
+          }
+          // 本地副本追平回卷后的 generation 再提交，否则重发带旧代次被宿主判冲突。
+          if (typeof rewound.generation === 'number') {
+            const synced = await waitLocalGeneration(conversationId, rewound.generation).catch(() => false);
+            if (!synced) logChain(`回卷后本地快照未追平 generation ${rewound.generation}，仍尝试提交`);
           }
         }
         await runTurn(messages, 'text');
