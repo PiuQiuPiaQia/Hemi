@@ -25,10 +25,10 @@
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
-  padding: var(--sp-32) var(--sp-24);
+  padding: var(--sp-24) var(--sp-24);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-32);
+  gap: var(--sp-24);
 }
 
 @media (max-width: 880px) {
@@ -47,18 +47,18 @@
   }
 }
 
-/* —— 总览卡片：三栏统计 —— */
+/* —— 总览卡片：三栏统计（紧凑行高，给下方列表让位） —— */
 .h37-usage-overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--sp-16);
+  gap: var(--sp-12);
 }
 
 .h37-usage-stat {
   display: flex;
   align-items: center;
-  gap: var(--sp-16);
-  padding: var(--sp-20);
+  gap: var(--sp-12);
+  padding: var(--sp-12);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--bg-surface);
@@ -67,8 +67,8 @@
 .h37-usage-stat-icon {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--r-md);
   flex-shrink: 0;
 }
@@ -96,7 +96,7 @@
 }
 
 .h37-usage-stat-value {
-  font-size: var(--fs-24);
+  font-size: var(--fs-20);
   font-weight: var(--fw-semibold);
   line-height: 1.2;
   color: var(--ink);
@@ -112,7 +112,7 @@
 .h37-usage-main .h37-section {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-16);
+  gap: var(--sp-12);
 }
 
 .h37-usage-main .h37-section-head {
@@ -182,7 +182,7 @@
 .h37-usage-heatmap {
   display: flex;
   gap: var(--sp-4);
-  padding: var(--sp-16);
+  padding: var(--sp-12);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--bg-surface);
@@ -492,14 +492,6 @@ html[data-appearance-mode='dark'] .h37-usage-status[data-status='error'] {
 
 html[data-appearance-mode='dark'] .h37-usage-error-text {
   color: var(--r-400);
-}
-
-.h37-usage-detail-note {
-  padding: var(--sp-10);
-  border-radius: var(--r-sm);
-  background: var(--bg-surface);
-  font-size: var(--fs-12);
-  color: var(--muted);
 }
 
 /* —— 分页 —— */

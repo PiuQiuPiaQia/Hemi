@@ -38,7 +38,7 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | UsageHistoryStatus>('all');
   const [offset, setOffset] = useState(0);
-  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('requests');
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('tokens');
   const requestSeqRef = useRef(0);
 
   const loadData = useCallback(() => {
@@ -93,7 +93,7 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
       currentWeek.push({
         date: key,
         value,
-        label: `${key}\n${value.toLocaleString()} ${heatmapMetric === 'requests' ? '请求' : 'tokens'}`,
+        label: `${key}\n${formatNumber(value)} ${heatmapMetric === 'requests' ? '请求' : 'tokens'}`,
       });
       if (date.getDay() === 6) {
         weeks.push(currentWeek);
@@ -190,9 +190,16 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                     >
                       Tokens
                     </button>
-                    </div>
+                  </div>
+                  <div className="h37-usage-heatmap-legend">
+                    <span className="h37-usage-legend-label">少</span>
+                    {[0, 1, 2, 3, 4].map(level => (
+                      <div key={level} className="h37-usage-heatmap-cell" data-level={level} />
+                    ))}
+                    <span className="h37-usage-legend-label">多</span>
                   </div>
                 </div>
+              </div>
                 <div className="h37-usage-heatmap">
                   {heatmapWeeks.map((week, weekIndex) => (
                     <div key={weekIndex} className="h37-usage-heatmap-week">
@@ -217,13 +224,6 @@ export function UsageHistoryPage({ onClose }: { onClose: () => void }) {
                       })}
                     </div>
                   ))}
-                </div>
-                <div className="h37-usage-heatmap-legend">
-                  <span className="h37-usage-legend-label">少</span>
-                  {[0, 1, 2, 3, 4].map(level => (
-                    <div key={level} className="h37-usage-heatmap-cell" data-level={level} />
-                  ))}
-                  <span className="h37-usage-legend-label">多</span>
                 </div>
               </section>
             ) : null}
@@ -470,9 +470,6 @@ function UsageRecordRow({ record }: { record: UsageHistoryRecord }) {
                     <div className="h37-usage-detail-value h37-usage-error-text">{record.error}</div>
                   </div>
                 )}
-              </div>
-              <div className="h37-usage-detail-note">
-                TPS 口径：输出 tokens / 首语义输出至结束的秒数。总览统计含所有筛选后记录，热力图仅显示近 12 周。
               </div>
             </div>
           </td>
