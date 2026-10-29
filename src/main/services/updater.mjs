@@ -15,7 +15,7 @@
  */
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readdirSync, statSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 
@@ -86,12 +86,82 @@ async function verifyDownloadedZip(info) {
   return file;
 }
 
+/** 换包暂存目录名（用户缓存区，与 electron-updater 自己的缓存目录分开，
+ * 避免下载层校验失败清缓存时连带清掉正在使用的暂存包）。 */
+const STAGING_DIR_NAME = 'hemi-updater-staging';
+/** 换包脚本等旧进程退出最长 120s（240×0.5s）+ 解包搬运耗时；年龄超过
+ * 10 分钟的暂存/.old 不可能还有脚本在用，可安全清扫。 */
+const STALE_SWAP_ARTIFACT_AGE_MS = 10 * 60_000;
+
+/**
+ * 暂存目录选址：优先用户缓存区——与 /Applications 同在系统 Data 卷时，
+ * 最后 mv 顶位仍是原子 rename，应用目录里不再出现可见的中转目录（也
+ * 避开 /Applications 的写权限差异）。用户目录被重定向到外置/网络卷
+ * （stat dev 不同）时退回旧包同目录，保证顶位动作必然同卷原子。
+ */
+export function pickStagingDir({ bundlePath, homeDir = null, statFn = statSync, now = Date.now() } = {}) {
+  const caches = path.join(homeDir ?? '', 'Library', 'Caches');
+  try {
+    if (statFn(caches).dev === statFn(path.dirname(bundlePath)).dev) {
+      return path.join(caches, STAGING_DIR_NAME, `staging-${now}`);
+    }
+  } catch { /* Caches 不可探：按异卷处理 */ }
+  return `${bundlePath}.update-${now}`;
+}
+
+/**
+ * 清扫换包安装的历史残留：解包/校验失败或应用侧异常退出的暂存目录、
+ * 换包脚本被强杀（SIGKILL/断电）遗留的暂存目录与 Hemi.app.old、以及
+ * 旧版本遗留在应用目录的 *.update-* 空壳。只清超过 STALE_SWAP_ARTIFACT_AGE_MS
+ * 的条目——年轻条目可能仍有换包脚本在用；.old 仅在主包存在时才清，
+ * 否则它是唯一的恢复副本。返回清理项数。
+ */
+export function sweepStaleSwapArtifacts({
+  bundlePath,
+  homeDir = null,
+  now = Date.now(),
+  staleAgeMs = STALE_SWAP_ARTIFACT_AGE_MS,
+  readdirFn = readdirSync,
+  statFn = statSync,
+  removeFn = rmSync,
+} = {}) {
+  if (!bundlePath) return 0;
+  let removed = 0;
+  const removeIfStale = (dir, name) => {
+    const target = path.join(dir, name);
+    try {
+      if (now - statFn(target).mtimeMs < staleAgeMs) return;
+      removeFn(target, { recursive: true, force: true });
+      removed += 1;
+    } catch { /* 消失竞态：跳过自愈 */ }
+  };
+  const scan = (dir, keep) => {
+    try {
+      for (const name of readdirFn(dir)) if (keep(name)) removeIfStale(dir, name);
+    } catch { /* 目录不存在/不可读：无事可清 */ }
+  };
+  scan(path.join(homeDir ?? '', 'Library', 'Caches', STAGING_DIR_NAME), (name) => name.startsWith('staging-'));
+  const bundleDir = path.dirname(bundlePath);
+  const bundleName = path.basename(bundlePath);
+  scan(bundleDir, (name) => name.startsWith(`${bundleName}.update-`));
+  try {
+    statFn(bundlePath);
+    removeIfStale(bundleDir, `${bundleName}.old`);
+  } catch { /* 主包不在：.old 是唯一恢复副本，保留 */ }
+  return removed;
+}
+
 /**
  * 自研换包安装脚本（未签名形态）：等旧进程退出→新版顶位→清理→重启。
  * 失败路径都有回滚：旧包先挪走，新包顶位失败则旧包放回。
+ * trap 兜底：脚本任何退出路径（失败/超时/被 TERM/INT/HUP 结束）都删掉
+ * 暂存目录——正常收尾的 rm 之外，被强杀在「顶位与清理之间」也不再遗留。
  */
 const SWAP_SCRIPT = `#!/bin/sh
 APP="$1"; NEW_DIR="$2"; PID="$3"; LOG="$4"
+cleanup() { rm -rf "$NEW_DIR" 2>>"$LOG"; }
+trap cleanup EXIT
+trap 'exit 1' TERM INT HUP
 echo "--- swap start $(date) ---" >> "$LOG"
 waited=0
 while kill -0 "$PID" 2>/dev/null; do
@@ -269,7 +339,8 @@ export function createUpdaterService({
 
   /**
    * 自研换包安装（未签名/ad-hoc 形态，Squirrel 拒装时的产品路）：
-   * 1. 缓存 zip（sha512 已由 electron-updater 下载层校验）ditto 解包到旧包同卷暂存区；
+   * 1. 缓存 zip（sha512 已由 electron-updater 下载层校验）ditto 解包到暂存区
+   *    （用户缓存目录，与旧包同卷时；选址见 pickStagingDir），任何失败都清理；
    * 2. 校验暂存包版本确实是待装版本（防换错包/坏包）；
    * 3. 写分离脚本：等本进程退出→旧包挪走→新包顶位（失败回滚）→重启；
    * 4. app.quit() 走正常退出清理（before-quit 收尾都执行）。
@@ -279,29 +350,38 @@ export function createUpdaterService({
       return { ok: false, code: 'not-downloaded', message: '下载回执与待装版本不一致，请重新下载' };
     }
     const zipPath = await verifyDownloadedZip(downloadedUpdate);
-    const staging = `${bundlePath}.update-${Date.now()}`;
+    sweepStaleSwapArtifacts({ bundlePath, homeDir: home });
+    const staging = pickStagingDir({ bundlePath, homeDir: home });
     exec('rm', ['-rf', staging]);
-    exec('ditto', ['-x', '-k', zipPath, staging]);
-    const plist = path.join(staging, 'Hemi.app', 'Contents', 'Info.plist');
-    const plistText = await readFile(plist, 'utf8').catch(() => '');
-    const staged = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(plistText)?.[1];
-    if (!staged || staged !== state.availableVersion) {
+    try {
+      exec('mkdir', ['-p', path.dirname(staging)]);
+      exec('ditto', ['-x', '-k', zipPath, staging]);
+      const plist = path.join(staging, 'Hemi.app', 'Contents', 'Info.plist');
+      const plistText = await readFile(plist, 'utf8').catch(() => '');
+      const staged = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(plistText)?.[1];
+      if (!staged || staged !== state.availableVersion) {
+        exec('rm', ['-rf', staging]);
+        return { ok: false, code: 'staged-mismatch', message: `暂存包版本异常：${staged ?? '读不到'}（预期 ${state.availableVersion}）` };
+      }
+      // Check the new bundle's resource seal without requiring the old ad-hoc
+      // binary's cdhash identity to match the new version.
+      exec('codesign', ['--verify', '--deep', '--strict', path.join(staging, 'Hemi.app')]);
+      const { writeFile: writeFileImpl } = await import('node:fs/promises');
+      const scriptPath = path.join(home, '.hemi-update-swap.sh');
+      await writeFileImpl(scriptPath, SWAP_SCRIPT, { mode: 0o755 });
+      const swapLog = path.join(home, 'Library', 'Logs', 'hemi-update-swap.log');
+      log?.info?.(`换包安装：${zipPath} → ${staging}（脚本 ${scriptPath}，日志 ${swapLog}）`);
+      // spawn 成功后暂存目录归换包脚本管（脚本 trap EXIT 兜底清理）。
+      spawnDetached('/bin/sh', [scriptPath, bundlePath, staging, String(process.pid), swapLog], {
+        detached: true,
+        stdio: 'ignore',
+      });
+    } catch (error) {
+      // 任何一步失败（ditto 解包/版本护栏/codesign/写脚本/拉起）都清掉暂存
+      // 目录再抛——修复「安装失败后应用目录残留空壳暂存」的根因。
       exec('rm', ['-rf', staging]);
-      return { ok: false, code: 'staged-mismatch', message: `暂存包版本异常：${staged ?? '读不到'}（预期 ${state.availableVersion}）` };
+      throw error;
     }
-    // Check the new bundle's resource seal without requiring the old ad-hoc
-    // binary's cdhash identity to match the new version.
-    try { exec('codesign', ['--verify', '--deep', '--strict', path.join(staging, 'Hemi.app')]); }
-    catch (error) { exec('rm', ['-rf', staging]); throw error; }
-    const { writeFile: writeFileImpl } = await import('node:fs/promises');
-    const scriptPath = path.join(home, '.hemi-update-swap.sh');
-    await writeFileImpl(scriptPath, SWAP_SCRIPT, { mode: 0o755 });
-    const swapLog = path.join(home, 'Library', 'Logs', 'hemi-update-swap.log');
-    log?.info?.(`换包安装：${zipPath} → ${staging}（脚本 ${scriptPath}，日志 ${swapLog}）`);
-    spawnDetached('/bin/sh', [scriptPath, bundlePath, staging, String(process.pid), swapLog], {
-      detached: true,
-      stdio: 'ignore',
-    });
     app.quit();
     return { ok: true };
   }
@@ -336,6 +416,11 @@ export function createUpdaterService({
   /** 启动后的静默检查：只亮状态不下载，失败只落日志。 */
   function scheduleStartupCheck({ delayMs = STARTUP_CHECK_DELAY_MS } = {}) {
     if (!supported) return;
+    if (platform === 'darwin') {
+      // 顺带清扫上次换包安装的遗留（脚本被强杀/断电的兜底，见 sweepStaleSwapArtifacts）。
+      const removed = sweepStaleSwapArtifacts({ bundlePath, homeDir: home });
+      if (removed > 0) log?.info?.(`已清扫换包更新残留 ${removed} 项`);
+    }
     const timer = timeoutSet(() => {
       void check();
     }, delayMs);
