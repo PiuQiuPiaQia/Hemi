@@ -830,7 +830,7 @@ export function BotPage({
               turnError=""
               streamingReply=""
               interimText=""
-              flowHistory={conversation.history?{...conversation.history,load:()=>void conversation.client.loadHistory()}:undefined}
+              flowHistory={conversation.history?{...conversation.history,gap:conversation.history.gap?{...conversation.history.gap,load:()=>void conversation.client.loadHistory('gap')}:undefined,load:()=>void conversation.client.loadHistory()}:undefined}
               transcripts={transcripts}
               timelineGeneration={flow?.generation ?? 0}
               taskState={null}

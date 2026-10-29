@@ -21,6 +21,9 @@ import {
 import { MarkdownParseCache } from "../shared/markdown-parse-cache.js";
 import { MarkdownCacheContext } from "../shared/markdown-cache-context.js";
 
+import {useTranscriptViewport} from './use-transcript-viewport.js';
+import type {FlowSurfaceState} from '../types/api.js';
+
 export type VirtualTranscriptHandle = {
   scrollToBottom: (options?: { behavior?: "instant" | "smooth" }) => void;
   scrollToMessage: (
@@ -38,6 +41,7 @@ export function VirtualTranscript({
   onPinnedChange,
   lastUserId,
   loading,
+  history,
   ref,
 }: {
   rowIds: string[];
@@ -50,6 +54,7 @@ export function VirtualTranscript({
   onPinnedChange: (pinned: boolean) => void;
   lastUserId: string | null;
   loading: boolean;
+  history?: FlowSurfaceState['history'];
   ref?: Ref<VirtualTranscriptHandle>;
 }) {
   const body = useRef<HTMLDivElement>(null);
@@ -68,16 +73,24 @@ export function VirtualTranscript({
   const [margin, setMargin] = useState(0);
   const [retained, setRetained] = useState<string[]>([]);
   const pinned = useRef(true);
+  const [following, setFollowing] = useState(true);
   const interactionVersion = useRef(0);
   const store = useMemo<TranscriptRowStates>(() => new Map(), []);
   const setPinned = useCallback(
     (value: boolean) => {
       if (pinned.current === value) return;
       pinned.current = value;
+      setFollowing(value);
       onPinnedChange(value);
     },
     [onPinnedChange],
   );
+  const intent = useTranscriptViewport(viewport, {
+    history,
+    historyHeight: () => body.current?.parentElement?.querySelector('.h24-history-load')?.clientHeight ?? 0,
+    read: () => {virtualizer.cancelScroll(); setPinned(false);},
+    interact: () => {interactionVersion.current++;},
+  });
   const getKey = useCallback((index: number) => rowIds[index], [rowIds]);
   const retainedIndexes = useMemo(() => {
     const ids = new Set(
@@ -115,17 +128,10 @@ export function VirtualTranscript({
     // End anchoring also preserves the visible row when history is prepended.
     // Following new output is controlled separately by the reader's intent.
     anchorTo: "end",
-    followOnAppend: pinned.current ? "auto" : false,
-    scrollEndThreshold: pinned.current ? 1 : 0,
+    followOnAppend: following ? "auto" : false,
+    scrollEndThreshold: following ? 1 : 0,
     onChange: (instance) => {
-      if (
-        instance.isScrolling &&
-        instance.scrollDirection === "backward" &&
-        !instance.isAtEnd(0)
-      ) {
-        instance.cancelScroll();
-        setPinned(false);
-      } else if (instance.isAtEnd(1)) setPinned(true);
+      if (instance.isAtEnd(1)) setPinned(true);
       else if (
         !pinned.current &&
         instance.isScrolling &&
@@ -139,6 +145,7 @@ export function VirtualTranscript({
   });
   const jump = useCallback(
     (options?: { behavior?: "instant" | "smooth" }) => {
+      intent.current();
       setPinned(true);
       virtualizer.scrollToEnd({
         behavior:
@@ -157,6 +164,7 @@ export function VirtualTranscript({
       scrollToMessage: async (id, options) => {
         const index = rowIds.indexOf(id);
         if (index >= 0) {
+          intent.current();
           setPinned(false);
           virtualizer.scrollToIndex(index, {
             align: options?.align ?? "start",
@@ -174,19 +182,16 @@ export function VirtualTranscript({
       ) ?? null;
     setViewport(el);
     if (!el || !body.current) return;
-    const measureMargin = () =>
-      setMargin(
-        body.current!.getBoundingClientRect().top -
-          el.getBoundingClientRect().top +
-          el.scrollTop,
-      );
+    const readMargin = () => body.current!.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    let contentMargin = readMargin();
+    const measureMargin = () => {contentMargin = readMargin(); setMargin(contentMargin);};
     measureMargin();
     let height = el.clientHeight;
     let contentHeight = body.current.offsetHeight;
     let frame = 0;
     const observer = new ResizeObserver(() => {
       const nextContentHeight = body.current!.offsetHeight;
-      if (height === el.clientHeight && contentHeight === nextContentHeight) return;
+      if (height === el.clientHeight && contentHeight === nextContentHeight && Math.abs(contentMargin - readMargin()) < 0.5) return;
       const follow = pinned.current;
       height = el.clientHeight;
       contentHeight = nextContentHeight;
@@ -201,6 +206,7 @@ export function VirtualTranscript({
     });
     observer.observe(el);
     observer.observe(body.current);
+    if (body.current.parentElement) observer.observe(body.current.parentElement);
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, [jump]);
   const previousUser = useRef(lastUserId);
@@ -210,27 +216,16 @@ export function VirtualTranscript({
     // Initial open and own sends position directly; asynchronous measurements keep the end anchored.
     // A local echo moving into the Host queue exposes an older last user; it is not another send.
     const userAdded = previousUser.current !== lastUserId && lastUserId !== null && !previousKeys.current.includes(lastUserId);
-    if (userAdded || pinned.current) jump();
+    if ((userAdded && !history?.gap) || pinned.current) jump();
     previousUser.current = lastUserId;
-  }, [viewport, loading, lastUserId, jump]);
+  }, [viewport, loading, lastUserId, jump, Boolean(history?.gap)]);
   useEffect(() => {
     const valid = new Set(rowIds);
     for (const id of store.keys()) if (!valid.has(id)) store.delete(id);
-    for (const key of virtualizer.itemSizeCache.keys())
-      if (!valid.has(String(key))) virtualizer.itemSizeCache.delete(key);
-    if (previousKeys.current.some((id) => !valid.has(id))) parseCache.clear();
     previousKeys.current = rowIds;
-  }, [rowIds, store, virtualizer, parseCache]);
+  }, [rowIds, store]);
   useEffect(() => {
     if (!viewport) return;
-    const interact = () => { interactionVersion.current++; };
-    const unpin = (e: WheelEvent) => {
-      interact();
-      if (e.deltaY < 0) {
-        virtualizer.cancelScroll();
-        setPinned(false);
-      }
-    };
     const retain = () => {
       const selection = window.getSelection();
       const rowOf = (node: Node | null) => {
@@ -253,24 +248,15 @@ export function VirtualTranscript({
         prev.join("\0") === next.join("\0") ? prev : next,
       );
     };
-    viewport.addEventListener("wheel", unpin, { passive: true });
-    const scrollRoot = viewport.closest("[data-transcript-scroll]") ?? viewport;
-    scrollRoot.addEventListener("pointerdown", interact, { passive: true });
-    scrollRoot.addEventListener("touchstart", interact, { passive: true });
-    scrollRoot.addEventListener("keydown", interact);
     viewport.addEventListener("focusin", retain);
     viewport.addEventListener("focusout", retain);
     document.addEventListener("selectionchange", retain);
     return () => {
-      viewport.removeEventListener("wheel", unpin);
-      scrollRoot.removeEventListener("pointerdown", interact);
-      scrollRoot.removeEventListener("touchstart", interact);
-      scrollRoot.removeEventListener("keydown", interact);
       viewport.removeEventListener("focusin", retain);
       viewport.removeEventListener("focusout", retain);
       document.removeEventListener("selectionchange", retain);
     };
-  }, [viewport, setPinned, virtualizer]);
+  }, [viewport]);
   const bindBody = useCallback(
     (node: HTMLDivElement | null) => {
       body.current = node;

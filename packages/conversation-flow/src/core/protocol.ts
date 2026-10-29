@@ -39,9 +39,9 @@ export type FlowSnapshotView = {
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
   /** Negotiated active window; older items remain available through history paging. */
-  history?: {start:number;total:number};
+  history?: {start:number;total:number;gap?:{start:number;end:number;beforeId:string};continuation?:{questionId:string|null}};
 };
-export type FlowHistoryPage = {conversationId:string;generation:number;revision:number;start:number;end:number;total:number;snapshot:FlowSnapshotView};
+export type FlowHistoryPage = {conversationId:string;generation:number;revision:number;start:number;end:number;total:number;snapshot:FlowSnapshotView;continuation?:{questionId:string|null;earlier:boolean;later:boolean}};
 
 export type FlowInputView = {
   workflow?: {invocationId:string;workflowId?:string;workflowRunId?:string};

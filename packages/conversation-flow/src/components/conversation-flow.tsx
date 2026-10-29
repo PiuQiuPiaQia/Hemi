@@ -121,7 +121,12 @@ function ConversationFlowBody({
       if (task.toolCallId) map.set(task.toolCallId, task);
     return map;
   }, [taskSnaps]);
-  const entries = useMemo(() => groupStageBriefs(items), [items]);
+  const entries = useMemo(() => {
+    const gap = state?.history?.gap;
+    const split = gap ? items.findIndex(item => item.id === gap.beforeId || item.flow?.itemId === gap.beforeId) : -1;
+    if (split < 0) return groupStageBriefs(items);
+    return [...groupStageBriefs(items.slice(0, split)), {type: 'gap' as const, key: '__history-gap'}, ...groupStageBriefs(items.slice(split))];
+  }, [items, state?.history?.gap?.beforeId]);
   const copies = useMemo(() => replyCopyTargets(items), [items]);
   const messageById = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
@@ -131,7 +136,7 @@ function ConversationFlowBody({
   const rowIds = useMemo(
     () => [
       ...entries.map((entry) =>
-        entry.type === "stages" ? entry.key : entry.item.id,
+        entry.type === "item" ? entry.item.id : entry.key,
       ),
       ...(state?.interimText ? ["__interim"] : []),
     ],
@@ -151,7 +156,7 @@ function ConversationFlowBody({
       scrollToBottom: (options) => virtual.current?.scrollToBottom(options),
       scrollToMessage: async (id, options) => {
         const row = entries.findIndex((entry) =>
-          entry.type === "stages"
+          entry.type === "gap" ? false : entry.type === "stages"
             ? entry.items.some((item) => item.id === id)
             : entry.item.id === id,
         );
@@ -269,9 +274,10 @@ function ConversationFlowBody({
           </p>
         </article>
       );
+    if (entry.type === 'gap') return state?.history ? <HistoryLoader history={state.history} gap/> : null;
     const item = entry.type === "stages" ? entry.items[0] : entry.item;
     const previous = entries[index - 1];
-    const prev = previous
+    const prev = previous && previous.type !== "gap"
       ? previous.type === "stages"
         ? previous.items[0]
         : previous.item
@@ -473,9 +479,11 @@ function ConversationFlowBody({
               onPinnedChange={setPinned}
               lastUserId={lastUser}
               loading={Boolean(state?.loading)}
+              history={state?.history}
               getRowText={(index, saved) => {
                 const entry = entries[index];
                 if (!entry) return state?.interimText ?? "";
+                if (entry.type === "gap") return "［中间消息尚未加载］";
                 if (entry.type === "stages")
                   return entry.items
                     .map((item) => markdownPlainText(item.text))

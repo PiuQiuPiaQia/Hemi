@@ -16,31 +16,47 @@ function viewFor(snapshot, timeline, start, total) {
     permissions:Object.fromEntries(Object.entries(snapshot.permissions ?? {}).filter(([,value])=>value.status==='pending'||runs.has(value.runId)||!value.status)),
     history:{start,total}};
 }
-export function projectFlowWindow(snapshot, {limit=32,maxBytes=256*1024,start=snapshot.history?.start??0,total=snapshot.history?.total??snapshot.timeline.length}={}) {
-  const end=start+snapshot.timeline.length;
-  const endCount=Math.max(1,Math.min(limit,snapshot.timeline.length));
-  let low=1,high=endCount,keep=endCount;
-  let offset=Math.max(0,snapshot.timeline.length-keep),timeline=snapshot.timeline.slice(offset);
-  let view=viewFor(snapshot,timeline,start+offset,total);
-  // The byte budget is soft for one oversized row; active output stays visible.
-  if(timeline.length>1 && bytes(view)>maxBytes) {
-    keep=1;
-    while(low<=high){const middle=Math.floor((low+high)/2),candidate=snapshot.timeline.slice(-middle);
-      const candidateView=viewFor(snapshot,candidate,end-middle,total);
-      if(bytes(candidateView)<=maxBytes){keep=middle;low=middle+1;}else high=middle-1;
+// Row count is a target; bytes and a 100-row ceiling bound oversized QA groups.
+// Normal pages begin with a question. A larger group explicitly continues across pages.
+function rangeView(snapshot, end, limit, maxBytes, offset = 0, total = snapshot.timeline.length) {
+  let start = Math.max(0, end - Math.max(1, Math.min(100, limit)));
+  let view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);
+  if (end - start > 1 && bytes(view) > maxBytes) {
+    let low = 1, high = end - start, keep = 1;
+    while (low <= high) {
+      const count = Math.floor((low + high) / 2), candidate = viewFor(snapshot, snapshot.timeline.slice(end - count, end), offset + end - count, total);
+      if (bytes(candidate) <= maxBytes) {keep = count; low = count + 1;} else high = count - 1;
     }
-    offset=snapshot.timeline.length-keep;timeline=snapshot.timeline.slice(offset);view=viewFor(snapshot,timeline,start+offset,total);
+    start = end - keep; view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);
   }
-  return {...view,history:{start:timeline.length?start+offset:end,total}};
+  if (start > 0 && snapshot.timeline[start]?.kind !== 'user') {
+    let question = start - 1;
+    while (question >= Math.max(0, end - 100) && snapshot.timeline[question].kind !== 'user') question--;
+    if (question >= 0 && snapshot.timeline[question].kind === 'user' && end - question <= 100) {
+      const whole = viewFor(snapshot, snapshot.timeline.slice(question, end), offset + question, total);
+      if (bytes(whole) <= maxBytes) {start = question; view = whole;}
+    }
+    if (snapshot.timeline[start]?.kind !== 'user') {
+      let nextQuestion = start;
+      while (nextQuestion < end && snapshot.timeline[nextQuestion].kind !== 'user') nextQuestion++;
+      if (nextQuestion < end) {start = nextQuestion; view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);}
+    }
+  }
+  if (view.timeline.length && view.timeline[0].kind !== 'user') {
+    view.history.continuation = {questionId: view.timeline[0].afterInputId ?? snapshot.history?.continuation?.questionId ?? null};
+  }
+  return view;
+}
+export function projectFlowWindow(snapshot, {limit=32,maxBytes=256*1024,start=snapshot.history?.start??0,total=snapshot.history?.total??snapshot.timeline.length}={}) {
+  return rangeView(snapshot, snapshot.timeline.length, limit, maxBytes, start, total);
 }
 export function flowHistoryPage(snapshot, {before,generation,limit=32,maxBytes=256*1024}={}) {
   if (generation!==snapshot.generation || !Number.isSafeInteger(before) || before<0 || before>snapshot.timeline.length)
     throw Object.assign(new Error('历史版本已变化，请重新同步后读取。'),{code:'conflict'});
-  const end=before;let start=Math.max(0,end-Math.max(1,Math.min(100,limit)));
-  let view=viewFor(snapshot,snapshot.timeline.slice(start,end),start,snapshot.timeline.length);
-  // Progress even when one individual item is larger than a normal page.
-  while(end-start>1 && bytes(view)>maxBytes){start++;view=viewFor(snapshot,snapshot.timeline.slice(start,end),start,snapshot.timeline.length);}
-  return {conversationId:snapshot.conversationId,generation:snapshot.generation,revision:snapshot.revision,start,end,total:snapshot.timeline.length,snapshot:view};
+  const view = rangeView(snapshot, before, limit, maxBytes), start = view.history.start;
+  const questionId = view.timeline[0]?.kind === 'user' ? view.timeline[0].id : view.history.continuation?.questionId ?? null;
+  return {conversationId:snapshot.conversationId,generation:snapshot.generation,revision:snapshot.revision,start,end:before,total:snapshot.timeline.length,snapshot:view,
+    ...(view.history.continuation || snapshot.timeline[before]?.kind === 'assistant' ? {continuation:{questionId,earlier:Boolean(view.history.continuation),later:snapshot.timeline[before]?.kind === 'assistant'}} : {})};
 }
 function diff(previous,next) {
   if(previous.generation!==next.generation)return {kind:'snapshot',snapshot:next};

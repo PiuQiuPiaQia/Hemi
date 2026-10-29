@@ -43,7 +43,7 @@ SDK 的业务数据只有 props 一条输入路径。组件内部不导入会话
 | [WorkflowCard](../../src/renderer/src/windows/voice/workflow-card.tsx) | 直接查询 invocation、模型目录；保存草稿并执行操作；发送全局预览事件 | 提供完整 WorkflowView，查询与变更移到宿主，预览改为动作回调 |
 | [DeliverableCards](../../src/renderer/src/windows/voice/deliverable-card.tsx) | 直接解析路径、读取文件、查询程序并通过 IPC 打开 | 接 Host resources，保留视口附近读取、去重、图片比例和错误状态 |
 | [Markdown](../../src/renderer/src/shared/markdown.tsx) | 全局打开链接；部分图片读取与应用登记文件绑定 | 改为 Host 接口；保留现有 Markdown 解析、链接边界处理和失败占位 |
-| [VirtualTranscript](../../src/renderer/src/windows/voice/virtual-transcript.tsx) | 向上查找应用 ScrollArea，依赖 Markdown 缓存与跨行复制 | SDK 自有唯一滚动根；其余算法保留，焦点和选择事件按实例过滤 |
+| [VirtualTranscript](../../packages/conversation-flow/src/components/virtual-transcript.tsx) | 向上查找应用 ScrollArea，依赖 Markdown 缓存与跨行复制 | SDK 自有唯一滚动根；其余算法保留，焦点和选择事件按实例过滤 |
 | [TranscriptRowState](../../src/renderer/src/windows/voice/transcript-row-state.tsx)、[TranscriptBoundary](../../src/renderer/src/windows/voice/transcript-boundary.tsx) | 局部状态可复用；错误边界使用应用日志 | 保留按行和 part 的状态；诊断经可选回调交宿主，无隐式遥测 |
 | [flow-timeline-view](../../src/renderer/src/windows/voice/lib/flow-timeline-view.ts)、[flow-deliverables](../../src/renderer/src/windows/voice/lib/flow-deliverables.ts) | 将 Hemi 内部 flow、历史档案和任务结构投影为界面 | 保留为 Hemi 数据适配器，输出 SDK 类型；SDK 不理解档案格式 |
 | [FilePreviewPanel](../../src/renderer/src/windows/voice/file-preview.tsx)、[DocumentPreview](../../src/renderer/src/windows/voice/document-preview.tsx) | 预览 Tab、主进程查询、PDF／Office 资源与桌面布局 | 保留宿主，收到 preview.open 后沿用现有实现；不带进基础包 |

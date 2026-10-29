@@ -24,16 +24,16 @@ test('window patches preserve revisions and global history offsets through appen
  const frame=project({type:'flow',id:'long',change:{kind:'patch',conversationId:'long',generation:2,baseRevision:99,revision:100,changes:[]}});
  assert.equal(frame.change.kind,'snapshot');assert.equal(frame.change.snapshot.generation,2);
 });
-test('historical paging stays outside command execution and cancellation preserves the live state',async t=>{
- let signal,reads=0,commands=0,receive;
+test('history reads and commands run concurrently without cancelling each other',async t=>{
+ let signal,release,reads=0,commands=0,receive;
  const client=createConversation({scope:{environmentId:'test',conversationId:'long'},transport:{
   async fetchSnapshot(){reads++;return projectFlowWindow(full);},
   subscribe(_scope,onChange,_offline,online){receive=onChange;onChange({kind:'snapshot',snapshot:projectFlowWindow(full),epoch:'boot'});online();return()=>{};},
-  fetchHistory(_scope,_cursor,context){signal=context.signal;return new Promise(()=>{});},
+  fetchHistory(_scope,cursor,context){signal=context.signal;return new Promise(resolve=>release=()=>resolve(flowHistoryPage(full,cursor)));},
   async command(){commands++;return {ok:true};}
  }});t.after(()=>client.dispose());await client.start();const history=client.loadHistory();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(client.getSnapshot().history.loading,true);assert.equal((await client.sendCommand({type:'resumeQueue'})).ok,true);await history;
- assert.equal(signal.aborted,true);assert.equal(commands,1);assert.equal(reads,0);assert.equal(client.getSnapshot().connection,'online');
+ assert.equal(client.getSnapshot().history.loading,true);assert.equal((await client.sendCommand({type:'resumeQueue'})).ok,true);assert.equal(signal.aborted,false);release();await history;
+ assert.equal(signal.aborted,false);assert.equal(client.getSnapshot().history.error,'');assert.equal(commands,1);assert.equal(reads,0);assert.equal(client.getSnapshot().connection,'online');
  receive({kind:'snapshot',snapshot:{...projectFlowWindow(full),revision:0},epoch:'new-boot'});assert.equal(client.getSnapshot().snapshot.revision,0);
 });
 test('loaded history merges with live heads without duplicating rows or caching the full history',async t=>{

@@ -3,6 +3,7 @@ import { createDraftPersistence, type ConversationDraftStorage, type Conversatio
 import { createFlowReplica, type ReplicaConnection } from './flow-replica.js';
 import {createSnapshotPersistence} from './snapshot-persistence.js';
 import {projectFlowWindow} from './flow-window.mjs';
+import {createHistoryView} from './history-view.js';
 import type { FlowChangeView, FlowCommandResult, FlowSnapshotView, FlowHistoryPage } from './protocol.js';
 
 export interface ConversationOperation {
@@ -47,7 +48,7 @@ export interface ConversationClientState {
   error: string;
   /** Offline history is optional; cache failures never block conversation operations. */
   cacheNotice?: string;
-  history?: {hasMore:boolean;loading:boolean;error:string};
+  history?: {hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number}};
 }
 
 export function createConversation({ scope, transport, storage, lifecycle, makeId = () => crypto.randomUUID(), requestTimeoutMs = 15000, pollIntervalMs = transport.subscribe ? 0 : 2000 }: {
@@ -82,18 +83,19 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   const recording = new Set<string>();
   const tokenSubmissions=new Map<string,Promise<FlowCommandResult>>();
   const draftSubmissions = new Map<number, Promise<FlowCommandResult>>();
-  let visible:FlowSnapshotView|null=null, authorityEpoch:string|undefined;
-  let historyRead:AbortController|null=null;
-  function show(head:FlowSnapshotView) {
-    const previous=visible;
-    if(previous&&previous.generation!==head.generation){historyRead?.abort();historyRead=null;}
-    const start=head.history?.start??0, previousStart=previous?.history?.start??0;
-    if(previous && head.history && previous.generation===head.generation && start>=previousStart && start<=previousStart+previous.timeline.length) {
-      const prefix=previous.timeline.slice(0,start-previousStart);
-      visible={...head,timeline:[...prefix,...head.timeline],history:{start:previousStart,total:head.history.total},
-        runs:{...previous.runs,...head.runs},tasks:{...previous.tasks,...head.tasks},artifacts:{...previous.artifacts,...head.artifacts},permissions:head.permissions};
-    } else visible=head;
-    update({snapshot:visible,history:{hasMore:Boolean(transport.fetchHistory&&(visible.history?.start??0)>0),loading:Boolean(historyRead),error:''}});
+  const history = createHistoryView();
+  let authorityEpoch: string | undefined;
+  let historyRead: AbortController | null = null;
+  function cancelHistory() {historyRead?.abort(); historyRead = null; history.endRead();}
+  function publishHistory(error = state.history?.error ?? '', target = state.history?.target) {
+    const snapshot = history.snapshot;
+    update({snapshot, history: {hasMore: Boolean(transport.fetchHistory && (snapshot?.history?.start ?? 0) > 0), loading: Boolean(historyRead), error, target, continuation: Boolean(snapshot?.history?.continuation), gap: snapshot?.history?.gap ? {beforeId: snapshot.history.gap.beforeId, remaining: snapshot.history.gap.end - snapshot.history.gap.start} : undefined}});
+  }
+  function show(head: FlowSnapshotView) {
+    const changed = !history.snapshot || history.snapshot.generation !== head.generation;
+    if (changed) {cancelHistory();}
+    history.head(head);
+    publishHistory(changed ? '' : state.history?.error);
   }
   const subscriptions: Array<() => void> = [];
   function update(next: Partial<ConversationClientState>) {
@@ -307,8 +309,6 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   }
   async function submit(command: Record<string, unknown>, draftRevision?: number, draftToken?: string): Promise<FlowCommandResult> {
     if (disposed) return { ok: false, code: 'cancelled' };
-    historyRead?.abort();historyRead=null;
-    if(state.history?.loading)update({history:{...state.history,loading:false}});
     const frozen = structuredClone(transport.prepareCommand?.(command) ?? command);
     const current = state.snapshot;
     if(frozen.type==='stop' && frozen.targetRunId===undefined)frozen.targetRunId=current?.activeRunId??null;
@@ -348,7 +348,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (transport.subscribe) subscribe();
     if (lifecycle) subscriptions.push(lifecycle.subscribe(event => {
       suspended = event === 'suspend' || event === 'offline';
-      if (suspended) { replica.suspend(); update({ connection: 'offline' }); void persistence?.flush(); void checkpoints?.flush(); }
+      if (suspended) { cancelHistory(); publishHistory(''); replica.suspend(); update({ connection: 'offline' }); void persistence?.flush(); void checkpoints?.flush(); }
       else if (hydrated) void recover().catch(() => {});
     }));
     const restoreCache = storage?.snapshots ? storage.snapshots.load(identity).then(cached => {
@@ -368,28 +368,29 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
       if (suspended || disposed) return;
       const source = change.kind === 'snapshot' ? change.snapshot?.conversationId : change.conversationId;
       if (source !== identity.conversationId) return;
-      if(change.kind==='snapshot'&&change.epoch&&change.epoch!==authorityEpoch){authorityEpoch=change.epoch;visible=null;historyRead?.abort();historyRead=null;}
-      if(change.kind==='patch'&&visible&&change.generation===visible.generation&&change.baseRevision===visible.revision){
-        const changed=new Map<string,FlowSnapshotView['timeline'][number]>();
-        for(const group of change.changes)for(const patch of group.kind==='multi'?group.changes as Array<Record<string,unknown>>:[group])
-          if(patch.kind==='item-updated'){const item=patch.item as FlowSnapshotView['timeline'][number];changed.set(item.kind==='user'?item.id:item.itemId,item);}
-        if(changed.size)visible={...visible,timeline:visible.timeline.map(item=>changed.get(item.kind==='user'?item.id:item.itemId)??item)};
+      if (change.kind === 'snapshot' && change.epoch && change.epoch !== authorityEpoch) {
+        authorityEpoch = change.epoch; history.reset(); cancelHistory();
       }
+      history.update(change);
       subscriptionLive = true; void replica.resume(false); replica.receive(change);
       update({connection: 'online'});
       if (hydrated) void reconcileUnknown().then(flushQueue);
     }, () => {
       if (disposed || suspended) return;
+      cancelHistory(); publishHistory('');
       subscriptionLive = false; replica.suspend(); update({connection: 'offline', synchronization: 'stale'});
     }, () => {
       if (disposed || suspended) return;
-      subscriptionLive = true; void replica.resume(false); replica.connected(); update({connection: 'online'});
+      subscriptionLive = true; void replica.resume(false); replica.connected();
+      if (state.history?.error === '连接恢复后可继续加载历史消息。') publishHistory('');
+      update({connection: 'online'});
       if (hydrated) void reconcileUnknown().then(flushQueue);
     });
   }
   async function performRecovery() {
     suspended = false; await initialize();
     if (!transport.subscribe) {await replica.resume(); await reconcileUnknown(); await flushQueue(); return;}
+    cancelHistory(); publishHistory('');
     replica.suspend(); void replica.resume(false);
     update({connection: 'connecting', synchronization: 'syncing'});
     const ready = new Promise<void>((resolve, reject) => {
@@ -417,6 +418,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (poll) clearInterval(poll); poll = null;
     if (reconcileTimer) clearTimeout(reconcileTimer); reconcileTimer = null;
     if (catchup) clearTimeout(catchup); catchup = null;
+    cancelHistory();
     controllers.forEach(controller => controller.abort()); listeners.clear();
   };
   return {
@@ -436,24 +438,21 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     retain() { retains += 1; void start(); let released = false; return () => { if (released) return; released = true; retains -= 1; queueMicrotask(() => { if (!retains) dispose(); }); }; },
     refresh: recover,
-    async loadHistory() {
-      const current=state.snapshot,before=current?.history?.start;
-      if(!transport.fetchHistory||!current||!before||historyRead||state.connection!=='online')return;
-      const controller=new AbortController();historyRead=controller;
+    async loadHistory(target: 'older' | 'gap' = 'older') {
+      const current=history.snapshot,before=target === 'gap' ? current?.history?.gap?.end : current?.history?.start;
+      if (!transport.fetchHistory || !current || !before || historyRead) return;
+      if (state.connection !== 'online') {publishHistory('连接恢复后可继续加载历史消息。', target); return;}
+      const controller=new AbortController();historyRead=controller; history.beginRead();
       const epoch=authorityEpoch;
-      update({history:{hasMore:true,loading:true,error:''}});
+      publishHistory('', target);
       try {
         const page=await request(signal=>transport.fetchHistory!(identity,{before,generation:current.generation},{signal}),controller.signal);
-        const latest=state.snapshot;
-        if(controller.signal.aborted||disposed||epoch!==authorityEpoch||!latest||latest.generation!==page.generation)return;
-        if(page.conversationId!==identity.conversationId||page.end!==before||page.start<0||page.start>=page.end||page.snapshot.timeline.length!==page.end-page.start||latest.history?.start!==before)throw new Error('Invalid history page');
-        visible={...latest,timeline:[...page.snapshot.timeline,...latest.timeline],history:{start:page.start,total:latest.history.total},
-          runs:{...page.snapshot.runs,...latest.runs},tasks:{...page.snapshot.tasks,...latest.tasks},artifacts:{...page.snapshot.artifacts,...latest.artifacts},permissions:latest.permissions};
-        update({snapshot:visible,history:{hasMore:page.start>0,loading:false,error:''}});
+        if (controller.signal.aborted || disposed || epoch !== authorityEpoch) return;
+        if (history.prepend(page, before, target)) publishHistory('', target);
       } catch {
-        if(!controller.signal.aborted&&!disposed)update({history:{hasMore:true,loading:false,error:'历史消息暂时未能加载，请重试。'}});
+        if (!controller.signal.aborted && !disposed && epoch === authorityEpoch) publishHistory('历史消息暂时未能加载，请重试。', target);
       } finally {
-        if(historyRead===controller){historyRead=null;if(state.history?.loading)update({history:{...state.history,loading:false}});}
+        if(historyRead===controller){historyRead=null;history.endRead();if(state.history?.loading)update({history:{...state.history,loading:false}});}
       }
     },
     flushQueue, flushDraft: () => persistence?.flush() ?? Promise.resolve(), flushSnapshot: () => checkpoints?.flush() ?? Promise.resolve(),
