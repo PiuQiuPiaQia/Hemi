@@ -140,7 +140,7 @@ test('clipReport：按码点截断并报告总长', () => {
 
 test('057 回归：register_delivery 声明随终态落任务档案 deliverables（重启后引用候选/预览才拿得到）', async () => {
   const { manager, fakes, history } = managerWith();
-  const pending = manager.spawn({ role: roles.get('fixer'), prompt: '创建 note.txt 并声明交付', description: '创建 note.txt', conversationId: 'c1' });
+  const spawned = await manager.spawn({ role: roles.get('fixer'), prompt: '创建 note.txt 并声明交付', description: '创建 note.txt', conversationId: 'c1' });
   await tick();
   await tick();
   fakes[0].emit('progress', { kind: 'tool-start', tool: 'write', toolCallId: 'tc-1', args: { path: '/tmp/note.txt' } });
@@ -148,15 +148,17 @@ test('057 回归：register_delivery 声明随终态落任务档案 deliverables
   fakes[0].emit('progress', { kind: 'tool-start', tool: 'register_delivery', toolCallId: 'tc-2', args: { files: [{ path: '/tmp/note.txt', description: '说明文件' }] } });
   fakes[0].emit('progress', { kind: 'tool-end', tool: 'register_delivery', toolCallId: 'tc-2', args: { files: [{ path: '/tmp/note.txt', description: '说明文件' }] }, isError: false });
   fakes[0].finish(done('已创建并声明'));
-  const outcome = await pending;
-  assert.equal(outcome.result.outcome, 'complete');
+  const result = await manager.waitFor(spawned.taskId);
+  assert.equal(result.outcome, 'complete');
   const [record] = [...history.records.values()];
   assert.ok(record.deliverables?.some((item) => item.path === '/tmp/note.txt' && item.kind === 'file'), 'deliverables 应含声明文件');
 });
 
-test('前台派单：阻塞到交付，报告作为结果返回；终态入档、快照带角色', async () => {
+test('统一受理：前台派单立即返回 accepted，报告经 waitFor 回到派单方；终态入档、快照带角色', async () => {
   const { manager, fakes, history } = managerWith();
-  const pending = manager.spawn({ role: roles.get('explorer'), prompt: '找出所有发布脚本', description: '找发布脚本', conversationId: 'c1' });
+  const spawned = await manager.spawn({ role: roles.get('explorer'), prompt: '找出所有发布脚本', description: '找发布脚本', conversationId: 'c1' });
+  assert.equal(spawned.ok, true);
+  assert.equal(spawned.background, true, '统一受理：前台派单也不阻塞 SDK 回合');
   await tick();
   await tick();
   assert.equal(fakes.length, 1);
@@ -166,12 +168,10 @@ test('前台派单：阻塞到交付，报告作为结果返回；终态入档�
   assert.equal(running.phase, 'running');
   assert.equal(running.taskText, '找发布脚本');
   fakes[0].finish(done('scripts/publish.mjs:12'));
-  const outcome = await pending;
-  assert.equal(outcome.ok, true);
-  assert.equal(outcome.background, false);
-  assert.equal(outcome.result.outcome, 'complete');
-  assert.equal(outcome.result.report, 'scripts/publish.mjs:12');
-  assert.equal(outcome.result.alias, 'explorer-1');
+  const result = await manager.waitFor(spawned.taskId);
+  assert.equal(result.outcome, 'complete');
+  assert.equal(result.report, 'scripts/publish.mjs:12');
+  assert.equal(result.alias, 'explorer-1');
   assert.equal(history.records.get('rec-1').finished.outcome, 'complete');
   assert.equal(manager.snapshot().tasks[0].resultText, 'scripts/publish.mjs:12');
 });
@@ -194,28 +194,29 @@ test('后台派单：立刻返回 id，终态经 onTerminal 通知（带对话 i
 
 test('续用：同角色已结束的会话再 prompt；运行中/跨角色/跨对话拒绝', async () => {
   const { manager, fakes } = managerWith();
-  const first = manager.spawn({ role: roles.get('explorer'), prompt: '第一问', conversationId: 'c3' });
+  const first = await manager.spawn({ role: roles.get('explorer'), prompt: '第一问', conversationId: 'c3' });
   await tick(); await tick();
   const busy = await manager.spawn({ role: roles.get('explorer'), prompt: '插队', sessionId: 'explorer-1', conversationId: 'c3' });
   assert.equal(busy.ok, false);
   assert.match(busy.error, /还在运行/);
   fakes[0].finish(done('答一'));
-  await first;
+  const firstResult = await manager.waitFor(first.taskId);
+  assert.equal(firstResult.report, '答一');
   const wrongRole = await manager.spawn({ role: roles.get('oracle'), prompt: 'x', sessionId: 'explorer-1', conversationId: 'c3' });
   assert.match(wrongRole.error, /不能当 oracle 续用/);
   const wrongConv = await manager.spawn({ role: roles.get('explorer'), prompt: 'x', sessionId: 'explorer-1', conversationId: 'other' });
   assert.match(wrongConv.error, /不属于当前对话/);
-  const again = manager.spawn({ role: roles.get('explorer'), prompt: '第二问', sessionId: 'explorer-1', conversationId: 'c3' });
+  const again = await manager.spawn({ role: roles.get('explorer'), prompt: '第二问', sessionId: 'explorer-1', conversationId: 'c3' });
   await tick();
   assert.equal(fakes.length, 1, '续用不新建会话');
   assert.deepEqual(fakes[0].prompts, ['第一问', '第二问']);
   fakes[0].finish(done('答二'));
-  const second = await again;
-  assert.equal(second.result.report, '答二');
+  const secondResult = await manager.waitFor(again.taskId);
+  assert.equal(secondResult.report, '答二');
   assert.equal(manager.snapshot().tasks[0].runs, 1, '旧任务不能被续用覆盖');
   assert.equal(manager.snapshot().tasks[0].resultText, '答一');
   assert.equal(manager.snapshot().tasks[1].runs, 2);
-  assert.notEqual(second.taskId, (await first).taskId);
+  assert.notEqual(again.taskId, first.taskId);
   assert.equal(manager.snapshot().tasks[0].sessionRef, manager.snapshot().tasks[1].sessionRef);
 });
 
@@ -260,7 +261,7 @@ test('确认环：子 agent 的授权卡进快照，decide 回传选项；主 ag
 
 test('停止：stop 收口为 stopped，结果仍回到派单方；message 给运行中的子 agent 补充指令', async () => {
   const { manager, fakes } = managerWith();
-  const pending = manager.spawn({ role: roles.get('fixer'), prompt: '长任务', conversationId: 'c6' });
+  const spawned = await manager.spawn({ role: roles.get('fixer'), prompt: '长任务', conversationId: 'c6' });
   await tick(); await tick();
   const steer = await manager.message('fixer-1', '只改 README');
   assert.equal(steer.ok, true);
@@ -268,8 +269,8 @@ test('停止：stop 收口为 stopped，结果仍回到派单方；message 给�
   assert.equal(manager.snapshot().tasks[0].steeredCount, 1);
   const stopped = await manager.stop('fixer-1');
   assert.equal(stopped.stopped, 1);
-  const outcome = await pending;
-  assert.equal(outcome.result.outcome, 'stopped');
+  const result = await manager.waitFor(spawned.taskId);
+  assert.equal(result.outcome, 'stopped');
   const late = await manager.message('fixer-1', '还在吗');
   assert.equal(late.ok, false);
 });
@@ -291,13 +292,13 @@ test('status 与 waitFor：只读视图按对话过滤；waitFor 等到终态返
 
 test('denied/blocked：门控拒绝且没有正文时按对应终态收口', async () => {
   const { manager, fakes } = managerWith();
-  const pending = manager.spawn({ role: roles.get('fixer'), prompt: '删库', conversationId: 'c9' });
+  const spawned = await manager.spawn({ role: roles.get('fixer'), prompt: '删库', conversationId: 'c9' });
   await tick(); await tick();
   fakes[0].emit('progress', { kind: 'tool-start', tool: 'bash', args: { command: 'rm -rf /' } });
   fakes[0].emit('progress', { kind: 'tool-end', tool: 'bash', args: {}, isError: true, text: '禁止执行（删除根目录）' });
   fakes[0].finish({ texts: [], lastText: null, usages: [], toolNames: ['bash'], modelError: null, aborted: false });
-  const outcome = await pending;
-  assert.equal(outcome.result.outcome, 'blocked');
+  const result = await manager.waitFor(spawned.taskId);
+  assert.equal(result.outcome, 'blocked');
 });
 
 test('只读调研打开页面到阈值时宿主插话一次，提醒收手交付；执行角色不提醒', async () => {

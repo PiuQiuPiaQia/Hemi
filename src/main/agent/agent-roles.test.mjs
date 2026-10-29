@@ -50,15 +50,16 @@ test('路由段：只渲染可用角色；同输入逐字节一致（缓存前�
   assert.equal(buildRoutingSection(roles), all);
 });
 
-test('agent-tools：task 走 spawn，前台返回报告、后台返回 id；失败带 isError', async () => {
+test('agent-tools：task 走 spawn 统一受理返回 accepted；重复派单已完成回读报告；失败带 isError', async () => {
   const calls = [];
   const tools = createAgentTools({
     agents: ['explorer', 'fixer'],
     spawn: async (args) => {
       calls.push(args);
-      if (args.agent === 'fixer') return { ok: true, background: true, alias: 'fixer-2' };
+      if (args.agent === 'fixer') return { ok: true, background: true, taskId: 'rec-2', alias: 'fixer-2' };
       if (args.prompt === 'boom') return { ok: false, error: '上限' };
-      return { ok: true, background: false, result: { alias: 'explorer-1', agent: 'explorer', outcome: 'complete', report: 'R', truncated: false, toolCalls: 3, durationMs: 1200, fileChanges: [] } };
+      if (args.sessionId) return { ok: true, background: true, taskId: 'rec-1', alias: 'explorer-1', sessionRef: 'explorer-1', result: { alias: 'explorer-1', agent: 'explorer', outcome: 'complete', report: 'R', truncated: false, toolCalls: 3, durationMs: 1200, fileChanges: [] } };
+      return { ok: true, background: true, taskId: 'rec-9', alias: 'explorer-1', sessionRef: 'explorer-1' };
     },
     status: () => [],
     waitFor: async () => null,
@@ -72,15 +73,21 @@ test('agent-tools：task 走 spawn，前台返回报告、后台返回 id；失�
   assert.equal(/quality|defaultQuality|fast／standard／deep/.test(buildRoutingSection(loadRoles())), false);
   // 宿主工具都不标 sequential——否则同批 task 被串行化（探针 A2）。
   for (const tool of tools) assert.equal(tool.executionMode, undefined);
+  // 统一受理：新派单立即返回 accepted（结果沿完成事件回投，不随工具返回）。
   const fg = await byName.task.execute('id', { agent: 'explorer', description: '找', prompt: '找文件' });
-  assert.equal(JSON.parse(fg.content[0].text).summary, 'R');
-  assert.equal(JSON.parse(fg.content[0].text).session_id, 'explorer-1');
+  const accepted = JSON.parse(fg.content[0].text);
+  assert.equal(accepted.status, 'accepted');
+  assert.equal(accepted.taskId, 'rec-9');
+  assert.match(accepted.guidance, /完成事件/);
   const bg = await byName.task.execute('id', { agent: 'fixer', description: '改', prompt: '改', background: true });
   assert.equal(JSON.parse(bg.content[0].text).alias, 'fixer-2');
-  assert.equal(JSON.parse(bg.content[0].text).goalStatus, 'running');
   const bad = await byName.task.execute('id', { agent: 'explorer', description: 'x', prompt: 'boom' });
   assert.equal(bad.isError, true);
   assert.equal(calls[1].background, true);
+  // 重复派单已完成时回读既有结果，格式化成报告返回。
+  const again = await byName.task.execute('id', { agent: 'explorer', description: '找', prompt: '找文件', session_id: 'explorer-1' });
+  assert.equal(JSON.parse(again.content[0].text).summary, 'R');
+  assert.equal(JSON.parse(again.content[0].text).session_id, 'explorer-1');
 });
 
 test('formatSubagentResult：保留真实状态、缺口与报告引用，不重复注入长规则或性能流水账', () => {
