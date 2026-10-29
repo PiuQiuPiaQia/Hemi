@@ -33,7 +33,12 @@ export function TaskConversationFlow({ snap }: { snap: TaskStateSnapshot }) {
     streaming: snap.phase === 'running' && message.author === 'hemi' && index === list.length - 1 && !snap.activity?.phase.startsWith('waiting-'),
   })), [snap.conversation, snap.phase, snap.activity, snap.endedAt]);
   return (
-    <section ref={container} className="h25-process-conversation" aria-label="子 agent 对话流" data-task-conversation={id}>
+    <section
+      ref={container}
+      className="h25-process-conversation desktop-conversation-flow"
+      aria-label="子 agent 对话流"
+      data-task-conversation={id}
+    >
       <ConversationFlow
         scope={scope} messages={messages} host={host}
         active={appearance.activity.visible}

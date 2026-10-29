@@ -2309,6 +2309,28 @@ function activityIndicatorsScene(collapsed = false) {
 }
 
 const scenes: Record<string, () => React.ReactElement> = {
+  // Synthetic spacing regression: no session storage or model credentials.
+  'desktop-flow-spacing': () => {
+    const snap: TaskStateSnapshot = { ...baseTask, agent: 'fixer', agentTitle: '执行',
+      phase: 'terminal', outcome: 'complete', taskText: '继续发布修复版',
+      startedAt: now - 1_066_000, endedAt: now - 60_000 };
+    const text = 'v0.2.24 已发布完成，Release 与产物均已验收通过：\n\n- macOS 与 Windows 产物已核对。\n- 发布说明与版本号一致。';
+    return <VoiceScreen {...screenProps({ sessionState: 'idle', callActive: false,
+      currentConversationId: 'spacing-fixture', conversationTitle: '发布修复版 · 间距核对',
+      taskState: null, taskSnaps: taskSnapsOf(snap), transcripts: [
+        { id: 'spacing-user', author: 'user', text: '继续发布修复版', createdAt: now - 1_100_000 },
+        { id: 'spacing-task', author: 'hemi', kind: 'task', text: '', taskId: snap.taskId!, taskSnap: snap, createdAt: now - 1_066_000 },
+        { id: 'spacing-recovery', author: 'hemi', text: '', createdAt: now - 50_000,
+          recovery: { id: 'spacing-recovered', phase: 'recovered', attempt: 1, firstFailureAt: now - 55_000,
+            deadlineAt: now - 40_000, nextRetryAt: null, updatedAt: now - 50_000,
+            history: [{ at: now - 50_000, phase: 'recovered', attempt: 1, summary: '已恢复连接' }] } },
+        { id: 'spacing-reply', author: 'hemi', text, createdAt: now - 40_000, parts: [
+          { type: 'thinking', text: '核对版本、发布说明和产物后汇总结果。', startedAt: now - 45_000, endedAt: now - 41_000 },
+          { type: 'text', text },
+        ] },
+      ],
+    })} />;
+  },
   'subagent-conversation': () => <SubagentConversationFixture base={runningTask} render={snap => <VoiceScreen key={snap.taskId} {...screenProps({
     currentConversationId: 'conv-fixture', sessionState: 'idle', callActive: false, transcripts: taskThread(snap), taskSnaps: taskSnapsOf(snap), taskState: bundleOf(snap), initialProcessTaskKey: snap.taskId!,
   })} />} />,

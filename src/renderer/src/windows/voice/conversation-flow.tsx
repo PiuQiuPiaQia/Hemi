@@ -418,7 +418,7 @@ export function DesktopConversationFlow(props: Props) {
     [props.messages, props.models, presentations, queryKey],
   );
   return (
-    <div ref={container} className="contents">
+    <div ref={container} className="contents desktop-conversation-flow">
       <ConversationFlow
         scope={scope}
         messages={messages}

@@ -1,0 +1,47 @@
+/* Desktop-only rhythm. Do not put these overrides in the shared SDK: iOS/touch
+   owns its disclosure spacing separately. Keep typography and action rows intact. */
+.desktop-conversation-flow [data-hemi-conversation-flow] .h24-hemi-message {
+  margin-bottom: var(--sp-6);
+}
+
+/* The final answer is already separated by its copy/action row. */
+.desktop-conversation-flow [data-hemi-conversation-flow] [data-reply-end='true'] > .h24-hemi-message {
+  margin-bottom: 0;
+}
+
+/* Virtual rows are flex containers: continuation offsets must match the preceding
+   message's bottom margin, rather than pulling the next row over its content. */
+.desktop-conversation-flow [data-hemi-conversation-flow] .h24-hemi-message[data-continuation='true'] {
+  margin-top: calc(var(--sp-6) * -1);
+}
+
+.desktop-conversation-flow [data-hemi-conversation-flow] .h56-delegation {
+  margin-bottom: var(--sp-4);
+}
+
+/* The disclosure already has a 28px hit area. Trim its outer whitespace, not
+   its text or button padding. Keep a small separation before the answer. */
+.desktop-conversation-flow [data-hemi-conversation-flow] .turn-activity {
+  margin: var(--sp-4) 0 var(--sp-6);
+}
+
+.desktop-conversation-flow [data-hemi-conversation-flow] .h24-hemi-message[data-lead='true'] > .turn-activity:first-child {
+  margin-top: 0;
+}
+
+/* Recovered history is a quiet disclosure, not an active reconnection notice.
+   Waiting/offline/error actions retain their existing dimensions. */
+.desktop-conversation-flow [data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered'] {
+  padding-block: 0;
+}
+
+.desktop-conversation-flow [data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered'] .model-recovery-row {
+  min-height: 28px;
+}
+
+/* Preserve coarse-pointer targets on Windows touch-enabled PCs. */
+@media (pointer: coarse) {
+  .desktop-conversation-flow [data-hemi-conversation-flow] .model-recovery-notice[data-phase='recovered'] .model-recovery-row {
+    min-height: 44px;
+  }
+}
