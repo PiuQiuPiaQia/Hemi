@@ -67,11 +67,15 @@ test('real Bot/SDK automatically continues an unfinished answer under one input 
   assert.equal(f.requests.filter(body=>body.messages.some(message=>message.role==='system'&&String(message.content).includes(GOAL_CHECK_SYSTEM))).length,2);
 });
 
-test('shared request chunk exhausts, rolls forward durably, and preserves the original total budget', {timeout:45000}, async t=>{
+test('shared request chunk exhausts softly inside one round, completes after one review, and preserves the original total budget', {timeout:45000}, async t=>{
   const f=await fixture(t,'chunk',{maxRounds:5,maxRequests:20,maxRequestsPerRound:1});
   await f.send();await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length;});
   const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
-  assert.equal(root.status,'completed',JSON.stringify(root.goal));assert.equal(root.goal.phase,'complete');assert.equal(root.goal.verifications.length,2);assert.equal(root.goal.limitHistory.length,1);assert.equal(root.goal.requestOffset,1);assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');
+  assert.equal(root.status,'completed',JSON.stringify(root.goal));assert.equal(root.goal.phase,'complete');
+  assert.equal(root.goal.round,1,'软段边界下主模型单回合内跨段连续工作，不再强制分段续跑');
+  assert.equal(root.goal.verifications.length,1,'一次复盘即判定 complete');assert.equal(root.goal.verifications[0].status,'complete');
+  assert.equal(root.goal.requestOffset,0,'软放行不产生跨段偏移');assert.equal(root.goal.limitHistory,undefined,'未发生硬触顶落账');
+  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');
 });
 
 test('real Bot/SDK delivers a failing command to the main agent and closes blocked without an error notice', {timeout:45000}, async t=>{
