@@ -194,7 +194,7 @@ test('saveSession：新建落盘、无 tmp 残留、非法 id 抛错', () => {
     const result = store.saveSession({ id, turns: [turn('user', '帮我整理下载文件夹')] });
     assert.equal(result.ok, true);
     assert.equal(result.session.title, '帮我整理下载文件夹');
-    const files = readdirSync(dir);
+    const files = readdirSync(dir).filter((name) => name !== 'list-index.json');
     assert.deepEqual(files, [`${id}.json`]); // rename 原子替换：无 .tmp 残留
     assert.throws(() => store.saveSession({ id: '../evil', turns: [] }), /非法会话 ID/);
   } finally {
@@ -1102,4 +1102,61 @@ test('上下文容量落档：快照可读回、渲染层整表保存不冲掉�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// 060 列表索引：正文解析结果按 size+mtime 指纹缓存（内存＋list-index.json），
+// 列表刷新不再全量读盘；外部改动/损坏/删除经指纹失配自愈。
+test('列表索引：未变化会话走缓存，外部改动、损坏、删除与索引损坏均自愈', t => {
+  const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ dir });
+  store.saveSession({ id: 'conv-a', turns: [turn('user', '你好世界，这是第一个会话')], now: 10 });
+  store.saveSession({ id: 'conv-b', turns: [turn('user', '第二个会话')], now: 20 });
+
+  const first = store.listSessions();
+  assert.equal(first.sessions.length, 2);
+  assert.ok(existsSync(path.join(dir, 'list-index.json')), '首次列表生成磁盘索引');
+  // 二次列表（全缓存命中）结果一致
+  assert.deepEqual(store.listSessions().sessions, first.sessions);
+
+  // 重启后从磁盘索引加载，列表仍正确（免全量解析）
+  const restarted = createConversationStore({ dir });
+  assert.deepEqual(restarted.listSessions().sessions, first.sessions);
+
+  // 外部修改会话文件（绕过 store）→ 指纹失配 → 重读反映新标题
+  const external = JSON.parse(readFileSync(path.join(dir, 'conv-a.json'), 'utf8'));
+  external.title = '外部改的名字（内容变长保证 size 变化）';
+  writeFileSync(path.join(dir, 'conv-a.json'), JSON.stringify(external, null, 2), 'utf8');
+  assert.equal(store.listSessions().sessions.find(s => s.id === 'conv-a').title, external.title);
+
+  // 文件损坏 → corrupt 条目；内容不再变时连 corrupt 视图也走缓存
+  writeFileSync(path.join(dir, 'conv-b.json'), '{', 'utf8');
+  const corrupted = store.listSessions();
+  assert.equal(corrupted.sessions.find(s => s.id === 'conv-b').corrupt, true);
+  assert.deepEqual(store.listSessions().sessions.find(s => s.id === 'conv-b'),
+    corrupted.sessions.find(s => s.id === 'conv-b'));
+
+  // 删除后列表与索引不残留
+  store.deleteSession('conv-b');
+  assert.equal(store.listSessions().sessions.find(s => s.id === 'conv-b'), undefined);
+  const persisted = JSON.parse(readFileSync(path.join(dir, 'list-index.json'), 'utf8'));
+  assert.equal(persisted.entries.find(([id]) => id === 'conv-b'), undefined, '索引落盘无残留');
+
+  // 打开会话时的排序刷新走索引路径，结果正确
+  assert.equal(store.refreshOrderForOpen('conv-a').ok, true);
+  assert.deepEqual(store.reorderSessions(['conv-a']), { ok: true, count: 1 });
+});
+
+test('列表索引文件损坏时回退全量读，列表仍正确并重建索引', t => {
+  const dir = makeDir(); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConversationStore({ dir });
+  store.saveSession({ id: 'conv-x', turns: [turn('user', '内容')], now: 5 });
+  store.listSessions();
+  writeFileSync(path.join(dir, 'list-index.json'), 'not-json{', 'utf8');
+  const broken = createConversationStore({ dir });
+  const list = broken.listSessions();
+  assert.equal(list.sessions.length, 1);
+  assert.equal(list.sessions[0].id, 'conv-x');
+  assert.equal(list.sessions[0].title, store.getSession('conv-x').title);
+  const rebuilt = JSON.parse(readFileSync(path.join(dir, 'list-index.json'), 'utf8'));
+  assert.equal(rebuilt.version, 1, '损坏索引被重建');
 });

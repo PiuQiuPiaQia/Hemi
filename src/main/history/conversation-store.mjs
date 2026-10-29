@@ -10,6 +10,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -79,6 +80,13 @@ export function sanitizeUsageRecords(records) {
 /** 手动排序索引文件（024：侧栏拖拽排序持久化）。会话文件名均为 conv-*，
  * 该名不匹配会话 ID 正则，listSessions 读到会跳过，不会误当会话。 */
 const ORDER_FILE = 'order-index.json';
+
+/** 列表索引文件（060）：会话列表只需要标题/时间等元数据，但它们与全部对话
+ * 正文同文件。索引把每个会话的「解析结果指纹（size+mtime）→ 列表视图」缓
+ * 存到磁盘，列表刷新只做 stat 比对，未变化的正文不再读盘解析；重启后首屏
+ * 同样免全量解析。损坏/缺省即弃，全量重建自愈。 */
+const LIST_INDEX_FILE = 'list-index.json';
+const LIST_INDEX_VERSION = 1;
 
 const SESSION_ID_RE = /^conv-[a-z0-9-]+$/;
 
@@ -473,6 +481,51 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
   if (!dir) throw new Error('conversation-store 缺少存储目录');
   let storageError = null;
 
+  /** 060 列表索引：id -> { view, size, mtimeMs }。null＝尚未从磁盘加载。 */
+  let listIndex = null;
+  /** 内存索引已与磁盘索引文件不一致（写入/删除/重排失效过）：下次列表顺手落盘。 */
+  let listIndexDirty = false;
+
+  /** 会话文件指纹（size+mtime）；stat 失败（文件消失竞态）返回 null。 */
+  function statStamp(file) {
+    try {
+      const stat = statSync(file);
+      return { size: stat.size, mtimeMs: stat.mtimeMs };
+    } catch {
+      return null;
+    }
+  }
+
+  function loadListIndex() {
+    listIndex = new Map();
+    try {
+      const raw = JSON.parse(readFileSync(path.join(dir, LIST_INDEX_FILE), 'utf8'));
+      if (raw?.version !== LIST_INDEX_VERSION || !Array.isArray(raw.entries)) return;
+      for (const entry of raw.entries) {
+        const id = Array.isArray(entry) ? entry[0] : null;
+        const item = Array.isArray(entry) ? entry[1] : null;
+        if (typeof id !== 'string' || !SESSION_ID_RE.test(id)) continue;
+        if (!item || typeof item !== 'object' || !item.view || item.view.id !== id
+          || !Number.isFinite(item.size) || !Number.isFinite(item.mtimeMs)) continue;
+        listIndex.set(id, item);
+      }
+    } catch { /* 无索引或损坏：首次列表全量重建 */ }
+  }
+
+  /** 索引写盘失败（磁盘满等）只记日志：列表读取不依赖它，下次变化时重写。 */
+  function persistListIndex() {
+    try {
+      writeFileSync(path.join(dir, LIST_INDEX_FILE), JSON.stringify({ version: LIST_INDEX_VERSION, entries: [...listIndex] }), 'utf8');
+    } catch (error) {
+      log?.warn?.(`[conversation] 列表索引写入失败（下次列表将重建）：${error.message}`);
+    }
+  }
+
+  function invalidateListIndex(id) {
+    listIndex?.delete(id);
+    listIndexDirty = true;
+  }
+
   function sessionPath(id) {
     if (!SESSION_ID_RE.test(String(id))) {
       throw new Error(`非法会话 ID：${id}`);
@@ -486,6 +539,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     const tmp = `${target}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(record, null, 2), 'utf8');
     replaceSessionFile(tmp, target); // 同目录原子替换；重试 Windows 瞬态文件占用
+    invalidateListIndex(record.id); // 060：写后失效，列表刷新按新指纹重读
   }
 
   function readSessionFile(id) {
@@ -950,14 +1004,33 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
 
   /** 024 拖拽排序：全量写入手动顺序（渲染层发当前完整列表序）。只收存在的
    *  会话 id，去重保序；写入失败记 storageError 不抛。 */
+  /** 060 按指纹取列表视图：未变化走索引，指纹变了才读正文解析。返回 null＝
+   *  会话不存在；corrupt 视图带 corrupt:true。更新只进内存索引，落盘由
+   *  listSessions 批量做（低频调用点漏写无碍——指纹不匹配会自愈重读）。 */
+  function sessionView(id, stamp) {
+    const fingerprint = stamp ?? statStamp(sessionPath(id));
+    if (!fingerprint) return null;
+    if (listIndex === null) loadListIndex();
+    const cached = listIndex.get(id);
+    if (cached && cached.size === fingerprint.size && cached.mtimeMs === fingerprint.mtimeMs) return cached.view;
+    const record = readSessionFile(id);
+    if (!record) return null;
+    const view = record.corrupt
+      ? { id, title: '(记录损坏)', createdAt: 0, updatedAt: 0, turnCount: 0, corrupt: true }
+      : buildSessionView(record);
+    listIndex.set(id, { view, size: fingerprint.size, mtimeMs: fingerprint.mtimeMs });
+    listIndexDirty = true; // 重建的条目尚未落盘（listSessions 批量补写）
+    return view;
+  }
+
   function reorderSessions(ids) {
     const seen = new Set();
     const ordered = [];
     for (const id of Array.isArray(ids) ? ids : []) {
       const sessionId = String(id ?? '');
       if (!SESSION_ID_RE.test(sessionId) || seen.has(sessionId)) continue;
-      const record = readSessionFile(sessionId);
-      if (!record || record.corrupt) continue;
+      const view = sessionView(sessionId); // 060：存在性验证走索引，不读正文
+      if (!view || view.corrupt) continue;
       seen.add(sessionId);
       ordered.push(sessionId);
     }
@@ -975,8 +1048,8 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
 
   /** 用户打开时按真实更新时间重排普通会话，不改会话时间或置顶组的手动序。 */
   function refreshOrderForOpen(id) {
-    const record = readSessionFile(id);
-    if (!record || record.corrupt) return { ok: false, storageError: '会话不存在或已损坏' };
+    const view = sessionView(id); // 060：走索引验证，不读正文
+    if (!view || view.corrupt) return { ok: false, storageError: '会话不存在或已损坏' };
     const { sessions } = listSessions();
     const pinned = sessions.filter(session => session.pinned);
     const recent = sessions.filter(session => !session.pinned)
@@ -985,29 +1058,40 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
   }
 
   /** 列表：未进手动序的按更新时间新→旧在前（新会话置顶），手动序过的按用户顺序
-   *  稳定在后；损坏文件以 corrupt 条目殿后呈现，外来 JSON 直接跳过。 */
+   *  稳定在后；损坏文件以 corrupt 条目殿后呈现，外来 JSON 直接跳过。
+   *  060：正文解析结果按指纹（size+mtime）缓存（内存＋list-index.json），
+   *  未变化的会话不再读盘解析——列表刷新从 O(全量正文) 降到 O(stat)。 */
   function listSessions() {
-    let ids = [];
+    const stamps = new Map();
     try {
       mkdirSync(dir, { recursive: true });
-      ids = readdirSync(dir)
-        .filter((name) => name.endsWith('.json') && !name.includes('.tmp-') && name !== ORDER_FILE)
-        .map((name) => name.slice(0, -'.json'.length));
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith('.json') || name.includes('.tmp-') || name === ORDER_FILE || name === LIST_INDEX_FILE) continue;
+        const id = name.slice(0, -'.json'.length);
+        stamps.set(id, statStamp(path.join(dir, name)));
+      }
     } catch (error) {
       return { sessions: [], storageError: `会话目录不可读：${error.message}` };
     }
+    if (listIndex === null) loadListIndex();
+    const sessions = [];
+    let indexChanged = false;
+    for (const [id, stamp] of stamps) {
+      if (!stamp) continue; // stat 失败（消失竞态）：本轮跳过，下次列表自愈
+      const before = listIndex.get(id);
+      const view = sessionView(id, stamp);
+      if (listIndex.get(id) !== before) indexChanged = true; // 新建或指纹更新
+      if (view) sessions.push(view);
+    }
+    for (const id of [...listIndex.keys()]) {
+      if (!stamps.has(id)) { listIndex.delete(id); indexChanged = true; }
+    }
+    if (indexChanged || listIndexDirty) {
+      persistListIndex();
+      listIndexDirty = false;
+    }
     const manualIds = readOrderIds();
     const manualRank = new Map(manualIds.map((id, index) => [id, index]));
-    const sessions = [];
-    for (const id of ids) {
-      const record = readSessionFile(id);
-      if (!record) continue; // 非会话命名或文件消失：跳过
-      if (record.corrupt) {
-        sessions.push({ id, title: '(记录损坏)', createdAt: 0, updatedAt: 0, turnCount: 0, corrupt: true });
-        continue;
-      }
-      sessions.push(buildSessionView(record));
-    }
     sessions.sort((a, b) => {
       const ra = manualRank.has(a.id);
       const rb = manualRank.has(b.id);
@@ -1022,6 +1106,7 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
   function deleteSession(id) {
     try {
       rmSync(sessionPath(String(id ?? '')), { force: true });
+      invalidateListIndex(String(id ?? '')); // 060：删除后索引不残留
       return true;
     } catch (error) {
       storageError = `删除会话失败：${error.message}`;
