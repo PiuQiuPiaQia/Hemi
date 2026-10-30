@@ -28,7 +28,8 @@ import { ScopePopover } from '@/windows/voice/scope-popover';
 import { AccessAddDialog } from '@/windows/voice/access-add-dialog';
 import { RemoteFolderDialog } from '@/windows/voice/remote-folder-dialog';
 import { SettingsScreen } from '@/windows/voice/settings-screen';
-import { setModelProfilesFixtureState } from '@/windows/voice/model-profiles-section';
+import { ModelProfilesSection, setModelProfilesFixtureState } from '@/windows/voice/model-profiles-section';
+import { resetSubscriptionQuotaCache } from '@/windows/voice/lib/use-subscription-quota';
 import { setProviderImportFixtureState } from '@/windows/voice/newapi-import-section';
 import { SetupScreen } from '@/windows/voice/setup-screen';
 import { ConversationContextMenu } from '@/windows/voice/conversation-context-menu';
@@ -1831,6 +1832,63 @@ function stubModelV2(
     getRoleModels: async () => roleModels,
     saveRoleModel: async () => ({ ok: true, ...roleModels }),
   });
+}
+
+/**
+ * 066 订阅额度 fixtures：ChatGPT / GLM Coding Plan / Claude（不支持查询）三个订阅行。
+ * ?state=ok（默认）| low | unknown | unavailable | error | stale | slow；
+ * 每次桥调用记到 window.__quotaCalls，供生命周期脚本断言（Bot、卸载、轮询）。
+ */
+function stubSubscriptionQuota(state: string, extra: { environment?: 'bot' } = {}) {
+  const hour = 3_600_000;
+  const at = now;
+  const calls: Array<{ provider: string; force: boolean; at: number }> = [];
+  (window as unknown as { __quotaCalls: typeof calls }).__quotaCalls = calls;
+  const oauthProvider = (id: string, name: string, oauth: string, baseUrl: string, models: string[]) => ({
+    id, name, baseUrl, api: 'openai-responses' as const, oauthProvider: oauth as import('@/shared/types').OAuthProvider,
+    hasApiKey: true, keyStoredSecurely: true, updatedAt: at - 86_400_000,
+    models: models.map((model, index) => ({ id: `m-${index}`, modelKey: `${id}/m-${index}`, model, thinkingLevel: 'default' as const, supportsVision: false, visionModel: '' })),
+  });
+  const directory = {
+    version: 2 as const,
+    defaultModelId: 'mp-oauth-openai/m-0',
+    providers: [
+      oauthProvider('mp-oauth-openai', 'ChatGPT', 'openai', 'https://chatgpt.com/backend-api/codex', ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']),
+      oauthProvider('mp-oauth-bigmodel', 'GLM Coding Plan', 'bigmodel', 'https://open.bigmodel.cn/api/coding/paas/v4', ['glm-5.1', 'glm-4.6']),
+      oauthProvider('mp-oauth-anthropic', 'Claude', 'anthropic', 'https://api.anthropic.com', ['claude-sonnet-4.5']),
+      { id: 'mp-deep', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions' as const, hasApiKey: true, keyStoredSecurely: true, updatedAt: at,
+        models: [{ id: 'm-chat', modelKey: 'mp-deep/m-chat', model: 'deepseek-chat', thinkingLevel: 'default' as const, supportsVision: false, visionModel: '' }] },
+    ],
+  };
+  const views: Record<string, () => import('@/windows/voice/lib/subscription-quota').SubscriptionQuotaView> = {
+    openai: () => state === 'unavailable'
+      ? { provider: 'openai', status: 'unavailable', windows: [], fetchedAt: Date.now(), message: 'ChatGPT 暂时没有返回额度，稍后会自动重试' }
+      : { provider: 'openai', status: 'ok', fetchedAt: Date.now(), windows: [
+        { id: '5h', label: '5 小时额度', remainingPercent: state === 'low' ? 8 : state === 'unknown' ? null : 62, resetsAt: Date.now() + 2.6 * hour },
+        { id: 'week', label: '周额度', remainingPercent: state === 'low' ? 21 : 87, resetsAt: Date.now() + 4.2 * 24 * hour },
+      ] },
+    bigmodel: () => ({ provider: 'bigmodel', status: 'ok', fetchedAt: Date.now(), windows: [
+      // 形状对齐 GLM 真实脱敏响应：总积分 / 已用 / 服务器剩余（与 limit-used 差 1 的取整）。
+      { id: '5h', label: '5 小时额度', remainingPercent: 98, used: 195, limit: 12000, remaining: 11804, unit: '积分', resetsAt: Date.now() + 47 * 60_000 },
+      { id: 'week', label: '周额度', remainingPercent: state === 'unknown' ? null : 87, used: 7844, limit: 60000, remaining: 52155, unit: '积分', resetsAt: Date.now() + 6 * 24 * hour },
+    ] }),
+  };
+  const staleServed = new Set<string>();
+  stubExecutor({
+    listModelProfiles: async () => directory,
+    getOAuthLoginState: async () => null,
+    getRoleModels: async () => roleModelsFixture(),
+    getSubscriptionQuota: async (provider: string, options?: { force?: boolean }) => {
+      calls.push({ provider, force: Boolean(options?.force), at: Date.now() });
+      if (state === 'slow') await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (state === 'error') throw new Error("Error invoking remote method 'subscription:quota': Error: 网络连接超时");
+      // stale：首读成功，之后的刷新失败 → 保留旧数据并提示。
+      if (state === 'stale' && staleServed.has(provider)) throw new Error('网络连接超时');
+      staleServed.add(provider);
+      return views[provider]?.() ?? { provider, status: 'unsupported', windows: [], fetchedAt: Date.now() };
+    },
+  });
+  return { directory, ...extra };
 }
 
 /** 047 站点导入 fixtures：安全 DTO 的假状态（默认 can 全 false，场景按需覆盖）。 */
@@ -4338,6 +4396,24 @@ const scenes: Record<string, () => React.ReactElement> = {
       add: { presetId: 'qwen', apiKey: 'sk-example-000000000000000000', status: { state: 'ok', latencyMs: 398 } },
     });
     return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
+  // 066 订阅额度：订阅分组下每个可查询账号一行一个窗口（?state= 见 stubSubscriptionQuota）。
+  'settings-model-quota': () => {
+    resetSubscriptionQuotaCache();
+    setModelProfilesFixtureState(null);
+    stubSubscriptionQuota(new URLSearchParams(location.search).get('state') ?? 'ok');
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
+  // 066：Bot 环境下同一目录不得查询本机订阅额度（__quotaCalls 应为空）。
+  'settings-model-quota-bot': () => {
+    resetSubscriptionQuotaCache();
+    setModelProfilesFixtureState(null);
+    const { directory } = stubSubscriptionQuota('ok');
+    return (
+      <main className="min-h-dvh p-8">
+        <ModelProfilesSection api={window.hemiVoice} environment="bot" botInstanceId="fixture-bot" externalDirectory={directory} />
+      </main>
+    );
   },
   // 047 添加页方式选择：默认 New API 站点登录（未开始，地址输入）。
   'settings-model-add-oauth': () => {

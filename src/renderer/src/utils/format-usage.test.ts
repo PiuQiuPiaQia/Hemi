@@ -10,36 +10,33 @@ test('formatNumber handles null and zero', () => {
 test('formatNumber formats small numbers without units', () => {
   assert.equal(formatNumber(1), '1');
   assert.equal(formatNumber(999), '999');
+  assert.equal(formatNumber(9999), '9,999');
 });
 
-test('formatNumber formats K with proper rounding', () => {
-  assert.equal(formatNumber(1000), '1K');
-  assert.equal(formatNumber(1500), '1.5K');
-  assert.equal(formatNumber(9999), '10K');
-  assert.equal(formatNumber(10000), '10K');
+test('formatNumber formats 万 with proper rounding', () => {
+  assert.equal(formatNumber(10000), '1万');
+  assert.equal(formatNumber(15000), '1.5万');
+  assert.equal(formatNumber(99990), '10万');
+  assert.equal(formatNumber(100000), '10万');
 });
 
-test('formatNumber upgrades 999.95K to 1M to avoid 1000K', () => {
-  assert.equal(formatNumber(999950), '1M');
-  assert.equal(formatNumber(999999), '1M');
+test('formatNumber keeps 万 up to 亿, no 百万 unit', () => {
+  assert.equal(formatNumber(999999), '100万');
+  assert.equal(formatNumber(1000000), '100万');
+  assert.equal(formatNumber(1500000), '150万');
+  assert.equal(formatNumber(12345678), '1235万');
+  assert.equal(formatNumber(99949999), '9995万');
 });
 
-test('formatNumber formats M with proper rounding', () => {
-  assert.equal(formatNumber(1000000), '1M');
-  assert.equal(formatNumber(1500000), '1.5M');
-  assert.equal(formatNumber(9999999), '10M');
-  assert.equal(formatNumber(10000000), '10M');
+test('formatNumber upgrades 9999.995万 to 1亿 to avoid 10000万', () => {
+  assert.equal(formatNumber(99999999), '1亿');
 });
 
-test('formatNumber upgrades 999.95M to 1B to avoid 1000M', () => {
-  assert.equal(formatNumber(999950000), '1B');
-  assert.equal(formatNumber(999999999), '1B');
-});
-
-test('formatNumber formats B with proper rounding', () => {
-  assert.equal(formatNumber(1000000000), '1B');
-  assert.equal(formatNumber(1500000000), '1.5B');
-  assert.equal(formatNumber(9999999999), '10B');
+test('formatNumber formats 亿 with proper rounding', () => {
+  assert.equal(formatNumber(100000000), '1亿');
+  assert.equal(formatNumber(150000000), '1.5亿');
+  assert.equal(formatNumber(1000000000), '10亿');
+  assert.equal(formatNumber(9999999999), '100亿');
 });
 
 test('formatDuration handles null and zero', () => {

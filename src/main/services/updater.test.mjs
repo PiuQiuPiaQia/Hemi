@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 
-import { createUpdaterService, detectSigningMode } from './updater.mjs';
+import { createUpdaterService, detectSigningMode, pickStagingDir, sweepStaleSwapArtifacts } from './updater.mjs';
 import { UPDATE_FEED_URL } from '../../shared/release-info.mjs';
 
 /** 假 electron-updater：EventEmitter + 记录调用与关键配置。
@@ -260,7 +260,7 @@ test('安装（未签名形态）：自研换包——ditto 解包、版本护�
   assert.equal(autoUpdater.config.autoInstallOnAppQuit, false);
   const result = await service.install();
   assert.equal(result.ok, true);
-  // 命令序列：codesign 探测 → rm 暂存 → ditto 解包 → （版本护栏过）不再 rm。
+  // 命令序列：codesign 探测 → rm 预清 + mkdir 暂存根 → ditto 解包 →（版本护栏过）。
   assert.ok(execCalls.some(([file]) => file === 'codesign'));
   assert.ok(execCalls.some(([file, ...args]) => file === 'ditto' && args[2] === path.join(cacheDir, 'Hemi-0.4.0-arm64-mac.zip')));
   assert.ok(execCalls.some(([file, ...args]) => file === 'codesign' && args.includes('--verify') && args.includes('--strict')));
@@ -270,7 +270,8 @@ test('安装（未签名形态）：自研换包——ditto 解包、版本护�
   assert.equal(sh, '/bin/sh');
   assert.equal(path.dirname(script), home);
   assert.equal(bundleArg, bundle);
-  assert.equal(stagingArg.includes('.update-'), true);
+  assert.equal(stagingArg.includes(path.join('Library', 'Caches', 'hemi-updater-staging')), true);
+  assert.match(path.basename(stagingArg), /^staging-\d+$/);
   assert.match(logArg, /hemi-update-swap\.log$/);
   assert.equal(Number(pidArg), process.pid);
   assert.equal(quitCalled, true);
@@ -474,4 +475,93 @@ test('启动静默检查：打包实例按延迟排入，未打包不排', async
   });
   unpackaged.scheduleStartupCheck();
   assert.equal(fired.length, 1);
+});
+
+test('换包解包失败：ditto 抛错也清掉暂存目录，不再遗留空壳', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-ditto-fail-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const bundle = path.join(home, 'Hemi.app');
+  mkdirSync(bundle, { recursive: true });
+  const cacheDir = path.join(home, 'Library', 'Caches', 'hemi-desktop-updater', 'pending');
+  mkdirSync(cacheDir, { recursive: true });
+  const zip = path.join(cacheDir, 'Hemi-0.4.0-arm64-mac.zip');
+  writeFileSync(zip, 'zip');
+
+  const rms = [];
+  let spawned = 0;
+  const autoUpdater = fakeAutoUpdater();
+  const service = createUpdaterService({
+    app: { ...fakeApp(), quit: () => {} },
+    platform: 'darwin',
+    updaterFactory: async () => autoUpdater,
+    homeDir: home,
+    appBundlePath: bundle,
+    execFn: (file, args) => {
+      if (file === 'codesign') return 'TeamIdentifier=not set';
+      if (file === 'ditto') throw new Error('ditto: CRC mismatch');
+      if (file === 'rm') rms.push(args[1]);
+      return '';
+    },
+    spawnFn: () => { spawned += 1; },
+  });
+  service.setBroadcast(() => {});
+  autoUpdater.onCheck = () => autoUpdater.emitter.emit('update-available', { version: '0.4.0' });
+  autoUpdater.onDownload = () => autoUpdater.emitter.emit('update-downloaded', downloadInfo(zip));
+  await service.check();
+  await service.download();
+
+  const result = await service.install();
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'install-failed');
+  assert.equal(spawned, 0);
+  // 预清理与失败清理都指向同一个 Caches 暂存目录（重复 rm 幂等无害）。
+  const stagingRms = rms.filter((p) => p.includes(path.join('Caches', 'hemi-updater-staging')));
+  assert.equal(stagingRms.length >= 1, true);
+  assert.equal(new Set(stagingRms).size, 1);
+});
+
+test('sweepStaleSwapArtifacts：清陈旧暂存/旧版残留/.old，保新鲜暂存与恢复副本', (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-sweep-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const appsDir = path.join(home, 'Applications');
+  const stagingRoot = path.join(home, 'Library', 'Caches', 'hemi-updater-staging');
+  const mk = (p) => { mkdirSync(p, { recursive: true }); return p; };
+  const age = (p, minutes) => { const at = new Date(Date.now() - minutes * 60_000); utimesSync(p, at, at); };
+  const bundle = mk(path.join(appsDir, 'Hemi.app'));
+  const staleStaging = mk(path.join(stagingRoot, 'staging-100'));
+  const freshStaging = mk(path.join(stagingRoot, 'staging-200'));
+  const legacyShell = mk(path.join(appsDir, 'Hemi.app.update-1793144960881'));
+  const oldBundle = mk(path.join(appsDir, 'Hemi.app.old'));
+  age(staleStaging, 30);
+  age(legacyShell, 60 * 24);
+  age(oldBundle, 15);
+
+  const removed = sweepStaleSwapArtifacts({ bundlePath: bundle, homeDir: home });
+  assert.equal(removed, 3);
+  assert.equal(existsSync(staleStaging), false);
+  assert.equal(existsSync(freshStaging), true);
+  assert.equal(existsSync(legacyShell), false);
+  assert.equal(existsSync(oldBundle), false);
+
+  // 主包不在时 .old 是唯一恢复副本：不清。
+  const home2 = mkdtempSync(path.join(tmpdir(), 'hemi-updater-sweep2-'));
+  t.after(() => rmSync(home2, { recursive: true, force: true }));
+  const missingBundle = path.join(home2, 'Applications', 'Hemi.app');
+  const rescueOld = mk(path.join(home2, 'Applications', 'Hemi.app.old'));
+  age(rescueOld, 30);
+  assert.equal(sweepStaleSwapArtifacts({ bundlePath: missingBundle, homeDir: home2 }), 0);
+  assert.equal(existsSync(rescueOld), true);
+});
+
+test('pickStagingDir：与旧包同卷时暂存放 Caches，异卷退回旧包同目录', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-pick-'));
+  const bundle = path.join(home, 'Hemi.app');
+  const cachePick = pickStagingDir({ bundlePath: bundle, homeDir: home, statFn: () => ({ dev: 1 }) });
+  assert.match(cachePick, new RegExp(`hemi-updater-staging${path.sep}staging-\\d+$`));
+  const crossVolumePick = pickStagingDir({
+    bundlePath: bundle,
+    homeDir: home,
+    statFn: (p) => ({ dev: p.includes('Caches') ? 2 : 1 }),
+  });
+  assert.match(crossVolumePick, /Hemi\.app\.update-\d+$/);
 });

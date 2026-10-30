@@ -1435,6 +1435,32 @@ export type OAuthLoginState = {
   prompt: null | { id: string; type: 'text' | 'secret' | 'select' | 'manual_code'; message: string; placeholder: string; options?: Array<{ id: string; label: string }> };
 };
 
+/** 订阅余额单窗口视图（如 ChatGPT/GLM 的 5 小时、周窗口；订阅行内进度条的数据源）。 */
+export type SubscriptionQuotaWindow = {
+  /** 窗口标识（'five-hour' | 'weekly'；后续窗口由服务器定义，UI 按 label 展示）。 */
+  id: string;
+  label: string;
+  /** 剩余额度百分比 0-100；null＝服务器未给出，不本地估算、不补 0。 */
+  remainingPercent: number | null;
+  /** 绝对剩余量（GLM 以服务端 remaining 为准；与 limit-used 可差 1＝服务端取整，不本地重算）。 */
+  remaining?: number;
+  used?: number;
+  limit?: number;
+  unit?: string;
+  /** 窗口重置时间（epoch 毫秒）。 */
+  resetsAt?: number;
+};
+
+/** 订阅余额查询结果（oauth:quota）。失败一律以 status 表达，不 reject。 */
+export type SubscriptionQuotaView = {
+  provider: OAuthProvider;
+  /** ok＝已取得额度；unsupported＝该供应商没有订阅余额接口；unavailable＝接口失败/不兼容；signed-out＝未登录。 */
+  status: 'ok' | 'unsupported' | 'unavailable' | 'signed-out';
+  windows: SubscriptionQuotaWindow[];
+  fetchedAt: number;
+  message?: string;
+};
+
 /** 031 v2：供应商视图（端点＋Key＋协议＋模型列表；无 Key 材料）。 */
 export type ModelProviderView = {
   configuration?: 'newapi';
@@ -2050,6 +2076,8 @@ export type HemiVoiceBridge = {
   answerOAuthLogin: (payload: { id: string; promptId: string; value: string }) => Promise<OAuthLoginState | null>;
   cancelOAuthLogin: (id: string) => Promise<OAuthLoginState | null>;
   logoutOAuth: (provider: OAuthProvider) => Promise<{ ok: boolean }>;
+  /** 订阅余额（5h/周窗口）查询：主进程缓存＋并发合并＋force 限频；失败以 status 表达，不抛错。 */
+  getSubscriptionQuota: (provider: OAuthProvider, options?: { force?: boolean }) => Promise<SubscriptionQuotaView>;
   saveModelProfile: (provider: ModelProviderSaveInput) => Promise<{ ok: boolean; providerId: string; modelKeys: string[] }>;
   removeModelProfile: (payload: {
     providerId: string;

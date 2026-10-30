@@ -1,14 +1,17 @@
 /**
- * 使用记录数字格式化工具：紧凑K/M/B单位，舍入后升级，避免1000K。
+ * 使用记录数字格式化工具：中文单位（万/亿），舍入后升级，避免10000万。
  */
 
 /**
- * 格式化数字：tokens、计数等。
- * 舍入后升级单位，避免1000K、1000M。
+ * 格式化数字：tokens、计数等，采用中文单位。
+ * 万到亿之间只用「万」；舍入后升级单位，避免10000万。
  * @example formatNumber(999) => "999"
- * @example formatNumber(999.9) => "1K"
- * @example formatNumber(999999) => "1M"
- * @example formatNumber(999950) => "1M"
+ * @example formatNumber(9999.9) => "1万"
+ * @example formatNumber(15000) => "1.5万"
+ * @example formatNumber(999999) => "100万"
+ * @example formatNumber(1500000) => "150万"
+ * @example formatNumber(99999999) => "1亿"
+ * @example formatNumber(999999999) => "10亿"
  * @example formatNumber(null) => "—"
  * @example formatNumber(0) => "0"
  */
@@ -16,30 +19,22 @@ export function formatNumber(n: number | null): string {
   if (n === null) return '—';
   if (n === 0) return '0';
 
-  // 小于1000直接显示
-  if (n < 1000) return Math.round(n) >= 1000 ? '1K' : Math.round(n).toLocaleString();
+  // 小于一万直接显示
+  if (n < 10000) return Math.round(n) >= 10000 ? '1万' : Math.round(n).toLocaleString();
 
-  // K: 1000 - 999,999
-  if (n < 1000000) {
-    const k = n / 1000;
-    const rounded = k < 10 ? Math.round(k * 10) / 10 : Math.round(k);
-    // 999.95K 舍入后会变成1000K，应升级为1M
-    if (rounded >= 1000) return '1M';
-    return `${rounded}K`;
+  // 万: 10,000 - 99,999,999
+  if (n < 100000000) {
+    const w = n / 10000;
+    const rounded = w < 10 ? Math.round(w * 10) / 10 : Math.round(w);
+    // 9999.995万舍入后变成10000万，应升级为1亿
+    if (rounded >= 10000) return '1亿';
+    return `${rounded}万`;
   }
 
-  // M: 1,000,000 - 999,999,999
-  if (n < 1000000000) {
-    const m = n / 1000000;
-    const rounded = m < 10 ? Math.round(m * 10) / 10 : Math.round(m);
-    if (rounded >= 1000) return '1B';
-    return `${rounded}M`;
-  }
-
-  // B: >= 1,000,000,000
-  const b = n / 1000000000;
+  // 亿: >= 100,000,000
+  const b = n / 100000000;
   const rounded = b < 10 ? Math.round(b * 10) / 10 : Math.round(b);
-  return `${rounded}B`;
+  return `${rounded}亿`;
 }
 
 /**

@@ -69,7 +69,14 @@ export function bootstrapFlowFromTurns(turns, { conversationId } = {}) {
     if (Array.isArray(turn.parts)) {
       for (const part of turn.parts) {
         if (part?.type === 'thinking' && typeof part.text === 'string') {
-          parts.push({ partId: partId('k'), kind: 'thinking', content: part.text });
+          // 065：保留思考段起止（旧档回看思考时长、完成态整轮「用时 X」兜底估算都用它）。
+          parts.push({
+            partId: partId('k'),
+            kind: 'thinking',
+            content: part.text,
+            startedAt: Number(part.startedAt) || 0,
+            endedAt: Number(part.endedAt) || 0,
+          });
         } else if (part?.type === 'text' && typeof part.text === 'string') {
           parts.push({ partId: partId('t'), kind: 'text', content: part.text });
         } else if (part?.type === 'tools' && Array.isArray(part.calls)) {

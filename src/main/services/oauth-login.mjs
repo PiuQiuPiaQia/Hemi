@@ -8,6 +8,7 @@ function loginError(error) {
   if (/1455|EADDRINUSE|port .*in use/i.test(message)) return '登录回调端口被占用，请先结束其他 ChatGPT 登录后重试。';
   if (/keychain|钥匙串|凭据文件|无法解密/.test(message)) return message;
   if (/chatgpt.tokens.use.direct/.test(message)) return '尚未授权使用 ChatGPT 额度，请重新登录并同意该权限。';
+  if (/Failed to extract accountId from token/.test(message)) return '登录令牌缺少账号标识，请重新登录并确认账号已开通 Codex 访问。';
   if (/^GLM 编程套餐/.test(message)) return message;
   if (/^Bot 未能验证账号模型/.test(message)) return message;
   if (/^(配置目录损坏|环境变量正在覆盖|ChatGPT 模型目录|这个账号没有返回)/.test(message)) return message;
@@ -39,7 +40,7 @@ export function createOAuthLogin({ runtime, credentials, profiles, openExternal,
         id, type: request.type,
         message: request.type === 'select' ? '选择登录方式' : request.type === 'manual_code' ? '浏览器未自动返回时，粘贴授权码或完整回调地址' : 'GitHub Enterprise 域名（个人账号留空）',
         placeholder: request.placeholder ?? '',
-        ...(request.options ? { options: request.options.map(option => ({ id: option.id, label: option.id === 'browser' ? '浏览器登录' : option.id === 'copy_code' ? '复制授权码登录' : option.label })) } : {}),
+        ...(request.options ? { options: request.options.map(option => ({ id: option.id, label: option.id === 'browser' ? '浏览器登录' : option.id === 'copy_code' ? '复制授权码登录' : option.id === 'device_code' ? '设备验证码登录' : option.label })) } : {}),
       } });
     });
   }

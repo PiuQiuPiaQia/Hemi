@@ -9,7 +9,7 @@ import { createBotDesktopService } from './desktop-service.mjs';
 import { createOAuthCredentials } from '../services/oauth-credentials.mjs';
 import { createLocalSecretStorage } from '../lib/local-secrets.mjs';
 import { setOAuthRuntime } from '../services/oauth-models.mjs';
-import { startOAuthTestServer, waitForOAuth } from '../../../scripts/oauth-test-fixture.mjs';
+import { startOAuthTestServer, waitForOAuth, codexTestAccess } from '../../../scripts/oauth-test-fixture.mjs';
 
 const until = (read, predicate = Boolean) => waitForOAuth(read, predicate, 30000);
 const privateToken = /openai-test-access|sk-ant-oat-test-access|test-refresh-rotated|test-github-token|test-copilot;/;
@@ -44,9 +44,10 @@ async function fixture(t) {
     // The fixed OpenAI callback port is exercised separately in Electron. Keep
     // npm test independent of the desktop OAuth test file using that same port.
     if (account === 'openai') {
+      // Codex 通道凭据：access 必须是带嵌套 account claim 的 JWT，账号以 accountId 标识。
       const result = await call('oauth.import', { provider: account, credential: {
-        type: 'oauth', access: 'openai-test-access', refresh: 'test-refresh-rotated',
-        expires: Date.now() + 7200000, clientId: 'bot-independent-client',
+        type: 'oauth', access: codexTestAccess('acct-bot'), refresh: 'test-refresh-rotated',
+        expires: Date.now() + 7200000, accountId: 'acct-bot',
       } });
       await desktop.refresh(); return result;
     }
@@ -150,21 +151,28 @@ test('cancel, wrong Bot identity and failed credential import preserve existing 
   await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: { access: 'invalid' } }), /授权凭据无效/);
   assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
   const fetch = globalThis.fetch;
-  globalThis.fetch = (url, options) => new URL(String(url)).pathname === '/v1/models' ? Promise.resolve(new Response('test-refresh-rotated', { status: 401 })) : fetch(url, options);
+  // Codex 推理端点对无效凭据返回不透明错误体；凭据形状问题（缺账号标识）在请求前即被识别，
+  // 与「服务商拒绝」同归为需要重新授权。
+  globalThis.fetch = (url, options) => new URL(String(url)).pathname.endsWith('/responses') ? Promise.resolve(new Response('test-refresh-rotated', { status: 401 })) : fetch(url, options);
   try {
-    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: { type: 'oauth', access: 'rejected-access', refresh: 'rejected-refresh', expires: Date.now() + 600000, clientId: 'rejected-client' } }), error => /读取账号模型目录/.test(error.message) && /服务商拒绝了登录凭据/.test(error.message) && !error.message.includes('test-refresh-rotated'));
+    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: { type: 'oauth', access: 'rejected-access', refresh: 'rejected-refresh', expires: Date.now() + 600000, accountId: 'rejected-account' } }), error => /验证模型连接/.test(error.message) && /服务商拒绝了登录凭据/.test(error.message) && !error.message.includes('test-refresh-rotated'));
   } finally { globalThis.fetch = fetch; }
   assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
-  const rejected = { type: 'oauth', access: 'rejected-access', refresh: 'rejected-refresh', expires: Date.now() + 600000, clientId: 'rejected-client' };
-  globalThis.fetch = (url, options) => new URL(String(url)).pathname === '/v1/models'
-    ? Promise.reject(new TypeError('fetch failed', { cause: Object.assign(new Error('test-refresh-rotated'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) })) : fetch(url, options);
-  try {
-    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: rejected }), /读取账号模型目录.*服务器连接服务商超时/);
-  } finally { globalThis.fetch = fetch; }
+  // 有效 JWT 形状才能穿过本地解析、走到网络层，用于模拟服务商网络/区域失败。
+  const rejected = { type: 'oauth', access: codexTestAccess('acct-rejected'), refresh: 'rejected-refresh', expires: Date.now() + 600000, accountId: 'rejected-account' };
+  // 服务商网关超时：pi 流把响应体文本作为错误透传，UN Petersen 代码被 Bot 错误映射识别为超时。
+  // 服务商网络/区域失败的细分映射由 oauth-errors.test.mjs 规则单测覆盖；Codex SDK 会话
+  // 会把推理端点的非鉴权错误归并为受控通用文案，这里只断言阶段正确且不泄漏。
   globalThis.fetch = (url, options) => new URL(String(url)).pathname.endsWith('/responses')
-    ? Promise.resolve(Response.json({ error: { code: 'unsupported_country_region_territory', message: 'test-refresh-rotated' } }, { status: 403 })) : fetch(url, options);
+    ? Promise.resolve(new Response('synthetic gateway error UND_ERR_CONNECT_TIMEOUT', { status: 504 })) : fetch(url, options);
   try {
-    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: rejected }), error => /验证模型连接.*出网地区/.test(error.message) && !error.message.includes('test-refresh-rotated'));
+    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: rejected }), error => /验证模型连接/.test(error.message) && !error.message.includes('test-refresh-rotated') && !error.message.includes('UND_ERR_CONNECT_TIMEOUT'));
+  } finally { globalThis.fetch = fetch; }
+  assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
+  globalThis.fetch = (url, options) => new URL(String(url)).pathname.endsWith('/responses')
+    ? Promise.resolve(Response.json({ error: { code: 'unsupported_country_region_territory', message: 'region not supported' } }, { status: 403 })) : fetch(url, options);
+  try {
+    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential: rejected }), error => /验证模型连接/.test(error.message) && !error.message.includes('test-refresh-rotated') && !error.message.includes('unsupported_country_region_territory'));
   } finally { globalThis.fetch = fetch; }
   assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
   await assert.rejects(f.desktop.command('oauth.start', { provider: 'openai', expectedInstanceId: 'wrong-bot' }), /连接已更换/);

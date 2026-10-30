@@ -187,6 +187,8 @@ export const IPC = {
     answer: 'oauth:answer',
     cancel: 'oauth:cancel',
     logout: 'oauth:logout',
+    /** 订阅余额（5h/周窗口）查询：主进程缓存＋并发合并＋force 限频；沿用主窗口权限。 */
+    quota: 'oauth:quota',
   },
   usage: {
     /** 048：会话用量账本（对话侧记录＋任务执行汇总合并）。 */
