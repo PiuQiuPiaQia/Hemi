@@ -4,16 +4,23 @@ import { NODE_RUNTIME } from './node-runtime.mjs';
 // EncodedCommand works with both cmd.exe and PowerShell as OpenSSH's default
 // shell. All dynamic values are PowerShell literals, never executable source.
 export const psLiteral = value => "'" + String(value).replaceAll("'", "''") + "'";
-export function powershellSource(script) {
-  return `$ErrorActionPreference = 'Stop'\n$ProgressPreference = 'SilentlyContinue'\n[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\ntry {\n${script}\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
+export function powershellSource(script, {stdoutUtf8 = true} = {}) {
+  // Some PowerShell 5.1 builds (observed on Windows Server 2025 without an
+  // interactive console) emit a UTF-8 BOM onto stdout when the console output
+  // encoding is assigned. CLI relay streams carry only the Node child's bytes,
+  // so they skip the assignment entirely and leave both handles untouched.
+  const encoding = stdoutUtf8
+    ? '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)'
+    : ''; // Windows PowerShell 5.1 has no ErrorEncoding; relay streams must stay untouched.
+  return `$ErrorActionPreference = 'Stop'\n$ProgressPreference = 'SilentlyContinue'\n${encoding}\ntry {\n${script}\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
 }
 export function copyWindowsInput(destination, size) {
   if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid stdin size');
   return `$inputStream = [Console]::OpenStandardInput(); $remaining = ${size}; $buffer = New-Object byte[] 32768\nwhile ($remaining -gt 0) { $read = $inputStream.Read($buffer, 0, [Math]::Min($remaining, $buffer.Length)); if ($read -le 0) { throw 'SSH 输入不完整' }; ${destination}.Write($buffer, 0, $read); $remaining -= $read }`;
 }
-export function powershellCommand(script) {
+export function powershellCommand(script, options = {}) {
   return 'powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' +
-    Buffer.from(powershellSource(script), 'utf16le').toString('base64');
+    Buffer.from(powershellSource(script, options), 'utf16le').toString('base64');
 }
 
 const rootScript = String.raw`
@@ -24,6 +31,9 @@ $desktopTaskName = $taskName + '-Desktop'
 `;
 
 export const windowsRootSetupScript = rootScript + String.raw`
+# Get-Acl lives in Microsoft.PowerShell.Security; module auto-loading can lose a
+# discovery race under parallel PowerShell sessions (observed on CI runners).
+Import-Module Microsoft.PowerShell.Security
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $acl = Get-Acl -LiteralPath $root
 $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))

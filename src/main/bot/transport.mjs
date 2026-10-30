@@ -70,7 +70,7 @@ export function createBotTransport({ runner, archivePath }) {
   }
   const isWindows = host => platforms.get(host) === 'win32';
   const cliCommand = (host, mode, stdin, file) => isWindows(host)
-    ? powershellCommand(windowsCliScript(mode, Buffer.byteLength(stdin), file))
+    ? powershellCommand(windowsCliScript(mode, Buffer.byteLength(stdin), file), {stdoutUtf8: false})
     : `r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" ${mode}`;
   async function execute(host, command, stdin, timeoutMs = 30000, signal) {
     const r = await runner.exec({ host, command, stdin, timeoutMs, signal });
