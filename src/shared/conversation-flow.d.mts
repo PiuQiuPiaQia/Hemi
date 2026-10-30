@@ -40,7 +40,7 @@ export type FlowRunSummary = {
 };
 
 export type FlowPart =
-  | { partId: string; kind: 'text' | 'thinking'; content: string }
+  | { partId: string; kind: 'text' | 'thinking'; content: string; textId?: string; phase?: 'commentary' | 'partial_answer' | 'final_answer' | 'unclassified'; phaseSource?: 'provider' | 'contract' }
   | { partId: string; kind: 'tool'; toolCallId: string; status: string; [key: string]: unknown }
   | { partId: string; kind: 'delegation' | 'artifact' | 'notice'; [key: string]: unknown }
   | {

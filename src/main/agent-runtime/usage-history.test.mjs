@@ -19,6 +19,7 @@ const localStamp = (ms = new Date()) => {
 test('真实 SSE：URL 脱敏落盘、TTFT 从首个有效输出起算、token/reasoning 按 provider 报告、重开投影一致', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'h-usage-history-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
+  const firstOutputObserved = Promise.withResolvers();
   const server = http.createServer((req, res) => {
     req.resume();
     req.on('end', () => {
@@ -27,8 +28,12 @@ test('真实 SSE：URL 脱敏落盘、TTFT 从首个有效输出起算、token/r
       res.write(`data: ${JSON.stringify({ id: 'm', object: 'chat.completion.chunk', model: 'test', choices: [{ index: 0, delta: {}, finish_reason: null }] })}\n\n`);
       setTimeout(() => {
         res.write(`data: ${JSON.stringify({ id: 'm', object: 'chat.completion.chunk', model: 'test', choices: [{ index: 0, delta: { role: 'assistant', content: 'OK' }, finish_reason: null }] })}\n\n`);
-        res.write(`data: ${JSON.stringify({ id: 'm', object: 'chat.completion.chunk', model: 'test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 15, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 10 } } })}\n\n`);
-        res.end('data: [DONE]\n\n');
+        // Wait until the actual consumer has seen output, then create a measurable
+        // generation window. Batched same-tick output legitimately has no TPS.
+        void firstOutputObserved.promise.then(() => setTimeout(() => {
+          res.write(`data: ${JSON.stringify({ id: 'm', object: 'chat.completion.chunk', model: 'test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 15, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 10 } } })}\n\n`);
+          res.end('data: [DONE]\n\n');
+        }, 20));
       }, 150);
     });
   });
@@ -40,8 +45,10 @@ test('真实 SSE：URL 脱敏落盘、TTFT 从首个有效输出起算、token/r
   const journal = createRunJournal({ dir });
   await journal.beginRoot(owner);
   const execution = { journal, owner, plan: { role: 'main', primary: config, allowedFallbacks: [] }, store: { resolveStrict: async () => ({ ok: true, config }) }, budgets: { maxRequestsPerRun: 5 }, purpose: 'main' };
-  const answer = await controlledStream(streamSimple, () => execution)(piModelOf(config, 'hemi'),
-    { messages: [{ role: 'system', content: 'Hemi', timestamp: 0, toolsAdded: [{ name: 'read', description: 'read', parameters: { type: 'object', properties: {} } }] }, { role: 'user', content: 'hi', timestamp: 0 }] }).result();
+  const stream = controlledStream(streamSimple, () => execution)(piModelOf(config, 'hemi'),
+    { messages: [{ role: 'system', content: 'Hemi', timestamp: 0, toolsAdded: [{ name: 'read', description: 'read', parameters: { type: 'object', properties: {} } }] }, { role: 'user', content: 'hi', timestamp: 0 }] });
+  for await (const event of stream) if (event.type === 'text_delta' && event.delta) firstOutputObserved.resolve();
+  const answer = await stream.result();
   assert.equal(answer.stopReason, 'stop');
 
   const raw = await readFile(path.join(dir, 'run-journal.json'), 'utf8');

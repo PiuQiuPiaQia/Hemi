@@ -6,7 +6,7 @@ const { estimateTurnDurationMs } = await moduleUnderTest('../src/presentation/tu
 
 
 const thinking = (id, text = '内部思考') => ({ partId: id, type: 'thinking', text, startedAt: 100, endedAt: 200 });
-const text = (id, value) => ({ partId: id, type: 'text', text: value });
+const text = (id, value, phase) => ({ partId: id, type: 'text', text: value, ...(phase ? {phase} : {}) });
 const call = (id, tool = 'read', state = 'done') => ({ id, tool, args: { path: `${id}.md` }, state });
 const tools = (id, ...calls) => ({ partId: id, type: 'tools', calls });
 
@@ -59,9 +59,9 @@ test('文件交付、工作流和相邻正文保留各自位置，过程不跨�
   assert.strictEqual(blocks[3].part, workflow);
 });
 
-test('065 完成态：回答之前的全部过程（含过程文本）折入首个整轮组，仅尾段文本外显', () => {
-  const parts = [text('intro', '我先核对文件。'), thinking('analysis'), tools('read', call('r')),
-    text('finding', '已确认原因，继续验证。'), tools('verify', call('v', 'bash', 'error')),
+test('完成态只折叠明确的 commentary，答案不按工具位置判断', () => {
+  const parts = [text('intro', '我先核对文件。', 'commentary'), thinking('analysis'), tools('read', call('r')),
+    text('finding', '已确认原因，继续验证。', 'commentary'), tools('verify', call('v', 'bash', 'error')),
     text('answer', '验证未通过。'), text('ps', '以上。')];
   const before = structuredClone(parts);
   const blocks = buildTurnDisplayBlocks(parts, { complete: true });
@@ -80,7 +80,7 @@ test('065 完成态：回答之前的全部过程（含过程文本）折入首�
 });
 
 test('065 完成态：无尾段文本（以动作收尾、无回答）退回执行态分组，过程保持可见', () => {
-  const parts = [text('intro', '我先核对文件。'), thinking('analysis'), tools('read', call('r'))];
+  const parts = [text('intro', '我先核对文件。', 'commentary'), thinking('analysis'), tools('read', call('r'))];
   const blocks = buildTurnDisplayBlocks(parts, { complete: true });
   assert.deepEqual(blocks.map(b => b.kind), ['content', 'activity']);
   assert.equal(blocks[1].turnSummary, undefined);
@@ -89,8 +89,8 @@ test('065 完成态：无尾段文本（以动作收尾、无回答）退回执�
 
 test('065 完成态：task 与交互块仍是边界，被分隔的后续活动组沿用执行态头部', () => {
   const file = { partId: 'file', type: 'file-delivery', artifactId: 'artifact', name: '结果.md' };
-  const parts = [text('intro', '先看文件。'), tools('t', call('a')), file,
-    text('mid', '交付后继续验证。'), tools('verify', call('v')), text('answer', '完成。')];
+  const parts = [text('intro', '先看文件。', 'commentary'), tools('t', call('a')), file,
+    text('mid', '交付后继续验证。', 'commentary'), tools('verify', call('v')), text('answer', '完成。')];
   const blocks = buildTurnDisplayBlocks(parts, { complete: true });
   assert.deepEqual(blocks.map(b => b.kind), ['activity', 'content', 'activity', 'content']);
   assert.equal(blocks[0].turnSummary, true, '仅首组为整轮过程组');
@@ -110,3 +110,20 @@ test('065 时长兜底：取思考段最早开始到最晚结束，无有效区�
   ]), 632_000);
 });
 
+
+for (const phase of [undefined, 'unclassified', 'partial_answer', 'final_answer', 'invalid']) {
+  test(`长答案后登记来源与短确认，正文始终可见：${phase ?? 'legacy'}`, () => {
+    const parts = [thinking('k'), text('answer', '**完整答案**\n\n- 第一步\n- 第二步', phase),
+      tools('delivery', call('d', 'register_delivery')), thinking('tail'), text('ack', '来源已登记', 'final_answer')];
+    const blocks = buildTurnDisplayBlocks(parts, {complete:true});
+    assert.deepEqual(blocks.filter(b=>b.kind==='content').map(b=>b.part.text), [parts[1].text, '来源已登记']);
+    assert.ok(!blocks.some(b=>b.kind==='activity'&&b.entries.some(e=>e.kind==='say')));
+  });
+}
+
+test('后续答案不会让前面的显式进度跨越任务或成果边界', () => {
+  const parts = [text('p','进度','commentary'), tools('t',call('task','task')),
+    text('a','答案','partial_answer'), tools('more',call('read')), text('f','补充','final_answer')];
+  const blocks = buildTurnDisplayBlocks(parts,{complete:true});
+  assert.deepEqual(blocks.map(b=>b.kind),['activity','task','content','activity','content']);
+});

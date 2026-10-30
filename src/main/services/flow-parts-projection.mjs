@@ -11,6 +11,8 @@
  *  - 任务快照投影只保留展示／恢复必需字段（正文大段留在任务档案，预览 200 字）。
  */
 
+import { normalizeMessagePhase, mergeMessagePhase } from '../../shared/message-phase.mjs';
+
 const MAX_ERROR_DETAIL_CHARS = 16_000;
 function boundedErrorDetail(error) {
   const text = String(error?.message ?? error);
@@ -32,6 +34,8 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
   let textPart = null;
   let thinkingPart = null;
   let requestParts = [];
+  const textParts = new Map();
+  let pendingText = null;
   /** toolCallId → { partId, kind } */
   const toolParts = new Map();
   const backgroundParts = new Map();
@@ -55,13 +59,30 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         return [{ type: 'run-recovery', runId, recovery: event.recovery, ...gen() }];
       case 'request-start':
         requestParts = [];
+        pendingText = null;
         return closeOpenParts();
       case 'message-end':
         return closeOpenParts();
       case 'request-reset': {
         const resets = requestParts.map(partId => ({ type: 'part-updated', runId, partId, patch: { content: '' }, ...gen() }));
         textPart = null; thinkingPart = null; requestParts = [];
+        pendingText = null;
+        textParts.clear();
         return resets;
+      }
+      case 'text-start': {
+        const closed = closeOpenParts();
+        pendingText = event;
+        return closed;
+      }
+      case 'text-phase': {
+        const target = textParts.get(event.textId);
+        if (!target) return facts;
+        const phase = mergeMessagePhase(target.phase, event.phase);
+        if (!phase || phase === target.phase) return facts;
+        target.phase = phase;
+        return [{ type: 'part-updated', runId, partId: target.partId,
+          patch: { phase, phaseSource: event.phaseSource === 'provider' ? 'provider' : 'contract' }, ...gen() }];
       }
       case 'activity':
         return [{ type: 'run-activity', runId, activity: event.activity, ...gen() }];
@@ -69,9 +90,15 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         const delta = typeof event.text === 'string' ? event.text : '';
         if (!delta) return facts;
         if (!textPart) {
-          textPart = { partId: nextId('t'), content: delta };
+          const metadata = { ...pendingText, ...event };
+          const phase = normalizeMessagePhase(metadata.phase);
+          textPart = { partId: nextId('t'), content: delta,
+            ...(typeof metadata.textId === 'string' ? { textId: metadata.textId } : {}),
+            ...(phase ? { phase, phaseSource: metadata.phaseSource === 'provider' ? 'provider' : 'contract' } : {}) };
+          pendingText = null;
+          if (textPart.textId) textParts.set(textPart.textId, textPart);
           requestParts.push(textPart.partId);
-          facts.push({ type: 'part-appended', runId, part: { partId: textPart.partId, kind: 'text', content: delta }, ...gen() });
+          facts.push({ type: 'part-appended', runId, part: { ...textPart, kind: 'text' }, ...gen() });
         } else {
           textPart.content += delta;
           facts.push({ type: 'part-updated', runId, partId: textPart.partId, patch: { content: textPart.content }, ...gen() });
@@ -98,6 +125,7 @@ export function createRunPartProjector({ runId, generation = null, inputId = nul
         thinkingPart = null;
         return facts;
       case 'tool_start': {
+        if (event.tool === 'report_progress') return facts;
         facts.push(...closeOpenParts());
         const toolCallId = String(event.toolCallId ?? nextId('u'));
         const isDelegation = event.tool === 'task';

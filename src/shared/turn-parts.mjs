@@ -8,6 +8,8 @@
  * 连续的工具调用并成一个工具组（中间没有正文或思考插入时）。纯函数、不改入参。
  */
 
+import { normalizeMessagePhase, mergeMessagePhase } from './message-phase.mjs';
+
 const MAX_TEXT = 100_000;
 const MAX_CALLS = 40;
 
@@ -25,6 +27,20 @@ export function reduceTurnParts(parts, event, now = Date.now()) {
   switch (event?.kind) {
     case 'restart':
       return [];
+    case 'text-start': {
+      if (typeof event.textId !== 'string') return list;
+      const phase = normalizeMessagePhase(event.phase);
+      return [...closeThinking(list, now), { type: 'text', text: '', textId: event.textId,
+        ...(phase ? { phase, phaseSource: event.phaseSource } : {}) }];
+    }
+    case 'text-phase': {
+      if (typeof event.textId !== 'string') return list;
+      return list.map(part => {
+        if (part.type !== 'text' || part.textId !== event.textId) return part;
+        const phase = mergeMessagePhase(part.phase, event.phase);
+        return phase && phase !== part.phase ? { ...part, phase, phaseSource: event.phaseSource } : part;
+      });
+    }
     case 'thinking_start':
       if (last?.type === 'thinking' && last.endedAt == null) return list;
       return [...list, { type: 'thinking', text: '', startedAt: now, endedAt: null }];
@@ -43,12 +59,15 @@ export function reduceTurnParts(parts, event, now = Date.now()) {
       if (!delta) return list;
       const closed = closeThinking(list, now);
       const tail = closed[closed.length - 1];
-      if (tail?.type === 'text') {
+      if (tail?.type === 'text' && (!event.textId || tail.textId === event.textId)) {
         return [...closed.slice(0, -1), { ...tail, text: (tail.text + delta).slice(-MAX_TEXT) }];
       }
-      return [...closed, { type: 'text', text: delta }];
+      const phase = normalizeMessagePhase(event.phase);
+      return [...closed, { type: 'text', text: delta, ...(event.textId ? { textId: event.textId } : {}),
+        ...(phase ? { phase, phaseSource: event.phaseSource } : {}) }];
     }
     case 'tool_start': {
+      if (event.tool === 'report_progress') return list;
       const closed = closeThinking(list, now);
       const tail = closed[closed.length - 1];
       const callCount = closed.reduce((sum, part) => sum + (part.type === 'tools' ? part.calls.length : 0), 0);

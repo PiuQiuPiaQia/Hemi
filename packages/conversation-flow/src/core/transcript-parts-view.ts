@@ -23,7 +23,11 @@ export function flowPartsToTranscriptParts(
     } else if (part.kind === 'text') {
       flushTools();
       const text = String(part.content ?? '');
-      if (text) mapped.push({ partId: part.partId, type: 'text', text });
+      if (text) mapped.push({ partId: part.partId, type: 'text', text,
+        ...(typeof part.textId === 'string' ? { textId: part.textId } : {}),
+        ...(['commentary', 'partial_answer', 'final_answer', 'unclassified'].includes(String(part.phase))
+          ? { phase: part.phase as 'commentary' | 'partial_answer' | 'final_answer' | 'unclassified',
+              phaseSource: part.phaseSource === 'provider' ? 'provider' as const : 'contract' as const } : {}) });
     } else if (part.kind === 'deliverable') {
       // 062 会话交付物：对话流紧凑文件入口（跨运行的重复声明由时间线投影层去重）。
       flushTools();

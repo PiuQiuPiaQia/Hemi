@@ -14,9 +14,8 @@ import { DeliverableCards } from "./deliverable-card";
  * 思考和普通工具合成一个过程组；组内仍按原序展开，任务和交付等独立入口不折入。
  * 流式与档案回看共用；只有尾段显示流式状态。正文后处理由 renderText 接管。
  *
- * 065 · 完成态（complete: true，回合正常收尾后）：回答之前的全部过程折进首个
- * 活动组（「用时 X」头部），过程文本以「说明」行入组，只外显最后无后续动作的
- * text。执行中、失败、停止、等待用户时不折叠（见 buildTurnDisplayBlocks）。
+ * 完成态只将明确标为 commentary 的文字并入过程组；答案与旧档正文保持可见。
+ * 失败、停止、等待用户或只有进度没有答案时，过程说明仍在原位置显示。
  */
 export function TurnParts({
   parts,
@@ -29,7 +28,7 @@ export function TurnParts({
 }: {
   parts: Array<TurnPart & { partId?: string }>;
   live?: boolean;
-  /** 065：完成态——过程并入整轮折叠组，仅尾段文本外显。 */
+  /** 完成态——只折叠明确标记的过程说明。 */
   complete?: boolean;
   /** 065：整轮生成时长（完成态头部「用时 X」）。 */
   durationMs?: number;
@@ -98,6 +97,7 @@ export function TurnParts({
         return (
           <div
             key={key}
+            data-message-phase={part.phase}
             className={`chat-copy assistant-copy${live && index === parts.length - 1 ? " streaming-copy" : ""}`}
           >
             {renderText ? (

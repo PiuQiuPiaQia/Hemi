@@ -1,3 +1,4 @@
+import { textFactOf } from '../../shared/message-phase.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -166,7 +167,8 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
       const fact = event => {for (const value of projector.handle(event)) apply(value);};
       let session, outcome = 'failed', cleanupUnconfirmed = false;
       const onStream = event => {
-        if (event.type === 'text_delta') fact({kind: 'text', text: event.delta});
+        const text = textFactOf(event);
+        if (text) fact(text);
         else if (event.type === 'thinking_delta') fact({kind: 'thinking', text: event.delta});
         else if (event.type === 'thinking_end') fact({kind: 'thinking_end'});
         else if (event.type === 'hemi_message_end') fact({kind: 'message-end'});

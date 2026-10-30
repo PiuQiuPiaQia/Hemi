@@ -548,7 +548,7 @@ export type TurnPart =
       endedAt: number | null;
       interrupted?: boolean;
     }
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; textId?: string; phase?: "commentary" | "partial_answer" | "final_answer" | "unclassified"; phaseSource?: "provider" | "contract" }
   | { type: "tools"; calls: TurnToolCall[] }
   /** 会话成果：同一回合去重，后续回合更新仍可见；同一文件复用预览身份。 */
   | {

@@ -1,3 +1,4 @@
+import { textFactOf } from '../../shared/message-phase.mjs';
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
 import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
 import {closeConversationRun} from '../services/run-completion.mjs';
@@ -934,12 +935,8 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
       } else if (assistantEvent?.type === 'hemi_request_reset') {
         thinkingStartedAt = null;
         streamEvent({ kind: 'request-reset' });
-      } else if (assistantEvent?.type === 'text_start') {
-        // 后台收口仍在同一业务目标内，但新一次模型正文须保留段落边界。
-        if (conversationTurns.getState(conversationId)?.parts?.at(-1)?.type === 'text') streamEvent({ kind: 'text', text: '\n\n' });
-      } else if (assistantEvent?.type === 'text_delta') {
-        const delta = typeof assistantEvent.delta === 'string' ? assistantEvent.delta : '';
-        if (delta) streamEvent({ kind: 'text', text: delta });
+      } else if (textFactOf(assistantEvent)) {
+        streamEvent(textFactOf(assistantEvent));
       } else if (assistantEvent?.type === 'thinking_start') {
         thinkingStartedAt = Date.now();
         streamEvent({ kind: 'thinking_start' });

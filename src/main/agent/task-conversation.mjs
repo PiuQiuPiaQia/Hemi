@@ -1,3 +1,4 @@
+import { textFactOf } from '../../shared/message-phase.mjs';
 import { reduceTurnParts } from '../../shared/turn-parts.mjs';
 
 const MAX_MESSAGES = 160;
@@ -67,6 +68,8 @@ export function createTaskConversation({ taskId, prompt, now = Date.now }) {
     snapshot: () => value,
     stream(event) {
       if (closed) return false;
+      const text = textFactOf(event);
+      if (text) return reduce(text);
       switch (event?.type) {
         case 'hemi_request_start': {
           const last = value.messages.at(-1);
@@ -78,7 +81,6 @@ export function createTaskConversation({ taskId, prompt, now = Date.now }) {
           if (requestMessageId) update(value.messages.filter(message => message.id !== requestMessageId));
           requestMessageId = null;
           return true;
-        case 'text_delta': return reduce({ kind: 'text', text: event.delta });
         case 'thinking_start': return reduce({ kind: 'thinking_start' });
         case 'thinking_delta': return reduce({ kind: 'thinking', text: event.delta });
         case 'thinking_end': return reduce({ kind: 'thinking_end' });

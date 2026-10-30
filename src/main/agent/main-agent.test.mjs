@@ -338,7 +338,7 @@ test('显式工具白名单严格裁剪；工具声明是实际执行能力的�
     await agent.runTurn({ userText: '打开 liblib.tv' });
     // SDK 自带的 __pi_* 内部占位不计（两种模式都有）。
     const names = (mock.requests[0].tools ?? []).map((tool) => tool.name).filter((name) => !name.startsWith('__pi_')).sort();
-    assert.deepEqual(names, [...MAIN_CONTROL_TOOLS].sort());
+    assert.deepEqual(names, [...MAIN_CONTROL_TOOLS, 'report_progress'].sort());
     const system = JSON.stringify(mock.requests[0].system);
     assert.ok(!system.includes('自己不直接动手'));
   }, { tools: [...MAIN_CONTROL_TOOLS], orchestrator: true });

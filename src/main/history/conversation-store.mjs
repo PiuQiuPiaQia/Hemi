@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { normalizeMessagePhase } from '../../shared/message-phase.mjs';
 import { retryingRenameSync } from '../lib/rename-retry.mjs';
 
 const replaceSessionFile = retryingRenameSync((from, to) => renameSync(from, to));
@@ -119,7 +120,13 @@ function sanitizeParts(parts) {
     if (part.type === 'text' || part.type === 'thinking') {
       const text = typeof part.text === 'string' ? part.text.slice(0, MAX_PART_TEXT) : '';
       if (!text.trim()) continue;
-      if (part.type === 'text') { out.push({ type: 'text', text }); continue; }
+      if (part.type === 'text') {
+        const phase = normalizeMessagePhase(part.phase);
+        out.push({ type: 'text', text,
+          ...(typeof part.textId === 'string' ? { textId: part.textId.slice(0, 200) } : {}),
+          ...(phase ? { phase, phaseSource: part.phaseSource === 'provider' ? 'provider' : 'contract' } : {}) });
+        continue;
+      }
       const startedAt = Number(part.startedAt) || 0;
       const endedAt = Number(part.endedAt) || startedAt;
       out.push({ type: 'thinking', text, startedAt, endedAt, ...(part.interrupted === true ? { interrupted: true } : {}) });

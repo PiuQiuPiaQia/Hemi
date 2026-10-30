@@ -51,7 +51,7 @@ export type WorkflowCardView = {
 };
 export type TurnPart =
   | { type: 'thinking'; text: string; startedAt: number; endedAt: number | null; interrupted?: boolean }
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; textId?: string; phase?: 'commentary' | 'partial_answer' | 'final_answer' | 'unclassified'; phaseSource?: 'provider' | 'contract' }
   | { type: 'tools'; calls: TurnToolCall[] }
   /** 059 执行卡：流式归约不产出（卡片只来自 flow 投影），类型层与 protocol 同形。 */
   | { type: 'workflow-card'; card: WorkflowCardView };

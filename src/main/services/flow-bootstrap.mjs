@@ -1,3 +1,4 @@
+import { normalizeMessagePhase } from '../../shared/message-phase.mjs';
 /**
  * 057 旧档引导（S2 渲染层前置；S3 迁移的转换函数先行）：没有 flow 快照的旧会话，
  * 打开时按 turns 原存储顺序一次性投影出 flow 快照（契约 §8「旧 turns 按原顺序
@@ -78,7 +79,8 @@ export function bootstrapFlowFromTurns(turns, { conversationId } = {}) {
             endedAt: Number(part.endedAt) || 0,
           });
         } else if (part?.type === 'text' && typeof part.text === 'string') {
-          parts.push({ partId: partId('t'), kind: 'text', content: part.text });
+          parts.push({ partId: partId('t'), kind: 'text', content: part.text,
+            ...(normalizeMessagePhase(part.phase) ? { phase: part.phase, phaseSource: part.phaseSource === 'provider' ? 'provider' : 'contract' } : {}) });
         } else if (part?.type === 'tools' && Array.isArray(part.calls)) {
           for (const call of part.calls) {
             parts.push({

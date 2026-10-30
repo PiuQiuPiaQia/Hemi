@@ -7,6 +7,8 @@ import http from 'node:http';
 import test from 'node:test';
 import { createHemiSession } from './hemi-session.mjs';
 import { collectSkills } from '../skills/skill-catalog.mjs';
+import { textFactOf } from '../../shared/message-phase.mjs';
+import { reduceTurnParts } from '../../shared/turn-parts.mjs';
 
 async function fixture(t, respond) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-model-test-'));
@@ -35,6 +37,34 @@ async function fixture(t, respond) {
     },
   };
 }
+
+test('真实 SDK：进度协议、答案后交付登记、最终确认分别保留身份，恢复后约束仍有效', async t => {
+  const answer = '**完整答案**\n\n- 操作一\n- 操作二';
+  const { requests, make } = await fixture(t, (body) => {
+    const count = body.messages.filter(message=>message.role==='tool').length;
+    const tool = (id,name,args) => ({tool_calls:[{index:0,id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
+    if (count === 0) return tool('progress','report_progress',{text:'正在核对资料'});
+    if (count === 1) return {content:answer,...tool('delivery','register_delivery',{files:[],sources:[{title:'依据',url:'https://example.com/'}]})};
+    return {content:'来源已登记'};
+  });
+  const options = {tools:['register_delivery'],delivery:true};
+  const session = make(options);
+  let parts = [];
+  session.on('stream',event=>{const fact=textFactOf(event);if(fact)parts=reduceTurnParts(parts,fact);});
+  const result = await session.prompt('检查消息协议');
+  assert.equal(result.lastText,'来源已登记');
+  assert.equal(requests.length,3);
+  assert.deepEqual(parts.map(part=>[part.text,part.phase]),[
+    ['正在核对资料','commentary'],[answer,'unclassified'],['来源已登记','unclassified'],
+  ]);
+  assert.ok(requests[0].body.tools.some(tool=>tool.function.name==='report_progress'));
+  assert.match(JSON.stringify(requests[0].body.messages),/普通正文.*答案/);
+  assert.doesNotMatch(JSON.stringify(requests[1].body.messages.at(-1)),/isError/);
+  const entries = (await session.exportEntries()).entries;
+  const restored = make({...options,entries});
+  await restored.prompt('继续检查');
+  assert.match(JSON.stringify(requests.at(-1).body.messages),/report_progress/);
+});
 
 test('最终选模后应用产品三档；从旧条目恢复不能沿用旧档位', async (t) => {
   const { requests, make } = await fixture(t);

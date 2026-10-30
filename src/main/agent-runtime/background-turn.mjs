@@ -1,3 +1,4 @@
+import { textFactOf } from '../../shared/message-phase.mjs';
 import {goalRunOutcome} from './goal-driver.mjs';
 import {createRunPartProjector} from '../services/flow-parts-projection.mjs';
 
@@ -6,7 +7,8 @@ export async function runBackgroundTurn({runtime,conversationId,runId,generation
   const projector=createRunPartProjector({runId,generation,inputId:null});
   const fact=event=>{for(const value of projector.handle(event))apply(value);};
   const stream=event=>{
-    if(event.type==='text_delta')fact({kind:'text',text:event.delta});
+    const text=textFactOf(event);
+    if(text)fact(text);
     else if(event.type==='thinking_delta')fact({kind:'thinking',text:event.delta});
     else if(event.type==='thinking_end')fact({kind:'thinking_end'});
     else if(event.type==='hemi_message_end')fact({kind:'message-end'});

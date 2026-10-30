@@ -1,3 +1,4 @@
+import { Markdown } from "../shared/markdown.js";
 import { useId } from "react";
 import {
   BookOpen,
@@ -231,7 +232,7 @@ export function TurnActivity({
               ) : entry.kind === "say" ? (
                 <div className="turn-activity-say">
                   <MessageSquareText aria-hidden="true" />
-                  <span className="selectable">{entry.part.text}</span>
+                  <div className="selectable"><Markdown text={entry.part.text} /></div>
                 </div>
               ) : (
                 <ToolStep call={entry.call} />

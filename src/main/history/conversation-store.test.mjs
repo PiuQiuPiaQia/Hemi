@@ -1160,3 +1160,17 @@ test('列表索引文件损坏时回退全量读，列表仍正确并重建索�
   const rebuilt = JSON.parse(readFileSync(path.join(dir, 'list-index.json'), 'utf8'));
   assert.equal(rebuilt.version, 1, '损坏索引被重建');
 });
+
+
+test('消息用途协议随 turns 清洗保留，未知阶段不取得折叠资格', () => {
+  const input = [{id:'phase-turn',author:'hemi',createdAt:1,text:'答案',parts:[
+    {type:'text',text:'进度',textId:'p',phase:'commentary',phaseSource:'contract'},
+    {type:'text',text:'正文',textId:'a',phase:'partial_answer',phaseSource:'provider'},
+    {type:'text',text:'旧档正文',phase:'invalid'},
+  ]}];
+  const saved = JSON.parse(JSON.stringify(sanitizeTurns(input)));
+  assert.deepEqual(saved[0].parts.map(part=>[part.text,part.phase]),
+    [['进度','commentary'],['正文','partial_answer'],['旧档正文',undefined]]);
+  assert.equal(saved[0].parts[1].textId,'a');
+  assert.equal(saved[0].parts[1].phaseSource,'provider');
+});
