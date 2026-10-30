@@ -58,7 +58,9 @@ export function createModelRecovery({ signal, isOnline = () => true, onState = (
       check();
       const classification = classifyModelFailure(failure);
       if (!classification) return false;
-      state ??= { id: randomUUID(), firstFailureAt: now(), deadlineAt: now() + windowMs, attempt: 0, attemptsMade: 0, history: [] };
+      // 期限锚定同一次 now()：两次取时在 Windows 时钟粒度下会漂 1ms，deadlineAt 必须精确等于窗口终点。
+      const firstFailureAt = now();
+      state ??= { id: randomUUID(), firstFailureAt, deadlineAt: firstFailureAt + windowMs, attempt: 0, attemptsMade: 0, history: [] };
       const attempt = state.attempt + 1;
       const notBefore = Math.max(now() + 1000, now() + (failure.retryAfterMs ?? 0));
       const nextRetryAt = Math.max(now() + recoveryDelayMs(attempt), notBefore);

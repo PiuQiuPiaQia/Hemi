@@ -109,7 +109,16 @@ export function createAccessContext({
     /** 真实落点命中硬拒（家内敏感点文件/个人数据库）——软链进出都按真实路径判。 */
     deniedRealPath: (real) => hitsDenyPrefix(real, home) || (realHome !== home && hitsDenyPrefix(real, realHome)),
     /** 系统目录不可写（读放行：/usr/bin 等工具与系统文件要能读；win 用 SystemRoot/Program* 根表）。 */
-    systemWriteRoot: (real) => SYSTEM_WRITE_ROOTS.some((root) => real === root || real.startsWith(`${root}${path.sep}`)),
+    // Windows 文件系统不区分大小写：SystemRoot 常见为 C:\WINDOWS，盘上实际 C:\Windows——
+    // 大小写敏感比较会让系统目录拦截被真实落点绕过（2026-10-22 win 真机实锤，写入成功）。
+    systemWriteRoot: (real) => {
+      const fold = process.platform === 'win32';
+      const normalize = (value) => (fold ? value.toLowerCase() : value);
+      return SYSTEM_WRITE_ROOTS.some((root) => {
+        const candidate = normalize(real), base = normalize(root);
+        return candidate === base || candidate.startsWith(`${base}${path.sep}`);
+      });
+    },
 
   /** ui_tree/ui_act 后记录当前桌面目标（pi-ax 调），供 ui_act 等无目标调用归属。 */
     recordDesktopTarget(target) {

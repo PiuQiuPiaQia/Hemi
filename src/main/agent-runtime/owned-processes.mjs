@@ -33,7 +33,8 @@ export async function recoverOwnedProcesses(journal) {
     if (process.platform === 'win32') {
       // A legacy PID/tree snapshot cannot prove ownership of detached descendants.
       // Do not kill a still-useful service, or claim all children were reclaimed.
-      await journal.processEnd(record.id,{state:'unknown',cleanupConfirmed:false,reason:'旧版命令没有 Job 归属；父进程存在或消失都不能证明子孙已结束'});
+      // 记录保持 unknown/cleanupConfirmed=false 原样（与 POSIX 分支一致，不做任何日志写入），
+      // 抛错即阻断恢复；写入 processEnd 反而会被「未确认不得落状态」的口径拒绝。
       throw cleanupFailure('旧版 Windows 命令缺少 Job 归属，子进程需人工核对；没有清理或重跑现有服务');
     }
     if(record.state==='unknown'&&record.cleanupConfirmed===false)throw cleanupFailure('旧命令存在未确认的子进程，重启不能代替清理确认；需人工核对进程归属');
