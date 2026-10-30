@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {spawn} from 'node:child_process';
+import {spawn, execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {once} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {randomUUID} from 'node:crypto';
@@ -51,7 +52,7 @@ test('Windows transport reuses one real CLI/Host process channel and reconnects 
   t.after(async () => {
     transport?.disconnect();
     if (host.exitCode === null) {const ended = once(host, 'exit'); host.kill(); await ended;}
-    await fs.rm(root, {recursive: true, force: true});
+    await fs.rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 100});
   });
   let hello;
   for (let i = 0; i < 300; i++) {
@@ -71,7 +72,47 @@ fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({mode})+'\\n');
 const child=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(entry)},mode],{env:{...process.env,HEMI_BOT_DATA_DIR:${JSON.stringify(dataDir)},HEMI_BOT_ISOLATED_TEST:'1'},stdio:['pipe','pipe','inherit']});
 process.stdin.pipe(child.stdin);child.stdout.pipe(process.stdout);child.on('exit',code=>process.exit(code??1));
 `, {mode: 0o700});
-  const runner = createSshRunner({controlDir: path.join(root, 'ssh'), sshBin: ssh});
+  // Windows 真机没有 POSIX shebang exec：直接 spawn .mjs 会被 CreateProcess 拒绝
+  // （spawn EFTYPE）。按仓库构建命令监督器的口径（scripts/build-windows-command-job.mjs）
+  // 用 .NET Framework 自带的 csc 现场编译一个透传启动器：argv、stdio 与退出码原样
+  // 转交 node 执行上面的 ssh.mjs；runner、transport、CLI、Host 仍全是生产实现。
+  let sshBin = ssh;
+  if (process.platform === 'win32') {
+    const compiler = path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
+    const launcher = path.join(root, 'ssh-mock.exe'), source = path.join(root, 'ssh-mock.cs');
+    await fs.writeFile(source, `using System;
+using System.Diagnostics;
+using System.Text;
+class HemiSshMockLauncher {
+    static int Main(string[] args) {
+        var script = Environment.GetEnvironmentVariable("HEMI_TEST_SSH_MOCK");
+        var node = Environment.GetEnvironmentVariable("HEMI_TEST_SSH_MOCK_NODE");
+        if (string.IsNullOrEmpty(script) || string.IsNullOrEmpty(node)) {
+            Console.Error.WriteLine("hemi ssh-mock launcher: HEMI_TEST_SSH_MOCK or HEMI_TEST_SSH_MOCK_NODE missing");
+            return 255;
+        }
+        var line = new StringBuilder(Quote(script));
+        foreach (var argument in args) line.Append(' ').Append(Quote(argument));
+        using (var child = Process.Start(new ProcessStartInfo {
+            FileName = node, Arguments = line.ToString(), UseShellExecute = false,
+        })) {
+            child.WaitForExit();
+            return child.ExitCode;
+        }
+    }
+    static string Quote(string value) {
+        var slash = Convert.ToChar(92).ToString();
+        var mark = Convert.ToChar(34).ToString();
+        return mark + (value ?? string.Empty).Replace(slash, slash + slash).Replace(mark, slash + mark) + mark;
+    }
+}
+`);
+    await promisify(execFile)(compiler, ['/nologo', '/optimize+', '/platform:x64', '/target:exe', '/out:' + launcher, source], {windowsHide: true, timeout: 30000});
+    process.env.HEMI_TEST_SSH_MOCK = ssh;
+    process.env.HEMI_TEST_SSH_MOCK_NODE = process.execPath;
+    sshBin = launcher;
+  }
+  const runner = createSshRunner({controlDir: path.join(root, 'ssh'), sshBin});
   transport = createBotTransport({runner}); transport.setPlatform('fixture', 'win32');
   const call = (method, params = {}) => transport.rpc('fixture', method, {instanceId: hello.instanceId, requestId: randomUUID(), ...params});
   assert.equal((await call('handshake')).bootId, hello.bootId);

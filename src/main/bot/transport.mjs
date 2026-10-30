@@ -70,7 +70,7 @@ export function createBotTransport({ runner, archivePath }) {
   }
   const isWindows = host => platforms.get(host) === 'win32';
   const cliCommand = (host, mode, stdin, file) => isWindows(host)
-    ? powershellCommand(windowsCliScript(mode, Buffer.byteLength(stdin), file))
+    ? powershellCommand(windowsCliScript(mode, Buffer.byteLength(stdin), file), {stdoutUtf8: false})
     : `r=${ROOT}; n="$r/runtime/bin/node"; if [ ! -x "$n" ]; then n=$(command -v node); fi; exec "$n" "$r/current/src/main/bot/cli.mjs" ${mode}`;
   async function execute(host, command, stdin, timeoutMs = 30000, signal) {
     const r = await runner.exec({ host, command, stdin, timeoutMs, signal });
@@ -122,7 +122,10 @@ export function createBotTransport({ runner, archivePath }) {
         'unsupported',
       );
     }
-    return r.stdout.toString('utf8');
+    const text = r.stdout.toString('utf8');
+    // PowerShell 5.1 hosts on UTF-8 system locales emit a leading BOM into piped
+    // stdout before any payload; legitimate reply payloads never start with one.
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   }
   async function executeWindows(host, script, stdin, timeoutMs, signal) {
     const command = powershellCommand(script);

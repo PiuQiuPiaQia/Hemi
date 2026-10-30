@@ -184,7 +184,7 @@ test('one-shot PowerShell validates all input before launching the CLI and prese
   await fs.writeFile(path.join(root, 'current.json'), JSON.stringify({node: process.execPath, release: root}));
   await fs.writeFile(path.join(root, 'src/main/bot/cli.mjs'), "import fs from 'node:fs';fs.writeFileSync(new URL('../../../started',import.meta.url),'1');for await(const bytes of process.stdin)process.stdout.write(bytes);");
   const input = Buffer.from(JSON.stringify({text: '中文🙂', method: 'handshake'}));
-  const source = powershellSource(windowsCliScript('rpc', input.length).replace(/\$root = Join-Path \$env:USERPROFILE '[^']+'/, "$root = '" + root.replaceAll("'", "''") + "'"));
+  const source = powershellSource(windowsCliScript('rpc', input.length).replace(/\$root = Join-Path \$env:USERPROFILE '[^']+'/, "$root = '" + root.replaceAll("'", "''") + "'"), {stdoutUtf8: false});
   async function run(bytes) {
     const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], {stdio: ['pipe', 'pipe', 'pipe']});
     const output = []; let error = '';
@@ -199,7 +199,10 @@ test('one-shot PowerShell validates all input before launching the CLI and prese
   await assert.rejects(fs.access(path.join(root, 'started')), {code: 'ENOENT'});
   const complete = await run(input);
   assert.equal(complete.code, 0, complete.error);
-  assert.deepEqual(complete.output, input);
+  // PS 5.1 on UTF-8 system locales prefixes its own BOM onto the piped stdout;
+  // the relay payload itself must stay byte-identical after that optional prefix.
+  const relayed = complete.output.length >= 3 && complete.output[0] === 0xef && complete.output[1] === 0xbb && complete.output[2] === 0xbf ? complete.output.subarray(3) : complete.output;
+  assert.deepEqual(relayed, input);
   await fs.access(path.join(root, 'started'));
 });
 
@@ -208,13 +211,14 @@ test('persistent PowerShell forwards a small UTF-8 request before stdin closes',
   await fs.mkdir(path.join(root, 'src/main/bot'), {recursive: true});
   await fs.writeFile(path.join(root, 'current.json'), JSON.stringify({node: process.execPath, release: root}));
   await fs.writeFile(path.join(root, 'src/main/bot/cli.mjs'), "process.stdin.on('data', bytes => process.stdout.write(bytes));");
-  const source = powershellSource(windowsCliScript('rpc-stream').replace(/\$root = Join-Path \$env:USERPROFILE '[^']+'/, "$root = '" + root.replaceAll("'", "''") + "'"));
+  const source = powershellSource(windowsCliScript('rpc-stream').replace(/\$root = Join-Path \$env:USERPROFILE '[^']+'/, "$root = '" + root.replaceAll("'", "''") + "'"), {stdoutUtf8: false});
   const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], {stdio: ['pipe', 'pipe', 'pipe']});
   let errors = ''; child.stderr.on('data', bytes => {errors += bytes;});
   t.after(async () => {child.stdin.end(); if (child.exitCode === null) {const exited = once(child, 'exit'); child.kill(); await exited;} await fs.rm(root, {recursive: true, force: true});});
   const input = Buffer.from('small request 中文🙂\n'), received = Promise.withResolvers();
   let body = Buffer.alloc(0);
-  child.stdout.on('data', bytes => {body = Buffer.concat([body, bytes]); if (body.length >= input.length) received.resolve(body);});
+  const stripBom = bytes => bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? bytes.subarray(3) : bytes;
+  child.stdout.on('data', bytes => {body = Buffer.concat([body, bytes]); if (body.length >= input.length) received.resolve(stripBom(body));});
   child.on('exit', () => received.reject(new Error(errors || 'PowerShell exited before forwarding the request')));
   child.stdin.write(input); // Deliberately keep stdin open, as a persistent SSH channel does.
   assert.deepEqual(await received.promise, input);
@@ -277,8 +281,27 @@ test('Windows pre-install directory browser executes the real PowerShell path ha
 test('Windows installation gives a new root only owner/SYSTEM access and preserves the ACL on repeat', {skip:process.platform!=='win32'}, async t => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-root-acl-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  const script=powershellSource(windowsRootSetupScript+`\n$before=(Get-Acl -LiteralPath $root).Sddl\n${windowsRootSetupScript}\nif((Get-Acl -LiteralPath $root).Sddl -ne $before){throw 'Existing private ACL changed'}\n$acl=Get-Acl -LiteralPath $root; $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));if(-not $acl.AreAccessRulesProtected -or $rules.Count -ne 2){throw 'Root is not private'}\nforeach($rule in $rules){if($rule.IdentityReference.Value -notin @($sid,'S-1-5-18')){throw 'Unexpected ACL identity'}}`);
-  await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,USERPROFILE:root}});
+  const script=powershellSource(windowsRootSetupScript+`\n$before=[IO.Directory]::GetAccessControl($root).Sddl\n${windowsRootSetupScript}\nif([IO.Directory]::GetAccessControl($root).Sddl -ne $before){throw 'Existing private ACL changed'}\n$acl=[IO.Directory]::GetAccessControl($root); $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));if(-not $acl.AreAccessRulesProtected -or $rules.Count -ne 2){throw 'Root is not private'}\nforeach($rule in $rules){if($rule.IdentityReference.Value -notin @($sid,'S-1-5-18') -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.InheritanceFlags -ne 'ContainerInherit,ObjectInherit' -or $rule.PropagationFlags -ne 'None'){throw 'Unexpected ACL rule'}}`);
+  const encoded=Buffer.from(script,'utf16le').toString('base64');
+  // Model an inherited PS7 module path deterministically, without requiring an
+  // installed pwsh. This manifest exports Get-Acl but cannot load in PS5.1.
+  const modules=path.join(root,'PowerShell7','Modules'),security=path.join(modules,'Microsoft.PowerShell.Security');
+  await fs.mkdir(security,{recursive:true});
+  // PS7's real Security manifest declares PowerShellVersion=3.0 (not 7.0),
+  // so PS5 discovers it even though its implementation is Core-only.
+  await fs.writeFile(path.join(security,'Microsoft.PowerShell.Security.psd1'),`@{ModuleVersion='7.0.0';GUID='a94c8c7e-9810-47c0-b8af-65089c13a35a';PowerShellVersion='3.0';CompatiblePSEditions=@('Core');RootModule='Security.psm1';FunctionsToExport=@('Get-Acl');CmdletsToExport=@()}`);
+  await fs.writeFile(path.join(security,'Security.psm1'),`throw 'Fixture: Core-only Security implementation cannot load in Desktop'; function Get-Acl {}`);
+  const env={...process.env,USERPROFILE:root,PSModulePath:modules};
+  // Establish the original failure from real module resolution, not a mock.
+  await assert.rejects(exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; try { Get-Acl -LiteralPath $env:USERPROFILE } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"],{env}),error=>{
+    assert.match(error.stderr,/Microsoft\.PowerShell\.Security/); return true;
+  });
+  const detail=await exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',"try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; exit 0 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"],{env}).catch(error=>error);
+  assert.equal(detail.code,1); assert.match(detail.stderr,/Core-only Security/);
+  t.diagnostic('Inherited PSModulePath underlying import error: '+detail.stderr.trim());
+  // Production setup must work on the FIRST attempt with the same hostile env.
+  await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env});
+  await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env:{...process.env,USERPROFILE:root}});
 });
 
 test('Windows PowerShell can atomically replace the active pointer without creating a backup path', {skip:process.platform!=='win32'}, async t => {

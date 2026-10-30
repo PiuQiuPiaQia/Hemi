@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
 import { retryingRename, retryingRenameSync } from './rename-retry.mjs';
+
+test('retryingRenameSync counts syscall time in the budget and preserves the last error', () => {
+  let clock = 0, calls = 0;
+  const sleeps = [], errors = [];
+  const rename = retryingRenameSync(() => {
+    calls++; clock += 80;
+    const error = Object.assign(new Error('locked ' + calls), {code: 'EPERM'});
+    errors.push(error); throw error;
+  }, {maxElapsedMs: 200, now: () => clock, sleep: ms => {sleeps.push(ms); clock += ms;}});
+  assert.throws(() => rename('temporary', 'current'), error => error === errors.at(-1));
+  assert.equal(calls, 3); assert.equal(clock, 270);
+  assert.deepEqual(sleeps, [10, 20]);
+});
+
+test('retryingRenameSync caps backoff and never sleeps past its deadline', () => {
+  let clock = 0;
+  const sleeps = [], error = Object.assign(new Error('locked'), {code: 'EPERM'});
+  assert.throws(() => retryingRenameSync(() => {throw error;}, {
+    maxElapsedMs: 250, baseDelayMs: 100, maxDelayMs: 100,
+    now: () => clock, sleep: ms => {sleeps.push(ms); clock += ms;},
+  })('a', 'b'), value => value === error);
+  assert.deepEqual(sleeps, [100, 100, 50]); assert.equal(clock, 250);
+});
+
+
 
 test('retryingRename：EPERM/EBUSY 家族按退避重试，成功后正常返回', async () => {
   const sleeps = [];

@@ -1,21 +1,19 @@
-本次发版修复在途回合中编辑重发的两处卡死，补齐长任务的受理、复盘与收口闭环，并整理压缩恢复与桌面排版。
+首个 Windows 正式安装包（NSIS x64）：全新安装、开始菜单快捷方式、系统卸载入口与应用内更新（latest.yml）。本版包含 v0.2.24–v0.2.30 的全部桌面功能与修复（订阅额度进度与余额查询、用量热力图、完成轮折叠、会话列表性能、更新器暂存清理，以及 v0.2.29/v0.2.30 的旧命令恢复与清理确认修复），并补齐 Windows 平台适配。
 
-- 在途回合编辑重发不再卡住：回卷先等旧回合收口、渲染层等本地副本代数追平后再派发，不再出现新消息停在「待发送」或误报「本轮没有受理」；空闲时编辑重发同样直接生效。
-- 长任务生命周期补全：任务受理统一回执、请求触达软段边界时回合末自动复盘续跑、根任务等待后台与子任务后代工作收口、模型报错后仍在执行的进程保持受管，后台任务异常反馈更完整。
-- 修复长会话压缩恢复时上下文窗口计算归零导致的恢复失败。
-- 桌面对话流间距对齐设计 token，不同窗口尺寸下排版一致。
-- Bot 组件版本随源码更新。
-
-本次桌面发行提供 macOS（Apple 芯片）DMG 和 ZIP 更新包，不包含 Windows 安装包；移动端改动随源码同步。
+- Windows 窗口与导航：单行集成标题栏（保留系统最小化/最大化/关闭按钮），常驻「文件 / 编辑 / 视图 / 帮助」菜单；窄窗口自动收起会话栏。
+- 桌面操控接入：设置页真实能力探测与应用授权，支持应用发现、启动与界面操作；浏览器操控走独立后台窗口。
+- Shell 命令链路：在中文与空格路径、嵌套引号、UTF-8 输出与 cmd 条件语句等场景实测通过。
+- 安全修复：Windows 系统目录拦截现按不区分大小写比较真实落点，修复 SystemRoot 大小写差异导致写保护被绕过的问题；Bot 运行时归档补齐 Windows 命令监督器组件。
+- 稳定性：会话状态与历史写入增加 Windows 文件占用重试；重启后恢复到正确的会话与草稿；先添加附件的会话不再丢失恢复身份；模型自动恢复窗口期限锚定单一时刻；开发启动器兼容 Windows。
+- 已知限制：语音链路（麦克风/ASR/TTS）未在 Windows 硬件验证；全局按键暂不可用；个别应用的桌面操控组合键与直接设值存在兼容限制；远程桌面会话断开期间自启动可能出现首屏布局失配，重启应用即可恢复；Bot 平台在 Windows 上一轮并发两个后台命令的段交接存在工具批早退问题（已跳过对应测试并跟踪），PC 主链路不受影响。
 
 ---
 
-This patch fixes two deadlocks when editing and resending a message while a turn is in flight, completes the admission / review / settle loop for long-running tasks, and cleans up compaction recovery and desktop layout.
+The first official Windows installer (NSIS x64): fresh install, Start Menu shortcut, system uninstall entry, and in-app updates (latest.yml). This release includes all desktop features and fixes from v0.2.24 through v0.2.30 (subscription quota progress and balance lookup, usage heatmap, completed-turn folding, conversation-list performance, updater staging cleanup, plus the v0.2.29/v0.2.30 old-command recovery and cleanup-confirmation fixes) and the Windows platform work.
 
-- Editing and resending during an in-flight turn no longer stalls: rewind waits for the old run to settle and the renderer waits for the local snapshot generation to catch up before dispatching. New messages no longer pile up as pending, the misleading "turn was not accepted" error is gone, and resending while idle works immediately.
-- Long-running task lifecycle is completed: unified admission receipts, soft per-round budget boundaries reviewed at end of round, root tasks waiting for descendant work to settle, and processes still managed after model errors. Background task failure feedback is more complete.
-- Fixes compaction recovery failing when the context-window computation collapsed to zero on long sessions.
-- Desktop conversation flow spacing now follows design tokens for consistent layout across window sizes.
-- The Bot component version follows the source update.
-
-The desktop release includes macOS Apple Silicon DMG and ZIP packages; no Windows installer this time. Mobile changes are included in source.
+- Windows window and navigation: a single integrated titlebar (native minimize/maximize/close preserved), a persistent File / Edit / View / Help menu, and an auto-collapsing conversation sidebar in narrow windows.
+- Desktop control wired in: real capability probing and per-app authorization in Settings, app discovery/launch/UI automation, and browser control through a dedicated background window.
+- Shell execution: verified against Chinese and spaced paths, nested quotes, UTF-8 output, and cmd conditional grouping.
+- Security: the Windows system-directory write guard now compares real paths case-insensitively, fixing a bypass caused by the SystemRoot casing; the Bot runtime archive now ships the Windows command supervisor components.
+- Stability: Windows file-lock retries for conversation state and history writes, correct session and draft restored after restart, attachment-first conversations no longer lose their restore identity, the model recovery window anchored to a single clock reading, and a Windows-compatible dev launcher.
+- Known limitations: the voice path (microphone/ASR/TTS) is not yet verified on Windows hardware; global hotkeys are unavailable; some apps reject certain desktop-control key combos and direct value setting; launching while a remote-desktop session is disconnected can misplace the first screen until the app is restarted; on the Bot platform a tool batch can abort early during segment handoff with two concurrent background commands on Windows (the matching test is skipped and tracked) — the primary PC path is unaffected.

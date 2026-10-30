@@ -250,5 +250,8 @@ notices.push(
   "Material Icon Theme (MIT)",
   fs.readFileSync("licenses/Material-Icon-Theme-MIT.txt", "utf8"),
 );
-fs.writeFileSync("THIRD-PARTY-NOTICES.md", notices.join("\n"));
+fs.writeFileSync(
+  "THIRD-PARTY-NOTICES.md",
+  notices.join("\n").replaceAll("\r\n", "\n"),
+);
 console.log("Built conversation SDK, declarations, scoped CSS and notices");

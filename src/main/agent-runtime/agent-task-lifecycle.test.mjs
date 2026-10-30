@@ -20,7 +20,11 @@ async function until(read, ms = 15000) {
     await pause(10);
   }
 }
-const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+// Windows 真机链路是 cmd.exe /d /s /c "<命令>"（command-execution-windows-shell.test.mjs
+// 固化的语义）：单引号会被 cmd 当普通字符，路径须用双引号；POSIX 分支保持 bash 单引号。
+const quote = process.platform === 'win32'
+  ? value => `"${String(value)}"`
+  : value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 // Real PC core, Pi SDK, journal and managed processes; only model HTTP is scripted.
 // Covers the unified-accepted dispatch path from docs/requirements/agent-task-lifecycle.md:
