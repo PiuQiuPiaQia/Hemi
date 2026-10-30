@@ -7,6 +7,7 @@ import { piModelOf, sdkThinkingLevelOf } from '../lib/pi-model.mjs';
 import { isSameCandidate } from '../lib/model-routing.mjs';
 import { createRequestImageProjector, isRequestMediaTooLarge } from './request-images.mjs';
 import { sanitizedUrl, sanitizeErrorText } from './usage-history.mjs';
+import { MODEL_PREFLIGHT, observeModelFetch, transportCodeOf } from '../lib/model-transport.mjs';
 
 const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 const candidateIndex = provider => provider === 'hemi-fallback' ? 1 : /^hemi-fallback-\d+$/.test(provider) ? Number(provider.split('-').at(-1)) : 0;
@@ -68,7 +69,8 @@ export function controlledStream(stream, getExecution) {
             if (projection.stats.omitted || projection.stats.resized) execution.onImageProjection?.(projection.stats);
           }
           await execution.beforeRequest?.();
-          const ids = [], attempts = new Map(), transport = {}, attempt = new AbortController();
+          const ids = [], attempts = new Map(), attempt = new AbortController();
+          let transport = {};
           const signal = options.signal ? AbortSignal.any([options.signal, attempt.signal]) : attempt.signal;
           const timeouts = Object.fromEntries([['connectionMs','connectionTimeoutMs'],['firstOutputMs','firstOutputTimeoutMs'],['idleMs','streamIdleTimeoutMs']].filter(([, key]) => execution.budgets[key] !== undefined).map(([name,key]) => [name,execution.budgets[key]]));
           const watchdog = requestWatchdog({ controller: attempt, signal, timeouts,
@@ -80,20 +82,32 @@ export function controlledStream(stream, getExecution) {
             const { apiKey: _secret, encryptedApiKey: _encrypted, ...publicCandidate } = candidate;
             try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, url: sanitizedUrl(url), cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
             catch (error) { if (error.code === 'request-limit') execution.onRequestLimit?.(); boundaryFailure = error; throw error; }
-            ids.push(requestId); attempts.set(requestId, { startedAt: Date.now() }); lastRequestId = requestId;
+            const { [MODEL_PREFLIGHT]: preflight = false, ...wireInit } = init ?? {};
+            const facts = { preflight };
+            ids.push(requestId); attempts.set(requestId, { startedAt: Date.now(), facts }); lastRequestId = requestId;
+            // Preflight and inference share one SDK call. A successful config
+            // fetch must not supply HTTP 200 to a later failed model fetch.
+            transport = facts;
             try {
-              const response = await (options.fetch ?? globalThis.fetch)(url, { ...init, signal });
-              transport.status = response.status;
+              const response = await observeModelFetch(options.fetch ?? globalThis.fetch, url, {
+                ...wireInit, signal: wireInit.signal ? AbortSignal.any([signal, wireInit.signal]) : signal,
+              }, facts);
+              Object.assign(transport, facts, { status: response.status });
               attempts.get(requestId).status = response.status;
               transport.retryAfterMs = retryAfterMs(response.headers?.get('retry-after'));
-              watchdog.connected();
+              if (!preflight) watchdog.connected();
               // 收到响应头不是请求终态；额度与完成校验必须仍看见这次在途生成。
               try { await execution.journal.requestResponse(requestId, { httpStatus: response.status }); }
               catch (error) { boundaryFailure = error; throw error; }
               return response;
             } catch (error) {
-              transport.code = error.cause?.code ?? error.code;
-              transport.message = String(error.message);
+              // Raw provider errors can embed authentication material. Keep
+              // only transport facts, even for an ignored preflight failure.
+              const code = transportCodeOf(error);
+              const message = /timeout|timed.out|超时/i.test(`${error.name} ${error.message}`) ? '模型连接超时'
+                : /fetch failed|connection|network|socket|连接/i.test(error.message) ? '模型连接中断' : '模型请求未收到响应';
+              Object.assign(facts, { code, message });
+              Object.assign(transport, facts);
               throw error;
             }
           };
@@ -137,7 +151,9 @@ export function controlledStream(stream, getExecution) {
           const tokenUsage = usageOf(finalMessage);
           for (const [position, requestId] of ids.entries()) {
             const last = position === ids.length - 1, meta = attempts.get(requestId);
-            const recordedFailure = last ? failure : meta.status >= 400 ? modelFailure({ status: meta.status, message: `HTTP ${meta.status}` }) : null;
+            const recordedFailure = last ? failure : meta.facts.code || meta.facts.message
+              ? modelFailure({ ...meta.facts, status: meta.status ?? null })
+              : meta.status >= 400 ? modelFailure({ status: meta.status, message: `HTTP ${meta.status}` }) : null;
             const recordedUsage = last ? tokenUsage : { uncachedInput: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null };
             const coverage = last && tokenUsage.uncachedInput !== null ? 'complete' : 'unknown';
             // 落盘边界统一脱敏：错误文本可能内嵌完整请求 URL（userinfo/query 带凭据）。
@@ -182,6 +198,9 @@ export function controlledStream(stream, getExecution) {
           ? { type: 'error', reason: finalMessage.stopReason, error: finalMessage }
           : { type: 'done', reason: finalMessage.stopReason, message: finalMessage });
       } catch (error) {
+        // Request admission/persistence/ownership failures must remain distinct
+        // from provider outages even when the SDK consumes an error event.
+        execution?.onControlError?.(error);
         const message = failedMessage(error);
         output.push({ type: 'error', reason: message.stopReason, error: message });
       } finally {

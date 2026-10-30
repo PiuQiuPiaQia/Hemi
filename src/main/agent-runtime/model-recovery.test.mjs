@@ -21,7 +21,7 @@ test('structured status and permanent error precedence; quota 429 is not a rate-
   for (const message of ['insufficient_quota', 'billing balance exhausted', '运行请求上限', 'context length limit', 'unsupported-modality', 'HEMI_RECOVERY_EXPIRED', 'arbitrary internal failure']) {
     assert.equal(classifyModelFailure({message, ...(message === 'insufficient_quota' ? {status:429} : {})}),null);
   }
-  assert.equal(classifyModelFailure({code:'ECONNRESET'}).category,'network');
+  assert.equal(classifyModelFailure({code:'ECONNRESET',delivery:'not-sent'}).category,'network');
   assert.equal(classifyModelFailure({status:503,aborted:true}),null);
   assert.equal(retryAfterMs('120'),120000);
   assert.equal(retryAfterMs('Thu, 01 Jan 1970 00:02:00 GMT',0),120000);

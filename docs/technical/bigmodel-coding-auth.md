@@ -46,3 +46,34 @@ node scripts/verify-bigmodel-live.mjs --user-data=<已授权账号目录> --mode
 - 最初主模型探针使用 128 输出 token，收到 HTTP 200 但以 `length` 结束；诊断脚本默认预算调整为 512 后得到 `stop`。产品输出预算没有修改。脚本日志中的机构、项目、密钥标识路径统一替换为占位符。
 
 生产账号文件仅用于读取，续签结果只保存在验证进程内；没有回放个人会话。没有修改已安装应用、发布版本或更新生产 Bot。未运行全量测试、渲染器构建或设备回归；本次修改不涉及渲染器、IPC 或 UI 生命周期。
+
+## 2026-10-30：请求内到期与上游令牌拒绝
+
+新增回归先在原实现上失败：真实 Pi SDK 完成认证后，在 `onPayload` 中将测试凭据标记到期，原请求返回本地 `项目令牌已过期` 401；签名预检期间到期也有相同结果。另一个回归确认，`VERIFY_APIKEY_EXPIRED` 原来只清签名私钥并重新握手，没有签发新项目令牌。这些复现确认了具体缺口，历史会话中上层未提前续签的完整时序仍不能从已有日志还原。
+
+修复位于桌面和 Bot 共用的认证与传输模块：
+
+- `ensureCodingCredential` 在签名前和发送前获取有效凭据，沿用 SDK 的五分钟有效期窗口。需要续签时进入同一凭据存储的 `modify` 锁，在锁内再次核对登录引用与有效期，复用其他请求已签发的令牌。
+- 签发仍使用 `projectCredential`，不在已持有存储锁的 SDK `oauth.refresh` 中再次获取锁。已开始的签发最多等待 15 秒；单个请求取消只结束自己的等待，签发结果仍可保存供其他请求使用。
+- 签发后重新读取凭据，因此续签期间排队的退出或重登会阻止旧请求。令牌变化后重建路由、认证头、握手和签名，沿用最多两次预检的上限；本地到期不会直接结束原任务。
+- 第一次明确的 `VERIFY_APIKEY_EXPIRED` 拒绝会换发令牌；如果其他请求已更换被拒绝的令牌则直接复用。`VERIFY_SIGNATURE_INVALID` 只重建签名私钥。两者共用最多一次推理重发的上限；普通 401、HTTP 200 后的流错误不进入该认证恢复分支，不发送无签名回退请求。
+- 无效或有效期不足的签发结果不写入凭据存储，返回可重试的受控错误；账号授权被拒绝才提示重新登录。错误消息与诊断输出不包含令牌或上游原始正文。
+
+本次基线为 `de447c7f603b1e4cda00fa50a833cafe1b717532` 加工作区原有改动及本次未提交修改。环境：macOS arm64、Node.js `22.22.3`、Pi SDK `1.3.0`。
+
+验证命令：
+
+```sh
+HEMI_USER_DATA_DIR=<新临时目录> node --test src/main/services/bigmodel-coding.test.mjs src/main/services/oauth.test.mjs src/main/bot/oauth.test.mjs src/main/bot/oauth-errors.test.mjs src/main/lib/pi-model.test.mjs
+node --check src/main/services/bigmodel-coding-auth.mjs
+node --check src/main/services/bigmodel-coding-transport.mjs
+node --check scripts/verify-bigmodel-live.mjs
+git diff --check -- src/main/services/bigmodel-coding-auth.mjs src/main/services/bigmodel-coding-transport.mjs src/main/services/bigmodel-coding.test.mjs src/main/bot/oauth.test.mjs scripts/verify-bigmodel-live.mjs docs/technical/bigmodel-coding-auth.md
+HEMI_USER_DATA_DIR=<新临时目录> node scripts/verify-bigmodel-live.mjs --user-data=<已有授权账号目录> --expire-after-auth
+```
+
+- 50 项定向检查通过，覆盖真实 SDK 的认证后到期、签名期间到期、复用 Hemi 会话处理追加指令、SDK 与传输层并发续签、取消、退出和重登、无效续签结果、有界拒绝恢复、流错误，以及四家账号原有路径。Bot 的真实 Host API → 执行器 → SDK → 签名传输路径通过受控时钟跨越有效期；独立目标验收请求与业务推理分别计数，业务推理只提交一次。模拟上游验证协议和真实密码学边界，不等同于 Windows 生产 Bot 验证。
+- 真实 `glm-5.3-flash` 请求中，在 SDK 认证后仅将内存凭据标记到期；项目令牌签发、路由、签名握手和推理均为 HTTP 200，返回 `OK`，终态为 `stop`。账号凭据文件前后 SHA-256 相同，没有回放个人会话或将新凭据写回账号文件。
+- 语法和所改文件的空白检查通过。Git 仍报告工作区原有 AppleDouble `._*.idx` 索引错误；未修改 Git 对象文件。
+
+未等待真实五小时自然到期，未运行全量测试、构建或渲染器回归；本次没有 UI 生命周期或依赖变更。未提交、发版、替换已安装应用或部署生产 Bot，未进行 Windows 或移动真机测试。

@@ -108,7 +108,7 @@ export function commandToolResult(out) {
     isError: false, terminate: true, details: out,
   };
   if (out.status === 'background') return {
-    content: [{ type: 'text', text: `命令已转后台（${out.jobId}），仍属于当前目标。${BACKGROUND_WAIT_GUIDANCE}` }],
+    content: [{ type: 'text', text: `命令已转后台（${out.jobId}），由当前会话继续管理。硬截止时间：${out.deadlineAt}。这是启动回执，不证明命令成功或应用就绪。${BACKGROUND_WAIT_GUIDANCE}` }],
     isError: false, details: out,
   };
   const text = [out.stdout, out.stderr ? `stderr:\n${out.stderr}` : '',

@@ -6,6 +6,34 @@ import os from 'node:os';
 import { createRunJournal, dispatchIdentity, BUDGET_SUMMARY_PURPOSE } from './run-journal.mjs';
 const owner = { conversationId: 'c', rootRunId: 'r', generation: 1 };
 async function fixture(t) { const dir = await mkdtemp(path.join(os.tmpdir(),'h64-journal-')); t.after(() => rm(dir,{recursive:true,force:true})); const journal = createRunJournal({dir}); await journal.ready(); return { dir, journal };  }
+test('background processes may reach goal checking; foreground and unknown cleanup still fence it',async t=>{
+  const {journal}=await fixture(t);await journal.beginRoot(owner);await journal.beginGoal(owner,'start service',{maxRounds:3,maxRequests:10,maxRequestsPerRound:10,noProgressRounds:3});
+  await journal.processStart({id:'service',pid:1234,token:'test',owner});await journal.processBackground('service');
+  await journal.checkGoal(owner);
+  await journal.recordGoalCheck(owner,{status:'continue',reason:'readiness needed',evidence:[],remaining:['readiness'],nextAction:'probe'});
+  await journal.processStart({id:'build',pid:1235,token:'test-build',owner});
+  await assert.rejects(journal.checkGoal(owner),/未确认/);
+  await journal.processEnd('build',{state:'finished',cleanupConfirmed:true});
+  await journal.processEnd('service',{state:'unknown',cleanupConfirmed:false});
+  await assert.rejects(journal.checkGoal(owner),/未确认/);
+  await journal.processEnd('service',{state:'finished',cleanupConfirmed:true});await journal.checkGoal(owner);
+});
+test('selected background waits wake on actual process facts and reject foreign jobs or cancellation',async t=>{
+ const {journal}=await fixture(t);await journal.beginRoot(owner);
+ await journal.processStart({id:'job',owner,pid:1234,token:'job'});await journal.processBackground('job');
+ await assert.rejects(journal.waitForProcessUpdate({...owner,conversationId:'foreign'},['job']),/不属于/);
+ const controller=new AbortController(),cancelled=journal.waitForProcessUpdate(owner,['job'],{signal:controller.signal});controller.abort();await assert.rejects(cancelled,{name:'AbortError'});
+ let woke=false;const waiting=journal.waitForProcessUpdate(owner,['job']).then(update=>{woke=true;return update;});
+ await new Promise(r=>setTimeout(r,10));assert.equal(woke,false);
+ await journal.processEnd('job',{state:'finished',cleanupConfirmed:true,status:'succeeded',code:0});assert.equal((await waiting).kind,'settled');
+});
+test('a cleanup failure racing a positive verdict cannot commit a completed goal',async t=>{
+ const {journal}=await fixture(t);await journal.beginRoot(owner);await journal.beginGoal(owner,'start',{maxRounds:3,maxRequests:10,maxRequestsPerRound:10,noProgressRounds:3});
+ await journal.processStart({id:'job',owner,pid:1234,token:'job'});await journal.processBackground('job');await journal.checkGoal(owner);
+ await journal.recordGoalCheck(owner,{status:'complete',reason:'ready',evidence:['independent readiness'],remaining:[],nextAction:''});
+ await journal.processEnd('job',{state:'unknown',cleanupConfirmed:false,status:'cleanup-failed'});
+ await assert.rejects(journal.finishRoot(owner,'completed'),/未确认/);assert.equal((await journal.root(owner)).status,'running');
+});
 test('terminal write failure retains its execution fence and retries only state after storage recovery', async t => {
   const {journal,dir}=await fixture(t);t.after(()=>journal.dispose());
   await journal.beginRoot(owner);

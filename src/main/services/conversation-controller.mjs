@@ -55,6 +55,7 @@ export function createConversationController({
   /** preparing 期间被 stop/preempt 打断：迟到的准备结果不得再启动模型。 */
   let preparingAborted = false;
   const seq = { input: 0, run: 0 };
+  const backgroundEvents = new Map();
 
   // ------------------------------------------------------------ 状态与发布
 
@@ -136,7 +137,7 @@ export function createConversationController({
 
   // ------------------------------------------------------------ 主运行启动（用户发送/队列派发/事件唤醒共用）
 
-  async function startRun({ input, source, fromPending = false }) {
+  async function startRun({ input, source, fromPending = false, background = null }) {
     const runId = makeId(`run-${++seq.run}`);
     const continuationOf = input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
     preparingAborted = false;
@@ -146,6 +147,7 @@ export function createConversationController({
       // 用户消息项在保存成功后才转正（失败回 pending 时时间线不留残影）。
       await store.update(conversationId, { revision: snapshot.revision });
     } catch (error) {
+      if(background)backgroundEvents.set(background.rootRunId,background);
       return failStart(runId, input, fromPending, 'storage-failed', error);
     }
     if (preparingAborted || snapshot.activeRunId !== runId) {
@@ -159,12 +161,13 @@ export function createConversationController({
     }
     let started;
     try {
-      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, continuationOf, envelope: input, source });
+      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, continuationOf, envelope: input, source, ...(background?{background}: {}) });
     } catch (error) {
       // 真实适配层在运行终态时已自行 applyFact 关闭运行（自闭合）——那种情况不重复收口。
       if (snapshot.activeRunId !== runId) {
         return { ok: false, code: 'runtime-failed', message: String(error?.message ?? error), runId };
       }
+      if(background)backgroundEvents.set(background.rootRunId,background);
       return failStart(runId, input, fromPending, 'runtime-failed', error);
     }
     if (snapshot.activeRunId === runId && !preparingAborted) {
@@ -212,6 +215,13 @@ export function createConversationController({
     const next = promoted ?? snapshot.pending[0];
     if (next && (next.state !== 'pending' || withdrawing.has(next.inputId))) return;
     if (!next) {
+      if(!snapshot.awaitingUser&&backgroundEvents.size){
+        const [key,event]=backgroundEvents.entries().next().value;
+        backgroundEvents.delete(key);
+        if(event.generation===snapshot.generation)void startRun({input:null,source:'event',background:event});
+        else maybeDrain();
+        return;
+      }
       maybeDrainReports();
       return;
     }
@@ -426,6 +436,12 @@ export function createConversationController({
 
   return {
     conversationId,
+    enqueueBackground(event) {
+      if(!event?.rootRunId||event.generation!==snapshot.generation)return false;
+      backgroundEvents.set(event.rootRunId,event);
+      maybeDrain();
+      return true;
+    },
 
     getSnapshot: () => snapshot,
 
@@ -456,7 +472,7 @@ export function createConversationController({
       switch (command.type) {
         case 'send': return commandSend(command);
         case 'backgroundCommand': {
-          if(snapshot.activeRunId!==command.targetRunId || snapshot.phase==='stopping')return {ok:false,code:'run-changed'};
+          if((snapshot.activeRunId!==command.targetRunId&&snapshot.runs[command.targetRunId]?.outcome!=='awaiting-background') || snapshot.phase==='stopping')return {ok:false,code:'run-changed'};
           if(!['list','read','review','stop'].includes(command.action))return {ok:false,code:'unsupported'};
           try {return {ok:true,data:await runtime.backgroundCommand?.({runId:command.targetRunId,action:command.action,jobId:command.jobId,from:command.from})};}
           catch(error){return {ok:false,code:'failed',message:error.message};}

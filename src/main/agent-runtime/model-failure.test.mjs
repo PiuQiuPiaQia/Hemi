@@ -10,6 +10,27 @@ test('structured phase facts survive localization and permanent failures take pr
   assert.equal(modelFailure({ message: 'unknown failure' }).retryable, false);
 });
 
+test('EPIPE keeps its transport identity; only a known unsent model request can recover before response headers', () => {
+  for (const code of ['EPIPE', 'ECONNRESET', 'UND_ERR_SOCKET']) {
+    for (const delivery of ['unknown', 'sending', 'sent']) {
+      const result = modelFailure({ code, delivery, message: 'GLM 编程套餐连接失败，请检查网络后重试。' });
+      assert.equal(result.kind, 'transport');
+      assert.equal(result.transportCode, code);
+      assert.equal(result.retryable, false);
+      assert.match(result.message, /请求可能已发送/);
+    }
+    assert.equal(modelFailure({ code, delivery: 'not-sent' }).retryable, true);
+    assert.equal(modelFailure({ code, delivery: 'sent', preflight: true }).retryable, true);
+  }
+  for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT'])
+    assert.equal(modelFailure({ code }).retryable, true);
+  assert.equal(modelFailure({ code: 'ECONNREFUSED', delivery: 'sent' }).retryable, false);
+  assert.equal(modelFailure({ timeoutPhase: 'connection', delivery: 'sent' }).retryable, false);
+  assert.equal(modelFailure({ timeoutPhase: 'connection', delivery: 'not-sent' }).retryable, true);
+  assert.equal(modelFailure({ status: 200, code: 'UND_ERR_SOCKET', delivery: 'sent', outputStarted: true }).retryable, true);
+  assert.equal(modelFailure({ status: 401, code: 'EPIPE', delivery: 'not-sent' }).retryable, false);
+});
+
 test('connection, first-output and stream idle have distinct deadlines, and ignored provider abort still releases the caller', async () => {
   let now = 0, seq = 0;
   const jobs = new Map();

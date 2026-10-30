@@ -96,6 +96,31 @@ async function fixture(t, command, toolOptions = {}, behavior = {}) {
 const commandCall = (id, command, description) => ({ index: 0, id, type: 'function',
   function: { name: 'bash', arguments: JSON.stringify({ command, description }) } });
 
+test('真实 SDK：服务独立就绪核验后可收口，同会话新问题不用等服务退出',{...posix,timeout:15000},async t=>{
+  const f=await fixture(t,()=>`"${process.execPath}" -e "require('node:http').createServer((q,s)=>s.end('REAL_SERVICE_READY')).listen(0,'127.0.0.1',function(){require('node:fs').writeFileSync('service-port',String(this.address().port))})"`,
+    {run_in_background:true,timeout_ms:12000},{quietMs:20,respond:({body,index})=>{
+      if(JSON.stringify(body.messages).includes('FOLLOW_UP_QUESTION'))return {content:'FOLLOW_UP_ANSWER'};
+      if(index===1)return undefined;
+      if(index===2)return {tool_calls:[commandCall('readiness',`"${process.execPath}" -e "const fs=require('node:fs'),end=Date.now()+3000;async function probe(){try{const port=fs.readFileSync('service-port','utf8');const r=await fetch('http://127.0.0.1:'+port,{signal:AbortSignal.timeout(500)});if(await r.text()==='REAL_SERVICE_READY'){console.log('BOUNDED_READINESS_OK');return}}catch{}if(Date.now()>end)process.exit(1);setTimeout(probe,20)}probe()"`)]};
+      return {content:'SERVICE_READY_CONFIRMED'};
+    }});
+  const {session,execution,owner}=await f.make('service');const progress=[];session.on('progress',e=>progress.push(e));
+  await f.journal.beginGoal(owner,'Start and keep a development service',{maxRounds:3,maxRequests:10,maxRequestsPerRound:10,noProgressRounds:3});
+  assert.equal((await session.prompt('Start and keep a development service')).lastText,'SERVICE_READY_CONFIRMED');
+  const jobs=await session.backgroundCommand({action:'list'});assert.equal(jobs.length,1);assert.equal(jobs[0].status,'running');
+  assert.match(JSON.stringify(f.requests.at(-1).messages),/BOUNDED_READINESS_OK/);
+  assert.ok(!f.activities.some(a=>a.phase==='waiting-background'));
+  assert.equal(progress.find(e=>e.kind==='tool-end'&&e.toolCallId===jobs[0].toolCallId).background,false,'service launch tool closes while process remains running');
+  await f.journal.checkGoal(owner);await f.journal.recordGoalCheck(owner,{status:'complete',reason:'real HTTP readiness',evidence:['BOUNDED_READINESS_OK'],remaining:[],nextAction:''});await f.journal.finishRoot(owner,'completed');
+  await session.abort({preserveBackground:true});
+  const next={...owner,rootRunId:'follow-up'};await f.journal.beginRoot(next);session.setExecutionContext({...execution,owner:next});
+  assert.equal((await session.prompt('FOLLOW_UP_QUESTION')).lastText,'FOLLOW_UP_ANSWER');
+  assert.equal((await session.backgroundCommand({action:'list'}))[0].status,'running');
+  await pause(60);assert.equal(f.requests.length,4,'quiet service does not cause model polling');
+  const stopped=await session.backgroundCommand({action:'stop',jobId:jobs[0].id});assert.equal(stopped.cleanupConfirmed,true);
+  assert.equal(f.requests.length,4,'stopping a retained service does not replay its original goal');
+});
+
 for (const api of ['openai-completions', 'anthropic-messages']) {
   for (const role of ['main', 'fixer']) {
     test(`${api} ${role}：占位命令在 Shell 前让出生成，宿主等待后仅续跑一次`, { ...posix, timeout: 10000 }, async t => {

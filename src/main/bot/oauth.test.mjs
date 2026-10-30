@@ -114,6 +114,50 @@ test('Bot-only first setup and four native account transports: desktop authoriza
   assert.ok(f.provider.requests.filter(request => /\/(responses|messages|chat\/completions)/.test(request.url)).every(request => request.headers.authorization !== 'Bearer oauth'));
 });
 
+test('Bot 原生 GLM 请求在签名期间到期后续签，业务推理只提交一次', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  await f.login('bigmodel');
+  const model = (await f.call('snapshot')).models.find(item => item.oauthProvider === 'bigmodel');
+  const credentials = createOAuthCredentials({ filePath: path.join(f.dataDir, 'oauth-credentials.json'),
+    safeStorage: createLocalSecretStorage({ directory: path.join(f.dataDir, 'secrets') }) });
+  const { expires } = await credentials.read('bigmodel');
+  const clock = Date.now, fetch = globalThis.fetch;
+  const before = { ...f.provider.bigmodel.state };
+  const beforeRequests = f.provider.requests.length;
+  let advanced = false;
+  Date.now = () => Math.max(expires - 330000, clock());
+  globalThis.fetch = async (url, init) => {
+    const response = await fetch(url, init);
+    if (!advanced && String(url).endsWith('/v2/client')) {
+      advanced = true;
+      Date.now = () => Math.max(expires + 1, clock());
+    }
+    return response;
+  };
+  try {
+    const session = await f.call('session.create');
+    await f.call('session.update', { id: session.id, modelKey: model.key });
+    await f.call('flow.command', { id: session.id, command: { type: 'send', input: { inputId: randomUUID(), text: '调研完成后请收敛形成报告' } } });
+    // The injected wall-clock jump must not expire this test's polling budget.
+    const deadline = performance.now() + 10000;
+    let detail;
+    do {
+      detail = await f.call('session.open', { id: session.id });
+      if (!detail.flow.activeRunId && detail.flow.timeline.some(item => item.kind === 'assistant')) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } while (performance.now() < deadline);
+    assert.equal(detail.flow.activeRunId, null);
+    assert.match(JSON.stringify(detail.flow.timeline), /OAuth OK/);
+  } finally { Date.now = clock; globalThis.fetch = fetch; }
+  assert.equal(advanced, true);
+  assert.equal(f.provider.bigmodel.state.issued - before.issued, 1);
+  assert.equal(f.provider.bigmodel.state.handshakes - before.handshakes, 2);
+  // Host also performs a separate goal verification without tools.
+  const executions = f.provider.requests.slice(beforeRequests).filter(row =>
+    row.url.endsWith('/ultra/anthropic/v1/messages') && JSON.parse(row.body).tools?.length > 0);
+  assert.equal(executions.length, 1);
+});
+
 test('Bot survives desktop disconnect and Host restart; refreshes once under concurrency; logout and reauthorization preserve keys and routing', { timeout: 120000 }, async t => {
   const f = await fixture(t);
   await f.login('openai');
@@ -181,4 +225,52 @@ test('cancel, wrong Bot identity and failed credential import preserve existing 
   await f.desktop.command('oauth.cancel', { id: start.id });
   await assert.rejects(f.desktop.command('oauth.answer', { id: start.id, promptId: pending.prompt.id, value: 'copy_code' }), /结束/);
   assert.equal((await f.call('snapshot')).oauthAccounts.find(item => item.provider === 'anthropic').connected, false);
+});
+
+test('account validation skips an unavailable model, but stops on account, quota and server failures', { timeout: 60000 }, async t => {
+  const f = await fixture(t);
+  const originalFetch = globalThis.fetch;
+  const credential = { type: 'oauth', access: codexTestAccess('acct-model-access'), refresh: 'test-refresh-rotated', expires: Date.now() + 600000, accountId: 'acct-model-access' };
+  let attempts = 0;
+  globalThis.fetch = (url, options) => {
+    if (!new URL(String(url)).pathname.endsWith('/responses')) return originalFetch(url, options);
+    attempts += 1;
+    return attempts === 1
+      ? Promise.resolve(Response.json({ error: { code: 'model_not_found', message: 'The first model is not available for this account. test-refresh-rotated' } }, { status: 400 }))
+      : originalFetch(url, options);
+  };
+  try {
+    await f.call('oauth.import', { provider: 'openai', credential });
+    assert.equal(attempts, 2, 'validate another catalog model only after a model-specific rejection');
+    assert.equal((await f.call('snapshot')).oauthAccounts.find(item => item.provider === 'openai').connected, true);
+    const before = await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8');
+    const modelRevision = (await f.call('snapshot')).modelConfigRevision;
+    for (const [status, body, expected] of [
+      [401, { error: { message: 'test-refresh-rotated' } }, /拒绝了登录凭据/],
+      [403, { error: { code: 'unsupported_country_region_territory', message: 'test-refresh-rotated' } }, /出网地区/],
+      [429, { error: { code: 'usage_limit_reached', message: 'test-refresh-rotated' } }, /额度/],
+      [503, { error: { message: 'test-refresh-rotated' } }, /暂时不可用/],
+    ]) {
+      attempts = 0;
+      globalThis.fetch = (url, options) => {
+        if (!new URL(String(url)).pathname.endsWith('/responses')) return originalFetch(url, options);
+        attempts += 1;
+        return Promise.resolve(Response.json(body, { status }));
+      };
+      await assert.rejects(f.call('oauth.import', { provider: 'openai', credential }), error => expected.test(error.message) && !privateToken.test(error.message));
+      assert.equal(attempts, 1, `HTTP ${status} must not retry or switch models`);
+      assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
+      assert.equal((await f.call('snapshot')).modelConfigRevision, modelRevision);
+    }
+    attempts = 0;
+    globalThis.fetch = (url, options) => {
+      if (!new URL(String(url)).pathname.endsWith('/responses')) return originalFetch(url, options);
+      attempts += 1;
+      return Promise.resolve(Response.json({ detail: 'This model is not supported when using Codex with a ChatGPT account. test-refresh-rotated' }, { status: 400 }));
+    };
+    await assert.rejects(f.call('oauth.import', { provider: 'openai', credential }), error => /型号.*不可用/.test(error.message) && !privateToken.test(error.message));
+    assert.ok(attempts > 1);
+    assert.equal(await fs.readFile(path.join(f.dataDir, 'oauth-credentials.json'), 'utf8'), before);
+    assert.equal((await f.call('snapshot')).modelConfigRevision, modelRevision);
+  } finally { globalThis.fetch = originalFetch; }
 });

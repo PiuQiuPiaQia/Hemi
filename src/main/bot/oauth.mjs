@@ -68,7 +68,22 @@ export async function createBotOAuth({ dataDir, validateModel, saveModels }) {
         // The actual SDK and native account transport run on the server before
         // installation; catalog presence alone does not prove inference works.
         stage = 'inference';
-        await withOAuthRuntime(preview, () => validateModel(configs[0]));
+        const signal = AbortSignal.timeout(45000);
+        await withOAuthRuntime(preview, async () => {
+          let unavailable;
+          for (const config of configs) {
+            signal.throwIfAborted();
+            try { await validateModel(config, {signal}); return; }
+            catch (error) {
+              // A static catalog can include models unavailable to this plan.
+              // Only an explicit model rejection permits another candidate;
+              // auth, quota, networking and service failures stop immediately.
+              if (botOAuthFailure(error, stage).reason !== 'model') throw error;
+              unavailable = error;
+            }
+          }
+          throw unavailable;
+        });
         stage = 'storage';
         const previous = await credentials.read(provider);
         await credentials.modify(provider, async () => await staged.read(provider));

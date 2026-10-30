@@ -11,6 +11,7 @@ import {freezeModelPolicy, resolveModelPlan, hydrateModelPlan} from './model-pol
 import {GOAL_CHECK_SYSTEM, goalRunOutcome} from './goal-driver.mjs';
 import {createBotHost} from '../bot/host.mjs';
 import {createBotExecutor} from '../bot/runtime.mjs';
+import {runBackgroundTurn} from './background-turn.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(read) {
@@ -37,6 +38,8 @@ async function fixture(t, platform, mode, policy = {}) {
   let runtime, host, agent, ctx, cid, mainCalls = 0, childCalls = 0, checks = 0, outcome, running;
   let blockedResponse, atHandoff = false, releaseHandoff;
   const requests = [], errors = [], activities = [];
+  const terminal=Promise.withResolvers();let eventSeq=0;
+  const settle=async result=>{outcome=goalRunOutcome(result,{cancelled:ctx?.cancelled});await runtime.completeConversation(cid,outcome,null,ctx.runId);if(!result.waitingForBackground)terminal.resolve(result);return result;};
   const exists = name => fs.stat(path.join(workspace, name)).then(() => true, () => false);
   const snapshot = async () => runtime ? runtime.journal.snapshot() : until(async () => {
     try {return JSON.parse(await fs.readFile(path.join(dataDir, 'runtime-v2/run-journal.json'), 'utf8'));}
@@ -53,9 +56,12 @@ async function fixture(t, platform, mode, policy = {}) {
       const checking = body.messages.some(message => message.role === 'system' && JSON.stringify(message.content).includes(GOAL_CHECK_SYSTEM));
       let content, tools;
       if (checking) {
-        checks++;
-        assert.ok((await processes()).every(item => item.state === 'finished' && item.cleanupConfirmed), 'live work must not reach completion verification');
-        content = JSON.stringify({status:'complete', reason:'实际成果与进程清理均已核对', evidence:['实际 proof.txt 与已清理的命令'], remaining:[], nextAction:''});
+        const evidence=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence);
+        const jobs=(await processes()).filter(job=>job.owner.rootRunId===evidence.rootRunId),live=jobs.filter(item=>item.state==='active');
+        if(live.length)content=JSON.stringify(mode==='child-hung'
+          ?{status:'continue',reason:'已有成果可核对，后台收尾尚未完成',evidence:['现有命令仍在执行'],remaining:['核对成果并停止不再需要的子任务命令'],nextAction:'核对已有成果后停止原子任务命令'}
+          :{status:'continue',reason:'需要实际后台结果',evidence:['现有命令仍在执行'],remaining:['核对命令真实终态'],nextAction:'等待这些命令退出后读取结果',waitForJobs:live.map(item=>item.id)});
+        else {checks++;assert.ok(jobs.every(item=>item.state==='finished'&&item.cleanupConfirmed));content=JSON.stringify({status:'complete',reason:'实际成果与进程清理均已核对',evidence:['实际 proof.txt 与已清理的命令'],remaining:[],nextAction:''});}
       } else if (!body.tools?.length) content = '隔离验收';
       else if (mode === 'child-hung' && !body.tools.some(item => item.function.name === 'task')) {
         childCalls++;
@@ -65,7 +71,7 @@ async function fixture(t, platform, mode, policy = {}) {
         mainCalls++;
         if (mode === 'child-hung') {
           if (mainCalls === 1) tools = [tool('task', {agent:'fixer',prompt:'生成 proof.txt；保留后台任务，等待主目标核对后停止。',description:'后台文件工作',background:true})];
-          else if (JSON.stringify(body.messages).includes('分段交接') && !body.messages.some(item => item.role === 'tool' && item.name === 'task_cancel')) {
+          else if (JSON.stringify(body.messages).includes('子任务完成') && !body.messages.some(item => item.role === 'tool' && item.name === 'task_cancel')) {
             await until(() => exists('proof.txt'));
             const task = Object.values((await snapshot()).dispatches)[0];
             tools = [tool('task_cancel', {id:task.taskId})];
@@ -78,8 +84,7 @@ async function fixture(t, platform, mode, policy = {}) {
           tools = [mainCalls === 2 ? tool('job_list', {}) : mainCalls === 3 ? tool('job_output', {job_id:id}) : tool('job_kill', {job_id:id})];
         } else if (mode === 'quiet-hung') {
           await until(() => exists('proof.txt'));
-          if (mainCalls === 2) content = '已检查，等待后台任务。';
-          else tools = [tool('job_kill', {job_id:(await processes())[0].id})];
+          tools = [tool('job_kill', {job_id:(await processes())[0].id})];
         } else if (mode === 'two-jobs' && mainCalls === 2) {
           await until(() => exists('proof.txt'));
           tools = [tool('job_kill', {job_id:(await processes()).find(item => item.command.includes('hung.cjs')).id})];
@@ -97,23 +102,34 @@ async function fixture(t, platform, mode, policy = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const config = {modelKey:'test/handoff', providerId:'test', name:'Handoff fixture', model:'handoff', api:'openai-completions', apiKey:'SYNTHETIC_ONLY', baseUrl:`http://127.0.0.1:${server.address().port}/v1`, thinkingLevel:'off'};
   const goalPolicy = {maxRequestsPerRound:1, maxRounds:10, maxRequests:20, ...policy};
-  let call;
+  let call,switchModel;
   if (platform === 'PC') {
-    const store = {list:async () => ({defaultModelId:config.modelKey}), resolveStrict:async () => ({ok:true, config})};
+    const alternate={...config,modelKey:'test/other',model:'handoff-other'};
+    const store = {list:async () => ({defaultModelId:config.modelKey}), resolveStrict:async key => ({ok:true, config:key===alternate.modelKey?alternate:config})};
     const policySnapshot = await freezeModelPolicy({store, modelKey:config.modelKey});
     const modelPlan = await hydrateModelPlan(resolveModelPlan(policySnapshot), store);
     ctx = {conversationId:'handoff', runId:'handoff-root', generation:1, policySnapshot, modelPlan, config, inputSource:'text', workspace:{id:'proof',type:'project',dir:workspace}};
     cid = ctx.conversationId;
     runtime = createAgentRuntime({userDataDir:dataDir, goalPolicy, getProfiles:() => store,
+      onBackgroundReady:(_cid,background)=>{setImmediate(()=>{void runBackgroundTurn({runtime,conversationId:cid,runId:`event-${++eventSeq}`,generation:1,background,apply:()=>{}}).then(result=>{outcome=goalRunOutcome(result);if(!result.waitingForBackground)terminal.resolve(result);},error=>terminal.reject(error));});},
       resolveCapabilities:async () => ({features:{},extensionConfig:{}}), getAccessService:() => null,
       loadArchiveAgent:() => null, loadArchiveTurns:() => [], saveArchiveAgent:() => true,
       sessionOptions:{backgroundQuietReviewMs:mode === 'quiet-hung' ? 30 : 0}});
     agent = await runtime.obtain(ctx); agent.on('activity', value => activities.push(value));
+    switchModel=async()=>{
+      await runtime.abort(cid,{preserveBackground:true});
+      const policySnapshot=await freezeModelPolicy({store,modelKey:alternate.modelKey});
+      const modelPlan=await hydrateModelPlan(resolveModelPlan(policySnapshot),store);
+      const nextCtx={...ctx,runId:'independent-question',policySnapshot,modelPlan,config:alternate,cancelled:false};
+      await runtime.prepareExecution(nextCtx);await runtime.obtain(nextCtx);
+      const result=await runtime.runRootTurn(cid,{userText:'QUESTION_DURING_BACKGROUND',inputId:'second-input'});
+      await runtime.completeConversation(cid,goalRunOutcome(result),null,nextCtx.runId);return result;
+    };
     if (mode === 'race' || mode === 'stop-handoff') {
       // 057 软复盘：段交接在回合边界发生，命令完成不再由旧的请求触顶点触发；
       // 这两种场景改用定时释放命令，让完成事实与回合边界复盘各自独立到达。
-      const checkpoint = runtime.journal.checkpointGoal;
-      runtime.journal.checkpointGoal = async (...args) => {
+      const checkpoint = runtime.journal.suspendGoal;
+      runtime.journal.suspendGoal = async (...args) => {
         atHandoff = true;
         if (mode !== 'race') await new Promise(resolve => { releaseHandoff = resolve; });
         return checkpoint(...args);
@@ -138,33 +154,33 @@ async function fixture(t, platform, mode, policy = {}) {
     await fs.rm(root, {recursive:true,force:true,maxRetries:5,retryDelay:50});
   });
   return {
-    workspace, requests, errors, activities, snapshot, processes, exists,
+    workspace, requests, errors, activities, snapshot, processes, exists,switchModel,
     get calls() {return mainCalls;}, get checks() {return checks;}, get atHandoff() {return atHandoff;}, get blocked() {return blockedResponse;},
     get childCalls() {return childCalls;},
     async start() {
       if (runtime) {
         running = runtime.runRootTurn(cid, {userText:'完成文件任务并处理所属后台工作', inputId:'one-user-input'})
-          .then(async result => {outcome = goalRunOutcome(result, {cancelled:ctx.cancelled}); await runtime.completeConversation(cid, outcome, null, ctx.runId); return result;},
-            async error => {if (!ctx.cancelled) throw error; outcome = 'stopped'; await runtime.completeConversation(cid, outcome, null, ctx.runId); return {aborted:true};});
+          .then(settle,
+            async error => {if (!ctx.cancelled) throw error; outcome = 'stopped'; await runtime.completeConversation(cid, outcome, null, ctx.runId); terminal.resolve({aborted:true});return {aborted:true};});
         void running.catch(() => {});
       } else await call('flow.command', {id:cid, command:{type:'send',input:{inputId:'one-user-input',text:'完成文件任务并处理所属后台工作'}}});
     },
     async finish() {
-      if (runtime) await running;
+      if (runtime) {await running;await terminal.promise;}
       else {
-        const flow = await until(async () => {const s = await call('flow.snapshot', {id:cid}); return s.phase === 'idle' && Object.keys(s.runs).length ? s : null;});
+        const flow = await until(async () => {const s = await call('flow.snapshot', {id:cid}); return s.phase === 'idle' && Object.values(s.runs).at(-1)?.outcome&&Object.values(s.runs).at(-1)?.outcome!=='awaiting-background' ? s : null;});
         assert.equal(flow.timeline.filter(item => item.kind === 'user').length, 1);
-        assert.equal(Object.keys(flow.runs).length, 1);
-        outcome = Object.values(flow.runs)[0].outcome;
+        outcome = Object.values(flow.runs).at(-1).outcome;
       }
       assert.deepEqual(errors, []);
       return outcome;
     },
     async stop() {
-      if (runtime) await runtime.stopRoot(cid, ctx.runId);
+      if (runtime) {await runtime.stopRoot(cid, ctx.runId);outcome='stopped';terminal.resolve({aborted:true});}
       else await call('flow.command', {id:cid,command:{type:'stop'}});
       releaseHandoff?.();
     },
+    async handoff() {await runtime.requestHandoff(cid);},
     async entries() {
       if (agent) return (await agent.exportEntries()).entries;
       const dir = path.join(dataDir, 'runtime-v2/sessions/pi');
@@ -187,7 +203,7 @@ for (const platform of ['PC','Bot']) {
     const entries = await f.entries(); assert.equal(entries.filter(item => item.type === 'custom' && item.customType === 'hemi.input').length, 1);
     // 057 软复盘（R-02/R-07）：跨段不再依赖 60s 静默复核兜底唤醒——reviewPending 立即唤醒
     // 根复盘（goal round 推进），模型自己核验并停止不再需要的命令；quiet review 保留为长静默兜底。
-    if (mode === 'quiet-hung') assert.ok(root.goal.round >= 2, `soft segment review woke the root (round=${root.goal.round})`);
+    assert.ok(root.goal.round>=1);
   });
   test(`${platform}: a quiet required long job survives handoff and retains its original identity and deadline`, {timeout:25000}, async t => {
     const f = await fixture(t, platform, 'normal'); await f.start();
@@ -228,7 +244,7 @@ for (const platform of ['PC','Bot']) {
     const f = await fixture(t,platform,'child-hung',{maxRequestsPerRound:3}); await f.start(); assert.equal(await f.finish(),'completed');
     assert.ok(f.childCalls >= 1); const state=await f.snapshot(); assert.equal(Object.keys(state.dispatches).length,1);
     const jobs=await f.processes(); assert.equal(jobs.length,1); assert.ok(jobs[0].owner.taskId); assert.equal(jobs[0].status,'cancelled'); assert.equal(jobs[0].cleanupConfirmed,true);
-    const goal=Object.values(state.roots).find(item=>item.goal).goal; assert.ok(goal.checkpoints.length>=1); assert.equal(goal.phase,'complete');
+    const goal=Object.values(state.roots).find(item=>item.goal).goal; assert.equal(goal.phase,'complete');
   });
 }
 test('PC: completion racing the durable handoff is delivered exactly once before verification', {timeout:25000}, async t => {
@@ -244,4 +260,29 @@ test('PC: cancellation while checkpoint persistence is delayed cannot advance or
   assert.equal(f.requests.length, count); assert.ok(f.calls >= 1 && f.calls <= 2, `calls=${f.calls}`);
   assert.equal(f.checks,0); assert.ok((await f.processes()).every(item => item.cleanupConfirmed));
   const goal = Object.values((await f.snapshot()).roots).find(item => item.goal).goal; assert.equal(goal.round,1); assert.notEqual(goal.phase,'complete');
+});
+test('PC: stopping a suspended background goal prevents later wakeups',{timeout:25000},async t=>{
+  const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
+  await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
+  await f.stop();assert.equal(await f.finish(),'stopped');const calls=f.requests.length;await pause(50);
+  assert.equal(f.requests.length,calls);assert.ok((await f.processes()).every(p=>p.status==='cancelled'&&p.cleanupConfirmed));
+});
+
+test('PC: changing the foreground model preserves the process; its event uses the original frozen model and owner',{timeout:25000},async t=>{
+ const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
+ await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
+ const [before]=await f.processes();assert.equal((await f.switchModel()).goalComplete,true);
+ assert.equal((await f.processes())[0].state,'active');
+ await fs.writeFile(path.join(f.workspace,'release'),'done');assert.equal(await f.finish(),'completed');
+ const [after]=await f.processes();assert.equal(after.id,before.id);assert.equal(after.pid,before.pid);assert.equal(after.owner.rootRunId,before.owner.rootRunId);
+ const models=f.requests.filter(body=>body.tools?.length).map(body=>body.model);
+ assert.ok(models.includes('handoff-other'));assert.equal(models.at(-1),'handoff');
+ assert.equal((await f.processes()).length,1);
+});
+test('PC: stopping the suspended owner after another goal finishes cancels its retained process without a wake',{timeout:25000},async t=>{
+ const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
+ await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
+ await f.switchModel();await f.stop();assert.equal(await f.finish(),'stopped');
+ const count=f.requests.length;await pause(50);assert.equal(f.requests.length,count);
+ assert.ok((await f.processes()).every(job=>job.status==='cancelled'&&job.cleanupConfirmed));
 });

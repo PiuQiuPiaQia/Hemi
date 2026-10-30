@@ -1,5 +1,5 @@
 /**
- * 当前上下文：输入框工具行里的静态叠页入口，悬浮展开用量面板（InfoPopover
+ * 当前上下文：输入框下方信息行里、会话用量右侧的静态叠页入口，悬浮展开用量面板（InfoPopover
  * openOnHover：200ms 进／140ms 出，键盘聚焦可开，Esc 关，点击不钉住）。
  * 数据：主进程轮末广播 context-usage:changed → page 重取快照（总量 usage 锚点、
  * 分类为请求字符估算；口径见 src/main/agent/context-usage.mjs）。
@@ -63,10 +63,10 @@ export function ContextCapacityChip({ snapshot, fixtureOpen = false }: {
             trigger={(
                 <button
                     type="button"
-                    className="h37-tool ctx-cap-trigger"
+                    className="ctx-cap-trigger"
                     aria-label={label}
                 >
-                    <Layers className="ctx-cap-icon" size={16} aria-hidden="true" />
+                    <Layers className="ctx-cap-icon" size={12} aria-hidden="true" />
                 </button>
             )}
         >

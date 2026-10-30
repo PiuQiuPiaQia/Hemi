@@ -5293,6 +5293,18 @@ const scenes: Record<string, () => React.ReactElement> = {
           { source: 'title', role: 'auxiliary', modelKey: 'vvcode/claude-opus-5-5', modelName: 'vvcode', input: 500, output: 30, cacheRead: 0, cacheWrite: 0, genMs: 4_000, at: 3 },
         ] satisfies UsageRecord[],
         usageRunning: true,
+        // 输入框下方信息行的「当前上下文」入口：固定快照，只为展示面板明细。
+        contextUsage: {
+          tokens: 51_200,
+          contextWindow: 1_000_000,
+          percent: 5.1,
+          categories: [
+            { key: 'tools', label: '系统工具', tokens: 18_400, percent: 36 },
+            { key: 'conversation', label: '对话消息', tokens: 16_900, percent: 33 },
+            { key: 'toolResults', label: '工具结果', tokens: 11_300, percent: 22 },
+            { key: 'system', label: '系统提示词', tokens: 4_600, percent: 9 },
+          ],
+        },
       })}
     />
     );

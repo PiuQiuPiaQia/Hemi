@@ -84,7 +84,7 @@ test('background shell does not block same-workspace file tools or commands, and
   const f=await fixture(t),a=await f.create(),b=await f.create(),c=await f.create(f.other),d=await f.create(),reader=await f.create(),writer=await f.create();
   await fs.writeFile(path.join(f.first,'input.txt'),'shared readable content');
   await f.send(a,'BLOCK_SHELL');await until(()=>fs.access(path.join(f.first,'a.started')).then(()=>true,()=>false));
-  await until(async()=>{const item=await f.detail(a);return item.flow.runs[item.flow.activeRunId]?.activity?.phase==='waiting-background';});
+  await until(async()=>{const item=await f.detail(a);return item.flow.phase==='idle'&&Object.values(item.flow.runs).some(run=>run.outcome==='awaiting-background');});
   await f.send(b,'WRITE_FILE_B');await f.done(b);
   assert.equal(await fs.readFile(path.join(f.first,'b.done'),'utf8'),'actual');
   await f.send(reader,'READ_SHARED_FILE');await f.done(reader);
@@ -93,9 +93,9 @@ test('background shell does not block same-workspace file tools or commands, and
   await f.send(writer,'WRITE_SHARED_FILE');await f.done(writer);
   assert.equal(await fs.readFile(path.join(f.first,'native.done'),'utf8'),'native write completed');
   await f.send(c,'WRITE_FILE_C');await f.done(c);assert.equal(await fs.readFile(path.join(f.other,'c.done'),'utf8'),'actual');
-  await f.send(d,'PLAIN');await f.done(d);assert.ok((await f.detail(a)).flow.activeRunId,'other conversations finish while the original shell still runs');
+  await f.send(d,'PLAIN');await f.done(d);assert.equal((await f.detail(a)).flow.phase,'idle','the original conversation is also free while its shell runs');
   assert.equal((await f.detail(reader)).waitingResource,false);assert.equal((await f.detail(writer)).waitingResource,false);
-  await fs.writeFile(path.join(f.first,'release'),'release');await f.done(a);
+  await fs.writeFile(path.join(f.first,'release'),'release');await until(async()=>{const flow=(await f.detail(a)).flow;return flow.phase==='idle'&&Object.values(flow.runs).some(run=>run.source==='event'&&run.outcome==='completed');});
   const completion=f.requests.filter(body=>JSON.stringify(body.messages).includes('［后台命令完成'));
   assert.equal(completion.length,1,'the background result resumes the owning goal exactly once');
   assert.match(JSON.stringify(completion[0].messages),/A_DONE/);

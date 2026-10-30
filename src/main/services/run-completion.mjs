@@ -28,7 +28,7 @@ export async function closeConversationRun({ controller, runId, generation, outc
         text:`运行状态尚未保存：${persistenceError.message}。自动发送已暂停，请检查本机存储后继续。`,
       }});
       // A successful result whose final state could not be saved is incomplete.
-      if (['completed','awaiting-user','blocked'].includes(outcome)) outcome = 'partial';
+      if (['completed','awaiting-user','awaiting-background','blocked'].includes(outcome)) outcome = 'partial';
     }
   } finally {
     clearTimeout(timer);

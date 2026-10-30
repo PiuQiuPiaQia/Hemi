@@ -222,11 +222,13 @@ try {
   await page.screenshot({path:path.join(evidence,'blocked-normal-result.png')});
   check('真实工具失败交回主 agent，blocked 正常收口并展示普通说明；重启保持阻塞且不自动重跑');
 
-  await newChat(); const invalidId=await send('PC_GOAL_INVALID 校验异常不得判定完成。');
-  const invalid=await settled(invalidId); assert.equal(Object.values(invalid.runs)[0].outcome,'failed');
-  assert.equal(errors(invalid).length,1); assert.match(errors(invalid)[0].text,/JSON/);
-  await wait(async () => await page.locator('.turn-error-notice').count()===1,'one visible error notice');
-  check('完成校验失败保留未完成状态，界面只显示一条错误');
+  await newChat(); const invalidId=await send('PC_GOAL_INVALID 校验器异常时保留已有回复并正常收口。');
+  const invalid=await settled(invalidId); assert.equal(Object.values(invalid.runs)[0].outcome,'completed');
+  assert.equal(errors(invalid).length,0);
+  const invalidGoal=journal().roots[Object.values(invalid.runs)[0].runId].goal;
+  assert.equal(invalidGoal.verifications.at(-1).verificationBypassed,true);
+  assert.equal(await page.locator('.turn-error-notice').count(),0);
+  check('完成校验格式异常按宽松策略正常收口，保留诊断且无错误通知');
   }
   assert.deepEqual(report.errors,[]); report.result='PASS';
 } catch (error) {

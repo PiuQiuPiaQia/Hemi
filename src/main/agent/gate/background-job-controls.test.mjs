@@ -16,7 +16,8 @@ test('real jobs support bounded waits, isolated stop, owner fencing and non-cons
  const run=body=>withExecutionScope({owner},null,()=>c.run({command:command(body),runInBackground:true,timeoutMs:10000}));
  const a=await run("process.stdout.write('FIRST');setTimeout(()=>{},8000)"),b=await run("setTimeout(()=>process.stdout.write('SECOND'),500)");
  await until(()=>c.list(owner).some(j=>j.output==='FIRST'));
- const early=await c.read(owner,a.jobId,{waitMs:20});assert.equal(early.status,'running');assert.equal(c.list(other).length,0);assert.throws(()=>c.inspect(other,a.jobId));
+ const early=await c.read(owner,a.jobId,{waitMs:20});assert.equal(early.status,'running');assert.equal(c.list(other).length,2);assert.equal(c.inspect(other,a.jobId).status,'running');
+ assert.throws(()=>c.inspect({...other,conversationId:'foreign'},a.jobId));assert.equal(c.list({...other,taskId:'child'}).length,0);
  assert.equal(c.inspect(owner,a.jobId).text,'FIRST');assert.equal(c.inspect(owner,a.jobId).text,'FIRST');
  const stopped=await c.stop(owner,a.jobId);assert.equal(stopped.status,'cancelled');assert.equal(stopped.cleanupConfirmed,true);assert.equal(c.inspect(owner,b.jobId).status,'running');
  const terminal=await c.read(owner,b.jobId,{waitMs:3000,collect:true});assert.equal(terminal.status,'succeeded');assert.equal(terminal.text,'SECOND');
@@ -46,4 +47,38 @@ test('a budget race cannot consume an unacknowledged quiet or manual review',{ti
  c.requestReview(owner);assert.equal((await c.waitForUpdate(owner,{collect:false})).requested,true);
  assert.equal((await c.waitForUpdate(owner)).requested,true,'manual review remains pending until accepted');
  await c.stop(owner,j.jobId);
+});
+
+test('all background jobs remain controllable across roots; closing a goal does not stop its process or replay it',{timeout:10000},async t=>{
+ const changes=[],ended=[],c=createCommandScope({quietReviewMs:20,onChange:jobs=>changes.push(jobs),onSettled:job=>ended.push(job)});t.after(()=>c.abort());
+ const next={...owner,rootRunId:'next'},foreign={...next,conversationId:'elsewhere'};
+ const job=await withExecutionScope({owner},null,()=>c.run({command:command("process.stdout.write('SERVICE_READY');setTimeout(()=>{},8000)"),runInBackground:true,timeoutMs:9000}));
+ await until(()=>c.list(owner)[0]?.output==='SERVICE_READY');
+ assert.equal(c.hasBackground(owner),true);assert.equal(c.hasBackgroundTree(owner),true);assert.equal(c.hasLiveBackground(),true);
+ c.releaseGoal(owner);assert.equal(c.hasBackground(owner),false);
+ assert.deepEqual(await c.waitForUpdate(owner),{kind:'settled',events:[]});
+ assert.equal(c.list(next)[0].id,job.jobId);assert.equal(c.inspect(next,job.jobId).status,'running');
+ assert.equal(c.list({...next,generation:owner.generation+1}).length,0);assert.throws(()=>c.inspect({...next,generation:owner.generation+1},job.jobId));
+ assert.equal(c.list(foreign).length,0);assert.throws(()=>c.inspect(foreign,job.jobId));
+ assert.throws(()=>c.inspect({...next,taskId:'child'},job.jobId));
+ assert.ok(changes.some(jobs=>jobs.length===1),'live jobs remain visible independently of the goal');
+ const stopped=await c.stop(next,job.jobId);assert.equal(stopped.cleanupConfirmed,true);assert.equal(stopped.status,'cancelled');
+ assert.equal(c.hasLiveBackground(),false);assert.deepEqual(c.takeCompleted(owner),[]);assert.deepEqual(ended,[],'job exit cannot resume a finished goal');
+});
+
+test('background jobs retain their hard timeout; new input preserves them and shutdown confirms cleanup',{timeout:10000},async t=>{
+ const c=createCommandScope({quietReviewMs:0});t.after(()=>c.abort());
+ const run=timeoutMs=>withExecutionScope({owner},null,()=>c.run({command:command('setTimeout(()=>{},8000)'),runInBackground:true,timeoutMs}));
+ const expiring=await run(500);await until(()=>c.inspect(owner,expiring.jobId).status==='timed-out');
+ assert.equal(c.inspect(owner,expiring.jobId).cleanupConfirmed,true);assert.equal((await c.collectCompleted(owner))[0].id,expiring.jobId);
+ const live=await run(9000);await c.abort({preserveBackground:true});assert.equal(c.inspect(owner,live.jobId).status,'running');
+ await c.abort();assert.equal(c.inspect(owner,live.jobId).status,'cancelled');assert.equal(c.inspect(owner,live.jobId).cleanupConfirmed,true);
+});
+test('automatic failure cleanup of a later goal preserves an older background job',{timeout:10000},async t=>{
+ const c=createCommandScope({quietReviewMs:0});t.after(()=>c.abort());
+ const run=who=>withExecutionScope({owner:who},null,()=>c.run({command:command("process.stdout.write('ALIVE');setTimeout(()=>{},8000)"),runInBackground:true,timeoutMs:9000}));
+ const old=await run(owner),current=await run(other);
+ await until(()=>c.inspect(owner,old.jobId).output==='ALIVE'&&c.inspect(other,current.jobId).output==='ALIVE');
+ await c.abort({owner:other});
+ assert.equal(c.inspect(owner,old.jobId).status,'running');assert.equal(c.inspect(other,current.jobId).status,'cancelled');
 });

@@ -2,28 +2,73 @@
 
 ## 执行语义
 
-本机 `bash` 支持 `run_in_background: true`；普通调用默认前台等待 10 秒，超出后交回模型并继续在宿主中运行。`yield_ms` 可调整前台等待预算（0–120000），`timeout_ms` 是独立的进程硬超时（默认 30 分钟，最大 24 小时）。
+本机 `bash` 支持 `run_in_background: true`；普通调用默认前台等待 10 秒，超出后交回模型并继续在宿主中运行。`yield_ms` 可调整前台等待预算（0–120000）。`timeout_ms` 是独立的进程硬超时：前台默认 30 分钟，显式后台默认 24 小时，最大 24 小时；自动转后台保留原截止时间。
 
-模型可先做不依赖结果的工作。一次 SDK 生成结束后，宿主保留原目标，等待后台命令的完成 Promise。期间不持续调用模型或查询进程。完成结果以隐藏的 `hemi_background_command_result` 消息交回原会话，沿用其 rootRunId、generation、模型计划及请求预算。多条命令的完成结果按批消费；已消费的结果不会再次唤醒。
+所有后台命令使用同一套进程守护、输出缓冲、事实库和控制工具，不提供服务分类参数，也不根据命令文本、运行时间或日志关键词推断服务类型。`rootRunId`、generation、taskId 保留执行来源；进程可以越过本次模型生成与主目标收口继续运行。同一会话主 agent 可用 `job_list`、`job_output`、`job_kill` 查询和控制当前及此前根目标、所属子任务的后台命令；子任务只可控制自己的命令，其他会话不能访问。
 
-`prompt` 返回和 flow 的 `run-closed` 都发生在必要后台结果处理完之后。模型的一次生成结束不等于用户目标完成。等待期间同会话普通新输入仍遵守现有队列规则；用户可以停止或插队。其他会话可独立工作。
+转后台回执只表示进程受理，不证明用户目标完成。启动工具在受理后结束，进程结果作为独立宿主事实保存，不让工具永久显示执行中。
 
-停止、插队替换、回卷、会话释放和应用退出会取消所拥有的命令，并确认进程树退出。唤醒前再次检查取消状态及执行归属，旧目标不再续跑。进程启动前仍须持久登记 PID、出生信息和随机归属标记；应用重启先清理旧命令，将旧目标按中断恢复，不自动重放命令。
+## 对话回合与后台目标分离
 
-这次后台执行覆盖本机命令（包含子 agent 的本机命令）；远端 SSH 工具保留原有前台执行、取消及超时语义。
+- 主模型决定是否还需要同步等待：需要结果时调用 `job_output`，每次最多等待 30 秒；仍有独立工作时继续调用工具；本轮助手回复结束后，宿主释放前台。
+- 若此时仍有所属后台命令，目标持久化为 `waiting_background`，flow 的本轮结果为 `awaiting-background`、会话回到 idle。原目标尚未被判为完成，用户可以正常提问，队列也可继续派发。
+- 交接后台等待发生在独立完成检查之前，不调用额外模型选择等待对象，不根据命令名、日志或时长识别常驻服务，没有 `waitForJobs` 协议。
+- `pnpm dev`、构建、测试和下载走同一条路径。服务可以持续运行；有限命令退出后，宿主保存真实终态和输出，并将通知交给现有对话调度器。当前对话忙时先等待，空闲时启动事件回合；用户队列优先，暂停队列时也不自动唤醒。
+- 事件回合保留原 `rootRunId`、generation、冻结模型策略、目标原文与累计请求预算，在 flow 中有独立回合身份；不插入伪造的用户消息、不重发原始命令。模型读取已完成结果后抑制重复通知；被主动停止的命令不会自行唤醒旧目标。
+- 结果处理后若还有所属命令，继续交接后台等待；没有待处理后台工作时，现有目标检查可以决定完成、继续、等待用户或阻塞。服务启动就绪需要主模型按用户目标执行独立有界核验，启动回执不能代替就绪证据。服务仍在运行不会因此占住前台。
+- 显式“检查进展”可提交状态观察事件；静默本身不产生周期性模型请求，也不证明失败，不延长原截止时间。
+
+`checkGoal()` 仍拒绝在途请求、工具、派单、报告、前台进程及清理未知的进程。主模型回复结束且只剩受管后台工作时使用安全交接，不拿完成检查充当前台锁。目标总预算耗尽则先清理所属工作，再以部分完成收口；不能借后台唤醒重置预算。
+
+## 清理和恢复
+
+普通新输入保留后台进程。自动失败或预算收口仅清理所属目标；明确停止、插队、回卷、会话释放及应用退出仍遵守实际清理屏障。模型或工作区切换时，仍持有后台命令或未读结果的旧会话保留命令控制能力；后续事件按原目标的模型策略处理。持有未决后台目标的会话不做空闲淘汰。
+
+进程启动前持久登记 PID、出生信息和随机归属标记。重启先按真实归属回收旧进程，将旧后台目标标记中断，不恢复服务、不重跑命令、不重放旧通知、不自动执行保留的用户队列。清理未确认时拒绝后续模型动作、标明失败并暂停自动发送。开发验证使用新的临时 `HEMI_USER_DATA_DIR`，不改写个人会话或安装版数据。本实现覆盖主／子 agent 的本机命令；远端 SSH 工具保留原有前台执行、取消及超时语义。
+
+## 参考实现
+
+只读核对本地源码，未复制第三方实现、引入依赖或修改参考项目：
+
+- ZCode `3.17.1`，`a60ba6a7e5a06742270ca605f5d2cc2766afa7e1`：`apps/zcode-cli/packages/core/src/tool/executor/background-tasks.ts` 分离后台登记、观察和终态通知；`tool/handlers/task-output.ts` 提供有限等待和结果读取；`runtime/methods/background-notifications.ts` 在退出或旧 branch generation 时抑制通知。
+- DeepSeek Harness `d743267388641bc76f17c45ce8b4c231aed1d32c`：`packages/jobs/jobs-local/src/index.ts` 的 job 归属准确的会话 Agent，可越过工具调用存活，owner disposal 取消并等待实际收尾；`packages/shell/tool-bash/src/background.ts` 分离进程与工具调用取消；`packages/jobs/tool-jobs/src/index.ts` 提供统一查询、输出和停止。
+
+两者的 Bash/Job 层均未按常驻服务与普通任务分类。Hemi 同样将后台进程存活与前台回合占用分离；需要同步等候时由主模型显式有限等待，宿主按实际退出事件交接后续处理。
+
+## 本轮验证（2026-10-30）
+
+基线为 `de447c7f603b1e4cda00fa50a833cafe1b717532` 加本次及工作区原有未提交改动；macOS arm64、Node 22.22.3、Electron 44.0.0（内置 Node 24.18.1）、源码应用版本 0.2.29。源码与安装版版本不同，本轮未提交、发布、替换安装版、更新生产 Bot 或操作实体移动设备。
+
+验证入口：
+
+```sh
+node --test src/main/agent-runtime/goal-driver.test.mjs src/main/agent-runtime/run-journal.test.mjs src/main/agent-runtime/background-handoff.test.mjs src/main/agent-runtime/agent-task-lifecycle.test.mjs src/main/agent/gate/background-job-controls.test.mjs src/main/agent/background-commands.test.mjs
+node --test src/main/bot/background-jobs.test.mjs src/main/bot/command-lifecycle.test.mjs src/main/bot/execution.test.mjs src/main/bot/goal-continuation.test.mjs
+HEMI_USER_DATA_DIR=<新的临时目录> npm test
+npm run build
+node scripts/verify-background-goals.mjs
+node scripts/verify-background-goals.mjs --dev
+git diff --check
+```
+
+Electron 验证走实际 UI → preload → IPC → Runtime → Pi SDK → Shell → HTTP 服务，仅模型响应合成：无服务分类参数启动开发服务，独立就绪检查后结束本轮回复，队列中的问题继续执行且服务仍响应 HTTP；重载保持 idle，不重放；使用完全相同的后台接口启动有限构建，构建期间前台空闲并可继续问答，真实退出结果回来后按原目标自动处理，期间原开发服务继续运行；后续目标查询和停止同一进程。PC/Bot 定向回归另覆盖分段交接、真实超时、单条停止、所属子任务的后台工作、取消清理失败和队列暂停。
+
+最终结果：`npm run build`、`git diff --check` 通过。开发 renderer 与构建 renderer 的 Electron 流程各四组断言通过，页面错误列表为空，截图已复核。Dev 控制台有既有 ResizeObserver 通知循环提示，功能断言通过。按 `scripts/run-tests.mjs` 相同四个根目录枚举全部 291 个测试文件，以 Node 文件并发 4、独立临时数据目录完整重跑：2226 项，2205 通过、21 跳过、0 失败；随后未读与通知文案专项 14 项通过。完整命令为 `node .visual/workflow/background-goals/run-full-suite.mjs`，入口脚本内部创建和清理临时 `HEMI_USER_DATA_DIR`。最终日志为 `async-full-final.log`、`async-build-final.log`、`async-dev-final.log`、`async-built-final.log`、`async-notification.log`。额外真实 PC/Host 场景覆盖模型切换后保留原进程和原策略、在另一目标结束后停止旧目标、异步清理未知拒绝启动模型，以及事件受理保存失败后等待显式恢复。
+
+日志、截图与最终检查结果保存在忽略目录 `.visual/workflow/background-goals/`。未验证 Windows 真机、移动设备、真实外部模型的完成判断或安装包更新后行为；没有对真实项目或个人配置进行启动、迁移或写入。
 
 ## 锁的范围
 
 - 普通 Bash／PowerShell 不申请工作目录租约；命令前台运行或转后台都不会阻塞其他会话对同目录文件的读取、写入或其他命令。文件工具仍按显式目标协调冲突读写，浏览器按会话使用 `browser:<owner>`，桌面使用交互资源租约。
-- 后台命令仍由原目标跟踪进程、保存结果，并在退出后通知原目标继续；它不保留目录锁。共用目录不提供任意 Shell 写入隔离，需要隔离并发修改时使用独立工作目录。
+- 后台命令保留原执行来源并由会话持续管理；同步等候由主模型显式有限等待，回合结束后由完成事件触发后续处理。它不保留目录锁。共用目录不提供任意 Shell 写入隔离，需要隔离并发修改时使用独立工作目录。
 - 进程清理未确认时拒绝原目标的后续执行，避免冒充已停止；不为其他会话留下整目录锁。
 
 ## 等待状态与输出
 
-flow 的运行记录增加 `activity`，不新增第二个主运行或改变四态调度器：
+默认目标驱动的后台交接会关闭本轮运行并清除 activity；会话为 idle，后台目标为 `waiting_background`。以下 activity 仅用于仍未结束的前台／SDK运行，不代表所有存活后台命令都会占用主对话：
 
 - `running`：模型或工具在推进，可同时列出后台命令。
-- `waiting-background`：SDK 已结束本次生成，宿主等待后台命令终态。
+- `waiting-background`：SDK 内的有界等待或非目标驱动兼容路径；默认目标驱动结束回复后使用独立后台交接。
 - `waiting-resource`：等待工作区、桌面或共享浏览器资源；携带阻塞操作摘要和等待起点。
 
 界面显示等待原因、耗时、命令最近输出及停止入口；列表使用时钟标志。等待时收起正文生成光标、输入框的回应提示和用量运行点；通话条也显示等待。renderer 重载通过 flow 快照接回，运行收口清除 activity，旧代次/旧运行的活动更新被丢弃。

@@ -17,7 +17,7 @@ export function conversationStatus(flow, { live = false, isTaskLive = () => true
 export function newSettledRuns(record, flow) {
   return Object.values(flow?.runs ?? {}).filter(run => run
     && ['user', 'queue', 'event'].includes(run.source)
-    && ['completed', 'partial', 'failed', 'blocked', 'awaiting-user'].includes(run.outcome)
+    && ['completed', 'partial', 'failed', 'blocked', 'awaiting-user', 'awaiting-background'].includes(run.outcome)
     && run.closedAt != null && record?.flow?.runs?.[run.runId]?.closedAt == null);
 }
 

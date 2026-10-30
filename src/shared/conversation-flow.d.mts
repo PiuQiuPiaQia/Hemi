@@ -30,7 +30,7 @@ export type FlowRunSummary = {
   startedAt: number | null;
   endedAt: number | null;
   closedAt: number | null;
-  outcome: 'completed' | 'partial' | 'awaiting-user' | 'blocked' | 'stopped' | 'failed' | 'interrupted' | 'unknown' | null;
+  outcome: 'completed' | 'partial' | 'awaiting-user' | 'awaiting-background' | 'blocked' | 'stopped' | 'failed' | 'interrupted' | 'unknown' | null;
   continuationOf?: string;
   waitingForUser?: {question:string;reason:string};
   halted?: {kind:'no_progress'|'budget_limited';reason:string;remaining:string[];nextAction:string};

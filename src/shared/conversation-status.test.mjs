@@ -68,3 +68,11 @@ test('等待用户需要新结果提醒，重读旧快照不会重复提醒',()=
  const record=withConversationUnread({flow:{runs:{}}},flow,20);assert.equal(record.unreadAt,20);
  assert.equal(withConversationUnread(record,flow,30).unreadAt,20);
 });
+
+test('本轮回复交接后台也产生未读，但主对话已经空闲',()=>{
+ const flow={phase:'idle',activeRunId:null,runs:{r:{runId:'r',source:'user',outcome:'awaiting-background',closedAt:10}},tasks:{}};
+ assert.equal(conversationStatus(flow,{live:true}),null);
+ const updated=withConversationUnread({flow:{runs:{}}},flow,20);
+ assert.equal(updated.unreadAt,20);
+ assert.equal(withConversationUnread(updated,flow,30).unreadAt,20);
+});

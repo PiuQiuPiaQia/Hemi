@@ -1,7 +1,8 @@
 import { createHash, createHmac, hkdfSync, createDecipheriv, createPrivateKey, sign, randomBytes, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { setImmediate as yieldToLoop } from 'node:timers/promises';
-import { codingAuthKey, codingJson, tokenClaims, ZCODE_ORIGIN, ZCODE_VERSION } from './bigmodel-coding-auth.mjs';
+import { ensureCodingCredential, codingJson, tokenClaims, ZCODE_ORIGIN, ZCODE_VERSION } from './bigmodel-coding-auth.mjs';
+import { modelConnectionError, transportCodeOf } from '../lib/model-transport.mjs';
 
 const MODEL_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages';
 const GATEWAY_URL = `${ZCODE_ORIGIN}/api/v1/ultra/anthropic/v1/messages`;
@@ -18,7 +19,9 @@ function waitFor(promise, signal) {
 const verificationFailure = async response => {
   if (response.status !== 401) return false;
   const body = await response.clone().json().catch(() => null);
-  return [body?.msg, body?.reason, body?.data?.reason, body?.error?.reason, body?.error?.message].some(value => ['VERIFY_SIGNATURE_INVALID', 'VERIFY_APIKEY_EXPIRED'].includes(value));
+  const reasons = [body?.msg, body?.reason, body?.data?.reason, body?.error?.reason, body?.error?.message];
+  return reasons.includes('VERIFY_APIKEY_EXPIRED') ? 'project-expired'
+    : reasons.includes('VERIFY_SIGNATURE_INVALID') ? 'signature' : null;
 };
 
 export function codingIdentity(deviceId, model = false) {
@@ -114,12 +117,7 @@ export function createCodingTransport(credentials) {
           const source = new URL(request.url);
           if (`${source.origin}${source.pathname}` !== MODEL_URL || request.method !== 'POST') throw new Error('GLM 编程套餐请求地址无效。');
           signal.throwIfAborted();
-          const readCredential = async () => {
-            const credential = await credentials.read('bigmodel', { signal });
-            if (!credential || codingAuthKey(credential) !== authKey) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
-            if (credential.expires <= Date.now()) throw new Error('GLM 编程套餐项目令牌已过期，请重新发送以刷新登录。');
-            return credential;
-          };
+          const readCredential = rejectedAccess => ensureCodingCredential(credentials, { authKey, fetchImpl, signal, rejectedAccess });
           const body = JSON.parse(await request.text());
           let response;
           for (let attempt = 0; attempt < 2; attempt++) {
@@ -147,15 +145,17 @@ export function createCodingTransport(credentials) {
               const signed = await signedHeaders(key, credential, headers, sessionId, signal);
               if ((await readCredential()).access !== credential.access) continue;
               body.metadata = { ...body.metadata, user_id: JSON.stringify({ device_id: credential.deviceId, account_uuid: '', session_id: sessionId }) };
-              ready = { state, target, signed };
+              ready = { state, target, signed, access: credential.access };
               break;
             }
             if (!ready) throw new Error('GLM 编程套餐项目令牌连续更新，请稍后重新发送。');
             signal.throwIfAborted();
             response = await fetchImpl(ready.target.url, { method: 'POST', headers: ready.signed, body: JSON.stringify(body), signal, redirect: 'error' });
-            if (attempt || !await verificationFailure(response)) break;
+            const rejection = !attempt && await verificationFailure(response);
+            if (!rejection) break;
             await response.body?.cancel().catch(() => {});
-            ready.state.key = null;
+            if (rejection === 'project-expired') await readCredential(ready.access);
+            else ready.state.key = null;
           }
           if (response.ok) return response;
           await response.body?.cancel().catch(() => {});
@@ -163,8 +163,11 @@ export function createCodingTransport(credentials) {
           return Response.json({ type: 'error', error: { type: 'api_error', message } }, { status: response.status });
         } catch (error) {
           signal.throwIfAborted();
+          // A local transport failure is not an upstream HTTP 503. Preserve a
+          // safe typed error; the request owner decides whether to recover.
+          if (transportCodeOf(error)) throw modelConnectionError(error, 'GLM 编程套餐连接中断，请稍后重试。');
           const message = /^GLM 编程套餐/.test(error?.message) ? error.message : 'GLM 编程套餐连接失败，请检查网络后重试。';
-          return Response.json({ type: 'error', error: { type: 'api_error', message } }, { status: /登录|令牌/.test(message) ? 401 : 503 });
+          return Response.json({ type: 'error', error: { type: 'api_error', message } }, { status: /登录/.test(message) ? 401 : 503 });
         }
       };
     },

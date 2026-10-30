@@ -3,6 +3,7 @@ import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createAgentRuntime } from '../agent-runtime/core.mjs';
 import { goalRunOutcome } from '../agent-runtime/goal-driver.mjs';
+import {runBackgroundTurn} from '../agent-runtime/background-turn.mjs';
 import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
 import { resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
@@ -16,13 +17,18 @@ const TOOLS = ['context_read', 'task_read', 'conversation_read', 'get_runtime_di
   'screen_view', 'ui_list', 'ui_click', 'ui_type', 'ui_key', 'ui_scroll', 'ui_tree', 'ui_act', 'app_open'];
 const CLOUD_SYSTEM = `你是 Hemi，运行在用户的 ${process.platform === 'win32' ? 'Windows' : 'Linux'} 远端主机上。所有文件、命令和浏览器操作都在这台主机执行，浏览器登录状态也属于这台主机。${process.platform === 'win32' ? 'bash 工具在此执行 Windows cmd.exe 命令，不是 POSIX bash；需要 PowerShell 时显式调用 powershell.exe -NoProfile -NonInteractive -Command。路径使用 Windows 绝对路径。桌面工具操作这台 Windows 主机已登录用户的桌面；会话锁定、注销或桌面助手不可用时如实报告，不能改为控制客户端电脑。Windows 快捷键使用 ctrl/alt/win，不使用 macOS 的 cmd。Windows 组合快捷键及包含 Emoji 等非 BMP 字符的键入使用 delivery="foreground"，让驱动短暂置前目标窗口后投递并恢复；用户明确要求全程后台时遵守该限制，改用可用的 UIA 语义操作或如实报告。动作结果须通过界面或目标应用的实际内容核对，不反复重放已生效的输入。' : '本主机不提供图形桌面控制。'}用用户的语言完成已授权的工作。没有麦克风、录音或语音能力；不能宣称已操作客户端电脑。敏感操作遵守宿主确认，不绕过门控。生成交付文件时使用 register_delivery 登记真实路径。`;
 
-export async function validateCloudModel(config) {
+export async function validateCloudModel(config, {signal: externalSignal} = {}) {
+  externalSignal?.throwIfAborted();
   const temporary = await mkdtemp(
     path.join(os.tmpdir(), 'hemi-bot-validation-'),
   );
   const access = createPermissionService({dir: path.join(temporary, 'access-store')});
   let session;
   let timer;
+  let abortListener;
+  let transportError;
+  const controller = new AbortController();
+  const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
   try {
     // Validation may finish before the default session's asynchronous store load.
     // Own and await initialization so cleanup cannot race its pending writes.
@@ -35,6 +41,19 @@ export async function validateCloudModel(config) {
       tools: [],
       appendSystem: ['你是 Hemi。仅验证模型连接，回复 OK。'],
       features: {},
+      // A connection check is one attempt. SDK retries otherwise start another
+      // turn, hit maxRunRequests and replace the original error with an abort.
+      settings: {retry: {enabled: false, provider: {maxRetries: 0}}},
+      fetchImpl: async (url, init = {}) => {
+        let response;
+        try {
+          response = await fetch(url, {...init, signal: init.signal ? AbortSignal.any([signal, init.signal]) : signal});
+        } catch (error) { transportError = error; throw error; }
+        // Native transports can flatten HTTP status/code into generic text.
+        // Keep this cause inside the Host; oauth-errors emits only fixed text.
+        transportError = response.ok ? null : {status: response.status, message: (await response.clone().text().catch(() => '')).slice(0, 32768)};
+        return response;
+      },
       maxRunRequests: 1,
       initTimeoutMs: 20000,
       stallTimeoutMs: 30000,
@@ -45,14 +64,19 @@ export async function validateCloudModel(config) {
         return session.prompt('Reply OK.');
       })(),
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('模型验证超时')), 45000);
+        abortListener = () => reject(signal.reason);
+        signal.addEventListener('abort', abortListener, {once: true});
+        if (signal.aborted) abortListener();
+        timer = setTimeout(() => controller.abort(new Error('模型验证超时')), 45000);
         timer.unref?.();
       }),
     ]);
     if (result.modelError || result.aborted || !result.texts.length)
-      throw new Error('模型验证失败', {cause:result.modelError || {aborted:result.aborted,textCount:result.texts.length}});
+      throw new Error('模型验证失败', {cause:transportError || result.modelError || {aborted:result.aborted,textCount:result.texts.length}});
   } finally {
     clearTimeout(timer);
+    signal.removeEventListener('abort', abortListener);
+    controller.abort();
     session?.dispose();
     await rm(temporary, { recursive: true, force: true });
   }
@@ -86,7 +110,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
     appendSystem: [CLOUD_SYSTEM], permissionTimeoutMs: 0,
     loadArchiveAgent(id) {
       const owner = active.get(id);if (!owner) return null;
-      const entries = readEntries(id, owner.spec.generation, owner.spec.envelope.inputId);
+      const entries = readEntries(id, owner.spec.generation, owner.spec.envelope?.inputId);
       if (isNativeSessionReference(entries)) return entries;
       return entries?.length ? {header: entries[0], entries: entries.slice(1)} : null;
     },
@@ -102,6 +126,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         kind: card.kind === 'grant' ? 'grant' : 'action', tool: card.tool ?? '', args: card.args ?? {}, note: card.note ?? ''});
     },
     onTaskState: snapshot => taskFacts?.publish(snapshot),
+    onBackgroundReady:(id,event)=>flowService?.controllerFor(id).enqueueBackground(event),
     onDeliveryDeclared({conversationId, rootRunId, file}) {
       const owner = active.get(conversationId);
       if (owner && owner.spec.runId === rootRunId && !owner.ctx.cancelled) deliver(owner, [file]);
@@ -120,6 +145,17 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
       await ready;
       const {conversationId, generation, runId, envelope, continuationOf} = spec;
       if (cancelledBeforeStart.delete(conversationId)) return {stopped: true};
+      if(spec.background){
+        const ctx=runtime.backgroundContext(conversationId,spec.background.rootRunId);
+        if(!ctx)return {stopped:true};
+        const owner={spec,ctx,stopped:false,permissions:new Map(),deliveries:[],settled:Promise.withResolvers()};
+        active.set(conversationId,owner);
+        try{
+          const result=await runBackgroundTurn({runtime,conversationId,runId,generation,background:spec.background,apply,onDelivery:files=>deliver(owner,files)});
+          await Promise.all(owner.deliveries);
+          return {stopped:result.aborted,waitingForBackground:result.waitingForBackground,waitingForUser:result.waitingForUser,blocked:result.blocked,halted:result.halted};
+        }finally{if(active.get(conversationId)===owner)active.delete(conversationId);owner.settled.resolve();}
+      }
       if (generations.has(conversationId) && generations.get(conversationId) !== generation) runtime.invalidate(conversationId);
       generations.set(conversationId, generation);
       const ctx = {conversationId, generation, runId, continuationOf, policySnapshot: envelope.modelPolicySnapshot, workspace: envelope.workspaceSnapshot, inputSource: 'text', cancelled: false,
@@ -157,7 +193,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
         await Promise.all(owner.deliveries);await runtime.persist(conversationId);
         outcome = goalRunOutcome(result, {cancelled: ctx.cancelled});
         for (const value of projector.finish({stopped: result.aborted || ctx.cancelled, halted:result.halted,blocked:outcome==='blocked'?result.blocked:null})) apply(value);
-        return {stopped: result.aborted || ctx.cancelled,waitingForUser:result.waitingForUser,halted:result.halted,blocked:outcome==='blocked'?result.blocked:null};
+        return {stopped: result.aborted || ctx.cancelled,waitingForBackground:result.waitingForBackground,waitingForUser:result.waitingForUser,halted:result.halted,blocked:outcome==='blocked'?result.blocked:null};
       } catch (error) {
         cleanupUnconfirmed = error.code === 'cleanup-unconfirmed';
         for (const value of projector.finish({error: owner.stopped ? null : error, stopped: owner.stopped})) apply(value);
@@ -179,7 +215,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
       const owner = active.get(id);
       if (!owner) {cancelledBeforeStart.add(id);return;}
       owner.stopped = true;owner.ctx.cancelled = true;
-      await runtime.stopRoot(id, owner.spec.runId, {inputs: [owner.spec.envelope.text]});
+      await runtime.stopRoot(id, owner.spec.runId, {inputs: owner.spec.envelope ? [owner.spec.envelope.text] : []});
     },
     decide(id, permissionId, value) {
       const owner = active.get(id), pending = owner?.permissions.get(permissionId);

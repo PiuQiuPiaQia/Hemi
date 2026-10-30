@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
 
 const terminal = new Set(['completed','partial','failed','blocked','cancelled','interrupted','continued']);
-const suspended = root => root?.status === 'awaiting_user' || (root?.kind === 'workflow' && root.status === 'waiting');
+const suspended = root => ['awaiting_user','waiting_background'].includes(root?.status) || (root?.kind === 'workflow' && root.status === 'waiting');
 const owns = (root, owner) => root && root.owner.conversationId === owner.conversationId && root.owner.rootRunId === owner.rootRunId && root.owner.generation === owner.generation;
 const initial = () => ({ version: 2, roots: {}, dispatches: {}, tasks: {}, inbox: {}, requests: {}, observations: {}, processes: {} });
 export const BUDGET_SUMMARY_PURPOSE = 'budget-summary';
@@ -21,18 +21,20 @@ const assertExecuting = (s, owner) => {
   // 不再用于每段边界；段边界由根调度在回合边界主动 checkpoint（agent-task-lifecycle R-02/R-07）。
   if (sourceRoot(s, owner)?.requestLimitReached) throw new Error('执行请求已达上限，不能开始新动作');
 };
+const processPending = item => !item.cleanupConfirmed || item.state !== 'finished';
 const pendingGoalWork = (s, owner) => {
   const belongs = item => item.owner.rootRunId === owner.rootRunId;
   return {
     requests: Object.values(s.requests).filter(item => belongs(item) && !item.endedAt).map(item => item.requestId),
     tools: Object.values(s.observations).filter(item => belongs(item) && item.phase !== 'finished').map(item => item.id),
-    processes: Object.values(s.processes).filter(item => belongs(item) && (!item.cleanupConfirmed || item.state !== 'finished'))
+    processes: Object.values(s.processes).filter(item => belongs(item) && processPending(item))
       .map(item => ({id:item.id, description:item.description, state:item.state, background:Boolean(item.background)})),
     tasks: Object.values(s.dispatches).filter(item => belongs(item) && item.state !== 'terminal').map(item => item.taskId),
     reports: Object.values(s.inbox).filter(item => belongs(item) && item.state === 'pending').map(item => item.eventId),
   };
 };
 const hasPendingWork = work => Object.values(work).some(items => items.length);
+const hasUnconfirmedWork = work => hasPendingWork({...work,processes:work.processes.filter(p=>!(p.background&&p.state==='active'))});
 function advanceGoalRound(s, root) {
   const goal = root.goal, used = goalRequests(s, root);
   if (goal.round >= goal.policy.maxRounds || used >= goal.policy.maxRequests) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code:'goal-budget-limit'});
@@ -96,13 +98,31 @@ export function createRunJournal({ dir }) {
         const dispose = () => { watchers.delete(check); signal?.removeEventListener('abort', abort); };
         const abort = () => { dispose(); reject(signal.reason ?? new DOMException('等待已取消','AbortError')); };
         const pendingNow = () => Object.values(state.processes).filter(item => item.owner.rootRunId === owner.rootRunId && item.owner.generation === owner.generation
-          && (!item.cleanupConfirmed || item.state !== 'finished'));
+          && processPending(item));
         const check = () => {
           if (!owns(state.roots[owner.rootRunId], owner)) {dispose(); reject(new Error('执行归属已失效')); return;}
           if (!pendingNow().length) {dispose(); resolve(true);}
         };
         signal?.addEventListener('abort', abort, {once:true});
         check();
+      });
+    },
+    /** 目标只等待实际依赖的后台命令；退出事实写入时唤醒，不轮询或消费输出。 */
+    async waitForProcessUpdate(owner, ids, {signal} = {}) {
+      await ready;await tail;signal?.throwIfAborted();
+      if (!Array.isArray(ids) || !ids.length || ids.some(id => {
+        const p=state.processes[id];return !p?.background || p.owner.conversationId!==owner.conversationId || owner.taskId;
+      })) throw new Error('等待的后台命令不存在或不属于当前目标');
+      return new Promise((resolve,reject)=>{
+        const dispose=()=>{watchers.delete(check);signal?.removeEventListener('abort',abort);};
+        const abort=()=>{dispose();reject(signal?.reason??new DOMException('等待已取消','AbortError'));};
+        const check=()=>{
+          const root=state.roots[owner.rootRunId];
+          if (!owns(root,owner)||terminal.has(root.status)) {abort();return;}
+          const jobs=ids.map(id=>state.processes[id]);
+          if(jobs.some(p=>p.state!=='active')) {dispose();resolve({kind:'settled'});}
+        };
+        watchers.add(check);signal?.addEventListener('abort',abort,{once:true});check();
       });
     },
     // Event-driven budget fence. Abandoning a wait removes its listener; it never consumes work/results.
@@ -127,6 +147,7 @@ export function createRunJournal({ dir }) {
       if (old) {
         if (JSON.stringify(old.owner) !== JSON.stringify(owner) || terminal.has(old.status)) throw new Error('根目标已失效或终结，不得重新执行');
         if (old.status === 'awaiting_user') throw new Error('目标正在等待用户答复，不能自行恢复');
+        if (old.status === 'waiting_background') throw new Error('后台目标只能由所属结果事件恢复');
       }
       const busy = Object.values(s.roots).find(r => r.owner.rootRunId !== owner.rootRunId && r.owner.conversationId === owner.conversationId && r.kind !== 'auxiliary' && !terminal.has(r.status) && !suspended(r));
       if (busy && (old?.kind ?? facts.kind) !== 'auxiliary') throw new Error('该对话已有执行中的根目标');
@@ -142,6 +163,28 @@ export function createRunJournal({ dir }) {
       root.kind = 'workflow';
       root.status = 'waiting';
       return root;
+    }),
+    suspendGoal: owner => transaction(s => {
+      const root=s.roots[owner.rootRunId];
+      if(!owns(root,owner)||terminal.has(root.status)||root.goal?.phase!=='active'||hasUnconfirmedWork(pendingGoalWork(s,owner)))throw new Error('目标尚未到达后台交接边界');
+      root.status='waiting_background';root.goal.phase='waiting_background';root.suspendedAt=Date.now();
+      return root.goal;
+    }),
+    backgroundBudgetExhausted: owner => read(s=>{
+      const root=s.roots[owner.rootRunId],goal=root?.goal;
+      if(!owns(root,owner)||!goal)throw new Error('目标归属已失效');
+      const used=goalRequests(s,root),cap=Math.min(goal.policy.maxRequestsPerRound,root.policySnapshot?.budgets?.maxRequestsPerRun??goal.policy.maxRequestsPerRound);
+      return used>=goal.policy.maxRequests||(goal.round>=goal.policy.maxRounds&&used>=goal.requestOffset+cap);
+    }),
+    backgroundYieldReady: owner => read(s=>!hasUnconfirmedWork(pendingGoalWork(s,owner))),
+    rootForFlow: (conversationId,runId) => read(s=>s.roots[runId]?.owner.conversationId===conversationId?runId:Object.values(s.roots).find(root=>root.owner.conversationId===conversationId&&root.eventRunIds?.includes(runId))?.owner.rootRunId??runId),
+    resumeBackgroundGoal: (owner,{flowRunId}={}) => transaction(s => {
+      const root=s.roots[owner.rootRunId];
+      if(!owns(root,owner)||root.status!=='waiting_background'||root.goal?.phase!=='waiting_background')throw new Error('后台目标已停止或已恢复');
+      if(hasUnconfirmedWork(pendingGoalWork(s,owner)))throw Object.assign(new Error('后台命令清理未确认，已阻止后续执行'),{code:'cleanup-unconfirmed'});
+      root.status='running';root.goal.phase='active';
+      if(flowRunId)(root.eventRunIds??=[]).push(flowRunId);
+      return advanceGoalRound(s,root);
     }),
     beginGoal: (owner, objective, policy, continuation = null) => transaction(s => {
       const root = s.roots[owner.rootRunId];
@@ -164,7 +207,9 @@ export function createRunJournal({ dir }) {
     checkGoal: owner => transaction(s => {
       const root = s.roots[owner.rootRunId];
       if (!owns(root, owner) || terminal.has(root.status) || !root.goal || root.goal.phase !== 'active') throw new Error('目标不能校验');
-      if (hasPendingWork(pendingGoalWork(s, owner))) throw new Error('目标仍有未确认的执行，不能判定完成');
+      const work=pendingGoalWork(s, owner);
+      // 正常后台进程交给目标检查判断依赖；在途前台动作和清理未知仍拒绝完成。
+      if (hasUnconfirmedWork(work)) throw new Error('目标仍有未确认的执行，不能判定完成');
       root.goal.phase = 'checking';
       return root.goal;
     }),
@@ -175,6 +220,17 @@ export function createRunJournal({ dir }) {
       root.goal.phase = verdict.status === 'complete' ? 'complete' : verdict.status === 'blocked' ? 'blocked' : verdict.status === 'awaiting_user' ? 'awaiting_user' : 'active';
       if (verdict.status === 'awaiting_user') root.goal.waitingForUser={question:verdict.question,reason:verdict.reason,at:Date.now()};
       return root.goal;
+    }),
+    recordGoalVerificationAttempt: (owner, result) => transaction(s => {
+      const root = s.roots[owner.rootRunId];
+      if (!owns(root, owner) || terminal.has(root.status) || root.goal?.phase !== 'checking') throw new Error('目标校验已失效');
+      const requests = Object.values(s.requests).filter(item => item.owner.rootRunId === owner.rootRunId
+        && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round);
+      const attempts = (root.goal.verificationAttempts ??= []);
+      if (result.attempt !== requests.length || !requests.length || requests.some(item => !item.endedAt)
+        || attempts.some(item => item.round === root.goal.round && item.attempt === result.attempt)) throw new Error('目标校验响应缺少已收口的请求');
+      attempts.push({round:root.goal.round, attempt:result.attempt, valid:result.valid, errorCode:result.errorCode,bypassed:Boolean(result.bypassed),
+        finishReason:result.finishReason, responseChars:result.responseChars, responseHash:result.responseHash, responseShape:result.responseShape, at:Date.now()});
     }),
     continueGoal: owner => transaction(s => {
       const root = s.roots[owner.rootRunId], goal = root?.goal;
@@ -207,10 +263,15 @@ export function createRunJournal({ dir }) {
       return root.goal;
     }),
     finishRoot: (owner, status, reason = null) => transaction(s => {
-      if (!terminal.has(status) && status !== 'awaiting_user') throw new Error('根目标终态无效');
+      if (!terminal.has(status) && !['awaiting_user','waiting_background'].includes(status)) throw new Error('根目标终态无效');
       const root = s.roots[owner.rootRunId];
       if (!root || JSON.stringify(root.owner) !== JSON.stringify(owner)) throw new Error('根目标身份已失效');
       if (terminal.has(root.status)) return root;
+      if(status==='waiting_background'){
+        if(root.goal?.phase!=='waiting_background')throw new Error('缺少后台交接事实');
+        return root;
+      }
+      if(status==='completed'&&root.goal?.phase==='complete'&&hasUnconfirmedWork(pendingGoalWork(s,owner)))throw new Error('目标收口时仍有未确认的执行结果');
       if (status === 'blocked' && (root.goal?.phase !== 'blocked' || root.goal.verifications.at(-1)?.status !== 'blocked')) throw new Error('缺少目标阻塞的校验事实');
       if (status === 'awaiting_user') {
         if (root.goal?.phase !== 'awaiting_user') throw new Error('缺少等待用户答复的校验事实');
@@ -378,6 +439,11 @@ export function createRunJournal({ dir }) {
       return Object.assign(s.requests[requestId], result, { endedAt: Date.now() });
     }),
     recover: () => transaction(s => {
+      // Background processes are not replayable after a host restart.
+      for(const root of Object.values(s.roots))if(root.status==='waiting_background'){
+        Object.assign(root,{status:'interrupted',reason:'进程重启；不会自动重放后台任务',terminalAt:Date.now()});
+        if(root.goal)root.goal.phase='interrupted';
+      }
       for (const root of Object.values(s.roots)) if (root.goal && !terminal.has(root.status) && !suspended(root)) Object.assign(root.goal, {phase: 'interrupted', reason: '进程重启；等待用户核对后继续'});
       for (const root of Object.values(s.roots)) if (!terminal.has(root.status) && !suspended(root)) Object.assign(root, { status: 'interrupted', reason: '进程重启；不会自动重放副作用', terminalAt: Date.now() });
       for (const dispatch of Object.values(s.dispatches)) if (!['terminal','interrupted'].includes(dispatch.state)) Object.assign(dispatch, {state:'interrupted', interruptionReason:'进程重启；受理不代表完成，不自动重投'});

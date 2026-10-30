@@ -4,16 +4,20 @@ import { runCommand, commandToolResult } from './command-execution.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 import { processBirth } from '../../agent-runtime/owned-processes.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
-import {commandDeadline, cleanupFailure, blockCommandCleanup} from './command-deadline.mjs';
+import {commandDeadline, cleanupFailure} from './command-deadline.mjs';
 import { isBackgroundWaitCommand } from '../background-wait.mjs';
 
 export const COMMAND_FOREGROUND_MS = 10_000;
 export const COMMAND_TIMEOUT_MS = 30 * 60_000;
+export const COMMAND_BACKGROUND_TIMEOUT_MS = 24 * 60 * 60_000;
 const sameOwner = (a, b) => a?.conversationId === b?.conversationId && a?.rootRunId === b?.rootRunId
   && a?.generation === b?.generation && a?.taskId === b?.taskId;
+// 后台命令统一归会话管理；子任务仍只可控制自己的命令。
+const canControl = (record, owner) => sameOwner(record.owner, owner) || (record.background
+  && !owner?.taskId && record.owner?.conversationId === owner?.conversationId && record.owner?.generation === owner?.generation);
 const outputTail = result => [result.stdout.slice(-2000), result.stderr.slice(-2000)].filter(Boolean).join('\n').slice(-2000);
 
-/** 进程属于目标而非一次 SDK 请求。后台只交还模型调用，取消/退出仍确认进程树清理。 */
+/** 进程持续受管；是否等待结果由当前目标决定，不推断命令是否为常驻服务。 */
 export function createCommandScope({ onChange = () => {}, onSettled = () => {}, now = Date.now, persistenceTimeoutMs = 10000, settleTimeoutMs = 20000, quietReviewMs = 60000, maxQuietReviews = 3 } = {}) {
   const active = new Set(), completed = [], recordsById = new Map();
   let wake = Promise.withResolvers(), reviewRequest = null;
@@ -22,7 +26,6 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   let quarantine = null;
   const uncertain = (execution, message) => {
     quarantine = cleanupFailure(message);
-    blockCommandCleanup(execution?.journal,quarantine);
     if (execution) {execution.cleanupUnconfirmed=true;execution.fatalError=message;}
     return quarantine;
   };
@@ -35,7 +38,9 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     code: record.result?.code ?? null, output: record.output,
   });
   const publish = () => onChange([...active].filter(r => r.background).map(view));
-  const backgroundFor = owner => [...active, ...completed].filter(r => r.background && sameOwner(r.owner, owner));
+  const backgroundFor = (owner, jobIds) => [...active, ...completed].filter(r => r.background
+    && (!r.goalClosed || jobIds)
+    && (jobIds ? jobIds.includes(r.id) && canControl(r, owner) : sameOwner(r.owner, owner)));
   const acknowledgeReview = (owner, update) => {
     if (!sameOwner(reviewOwner, owner)) throw new Error('观察不属于当前目标');
     if (update.requested && sameOwner(reviewRequest, owner)) reviewRequest = null;
@@ -60,6 +65,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     if (quarantine) throw quarantine;
     const scope = currentExecutionScope(), execution = scope?.execution;
     if (execution?.cancelled?.()) throw new DOMException('目标已停止', 'AbortError');
+    const timeoutMs = options.timeoutMs > 0 ? options.timeoutMs : options.runInBackground ? COMMAND_BACKGROUND_TIMEOUT_MS : COMMAND_TIMEOUT_MS;
     // 归属过滤与完成通知共用同一判定；占位等待不启动进程，也不取消已有工作。
     if (backgroundFor(execution?.owner).length && isBackgroundWaitCommand(options.command, options.description)) {
       return { status: 'waiting-background', code: null, cleanupConfirmed: true, actionState: 'not-executed' };
@@ -73,8 +79,8 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       toolCallId: scope?.toolCallId, command: options.command, startedAt: now(),
       description: normalizeCommandDescription(options.description), lastOutputAt: null,
       background: false, output: '', promise: null, settled: false, log:new CommandOutput(), reviewedAtOutput:null,
-      commandDeadlineAt:now()+(options.timeoutMs>0?options.timeoutMs:COMMAND_TIMEOUT_MS),
-      deadlineAt: now()+(options.timeoutMs>0?options.timeoutMs:COMMAND_TIMEOUT_MS)+settleTimeoutMs,
+      commandDeadlineAt:now()+timeoutMs,
+      deadlineAt: now()+timeoutMs+settleTimeoutMs,
     };
     const token = randomUUID();
     let registered = false, ready;
@@ -82,7 +88,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
     let lastProgress = 0, progressTimer;
     active.add(record);recordsById.set(record.id,record);
     for(const [id,old] of recordsById) if(recordsById.size>64 && old.settled && !completed.includes(old))recordsById.delete(id);
-    record.promise = runCommand({ ...options, signal: controller.signal, ownerToken: token,
+    record.promise = runCommand({ ...options, timeoutMs, signal: controller.signal, ownerToken: token,
       onOutput: result => {
         record.log.append(result.channel,result.chunk);
         record.output = record.log.tail(2000);
@@ -106,10 +112,16 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
           const registration = execution.journal.processStart({ id: record.id, token, pid, birth, ...isolation, owner: execution.owner,
             command: options.command, description: record.description, cwd: options.cwd, toolCallId: record.toolCallId,
           });
-          // A late durable write must not resurrect an already closed command.
+          // 登记落盘可能晚于取消收尾，必须保留真实清理结果，不能将已退出命令改成未知。
           void registration.then(async()=>{
             registered=true;
-            if(record.settled)await execution.journal.processEnd(record.id,{state:'unknown',cleanupConfirmed:false,status:'registration-late'});
+            if(record.settled) {
+              const result = record.result;
+              await execution.journal.processEnd(record.id, result ? {
+                state:result.cleanupConfirmed?'finished':'unknown', cleanupConfirmed:result.cleanupConfirmed,
+                status:result.status, code:result.code, output:record.output, lastOutputAt:record.lastOutputAt,
+              } : {state:'unknown',cleanupConfirmed:false,status:'registration-late'});
+            }
           }).catch(()=>{});
           try {await commandDeadline(registration,persistenceTimeoutMs,'命令归属保存超时，用户命令未启动');}
           catch(error){throw uncertain(execution,error.message);}
@@ -133,7 +145,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
         }
       }
       if (!result.cleanupConfirmed) {
-        throw uncertain(execution,'命令进程尚未确认退出，已停止后续操作；请核对后重启运行时');
+        throw uncertain(execution,'命令进程尚未确认退出，当前任务已停止；请先核对原命令状态');
       }
       if (record.background && execution?.contextStore) {
         record.outputRef = await commandDeadline(execution.contextStore.put({ owner: execution.owner, kind: 'tool',
@@ -154,7 +166,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       ready();
       options.signal?.removeEventListener('abort', onAbort);
       active.delete(record);
-      if (record.background) {
+      if (record.background && !record.goalClosed) {
         completed.push(record);
         onSettled({...view(record), owner: record.owner, outputRef:record.outputRef, text: record.error?.message ?? commandToolResult(record.result).content[0].text});
       }
@@ -185,14 +197,14 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       }
     }
     publish();
-    return { status: 'background', jobId: record.id, cleanupConfirmed: false, code: null,
+    return { status: 'background', jobId: record.id, deadlineAt: record.commandDeadlineAt, cleanupConfirmed: false, code: null,
       stdout: '', stderr: '', background: true, startedAt: record.startedAt,
     };
   }
 
   const find = (owner, id) => {
     const record = recordsById.get(id);
-    if (!record || !sameOwner(record.owner,owner)) throw new Error('命令不存在或不属于当前目标');
+    if (!record || !canControl(record,owner)) throw new Error('命令不存在或不属于当前目标');
     return record;
   };
   const inspect = (owner,id,options={}) => {
@@ -202,7 +214,14 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   };
   return {
     run,
-    list: owner => [...recordsById.values()].filter(r=>sameOwner(r.owner,owner)&&r.background).map(view),
+    list: owner => [...recordsById.values()].filter(r=>canControl(r,owner)&&r.background).map(view),
+    hasLiveBackground: () => [...active].some(r=>r.background),
+    hasCompletedTree: owner => completed.some(r=>!r.collected&&r.owner?.rootRunId===owner.rootRunId&&r.owner?.generation===owner.generation&&r.owner?.conversationId===owner.conversationId),
+    releaseGoal(owner) {
+      const belongs=record=>record.owner?.conversationId===owner.conversationId&&record.owner?.rootRunId===owner.rootRunId&&record.owner?.generation===owner.generation;
+      for(const record of recordsById.values())if(belongs(record))record.goalClosed=true;
+      for(let i=completed.length-1;i>=0;i--)if(belongs(completed[i]))completed.splice(i,1);
+    },
     inspect,
     async read(owner,id,{waitMs=0,signal,...options}={}) {
       const record=find(owner,id);
@@ -225,11 +244,12 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       if(![...active].some(r=>sameOwner(r.owner,owner)&&r.background))return false;
       reviewRequest=owner;changed();return true;
     },
-    async waitForUpdate(owner, {signal, collect = true} = {}) {
+    async waitForUpdate(owner, {signal, collect = true, jobIds} = {}) {
+      if (jobIds) for (const id of jobIds) find(owner, id);
       if(!sameOwner(reviewOwner,owner)){reviewOwner=owner;reviews=0;if(!sameOwner(reviewRequest,owner))reviewRequest=null;}
       while(true){
         signal?.throwIfAborted();
-        const pending=backgroundFor(owner);
+        const pending=backgroundFor(owner, jobIds);
         if(pending.some(r=>r.settled)||!pending.length)return {kind:'settled',events:collect ? takeCompleted(owner) : []};
         const due=pending.filter(r=>r.reviewedAtOutput!==(r.lastOutputAt??r.startedAt));
         const quiet=quietReviewMs>0 && reviews<maxQuietReviews && due.some(r=>now()-(r.lastOutputAt??r.startedAt)>=quietReviewMs);
@@ -278,15 +298,15 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       }
       return takeCompleted(owner);
     },
-    async abort() {
-      const owned = [...active];
+    async abort({preserveBackground = false, owner} = {}) {
+      const owned = [...active].filter(record => (!owner||sameOwner(record.owner,owner))&&(!preserveBackground || !record.background));
       for (const record of owned) record.controller.abort();
       const results = await Promise.allSettled(owned.map(record => commandDeadline(record.promise,settleTimeoutMs,'命令取消未能确认完成，已阻止后续执行')));
-      completed.length = 0;
+      if (!preserveBackground) for(let i=completed.length-1;i>=0;i--)if(!owner||sameOwner(completed[i].owner,owner))completed.splice(i,1);
       if(quarantine)throw quarantine;
       const failure = results.find(result => result.status === 'rejected');
       if (failure) throw uncertain(currentExecutionScope()?.execution,failure.reason.message);
-      if (results.some(result => !result.value.cleanupConfirmed)) throw uncertain(currentExecutionScope()?.execution,'命令所属进程未确认退出，请核对后重启运行时');
+      if (results.some(result => !result.value.cleanupConfirmed)) throw uncertain(currentExecutionScope()?.execution,'命令所属进程未确认退出，当前任务已停止；请先核对原命令状态');
     },
   };
 }

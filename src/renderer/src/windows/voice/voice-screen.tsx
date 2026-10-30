@@ -1170,13 +1170,16 @@ export function VoiceScreen({
                       activeTaskIds={activeTaskIds}
                       onManage={onOpenAccessSettings ?? onOpenSettings}
                     />}
-                    {/* 上下文容量：主会话当前占用（usage 锚点），点开看分类与缓存命中。 */}
-                    <ContextCapacityChip snapshot={contextUsage} />
                   </>
                 }
               />
-              {/* 048：居中用量预览，悬浮或键盘聚焦展开。 */}
-              <SessionUsage records={usageRecords} running={usageRunning} />
+              {/* 输入框下方信息行：048 会话用量预览＋当前上下文图标，各自悬浮或键盘聚焦展开。 */}
+              <div className="h24-composer-meta">
+                <div className="h24-composer-meta-row">
+                  <SessionUsage records={usageRecords} running={usageRunning} />
+                  <ContextCapacityChip snapshot={contextUsage} />
+                </div>
+              </div>
               {conversationEmpty ? (
                 <div className="h24-suggestions" aria-label="可以这样开始">
                   {(botEnvironment?[{icon:FolderInput,text:'查看当前目录的项目结构'},{icon:CloudSun,text:'检查服务器的磁盘使用情况'},{icon:Table2,text:'整理项目说明文档'}]:EMPTY_SUGGESTIONS).map(({ icon: Icon, text }) => (

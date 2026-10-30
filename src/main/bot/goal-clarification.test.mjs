@@ -19,6 +19,8 @@ for(const restart of [false,true])test(`real Host/SDK clarification -> ${restart
 test('normal user wait can be cancelled explicitly without resuming on restart',{timeout:30000},async t=>{
  const f=await createClarificationFixture();t.after(()=>f.close());const waiting=await waitForAnswer(f);await f.call('flow.command',{id:f.id,command:{type:'stop'}});assert.equal((await f.flow()).awaitingUser,null);assert.equal((await f.journal()).roots[waiting.awaitingUser.runId].status,'cancelled');const journalCount=Object.keys((await f.journal()).requests).length;await f.restart();const count=f.requests.length;await pause(100);assert.equal(f.requests.length,count);assert.equal(Object.keys((await f.journal()).requests).length,journalCount);
 });
-test('a real verification failure after clarification remains failed and produces one error notice',{timeout:30000},async t=>{
- const f=await createClarificationFixture({verificationFailsAfterAnswer:true});t.after(()=>f.close());await waitForAnswer(f);await f.send('写入 CLARIFIED_VALUE','answer-input');const done=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length===2?v:null;});assert.equal(Object.values(done.runs).at(-1).outcome,'failed');assert.equal(errors(done).length,1);assert.match(errors(done)[0].text,/JSON/);
+test('a verifier format failure after clarification closes normally and preserves the actual file',{timeout:30000},async t=>{
+ const f=await createClarificationFixture({verificationFailsAfterAnswer:true});t.after(()=>f.close());await waitForAnswer(f);await f.send('写入 CLARIFIED_VALUE','answer-input');const done=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length===2?v:null;});assert.equal(Object.values(done.runs).at(-1).outcome,'completed');assert.equal(errors(done).length,0);
+ assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'CLARIFIED_VALUE');
+ const root=(await f.journal()).roots[Object.values(done.runs).at(-1).runId];assert.equal(root.goal.verifications.at(-1).verificationBypassed,true);
 });

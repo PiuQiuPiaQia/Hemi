@@ -48,6 +48,43 @@ function makeController(effects) {
   });
 }
 
+test('后台结果与用户输入共用单槽：排队、去重、不造用户输入，暂停时不自动唤醒',async()=>{
+  const effects=makeEffects(),controller=makeController(effects);
+  const first=controller.command({type:'send',input:{inputId:'first',text:'原问题'}});
+  await settle();effects.runtime.starts[0].resolve({});await first;
+  const original=controller.getSnapshot().activeRunId;
+  controller.enqueueBackground({rootRunId:'background-goal',generation:1});
+  controller.enqueueBackground({rootRunId:'background-goal',generation:1});
+  await controller.command({type:'send',input:{inputId:'next',text:'下一条问题'}});
+  controller.applyFact({type:'run-closed',runId:original,outcome:'awaiting-background',at:2000});
+  await settle();assert.equal(effects.runtime.starts.length,2);
+  assert.equal(effects.runtime.starts[1].spec.source,'queue');
+  effects.runtime.starts[1].resolve({});await settle();
+  const question=controller.getSnapshot().activeRunId;
+  controller.applyFact({type:'queue-paused'});
+  controller.applyFact({type:'run-closed',runId:question,outcome:'completed',at:2001});
+  await settle();assert.equal(effects.runtime.starts.length,2);
+  await controller.command({type:'resumeQueue'});await settle();
+  assert.equal(effects.runtime.starts.length,3);
+  const event=effects.runtime.starts[2];assert.equal(event.spec.source,'event');assert.equal(event.spec.envelope,null);
+  assert.equal(event.spec.background.rootRunId,'background-goal');
+  event.resolve({});await settle();controller.applyFact({type:'run-closed',runId:controller.getSnapshot().activeRunId,outcome:'completed',at:2002});
+  await settle();assert.equal(effects.runtime.starts.length,3);
+  assert.equal(controller.getSnapshot().timeline.filter(item=>item.kind==='user').length,2);
+  assert.equal(controller.enqueueBackground({rootRunId:'stale',generation:0}),false);
+});
+
+test('后台事件受理保存失败后保留结果入口，显式恢复才重新受理且不会造用户项',async()=>{
+  const effects=makeEffects({storeFails:1}),controller=makeController(effects);
+  controller.enqueueBackground({rootRunId:'background-goal',generation:1});
+  await settle();assert.equal(controller.getSnapshot().phase,'idle');assert.equal(controller.getSnapshot().queuePaused,true);
+  assert.equal(effects.runtime.starts.length,0);
+  await controller.command({type:'resumeQueue'});await settle();assert.equal(effects.runtime.starts.length,1);
+  assert.equal(effects.runtime.starts[0].spec.background.rootRunId,'background-goal');
+  assert.equal(controller.getSnapshot().timeline.filter(item=>item.kind==='user').length,0);
+  effects.runtime.starts[0].resolve({});await settle();controller.applyFact({type:'run-closed',runId:controller.getSnapshot().activeRunId,outcome:'completed',at:2000});
+});
+
 /** 驱动一次完整运行：send → resolve runtime.start → settled+closed。 */
 async function runAndClose(controller, effects, { text, outcome = 'completed' } = {}) {
   const sendPromise = controller.command({ type: 'send', input: { text } });

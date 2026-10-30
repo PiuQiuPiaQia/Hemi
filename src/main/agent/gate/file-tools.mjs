@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { atomicWriteWithin, openVerifiedRead } from './safe-path.mjs';
 import { runCommand, commandToolResult } from './command-execution.mjs';
-import { COMMAND_FOREGROUND_MS, COMMAND_TIMEOUT_MS } from './command-scope.mjs';
+import { COMMAND_FOREGROUND_MS, COMMAND_TIMEOUT_MS, COMMAND_BACKGROUND_TIMEOUT_MS } from './command-scope.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
 import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
@@ -255,26 +255,27 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
   if (config.commands) {
     const owner = () => currentExecutionScope()?.execution?.owner;
     const result = value => ({content:[{type:'text',text:JSON.stringify(value)}],details:value});
-    pi.registerTool({name:'job_list',label:'查看后台命令',description:'列出当前目标所属的后台命令、真实状态、最近输出和硬截止时间。查询不会消费完成通知。',
-      parameters:{type:'object',properties:{}},async execute(){return result(config.commands.list(owner()));}});
+    const control = request => currentExecutionScope()?.execution?.commandControl?.(request);
+    pi.registerTool({name:'job_list',label:'查看后台命令',description:'列出本会话后台命令的真实状态、最近输出和硬截止时间。主会话可查询所属子任务的命令；子任务只可查询自己的命令。查询不会消费完成通知。',
+      parameters:{type:'object',properties:{}},async execute(){return result(await (control({action:'list'}) ?? config.commands.list(owner())));}});
     pi.registerTool({name:'job_output',label:'读取后台输出',description:'按命令 id 读取有界输出和状态。from 是上次 next 字节偏移；lossy 表示旧日志已超出保留范围。wait_ms 最多等待 30000 毫秒，到限返回当前状态，命令继续运行。不要连续查询空转。',
       parameters:{type:'object',properties:{job_id:{type:'string'},from:{type:'number'},wait_ms:{type:'number'}},required:['job_id']},
-      async execute(_id,p,signal){return result(await config.commands.read(owner(),p.job_id,{from:p.from,waitMs:Math.max(0,Math.min(30000,p.wait_ms??0)),signal,collect:true}));}});
-    pi.registerTool({name:'job_kill',label:'停止后台命令',description:'停止当前目标中指定 id 的单条后台命令，并确认进程清理。其他命令继续。仅在用户要求或任务已不需要该命令时使用；静默本身不能证明失败。',
-      parameters:{type:'object',properties:{job_id:{type:'string'}},required:['job_id']},async execute(_id,p){return result(await config.commands.stop(owner(),p.job_id));}});
+      async execute(_id,p,signal){const waitMs=Math.max(0,Math.min(30000,p.wait_ms??0));return result(await (control({action:'read',jobId:p.job_id,from:p.from,waitMs,signal,collect:true}) ?? config.commands.read(owner(),p.job_id,{from:p.from,waitMs,signal,collect:true})));}});
+    pi.registerTool({name:'job_kill',label:'停止后台命令',description:'停止本会话内有权控制的指定 id 后台命令，并确认进程清理。其他命令继续。仅在用户要求或任务已不需要该命令时使用；静默本身不能证明失败。',
+      parameters:{type:'object',properties:{job_id:{type:'string'}},required:['job_id']},async execute(_id,p){return result(await (control({action:'stop',jobId:p.job_id}) ?? config.commands.stop(owner(),p.job_id)));}});
   }
   pi.registerTool({
     name: 'bash',
     label: '执行命令',
-    description: `在会话工作目录执行本机 shell 命令，可联网。超过前台等待预算自动转后台，也可 run_in_background=true 立即后台执行。多个独立长命令分别调用 bash 并设 run_in_background=true，由宿主管理并行；不要手写 &/wait 拼接任务（cd 和变量赋值可能只在后台子 shell 生效）。${BACKGROUND_WAIT_GUIDANCE}命令及其子孙归属本次目标，父命令退出、停止或超时会清理整棵进程树；Start-Process、detached 或 & 不代表永久服务。需要常驻服务时使用用户授权的系统服务或计划任务管理生命周期，用有界就绪检查验证启动，不等待服务退出。危险操作仍经门控。`,
+    description: `在会话工作目录执行本机 shell 命令，可联网。超过前台等待预算自动转后台，也可 run_in_background=true 立即后台执行。多个独立长命令分别调用 bash 并设 run_in_background=true，由宿主管理并行；不要手写 &/wait 拼接任务（cd 和变量赋值可能只在后台子 shell 生效）。${BACKGROUND_WAIT_GUIDANCE}父命令退出、停止或超时会清理整棵进程树；Start-Process、detached 或 & 不代表永久服务。危险操作仍经门控。`,
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的命令' },
         description: { type: 'string', description: '用简短中文说明本次操作的目的，如“检查 GitHub 构建状态”；用于界面展示，不写环境变量、命令全文或未经核实的结果' },
-        timeout_ms: { type: 'number', description: '进程最长运行毫秒，超时终止（默认 1800000）' },
+        timeout_ms: { type: 'number', description: '进程硬超时毫秒，超时终止；前台默认 1800000，显式后台默认 86400000，最多 24 小时。自动转后台保留原截止时间。' },
         yield_ms: { type: 'number', description: '前台等待毫秒，之后自动转后台（默认 10000，最多 120000）' },
-        run_in_background: { type: 'boolean', description: '立即转后台；完成后自动继续原目标' },
+        run_in_background: { type: 'boolean', description: '立即转后台并返回命令 ID。进程可跨轮次运行；是否等待结果取决于当前用户目标，不代表目标已经完成。' },
       },
       required: ['command'],
     },
@@ -285,7 +286,7 @@ export function hemiCommandTool(pi, { config = {} } = {}) {
       const out = await execute({
         command, cwd: access.cwd ?? access.workspaceDir ?? access.home,
         description: normalizeCommandDescription(params?.description),
-        timeoutMs: Number.isFinite(params?.timeout_ms) && params.timeout_ms > 0 ? Math.min(24 * 60 * 60_000, params.timeout_ms) : COMMAND_TIMEOUT_MS,
+        timeoutMs: Number.isFinite(params?.timeout_ms) && params.timeout_ms > 0 ? Math.min(COMMAND_BACKGROUND_TIMEOUT_MS, params.timeout_ms) : params?.run_in_background ? COMMAND_BACKGROUND_TIMEOUT_MS : COMMAND_TIMEOUT_MS,
         foregroundMs: config.commands ? (Number.isFinite(params?.yield_ms) ? Math.max(0, Math.min(120_000, params.yield_ms)) : COMMAND_FOREGROUND_MS) : undefined,
         runInBackground: Boolean(config.commands && params?.run_in_background),
         signal,

@@ -351,7 +351,7 @@ export async function createBotHost({
         type: 'run-closed',
         runId: job.spec.runId,
         generation: job.spec.generation,
-        outcome: stopped ? 'stopped' : result?.waitingForUser ? 'awaiting-user' : result?.blocked ? 'blocked' : result?.halted ? 'partial' : 'completed',
+        outcome: stopped ? 'stopped' : result?.waitingForBackground ? 'awaiting-background' : result?.waitingForUser ? 'awaiting-user' : result?.blocked ? 'blocked' : result?.halted ? 'partial' : 'completed',
         ...(result?.waitingForUser ? {waitingForUser:result.waitingForUser} : {}),
         ...(result?.blocked ? {blocked:result.blocked} : {}),
         ...(result?.halted ? {halted:result.halted} : {}),
@@ -464,7 +464,7 @@ export async function createBotHost({
           cancelWaitingUser: ({runId}) => executor.cancelWaitingUser?.(id,runId),
           async start(spec) {
             if (!state.enabled) fail('Bot 已停止。', 'busy');
-            if (!spec.envelope?.modelPolicySnapshot)
+            if (!spec.background && !spec.envelope?.modelPolicySnapshot)
               fail('任务缺少受理时的模型版本。');
             jobs.set(id, {
               id,
@@ -479,7 +479,7 @@ export async function createBotHost({
             setImmediate(() => {
               void drain();
             });
-            return { modelUsed: spec.envelope.modelPolicySnapshot.modelKey };
+            return { modelUsed: spec.envelope?.modelPolicySnapshot?.modelKey??null };
           },
           async stop() {
             const job = jobs.get(id);

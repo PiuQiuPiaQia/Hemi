@@ -151,7 +151,7 @@ function freshRun() {
   return { texts: [], lastText: null, usages: [], requests: 0, toolNames: [], modelError: null };
 }
 
-function backgroundCommandEvent(events) {
+export function backgroundCommandEvent(events) {
   return {
     customType: 'hemi_background_command_result',
     eventIds: events.map(event => event.id),
@@ -236,6 +236,7 @@ export function createHemiSession({
   entries = null,
   sessionSource = undefined,
   settings = {},
+  fetchImpl = null,
   maxRunRequests = 0,
   executionContext = null,
   label = 'session',
@@ -407,6 +408,10 @@ export function createHemiSession({
         log,
       });
   let backgroundJobs = [];
+  let goalWaitJobs = null;
+  let goalWaitJobIds = null;
+  let externalBackgroundReview = null;
+  let goalManagedRun = false;
   let waitingForBackground = false;
   let backgroundWaitSince = null;
   let activityPhase = 'running';
@@ -425,12 +430,15 @@ export function createHemiSession({
       runId:runtimeExecution?.owner?.rootRunId,
       phase: compacting ? 'compacting' : waitingForBackground ? 'waiting-background' : resourceWaits.size ? 'waiting-resource' : activityPhase,
       since: backgroundWaitSince ?? [...resourceWaits.values()][0]?.since ?? activitySince,
-      jobs: backgroundJobs,
+      jobs: (goalWaitJobs ?? backgroundJobs).filter(job=>!goalWaitJobIds||goalWaitJobIds.has(job.id)),
       resources: [...resourceWaits.values()],
     });
   }
   const pendingCommandEnds = new Map(), acknowledgedCommands = new Set();
   function commandEnded(job) {
+    emitter.emit('command-settled',job);
+    // 有目标检查的运行中，启动工具已完成；进程结果作为独立事实交给目标，不二次收口工具。
+    if (goalManagedRun) return;
     if (disposed || ['conversationId','rootRunId','generation','taskId'].some(key => job.owner?.[key] !== runtimeExecution?.owner?.[key])) return;
     const event = {kind:'tool-end',tool:'bash',toolCallId:job.toolCallId,commandId:job.id,args:{command:job.command},
       isError:job.status !== 'succeeded',stopped:job.status === 'cancelled',text:job.text,observationRef:job.outputRef ?? null};
@@ -638,8 +646,8 @@ export function createHemiSession({
             toolCallId: event.toolCallId,
             args: event.args ?? startArgsByCall.get(event.toolCallId) ?? {},
             isError: Boolean(event.isError),
-            background: details?.status === 'background',
-            ...(details?.status === 'background' ? {commandId:details.jobId} : {}),
+            background: details?.status === 'background' && !goalManagedRun,
+            ...(details?.status === 'background' && !goalManagedRun ? {commandId:details.jobId} : {}),
             observationRef: details?.hemiObservationRef ?? null,
             observationId: details?.hemiObservationId ?? null,
             actionState,
@@ -647,7 +655,7 @@ export function createHemiSession({
             text: typeof text === 'string' ? text : '',
           });
           startArgsByCall.delete(event.toolCallId);
-          if (details?.status === 'background') {
+          if (details?.status === 'background' && !goalManagedRun) {
             const commandEnd = pendingCommandEnds.get(details.jobId);
             if (commandEnd) { pendingCommandEnds.delete(details.jobId); emitter.emit('progress',commandEnd); }
             else acknowledgedCommands.add(details.jobId);
@@ -859,6 +867,10 @@ export function createHemiSession({
         emitter.emit('recovery', recovery);
       },
     } : null);
+    if (fetchImpl) {
+      const stream = session.agent.streamFunction;
+      session.agent.streamFunction = (model, context, options = {}) => stream(model, context, { ...options, fetch: options.fetch ?? fetchImpl });
+    }
     const finishTurn = session.agent.finishTurn;
     session.agent.finishTurn = async (turn, signal) => {
       const decision = await finishTurn?.(turn, signal);
@@ -964,6 +976,7 @@ export function createHemiSession({
   async function prompt(text, options = {}) {
     const execution = runtimeExecution;
     const goalManaged = Boolean(execution?.journal && (await execution.journal.root(execution.owner))?.goal);
+    goalManagedRun = goalManaged;
     const waitAbort = new AbortController();
     promptWaitAbort = waitAbort;
     if (options.hostEvent) await checkpointExecution();
@@ -1010,7 +1023,8 @@ export function createHemiSession({
           ].join('\n')}}));
           continue;
         }
-        if (result.modelError || !commands.hasBackground(execution?.owner)) break;
+        // 模型生成结束后先检查目标；后台进程存活本身不能阻止进入完成检查。
+        if (goalManaged || result.modelError || !commands.hasBackground(execution?.owner)) break;
         waitingForBackground = true;
         backgroundWaitSince = Date.now();
         publishActivity();
@@ -1050,10 +1064,10 @@ export function createHemiSession({
       }
       // 057 子 Agent 失败后的工作控制：模型错误只结束该次推理，健康进程留给根目标继续受管
       // （agent-task-lifecycle R-09）；用户停止与终局释放仍按原契约清理全部命令。
-      if (result.aborted || disposed || abortRequested || execution?.cancelled?.()) await commands.abort();
+      if (result.aborted || disposed || abortRequested || execution?.cancelled?.()) await commands.abort({owner:execution?.owner});
       return { ...result, aborted: result.aborted || disposed || abortRequested || Boolean(execution?.cancelled?.()) };
     } catch (error) {
-      await commands.abort();
+      await commands.abort({owner:execution?.owner});
       if (abortRequested || disposed || execution?.cancelled?.()) return {...result, aborted:true};
       throw error;
     } finally {
@@ -1109,12 +1123,17 @@ export function createHemiSession({
   }
 
   /** 中断当前运行：优雅 abort，超时 dispose 兜底；在途确认一律按未应答收口。 */
-  async function abort() {
+  async function abort({preserveBackground = false, commandOwner} = {}) {
     abortRequested = true;
     promptWaitAbort?.abort();
     cancelPendingInteractions();
     await ensurePromise?.catch(() => {});
-    if (!session || disposed) { await commands.abort(); await reclaimBrowserPages(); return; }
+    if (!session || disposed) {
+      try { await commands.abort({preserveBackground,owner:commandOwner}); }
+      catch (error) { if (error.code === 'cleanup-unconfirmed') dispose(); throw error; }
+      finally { await reclaimBrowserPages(); }
+      return;
+    }
     clearTimeout(stallTimer);
     releasePermissions();
     try {
@@ -1124,8 +1143,10 @@ export function createHemiSession({
       dispose();
     } finally {
       session?.clearQueue();
-      await commands.abort();
-      await reclaimBrowserPages();
+      try { await commands.abort({preserveBackground,owner:commandOwner}); }
+      // 清理异常只结束当前执行器；下一任务由现有 obtain 路径按历史重建，不保留永久锁。
+      catch (error) { if (error.code === 'cleanup-unconfirmed') dispose(); throw error; }
+      finally { await reclaimBrowserPages(); }
     }
   }
 
@@ -1271,18 +1292,41 @@ export function createHemiSession({
     persistExecution,
     checkpointExecution,
     prompt,
-    backgroundCommand: async ({action,jobId,from,waitMs=0}) => {
-      const owner=runtimeExecution?.owner;
-      if(disposed || runtimeExecution?.cancelled?.())throw new Error('当前目标已停止');
+    backgroundCommand: async ({action,jobId,from,waitMs=0,signal,collect=false,controllerOwner}) => {
+      const owner=controllerOwner??runtimeExecution?.owner;
+      if(controllerOwner&&(controllerOwner.taskId||controllerOwner.conversationId!==runtimeExecution?.owner?.conversationId))throw new Error('命令不属于当前会话');
+      if(disposed || (!controllerOwner&&runtimeExecution?.cancelled?.()))throw new Error('当前目标已停止');
       if(action==='list')return commands.list(owner);
-      if(action==='read')return commands.read(owner,jobId,{from,waitMs});
+      if(action==='read')return commands.read(owner,jobId,{from,waitMs,signal,collect});
       if(action==='stop')return commands.stop(owner,jobId);
-      if(action==='review')return {accepted:commands.requestReview(owner)};
+      if(action==='review'){
+        if(externalBackgroundReview){externalBackgroundReview();return {accepted:true};}
+        return {accepted:commands.requestReview(owner)};
+      }
       throw new Error('不支持的后台命令操作');
     },
     /** 057 供根调度按 rootRunId+generation 收集本会话树内（含子任务归属）已完成的命令事实。 */
     collectTreeCommands: owner => commands.collectCompletedTree(owner),
+    hasTreeCommandResults: owner => commands.hasCompletedTree(owner),
     hasTreeCommands: owner => commands.hasBackgroundTree(owner),
+    hasLiveBackground: () => commands.hasLiveBackground(),
+    isWaitingForBackground: () => waitingForBackground,
+    releaseGoalCommands: owner => commands.releaseGoal(owner),
+    recordCommandEvents: async events => {
+      if(!events.length)return;
+      const event=backgroundCommandEvent(events);
+      await appendContextFact(event.customType,event.content,{eventIds:event.eventIds});await persistExecution();
+    },
+    async waitForBackground({jobIds,signal,jobs=null,waiter=null}) {
+      waitingForBackground=true;backgroundWaitSince=Date.now();goalWaitJobs=jobs;goalWaitJobIds=new Set(jobIds);publishActivity();
+      const stopped=new AbortController(),review=Promise.withResolvers();
+      if(waiter)externalBackgroundReview=()=>review.resolve({kind:'review',requested:true,jobs:goalWaitJobs??[]});
+      try {
+        const update=await (waiter ? Promise.race([waiter(AbortSignal.any([signal,stopped.signal])),review.promise]) : commands.waitForUpdate(runtimeExecution?.owner,{jobIds,signal}));
+        return update.events?.length?{...update,hostEvent:backgroundCommandEvent(update.events)}:update;
+      }
+      finally {stopped.abort();externalBackgroundReview=null;waitingForBackground=false;backgroundWaitSince=null;goalWaitJobs=null;goalWaitJobIds=null;publishActivity();}
+    },
     steer,
     followUp,
     notify,

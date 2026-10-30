@@ -9,7 +9,8 @@ import {createAgentRuntime} from './core.mjs';
 import {freezeModelPolicy, resolveModelPlan, hydrateModelPlan} from './model-policy.mjs';
 import {GOAL_CHECK_SYSTEM, goalRunOutcome} from './goal-driver.mjs';
 
-for (const chunked of [false, true]) test(`shared PC runtime ${chunked ? 'continues after its request chunk' : 'enables goal driving by default and preserves earlier round output'}`, {timeout:30000}, async t => {
+for (const mode of ['normal','chunked','fail-open']) test(`shared PC runtime ${mode}`, {timeout:30000}, async t => {
+  const chunked=mode==='chunked', bypassing=mode==='fail-open';
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-root-goal-')));
   const requests = [], checks = [], calls = [];
   let generated = 0;
@@ -20,12 +21,12 @@ for (const chunked of [false, true]) test(`shared PC runtime ${chunked ? 'contin
     if (body.messages.some(message => message.role === 'system' && String(message.content).includes(GOAL_CHECK_SYSTEM))) {
       const done = Boolean(await fs.stat(path.join(root, 'proof.txt')).catch(() => null));
       checks.push(done ? 'complete' : 'continue');
-      content = JSON.stringify({status:done ? 'complete' : 'continue', reason:done ? '实际文件已写入，符合原请求' : '文件尚未写入',
+      content = bypassing ? 'not json' : JSON.stringify({status:done ? 'complete' : 'continue', reason:done ? '实际文件已写入，符合原请求' : '文件尚未写入',
         evidence:[done ? 'write 的实际工具结果和 proof.txt' : '只有计划，尚无文件'], remaining:done ? [] : ['写入 proof.txt'], nextAction:done ? '' : '调用 write 写入 proof.txt'});
     } else {
       generated++;
       if (generated === 1) {
-        if (chunked) tool = {name:'ls', arguments:'{"path":"."}'};
+        if (chunked || bypassing) tool = {name:'ls', arguments:'{"path":"."}'};
         else content = 'FIRST_ROUND_PLAN';
       } else if (!await fs.stat(path.join(root, 'proof.txt')).catch(() => null)) {
         tool = {name:'write', arguments:JSON.stringify({path:'proof.txt',content:'SHARED_GOAL_PROOF'})};
@@ -64,12 +65,20 @@ for (const chunked of [false, true]) test(`shared PC runtime ${chunked ? 'contin
   assert.ok(Object.values(journal.requests).every(row => row.owner.rootRunId === ctx.runId && row.endedAt));
   const entries = (await agent.exportEntries()).entries;
   assert.equal(entries.filter(entry => entry.message?.role === 'user').length, 1);
-  if (chunked) {
+  if (chunked || bypassing) {
     // 057 软段边界（R-02/R-07）：请求不再被段预算硬拒，主模型单回合内跨段连续工作
     // （ls→write→收口），回合结束软复盘一次即完成；不再强制分段续跑或注入续跑条目。
     assert.equal(goal.round, 1);
     assert.deepEqual(checks, ['complete']);
     assert.equal(calls.length, 1);
+    if(bypassing){
+      assert.equal(goal.verificationAttempts[0].bypassed,true);
+      assert.equal(goal.verifications[0].verificationBypassed,true);
+      assert.deepEqual(goal.verifications[0].evidence,[],'host fallback must not fabricate verification evidence');
+      assert.equal(goal.verifications.length,1);
+      assert.equal(generated,3,'verifier fault must not re-enter the execution agent');
+      assert.equal(entries.filter(entry=>entry.message?.toolName==='write').length,1);
+    }
     assert.equal(activities.filter(phase => phase === 'verifying').length, 1);
     assert.ok(!activities.includes('continuing'));
     assert.equal(activities.at(-1), 'finishing');

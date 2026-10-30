@@ -21,6 +21,7 @@ const OUTCOME_LABEL = {
   failed: '任务未完成',
   blocked: '任务受阻',
   'awaiting-user':'等待你的回复',
+  'awaiting-background':'任务已转入后台',
 };
 
 /**

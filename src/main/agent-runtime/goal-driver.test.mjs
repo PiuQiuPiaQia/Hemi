@@ -10,6 +10,7 @@ const next={status:'continue',reason:'成果还缺少最后验证',evidence:['�
 const complete={status:'complete',reason:'实际结果已验证',evidence:['实际测试成功且符合请求'],remaining:[],nextAction:''};
 test('PC 和 Bot 区分已完成、受阻、等待用户和已停止的共享运行结果',()=>{
  assert.equal(goalRunOutcome({goalComplete:true}),'completed');
+ assert.equal(goalRunOutcome({waitingForBackground:true}),'awaiting-background');
  assert.equal(goalRunOutcome({waitingForUser:{question:'内容是什么？'}}),'awaiting-user');
  assert.equal(goalRunOutcome({aborted:true}),'stopped');
  assert.equal(goalRunOutcome(null,{cancelled:true}),'stopped');
@@ -69,8 +70,69 @@ test('取消后的迟到完成校验无效，触顶总结不能把未完成变�
 });
 test('完成判断严格校验结构、证据、剩余项和下一步',()=>{
  assert.deepEqual(parseGoalVerdict(JSON.stringify(complete)),complete);
+ assert.deepEqual(parseGoalVerdict(JSON.stringify({...complete,verificationBypassed:true,verificationFailure:'MODEL_CANNOT_SET_HOST_POLICY'})),complete);
  for(const value of ['{}','OK',JSON.stringify({...complete,evidence:[]}),JSON.stringify({...complete,remaining:['未做']}),JSON.stringify({...next,nextAction:''})])assert.throws(()=>parseGoalVerdict(value));
  assert.throws(()=>goalPolicy({maxRequests:0}));
+});
+test('后台交接不调用完成校验，不阻塞新根目标；结果只按原归属恢复',async t=>{
+ const {journal,dir}=await fixture(t);let runs=0,checks=0;
+ await journal.processStart({id:'job',owner,pid:99999,token:'fixture'});await journal.processBackground('job');
+ const drive=backgroundPending=>driveGoal({journal,owner,objective:'构建并核对结果',policy:goalPolicy(),signal:new AbortController().signal,
+   run:async()=>{runs++;return{texts:['真实进度']};},backgroundPending,verify:async()=>{checks++;return complete;},evidence:async()=>'',persist:async()=>{}});
+ const waiting=await drive(async()=>true);
+ assert.equal(goalRunOutcome(waiting),'awaiting-background');assert.equal(checks,0);assert.equal(runs,1);
+ assert.equal((await journal.root(owner)).goal.phase,'waiting_background');
+ await journal.finishRoot(owner,'waiting_background');await assert.rejects(journal.beginRoot(owner),/所属结果事件/);
+ const question={...owner,rootRunId:'question'};await journal.beginRoot(question);await journal.finishRoot(question,'cancelled');
+ await assert.rejects(journal.resumeBackgroundGoal({...owner,generation:2}),/已停止/);
+ await journal.processEnd('job',{state:'finished',cleanupConfirmed:true,status:'succeeded',code:0});
+ await journal.resumeBackgroundGoal(owner,{flowRunId:'event-flow'});
+ assert.equal(await journal.rootForFlow(owner.conversationId,'event-flow'),owner.rootRunId);
+ assert.equal(await journal.rootForFlow('another-conversation','event-flow'),'event-flow');
+ const done=await drive(async()=>false);assert.equal(done.goalComplete,true);assert.equal(runs,2);assert.equal(checks,1);
+ assert.equal((await journal.root(owner)).goal.round,2);
+ const restored=createRunJournal({dir});await restored.recover();assert.equal((await restored.root(owner)).status,'interrupted');
+});
+test('校验故障放行不能覆盖已发生的执行预算触顶',async t=>{
+ const {journal}=await fixture(t,{maxRequests:1,maxRequestsPerRound:1});let executed=0;
+ const result=await driveGoal({journal,owner,objective:'完成请求',policy:goalPolicy(),signal:new AbortController().signal,
+  run:async()=>{executed++;await request(journal,'last');await finish(journal,'last');await assert.rejects(request(journal,'over'),/上限/);return{budgetLimited:true,texts:['已有结果']};},
+  verify:async()=>({status:'complete',reason:'校验故障放行',evidence:[],remaining:[],nextAction:'',verificationBypassed:true}),evidence:async()=>'',persist:async()=>{}});
+ assert.equal(executed,1);assert.equal(result.halted.kind,'budget_limited');assert.equal(goalRunOutcome(result),'partial');
+ assert.equal((await journal.root(owner)).goal.phase,'budget_limited');
+});
+test('校验故障后的预算读取期间取消，迟到放行不能将目标改成完成',async t=>{
+ const {journal}=await fixture(t),controller=new AbortController(),readRoot=journal.root;
+ journal.root=async who=>{controller.abort();return readRoot(who);};
+ await assert.rejects(driveGoal({journal,owner,objective:'完成请求',policy:goalPolicy(),signal:controller.signal,
+  run:async()=>({texts:['已有结果']}),verify:async()=>({status:'complete',reason:'校验故障放行',evidence:[],remaining:[],nextAction:'',verificationBypassed:true}),
+  evidence:async()=>'',persist:async()=>{}}),{name:'AbortError'});
+ const goal=(await readRoot(owner)).goal;assert.equal(goal.phase,'cancelled');assert.equal(goal.verifications.length,0);
+});
+test('完成校验兼容围栏、解释和外层字符串编码，仍校验实际判定结构',()=>{
+ for(const label of ['json','JSON',''])assert.deepEqual(parseGoalVerdict(`\uFEFF\n\x60\x60\x60${label}\n${JSON.stringify(complete)}\n\x60\x60\x60\n`),complete);
+ for(const value of [complete,next])for(const text of [`解释\n${JSON.stringify(value)}\n结束`,JSON.stringify(JSON.stringify(value)),JSON.stringify(`\x60\x60\x60json\n${JSON.stringify(value)}\n\x60\x60\x60`)])assert.deepEqual(parseGoalVerdict(text),value);
+ for(const text of [`${JSON.stringify(complete)}\n${JSON.stringify(next)}`,JSON.stringify({...complete,evidence:[]})])assert.throws(()=>parseGoalVerdict(text));
+});
+test('校验格式失败仍保留诊断；每轮只准入一次校验，取消后拒绝迟到记录',async t=>{
+ const {journal}=await fixture(t);await journal.checkGoal(owner);
+ await request(journal,'check-1',owner,GOAL_VERIFICATION_PURPOSE);
+ const invalid={attempt:1,valid:false,errorCode:'goal-verdict-json',finishReason:'stop',responseChars:5,responseHash:'a'.repeat(64),responseShape:'other'};
+ await assert.rejects(journal.recordGoalVerificationAttempt(owner,invalid),/未收口|已收口/);
+ await assert.rejects(request(journal,'concurrent',owner,GOAL_VERIFICATION_PURPOSE),/不可用/);
+ await finish(journal,'check-1');
+ await assert.rejects(request(journal,'without-diagnostic',owner,GOAL_VERIFICATION_PURPOSE),/不可用/);
+ await journal.recordGoalVerificationAttempt(owner,invalid);
+ await assert.rejects(request(journal,'child-check',{...owner,taskId:'child'},GOAL_VERIFICATION_PURPOSE),/不可用/);
+ await assert.rejects(request(journal,'check-2',owner,GOAL_VERIFICATION_PURPOSE),/不可用/);
+ assert.equal((await journal.root(owner)).goal.verificationAttempts.length,1);
+ await journal.recordGoalCheck(owner,complete);await journal.finishRoot(owner,'completed');
+ await assert.rejects(journal.recordGoalVerificationAttempt(owner,invalid),/失效/);
+ const other={...owner,rootRunId:'valid-first'};await journal.beginRoot(other);await journal.beginGoal(other,'新请求',goalPolicy());await journal.checkGoal(other);
+ await request(journal,'valid-first',other,GOAL_VERIFICATION_PURPOSE);await finish(journal,'valid-first');
+ await journal.recordGoalVerificationAttempt(other,{...invalid,valid:true,errorCode:null});
+ await assert.rejects(request(journal,'unneeded-retry',other,GOAL_VERIFICATION_PURPOSE),/不可用/);
+ await journal.finishRoot(other,'cancelled');await assert.rejects(journal.recordGoalVerificationAttempt(other,{...invalid,attempt:2}),/失效/);
 });
 
 const awaiting = {status:'awaiting_user',question:'文件里写什么内容？',reason:'需要用户提供文件内容',evidence:['助手已询问文件内容'],remaining:['获得内容并写入文件'],nextAction:'等待用户答复'};
@@ -106,14 +168,14 @@ test('答复时预算已耗尽正常返回 partial，不调用模型或重置原
  await journal.finishRoot(reply,'partial');assert.equal((await journal.root(reply)).goal.phase,'budget_limited');
 });
 
-test('分段检查点保留后台归属，完成门仍拒绝活动进程；重启不自动重放',async t=>{
+test('分段检查点保留后台归属，后台可进入目标检查；重启不自动重放',async t=>{
  const {journal,dir}=await fixture(t);
  await journal.processStart({id:'live',owner,pid:99999,token:'fixture',description:'长任务'});await journal.processBackground('live');
  await request(journal,'one');await finish(journal,'one');await request(journal,'two');await finish(journal,'two');
  // 057 软复盘：段边界不再拒绝；第 3 个请求跨段继续后，在回合边界交接段事实。
  await request(journal,'cap');await finish(journal,'cap');
  const checkpoint=await journal.checkpointGoal(owner);assert.equal(checkpoint.goal.round,2);assert.equal(checkpoint.goal.requestOffset,3);assert.equal(checkpoint.work.processes[0].id,'live');
- assert.equal((await journal.snapshot()).processes.live.state,'active');await assert.rejects(journal.checkGoal(owner),/未确认/);
+ assert.equal((await journal.snapshot()).processes.live.state,'active');await journal.checkGoal(owner);await journal.recordGoalCheck(owner,next);
  await assert.rejects(journal.checkpointGoal(owner),/尚未耗尽/);
  const restored=createRunJournal({dir});await restored.recover();const root=await restored.root(owner);assert.equal(root.status,'interrupted');assert.equal(root.goal.checkpoints.length,1);
  await assert.rejects(restored.checkpointGoal(owner),/停止/);

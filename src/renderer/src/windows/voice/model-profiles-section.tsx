@@ -18,7 +18,6 @@ import type {
   ModelProfilesDirectory,
   ModelProviderView,
   ModelTestResult,
-  ThinkingLevel,
   HemiVoiceBridge,
 } from '@/shared/types';
 import { SaveIndicator, useDelayed, type SaveState } from '@/components/save-indicator';
@@ -26,7 +25,6 @@ import { ModelRoutingDialog } from '@/windows/voice/model-routing-dialog';
 import {
   KEYLESS_PLACEHOLDER_KEY,
   PROVIDER_PRESETS,
-  THINKING_SEGMENTS,
   draftModelEntry,
   findDefaultModel,
   guessVision,
@@ -36,7 +34,6 @@ import {
   presetById,
   providerSaveInput,
   providerTile,
-  thinkingLabel,
   uniqueProviderName,
   type ProviderPreset,
 } from '@/windows/voice/lib/provider-presets';
@@ -537,10 +534,6 @@ function findModelRef(directory: ModelProfilesDirectory, modelKey: string) {
     if (model) return { provider, model };
   }
   return null;
-}
-
-function normalizeLevel(level: string | undefined): ThinkingLevel {
-  return THINKING_SEGMENTS.some((item) => item.value === level) ? (level as ThinkingLevel) : 'default';
 }
 
 function scrollParentToTop(node: HTMLElement | null) {
@@ -1447,7 +1440,7 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
               >
                 <span className="h37-row-text">
                   <b className="h37m-mono h37m-model-name">{model.model}</b>
-                  <ModelSub model={model} test={modelTests[model.model]} />
+                  <ModelSub test={modelTests[model.model]} />
                 </span>
                 <span className="h37-row-end">
                   {ctl.external ? <>
@@ -1601,14 +1594,13 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
   );
 }
 
-function ModelSub({ model, test }: { model: ModelEntryView; test: ProviderStatus | undefined }) {
+function ModelSub({ test }: { test: ProviderStatus | undefined }) {
   const slow = useDelayed(test?.state === 'testing');
-  const level = normalizeLevel(model.thinkingLevel);
+  // 模型列表只显示连接测试状态；请求的思考档位不是模型自身的属性。
+  if (!test) return null;
   return (
     <span>
-      {/* 041：能看图/只看文字改由行内开关表达，这里不再重复文字；思考档位沿用「正在使用」的统一拨盘结果。 */}
-      {level !== 'default' ? `思考${thinkingLabel(level)}` : ''}
-      {test?.state === 'testing' && slow ? `${level !== 'default' ? ' · ' : ''}测试中…` : null}
+      {test.state === 'testing' && slow ? '测试中…' : null}
       {test?.state === 'ok' ? `可用${typeof test.latencyMs === 'number' ? ` ${test.latencyMs} ms` : ''}` : null}
       {test?.state === 'fail' ? <span className="h37m-sub-fail">不可用：{test.error}</span> : null}
     </span>

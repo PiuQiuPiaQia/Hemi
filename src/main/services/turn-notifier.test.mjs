@@ -113,3 +113,7 @@ test('通知落定时用户已切回前台就不再弹；发送异常只落日�
   assert.equal(warnings.length, 1);
   notifier.dispose();
 });
+
+test('后台交接提醒不宣称目标已经完成',()=>{
+ assert.equal(completionBody({outcome:'awaiting-background'}),'任务已转入后台');
+});

@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {createAgentRuntime} from './core.mjs';
 import {freezeModelPolicy, resolveModelPlan, hydrateModelPlan} from './model-policy.mjs';
 import {goalRunOutcome} from './goal-driver.mjs';
+import {runBackgroundTurn} from './background-turn.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(read, ms = 15000) {
@@ -33,8 +34,8 @@ async function fixture(t, scenario, policy = {}) {
   await fs.mkdir(workspace);
   // gate.cjs: writes proof, waits for the release file, then exits 0 (no dangling sockets).
   await fs.writeFile(path.join(workspace, 'gate.cjs'), "const fs=require('fs');fs.writeFileSync('proof.txt','WORK_DONE');const t=setInterval(()=>{if(fs.existsSync('release')){clearInterval(t);console.log('DONE');process.exit(0)}},20);");
-  let runtime, agent, ctx, cid, mainCalls = 0, childCalls = 0, childAttempts = 0, checks = 0, outcome, running;
-  const requests = [], errors = [];
+  let runtime, agent, ctx, cid, mainCalls = 0, childCalls = 0, childAttempts = 0, checks = 0, stopCalls = 0, outcome, running;
+  const requests = [], errors = [];const terminal=Promise.withResolvers();let eventSeq=0;
   const exists = name => fs.stat(path.join(workspace, name)).then(() => true, () => false);
   const snapshot = async () => runtime.journal.snapshot();
   const processes = async () => Object.values((await snapshot()).processes);
@@ -46,12 +47,15 @@ async function fixture(t, scenario, policy = {}) {
       const body = JSON.parse(raw); requests.push(body);
       const checking = body.messages.some(message => message.role === 'system' && JSON.stringify(message.content).includes('［Hemi 目标完成校验］'));
       const isChild = !checking && !body.tools?.some(item => item.function.name === 'task');
+      const all=JSON.stringify(body.messages);
       let content, tools;
       if (checking) {
-        checks++;
-        const jobs = await processes();
-        assert.ok(jobs.every(item => item.state === 'finished' && item.cleanupConfirmed), 'live work must not reach completion verification');
-        content = JSON.stringify({status:'complete', reason:'成果与进程终态均已核对', evidence:['proof.txt 与命令完成事实'], remaining:[], nextAction:''});
+        const jobs=await processes(),live=jobs.filter(item=>item.state==='active');
+        if(scenario==='child-ready') {
+          checks++;assert.match(all,/WORK_DONE/);assert.match(all,/read/);
+          content=JSON.stringify({status:'complete',reason:'启动的进程已通过独立就绪文件检查或已按要求停止',evidence:['实际 read 工具读取 WORK_DONE'],remaining:[],nextAction:''});
+        } else if(live.length)content=JSON.stringify({status:'continue',reason:'需要实际后台结果',evidence:['现有命令仍在执行'],remaining:['核对命令真实终态'],nextAction:'等待命令退出后读取结果',waitForJobs:live.map(item=>item.id)});
+        else {checks++;assert.ok(jobs.every(item=>item.state==='finished'&&item.cleanupConfirmed));content=JSON.stringify({status:'complete',reason:'成果与进程终态均已核对',evidence:['proof.txt 与命令完成事实'],remaining:[],nextAction:''});}
       } else if (isChild) {
         const failingChild = scenario === 'model-error' || scenario === 'stop';
         childAttempts++;
@@ -64,7 +68,10 @@ async function fixture(t, scenario, policy = {}) {
           return;
         }
         childCalls++;
-        if (scenario === 'cross-segment') {
+        if(scenario==='child-ready') {
+          if(childCalls===1)tools=[tool('bash',{command:command('gate.cjs'),description:'启动后台进程并保留',run_in_background:true,timeout_ms:30000})];
+          else content='后台进程已受理，交由主目标独立核验就绪。';
+        } else if (scenario === 'cross-segment') {
           // 第 1 次调用先做一步实际工作（前台立即完成），SDK 循环继续发起第 2 次请求——
           // 此时共享段预算已被主 Agent 的首次请求耗尽，第 2 次请求只能因软复盘被放行（R-02/R-07）。
           if (childCalls === 1) tools = [tool('bash', {command:'true', description:'第一步工作', timeout_ms:10000})];
@@ -75,7 +82,16 @@ async function fixture(t, scenario, policy = {}) {
         } else content = `子任务完成：${scenario.toUpperCase()}_DONE`;
       } else {
         mainCalls++;
-        if (mainCalls === 1) tools = [tool('task', {agent:'fixer', prompt:'生成 proof.txt 并完成收尾。', description:'前台文件工作'})];
+        if(all.includes('STOP_RETAINED_JOB')) {
+          stopCalls++;
+          if(stopCalls===1)tools=[tool('job_list',{})];
+          else if(stopCalls===2)tools=[tool('job_output',{job_id:(await processes())[0].id})];
+          else if(stopCalls===3)tools=[tool('job_kill',{job_id:(await processes())[0].id})];
+          else content='已停止上一目标保留的后台命令。';
+        } else if (mainCalls === 1) tools = [tool('task', {agent:'fixer', prompt:scenario==='child-ready'?'启动 gate.cjs 并保留，返回命令身份，不等待退出。':'生成 proof.txt 并完成收尾。', description:'前台文件工作'})];
+        else if(scenario==='child-ready'&&all.includes('子任务完成')&&!all.includes('WORK_DONE')) {
+          await until(()=>exists('proof.txt'));tools=[tool('read',{path:'proof.txt'})];
+        }
         else if (scenario === 'model-error' && mainCalls === 2) {
           // The child settled with an unknown report while its command stays live.
           // Release the gate so the root's wait resolves; the next call consumes the command fact.
@@ -99,6 +115,7 @@ async function fixture(t, scenario, policy = {}) {
   ctx = {conversationId:'lifecycle', runId:'lifecycle-root', generation:1, policySnapshot, modelPlan, config, inputSource:'text', workspace:{id:'proof',type:'project',dir:workspace}};
   cid = ctx.conversationId;
   runtime = createAgentRuntime({userDataDir:dataDir, goalPolicy, getProfiles:() => store,
+    onBackgroundReady:(_cid,background)=>{setImmediate(()=>{void runBackgroundTurn({runtime,conversationId:cid,runId:`event-${++eventSeq}`,generation:1,background,apply:()=>{}}).then(result=>{outcome=goalRunOutcome(result);if(!result.waitingForBackground)terminal.resolve();},error=>terminal.reject(error));});},
     resolveCapabilities:async () => ({features:{},extensionConfig:{}}), getAccessService:() => null,
     loadArchiveAgent:() => null, loadArchiveTurns:() => [], saveArchiveAgent:() => true,
     sessionOptions:{}});
@@ -114,13 +131,19 @@ async function fixture(t, scenario, policy = {}) {
     get calls() {return mainCalls;}, get childCallCount() {return childCalls;}, get childAttempts() {return childAttempts;}, get checks() {return checks;},
     async start() {
       running = runtime.runRootTurn(cid, {userText:'完成文件任务', inputId:'one-user-input'})
-        .then(async result => {outcome = goalRunOutcome(result, {cancelled:ctx.cancelled}); await runtime.completeConversation(cid, outcome, null, ctx.runId); return result;},
-          async error => {if (!ctx.cancelled) throw error; outcome = 'stopped'; await runtime.completeConversation(cid, outcome, null, ctx.runId); return {aborted:true};});
+        .then(async result => {outcome = goalRunOutcome(result, {cancelled:ctx.cancelled}); await runtime.completeConversation(cid, outcome, null, ctx.runId); if(!result.waitingForBackground)terminal.resolve();return result;},
+          async error => {if (!ctx.cancelled) throw error; outcome = 'stopped'; await runtime.completeConversation(cid, outcome, null, ctx.runId); terminal.resolve();return {aborted:true};});
       void running.catch(() => {});
     },
-    async finish() { await running; assert.deepEqual(errors, []); return outcome; },
-    async stop() { await runtime.stopRoot(cid, ctx.runId); },
+    async finish() { await running;await terminal.promise;assert.deepEqual(errors, []); return outcome; },
+    async yielded() {await running;return outcome;},
+    async stop() { await runtime.stopRoot(cid, ctx.runId);outcome='stopped';terminal.resolve(); },
     async entries() { return (await agent.exportEntries()).entries; },
+    async followUpAndStop() {
+      await runtime.abort(cid,{preserveBackground:true});ctx={...ctx,runId:'follow-up-root',cancelled:false};await runtime.obtain(ctx);
+      const result=await runtime.runRootTurn(cid,{userText:'STOP_RETAINED_JOB 停止上一目标留下的后台进程',inputId:'follow-up-input'});
+      await runtime.completeConversation(cid,goalRunOutcome(result),null,ctx.runId);return result;
+    },
   };
 }
 
@@ -163,7 +186,7 @@ test('PC: a settled child model failure keeps its command managed; the root wait
   assert.ok(jobs[0].owner.taskId, 'the command stayed owned by the settled child');
   const entries = await f.entries();
   assert.ok(entries.some(item => item.customType === 'hemi_subagent_result'), 'the child stage report was delivered');
-  assert.ok(entries.some(item => item.customType === 'hemi_subagent_result' && JSON.stringify(item).includes('DONE')), 'the command completion fact reached the parent context');
+  assert.ok(entries.some(item => ['hemi_subagent_result','hemi_background_command_result'].includes(item.customType) && JSON.stringify(item).includes('DONE')), 'the command completion fact reached the parent context');
   assert.equal(f.checks, 1);
   const goal = Object.values(state.roots).find(item => item.goal).goal;
   assert.equal(goal.phase, 'complete');
@@ -176,11 +199,20 @@ test('PC: stopping the root cancels the managed command left by a settled child'
   // The child settles fast once its model failure is non-retryable (auth), while its gate keeps waiting.
   await until(async () => {
     const state = await f.snapshot();
-    return Object.values(state.inbox).some(item => item.state === 'pending');
+    return Object.values(state.inbox).length&&Object.values(state.processes).some(item=>item.state==='active');
   }, 15000);
   await f.stop();
   assert.equal(await f.finish(), 'stopped');
   const jobs = await f.processes();
   assert.ok(jobs.length >= 1);
   assert.ok(jobs.every(item => item.cleanupConfirmed && item.status === 'cancelled'), 'no managed command outlived the stopped root');
+});
+
+test('PC: child background work can outlive a ready startup goal; the next root lists, reads and stops it',{timeout:30000},async t=>{
+  const f=await fixture(t,'child-ready',{maxRequestsPerRound:60});await f.start();assert.equal(await f.yielded(),'awaiting-background');
+  const [before]=await f.processes();assert.ok(before.owner.taskId);assert.equal(before.state,'active');
+  assert.equal((await f.followUpAndStop()).goalComplete,true);
+  const [after]=await f.processes();assert.equal(after.id,before.id);assert.equal(after.status,'cancelled');assert.equal(after.cleanupConfirmed,true);
+  assert.equal((await f.processes()).length,1,'no restarted or duplicate process');
+  for(const req of f.requests)for(const tool of req.tools??[])if(tool.function.name==='bash')assert.equal(tool.function.parameters.properties.lifecycle,undefined);
 });

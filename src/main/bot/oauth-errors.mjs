@@ -15,6 +15,8 @@ const REASONS = {
   region: '服务商不支持 Bot 服务器当前的出网地区',
   quota: '订阅共享额度不可用或已用尽，请在服务商处检查额度后重试',
   rate: '服务商请求过于频繁，请稍后重试',
+  service: '服务商暂时不可用，请稍后重试',
+  model: '账号目录中的型号当前不可用，请检查套餐的模型权限或更新模型目录',
   models: '账号没有返回 Bot 支持的模型，请检查账号权限与模型目录',
   disk: 'Bot 服务器磁盘空间不足，请释放空间后重试',
   permission: 'Bot 无法写入服务器上的账号配置，请检查目录权限',
@@ -39,16 +41,18 @@ export function botOAuthFailure(error, stage) {
   const text = messages.join('\n');
   const status = statuses[0] ?? Number(text.match(/(?:\bHTTP\s*|\bstatus[=: ]+|\bAPI error\s*\(|(?:^|\n)\s*)([45]\d\d)\b/i)?.[1]);
   const reason = /unsupported_country_region_territory|unsupported_country|region.*not supported/i.test(text) ? 'region'
-    : /subscription_sharing_(?:usage_limit_exceeded|usage_unavailable)|insufficient_quota/i.test(text) ? 'quota'
+    : /subscription_sharing_(?:usage_limit_exceeded|usage_unavailable)|insufficient_quota|usage_limit_reached|usage_not_included|hit your ChatGPT usage limit/i.test(text) ? 'quota'
     : /ENOSPC|EDQUOT/.test(text) ? 'disk'
     : /EACCES|EPERM/.test(text) ? 'permission'
     : /ENOTFOUND|EAI_AGAIN/.test(text) ? 'dns'
     : /CERT_|TLS_|UNABLE_TO_VERIFY|SELF_SIGNED_CERT/i.test(text) ? 'tls'
-    : /TimeoutError|ETIMEDOUT|UND_ERR_(?:CONNECT|HEADERS|BODY)_TIMEOUT|验证超时/i.test(text) ? 'timeout'
+    : status === 408 || status === 504 || /TimeoutError|ETIMEDOUT|UND_ERR_(?:CONNECT|HEADERS|BODY)_TIMEOUT|验证超时/i.test(text) ? 'timeout'
     : /fetch failed|ECONN(?:REFUSED|RESET)|ENETUNREACH|EHOSTUNREACH|connection error/i.test(text) ? 'network'
     // Codex 通道：凭据缺账号标识（旧直连凭据或损坏令牌）只能重新授权。
     : /Failed to extract accountId from token/i.test(text) ? 'unauthorized'
-    : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : status === 429 ? 'rate'
+    : status === 401 ? 'unauthorized'
+    : [400, 403, 404].includes(status) && /model_not_(?:found|available|supported)|unsupported_model|unknown_model|invalid_model|model[^\n]*(?:not supported|not available|not found|does not exist|no access)|(?:do(?:es)? not have|don't have|no) access to[^\n]*model/i.test(text) ? 'model'
+    : status === 403 ? 'forbidden' : status === 429 ? 'rate' : status >= 500 ? 'service'
     : /没有返回|账号没有.*模型|模型目录.*不可用/.test(text) ? 'models' : 'unknown';
   return { stage, reason, ...(Number.isInteger(status) ? { status } : {}),
     message: `Bot 未能验证账号模型（${STAGES[stage] ?? STAGES.inference}）：${REASONS[reason]}；原配置已保留。` };

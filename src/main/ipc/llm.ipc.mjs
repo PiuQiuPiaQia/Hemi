@@ -13,6 +13,7 @@ import { describeModelError, isSameCandidate } from '../lib/model-routing.mjs';
 import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
 import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
 import { goalRunOutcome } from '../agent-runtime/goal-driver.mjs';
+import {runBackgroundTurn} from '../agent-runtime/background-turn.mjs';
 import { createConversationTurns } from '../services/conversation-turns.mjs';
 import { finalizeTurnParts, hasNonTextParts } from '../../shared/turn-parts.mjs';
 import { buildTurnContextBlock, buildWorkspaceTurnBlock } from '../services/text-model.mjs';
@@ -244,6 +245,7 @@ export function getAgentRuntime() {
     loadArchiveSession: getConversationSession,
     saveArchiveAgent: saveConversationAgent,
     onEventTurn: handleEventTurn,
+    onBackgroundReady:(conversationId,event)=>flowService?.controllerFor(conversationId).enqueueBackground(event),
     getSkillService,
     nativeMemory: true,
     onGoalVerification: (conversationId, call) => {
@@ -363,13 +365,48 @@ export function setWorkflowFlowRouter(router) {
   workflowFlowRouter = typeof router?.start === 'function' ? router : null;
 }
 
+async function executeBackgroundTurn(conversationId,{runId,background,controller}){
+  const runtime=getAgentRuntime(),generation=background.generation;
+  const eventContext=runtime.backgroundContext(conversationId,background.rootRunId);
+  let outcome='failed',result=null;
+  const deliveries=[],calls=[];
+  try{
+    result=await runBackgroundTurn({runtime,conversationId,runId,generation,background,apply:fact=>controller.applyFact(fact),
+      onModelCall:call=>{if(call.usageDetail)calls.push({model:call.model,detail:call.usageDetail});},
+      onDelivery:files=>{for(const file of files)deliveries.push(registerDeclaredDeliverable({conversationId,controller,runId,file,generation,afterInputId:null,
+        workspace:eventContext?.workspace}));},
+      saveReply:async value=>{
+        const text=String(value.lastText??value.texts?.join('\n\n')??'').trim();
+        recordUsages(conversationId,eventContext,calls);
+        if(text){const saved=persistConversationTurns(conversationId,[{id:`reply-${randomUUID()}`,runId,createdAt:Date.now(),author:'hemi',text}]);
+          if(!saved.ok)throw new Error('后台结果回答保存失败');}
+      },
+    });
+    await Promise.all(deliveries);
+    outcome=goalRunOutcome(result);
+  }catch(error){
+    llmLog.warn(`后台结果处理失败：${error.message}`);
+    if(error.code==='cleanup-unconfirmed')closeUnconfirmedCommand(controller,{runId,generation,error});
+    controller.applyFact({type:'queue-paused',generation});
+    controller.applyFact({type:'part-appended',runId,generation,part:{partId:`${runId}-background-error`,kind:'notice',level:'error',text:error.message}});
+  }finally{
+    controller.applyFact({type:'run-settled',runId,generation,at:Date.now()});
+    controller.applyFact({type:'run-closed',runId,generation,outcome,at:Date.now(),...(result?.waitingForUser?{waitingForUser:result.waitingForUser}:{}),
+      ...(result?.blocked?{blocked:result.blocked}:{}),...(result?.halted?{halted:result.halted}:{})});
+  }
+}
+
 function createLlmFlowRuntime(conversationId) {
   const controllerOf = () => flowService.controllerFor(conversationId);
   const activeTurnId = (runId) => turnIdByRun.get(conversationId)?.get(runId) ?? null;
 
   return {
     freezeInput: input => freezeAcceptedInput({ store: getProfiles(), workspaceService: getWorkspaceService(), input }),
-    async start({ runId, envelope, source, continuationOf }) {
+    async start({ runId, envelope, source, continuationOf, background }) {
+      if(background){
+        void executeBackgroundTurn(conversationId,{runId,background,controller:controllerOf()});
+        return {modelUsed:null};
+      }
       // 059：workflow-start 结构化输入走宿主 workflow 分派器（S3a）——不进 executeChatTurn，
       // 不造用户文字回合；卡片事实由 router 经 part-updated 更新在同一 partId 上；
       // 终态自闭合与 chat 分支同一收口语义（run-settled＋run-closed）。
@@ -863,8 +900,8 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     };
     lastTurnCtx.set(conversationId, ctx);
 
-    // 用户答复续接等待中的目标，必须保留原页面。其它输入仍收掉旧运行，防止抢占后留下僵尸循环。
-    if (!continuationOf) await agentRuntime.abort(conversationId).catch(() => {});
+    // 新输入收掉旧模型运行，保留会话后台命令；显式停止仍执行完整清理。
+    if (!continuationOf) await agentRuntime.abort(conversationId, {preserveBackground:true}).catch(() => {});
     const agent = await agentRuntime.obtain(ctx);
     // 057：用户轮派发即落档（dispatchEnvelope＝控制器的派发 envelope，含 inputId/附件视图）。
     if (dispatchEnvelope) persistUserTurn(conversationId, dispatchEnvelope, dispatchMeta);
@@ -1002,6 +1039,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
           ...(calls.length ? { usage: usageOfTurn() } : {}),
           toolNames: run.toolNames,
           goalComplete: run.goalComplete,
+          ...(run.waitingForBackground ? {waitingForBackground:true} : {}),
           ...(run.waitingForUser ? {waitingForUser: run.waitingForUser} : {}),
           ...(run.blocked ? {blocked:run.blocked} : {}),
           ...(run.halted ? {halted:run.halted} : {}),

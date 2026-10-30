@@ -5,7 +5,7 @@ import { currentExecutionScope } from './execution-scope.mjs';
 import { recoverOwnedProcesses } from './owned-processes.mjs';
 import os from 'node:os';
 import path from 'node:path';
-import {assertCommandCleanup,commandDeadline} from '../agent/gate/command-deadline.mjs';
+import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { mkdirSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -21,7 +21,7 @@ import { createSessionStore } from './session-store.mjs';
 import { isNativeSessionReference, nativeSessionReference } from './session-reference.mjs';
 
 import { createMainAgent, buildAgentAppendSystem, entriesFromTurns } from '../agent/main-agent.mjs';
-import { createHemiSession } from '../agent/hemi-session.mjs';
+import { createHemiSession, backgroundCommandEvent } from '../agent/hemi-session.mjs';
 import { createSubagentManager } from '../agent/subagents.mjs';
 import { loadRoles, buildRoutingSection, ROLE_NAMES } from '../agent/agent-roles.mjs';
 import { discoverProjectSkills } from '../skills/project-skills.mjs';
@@ -117,6 +117,7 @@ export function createAgentRuntime({
   loadArchiveSession = null,
   saveArchiveAgent,
   onEventTurn,
+  onBackgroundReady = null,
   getSkillService = () => null,
   nativeMemory = false,
   goalPolicy = {},
@@ -138,9 +139,38 @@ export function createAgentRuntime({
   const sessionStore = createSessionStore({ dir: path.join(userDataDir, 'runtime-v2/sessions'), log });
   const contextStore = createContextStore({ dir: path.join(userDataDir, 'runtime-v2/contexts') });
   const conversationHistory = loadArchiveSession ? createConversationHistoryReader({ loadSession: loadArchiveSession, contextStore }) : null;
-  const journalReady = journal.ready().then(() => recoverOwnedProcesses(journal)).then(() => journal.recover());
+  const journalReady = journal.ready().then(() => recoverOwnedProcesses(journal, {log})).then(() => journal.recover());
   void journalReady.catch(error => log?.error?.(error.message));
   const dispatchInFlight = new Map();
+  // Pending goals hold no foreground slot. Only a live, unconsumed result may wake one.
+  const backgroundGoals = new Map(), retainedCommandSessions = new Map();
+  let shuttingDown = false;
+  async function wakeBackground(owner,{review=false}={}) {
+    const pending=backgroundGoals.get(owner?.rootRunId);
+    if(shuttingDown||!pending||pending.queued||pending.ctx.generation!==owner.generation)return;
+    if(!review&&!commandSessions(owner.conversationId).some(session=>session.hasTreeCommandResults?.(owner)))return;
+    const root=await journal.root(owner);
+    if(shuttingDown||pending.queued||backgroundGoals.get(owner.rootRunId)!==pending||root?.status!=='waiting_background')return;
+    if(!onBackgroundReady)return;
+    pending.queued=true;pending.review=review;
+    try { if(await onBackgroundReady(owner.conversationId,{rootRunId:owner.rootRunId,generation:owner.generation})===false)pending.queued=false; }
+    catch(error){pending.queued=false;log?.warn?.(`后台结果通知失败：${error.message}`);}
+  }
+  function observeCommands(session) {
+    session.on('command-settled',job=>{void (async()=>{
+      if(job.status==='cancelled'){
+        const pending=backgroundGoals.get(job.owner.rootRunId);
+        if(pending&&!commandSessions(job.owner.conversationId).some(source=>source.hasTreeCommands?.(job.owner))){
+          const jobs=Object.values((await journal.snapshot()).processes).filter(p=>p.background&&p.owner.rootRunId===job.owner.rootRunId&&p.owner.generation===job.owner.generation);
+          if(jobs.every(p=>p.status==='cancelled')){
+            backgroundGoals.delete(job.owner.rootRunId);
+            await journal.finishRoot(job.owner,'cancelled','后台命令已停止');
+            for(const source of commandSessions(job.owner.conversationId))source.releaseGoalCommands?.(job.owner);
+          }else await wakeBackground(job.owner);
+        }
+      }else await wakeBackground(job.owner);
+    })().catch(error=>log?.warn?.(`后台结果交接失败：${error.message}`));});
+  }
   const ownerOf = ctx => ({ conversationId: ctx.conversationId, rootRunId: ctx.runId, generation: ctx.generation ?? 0 });
   const sessionRefOf = (ctx, execution) => execution.sessionRef ?? ctx.sessionRef ?? `main-${safeDirName(ctx.conversationId)}`;
   const sessionRecord = (ctx, execution) => {
@@ -151,6 +181,7 @@ export function createAgentRuntime({
       modelPlan: { ...execution.plan, primary: publicCandidate(execution.plan.primary), allowedFallbacks: execution.plan.allowedFallbacks.map(publicCandidate) } };
   };
   const executionFor = (ctx, plan, purpose = 'main') => ({ isOnline, journal, contextStore, store: getProfiles(ctx), owner: ownerOf(ctx), plan,
+    ...(purpose==='main'?{commandControl:request=>backgroundCommand(ctx.conversationId,{...request,runId:ctx.runId})}:{}),
     validateConversationSource: source => conversationHistory?.validateSource(source) ?? false,
     budgets: ctx.policySnapshot.budgets, sessionRef: ctx.sessionRef, purpose, onRequestRecorded: () => onModelUsage?.({ conversationId: ctx.conversationId }), allowedRefs: null, cancelled: () => Boolean(ctx.cancelled),
     openSession: ({ cwd, entries, source, execution }) => sessionStore.open(sessionRefOf(ctx, execution), {
@@ -286,6 +317,7 @@ export function createAgentRuntime({
       label: `${role.name} ${accessId}`,
       log,
     });
+    observeCommands(session);
     onSession?.({conversationId, role: role.name, session, modelPlan});
     if(modelPlan.onProgress)session.on('progress',modelPlan.onProgress);
     if(modelPlan.onModelCall)session.on('model-call',call=>modelPlan.onModelCall(call,role.name,modelPlan.config));
@@ -393,7 +425,10 @@ export function createAgentRuntime({
       if (existing.agent.isDisposed()) log?.info?.(`[agent] ${conversationId} 旧实例已释放，保留条目重建主会话`);
       sessionSource = await existing.agent.exportSession();
       entries = Array.isArray(sessionSource?.entries) ? [sessionSource.header, ...sessionSource.entries] : null;
-      await existing.agent.close('reload');
+      if(existing.agent.hasLiveBackground?.()||[...backgroundGoals.values()].some(p=>p.ctx.conversationId===conversationId&&existing.agent.hasTreeCommandResults?.(ownerOf(p.ctx)))){
+        const retained=retainedCommandSessions.get(conversationId)??new Set();
+        retained.add(existing.agent);retainedCommandSessions.set(conversationId,retained);
+      }else await existing.agent.close('reload');
       existing.skills?.release();
       agents.delete(conversationId);
     } else {
@@ -448,6 +483,7 @@ export function createAgentRuntime({
       log,
     });
     entry.agent = agent;
+    observeCommands(agent);
     onSession?.({conversationId, role: 'main', session: agent, modelPlan: turn.modelPlan});
     agent.on('permission', (request) => subagents.hostPermission({
       conversationId, inputSource: entry.ctx?.inputSource ?? 'voice', session: agent, request,
@@ -548,7 +584,9 @@ export function createAgentRuntime({
   function evictLRU(keep) {
     if (agents.size <= MAX_RESIDENT) return;
     const candidates = [...agents.entries()]
-      .filter(([id, entry]) => id !== keep && !entry.activeRootRunId && !entry.waitingForUser && !entry.agent?.isBusy())
+      .filter(([id, entry]) => id !== keep && !entry.activeRootRunId && !entry.waitingForUser && !entry.agent?.isBusy()
+        && ![...backgroundGoals.values()].some(p=>p.ctx.conversationId===id)
+        && !commandSessions(id).some(session=>session.hasLiveBackground?.()))
       .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
     for (const [id, entry] of candidates) {
       if (agents.size <= MAX_RESIDENT) break;
@@ -657,7 +695,6 @@ export function createAgentRuntime({
   }
 
   async function prepareExecution(ctx) {
-    assertCommandCleanup(journal);
     await journalReady;await journal.beginRoot(ownerOf(ctx), {policySnapshot:ctx.policySnapshot,workspace:ctx.workspace});
     return executionFor(ctx,ctx.modelPlan,'input-preparation');
   }
@@ -665,11 +702,13 @@ export function createAgentRuntime({
     const entry = agents.get(conversationId);
     if (!entry || entry.ctx.cancelled) throw new Error('目标已停止');
     const ctx = entry.ctx, owner = ownerOf(ctx), controller = new AbortController();
+    if(ctx.continuationOf)ctx.continuationOf=await journal.rootForFlow(conversationId,ctx.continuationOf);
     entry.goalController = controller; entry.activeRootRunId = owner.rootRunId;
     await journalReady;
     await journal.beginRoot(owner, {policySnapshot:ctx.policySnapshot, workspace:ctx.workspace});
     try {
       const result = await driveGoal({journal, owner, objective:args.userText, policy:normalizeGoalPolicy(goalPolicy), signal:controller.signal,
+        initialEvent:args.hostEvent??null,
         continuation:ctx.continuationOf ? {rootRunId:ctx.continuationOf,inputId:args.inputId,answer:args.userText} : null,
         run: hostEvent => {
           entry.agent.setActivityPhase(hostEvent ? 'continuing' : 'running');
@@ -681,10 +720,12 @@ export function createAgentRuntime({
         },
         evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
         persist: () => entry.agent.checkpointExecution(),
+        backgroundPending:()=>commandSessions(conversationId).some(session=>session.hasTreeCommands?.(owner)||session.hasTreeCommandResults?.(owner)),
         cleanup: async () => {
-          await Promise.all([entry.agent.abort(), subagents.cancelByRootRun(owner.rootRunId, {reason:'stop'})]);
+          await Promise.all([entry.agent.abort({commandOwner:owner}), subagents.cancelByRootRun(owner.rootRunId, {reason:'stop'})]);
         },
       });
+      if(result.waitingForBackground)backgroundGoals.set(owner.rootRunId,{ctx:{...ctx,cancelled:false},args:{...args,hostEvent:null},queued:false});
       entry.agent.setActivityPhase('finishing');
       if (result.completionText) {
         await entry.agent.recordGoalCompletion(result.completionText, controller.signal);
@@ -693,6 +734,41 @@ export function createAgentRuntime({
       }
       return result;
     } finally { if (entry.goalController === controller) { entry.goalController = null; entry.activeRootRunId = null; } }
+  }
+  function backgroundContext(conversationId,rootRunId){
+    const pending=backgroundGoals.get(rootRunId);
+    return pending?.ctx.conversationId===conversationId?pending.ctx:null;
+  }
+  async function resumeBackground(conversationId,{rootRunId,generation,flowRunId},{onReady=()=>{}}={}){
+    const pending=backgroundGoals.get(rootRunId),ctx=pending?.ctx;
+    if(shuttingDown||!ctx||ctx.conversationId!==conversationId||ctx.generation!==generation)return {aborted:true,skipped:true};
+    const owner=ownerOf(ctx),root=await journal.root(owner);
+    if(root?.status!=='waiting_background'){backgroundGoals.delete(rootRunId);return {aborted:true,skipped:true};}
+    if(!pending.review&&!commandSessions(conversationId).some(session=>session.hasTreeCommandResults?.(owner))){
+      pending.queued=false;
+      if(!commandSessions(conversationId).some(session=>session.hasTreeCommands?.(owner))){
+        backgroundGoals.delete(rootRunId);await journal.finishRoot(owner,'interrupted','后台结果已被读取，不再自动续跑');
+      }
+      return {aborted:true,skipped:true};
+    }
+    // Reuse the original owner and frozen model policy; this is no new user goal.
+    try{await journal.resumeBackgroundGoal(owner,{flowRunId});}
+    catch(error){
+      if(error.code!=='goal-budget-limit')throw error;
+      backgroundGoals.delete(rootRunId);
+      await Promise.all(commandSessions(conversationId).map(session=>session.abort({commandOwner:owner})));
+      await subagents.cancelByRootRun(rootRunId,{reason:'stop'});
+      await journal.endGoal(owner,'budget_limited',error.message);
+      return {goalComplete:false,halted:{kind:'budget_limited',reason:error.message},texts:[],usages:[],toolNames:[],requests:0};
+    }
+    backgroundGoals.delete(rootRunId);
+    ctx.cancelled=false;ctx.flowRunId=flowRunId;
+    const events=(await Promise.all(commandSessions(conversationId).map(session=>session.collectTreeCommands?.(owner)??[]))).flat();
+    const agent=await obtain(ctx);
+    await onReady(agent,ctx);
+    const hostEvent=events.length?backgroundCommandEvent(events):{customType:'hemi_background_command_review',content:'［后台命令状态观察 · 用户请求核对已有任务，不是新目标］\n读取现有命令状态和输出；不要重复启动。'};
+    hostEvent.content=[`原目标：${root.goal.objective}`,hostEvent.content,'只处理上述实际结果，继续原目标；不要重启已受理的命令，不恢复已取消的工作。'].join('\n');
+    return runRootTurn(conversationId,{...pending.args,hostEvent});
   }
   /** 上下文容量快照（渲染层轮末/切换会话时拉取；无在途会话返回 null）。 */
   function contextUsageFor(conversationId) {
@@ -764,7 +840,7 @@ export function createAgentRuntime({
           await agent.persistExecution();
           continue;
         }
-        if (settled.some(task => task.session.hasTreeCommands?.(owner))) {
+        if (!args.goalRound && settled.some(task => task.session.hasTreeCommands?.(owner))) {
           // 事件驱动优先（journal 进程终态唤醒）；未注册 journal 的记录缺口用有界内存观察兜底，
           // 不发模型请求、不刷新任何截止（agent-task-lifecycle R-04：等待有明确对象与解除事件）。
           while (!ctx.cancelled && !combined.aborted && settled.some(task => task.session.hasTreeCommands?.(owner))) {
@@ -820,36 +896,61 @@ export function createAgentRuntime({
         } catch (summaryError) { error = summaryError; }
       }
       ctx.cancelled = true;
-      try { await Promise.all([agent.abort(), subagents.cancelByRootRun(owner.rootRunId, { reason: 'stop' })]); }
+      try { await Promise.all([agent.abort({commandOwner:owner}), subagents.cancelByRootRun(owner.rootRunId, { reason: 'stop' })]); }
       catch (cleanupError) { cleanupError.pendingStop = true; throw cleanupError; }
       throw error;
     } finally { entry.actualCandidate = execution.actualCandidate; if (!args.goalRound && entry.activeRootRunId === owner.rootRunId) entry.activeRootRunId = null; }
   }
 
+  function commandSessions(conversationId) {
+    return [...new Set([agents.get(conversationId)?.agent,...(retainedCommandSessions.get(conversationId)??[]),...[...subagents._internals.tasks.values()]
+      .filter(task=>task.conversationId===conversationId).map(task=>task.session)])].filter(session=>session&&!session.isDisposed?.());
+  }
   async function backgroundCommand(conversationId,request) {
+    request={...request,runId:await journal.rootForFlow(conversationId,request.runId)};
     const entry=agents.get(conversationId);
-    if(!entry || entry.ctx.runId!==request.runId || entry.ctx.cancelled)throw new Error('当前目标已变化');
-    return entry.agent.backgroundCommand(request);
+    const pending=backgroundGoals.get(request.runId);
+    if(!entry || (!pending&&(entry.ctx.runId!==request.runId || entry.ctx.cancelled)))throw new Error('当前目标已变化');
+    if(request.action==='review'&&pending){await wakeBackground(ownerOf(pending.ctx),{review:true});return {accepted:true};}
+    const controllerOwner=ownerOf(entry.ctx),sources=commandSessions(conversationId);
+    if(request.action==='review')return entry.agent.backgroundCommand(request);
+    const buckets=await Promise.all(sources.map(session=>session.backgroundCommand({action:'list',controllerOwner})));
+    if(request.action==='list')return buckets.flat();
+    const index=buckets.findIndex(jobs=>jobs.some(job=>job.id===request.jobId));
+    if(index>=0)return sources[index].backgroundCommand({...request,controllerOwner});
+    throw new Error('命令不存在或不属于当前会话');
   }
 
   async function completeConversation(conversationId, status, reason = null, rootRunId = null) {
     if (!rootRunId) throw new Error('收口缺少根目标身份');
     await journalReady;
-    const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status;
+    rootRunId=await journal.rootForFlow(conversationId,rootRunId);
+    const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status === 'awaiting-background' ? 'waiting_background' : status;
     let root = (await journal.snapshot()).roots[rootRunId];
     if (root?.owner.conversationId !== conversationId) return;
     try {
-      if (['running','waiting','awaiting_user','stopping'].includes(root.status)) root = await journal.finishRoot(root.owner, normalized, reason);
+      // 已完成进程的结果保存可能与校验响应同时到达；收口前保存这些事实，不等待活进程。
+      const entry=agents.get(conversationId);
+      if(entry?.ctx.runId===rootRunId&&normalized!=='waiting_background'){
+        const events=(await Promise.all(commandSessions(conversationId).map(session=>session.collectTreeCommands?.(root.owner)??[]))).flat();
+        if(events.length)await entry.agent.recordCommandEvents(events);
+      }
+      if (['running','waiting','awaiting_user','waiting_background','stopping'].includes(root.status)) root = await journal.finishRoot(root.owner, normalized, reason);
     } finally {
       // Read the retained in-memory fact after a failed write; a late call must
       // not turn an already cancelled/completed root back into a user wait.
       const finishedRoot = await journal.root(root.owner);
       const entry = agents.get(conversationId);
       if (entry?.activeRootRunId === rootRunId) entry.activeRootRunId = null;
+      if(!['awaiting_user','waiting_background'].includes(finishedRoot?.status)){
+        backgroundGoals.delete(rootRunId);
+        for(const session of commandSessions(conversationId))session.releaseGoalCommands?.(root.owner);
+      }
       if (entry?.ctx.runId === rootRunId) {
         entry.waitingForUser = finishedRoot?.status === 'awaiting_user';
         if (!entry.waitingForUser) await entry.agent.reclaimBrowserPages();
       }
+      if(finishedRoot?.status==='waiting_background')await wakeBackground(root.owner);
     }
   }
 
@@ -891,6 +992,9 @@ export function createAgentRuntime({
    * 内存授权随之消失）。
    */
   function invalidate(conversationId) {
+    for(const [id,pending]of backgroundGoals)if(pending.ctx.conversationId===conversationId)backgroundGoals.delete(id);
+    for(const session of retainedCommandSessions.get(conversationId)??[])session.dispose();
+    retainedCommandSessions.delete(conversationId);
     archiveWriters.delete(String(conversationId ?? ''));
     const entry = agents.get(String(conversationId ?? ''));
     entry?.goalController?.abort();
@@ -903,7 +1007,10 @@ export function createAgentRuntime({
     log?.info?.(`[agent] ${conversationId} 档案被剪，主 agent 将按新档案重建`);
   }
 
-  async function abort(conversationId) {
+  async function abort(conversationId, options) {
+    if(!options?.preserveBackground)for(const [id,pending]of backgroundGoals)if(pending.ctx.conversationId===conversationId){
+      backgroundGoals.delete(id);await journal.finishRoot(ownerOf(pending.ctx),'cancelled','用户停止后台工作');
+    }
     const agent = get(conversationId);
     const entry = agents.get(conversationId);
     if (entry?.ctx) {
@@ -912,17 +1019,33 @@ export function createAgentRuntime({
       for (const job of auxiliaryJobs.values()) if (job.sourceRootRunId === entry.ctx.runId) job.controller.abort();
     }
     subagents.clearHostedPermission(conversationId);
-    if (agent) await agent.abort();
+    if (agent) await agent.abort(options);
+    if(!options?.preserveBackground)await Promise.all(commandSessions(conversationId).filter(session=>session!==agent).map(session=>session.abort()));
   }
 
   async function requestHandoff(conversationId) {
-    await get(conversationId)?.requestHandoff();
+    const entry=agents.get(conversationId),ctx=entry?.ctx,controller=entry?.goalController;
+    // 目标检查登记的等待发生在 SDK prompt 外，插队也必须先取消这个事件等待。
+    if(entry?.agent.isWaitingForBackground?.()) {ctx.cancelled=true;controller?.abort();}
+    await entry?.agent.requestHandoff();
+    if(ctx&&entry?.ctx===ctx){ctx.cancelled=true;controller?.abort();}
   }
 
   async function stopRoot(conversationId, runId, {reason = 'stop', inputs = []} = {}) {
     const entry = agents.get(conversationId);
+    runId=await journal.rootForFlow(conversationId,runId);
     // A delayed stop cannot abort a newer root in the same conversation.
     if (entry?.activeRootRunId && entry.ctx.runId !== runId) throw new Error('当前运行已变化');
+    const pending=backgroundGoals.get(runId);
+    if(pending?.ctx.conversationId===conversationId){
+      backgroundGoals.delete(runId);
+      await journal.finishRoot(ownerOf(pending.ctx),'cancelled','用户停止后台目标');
+      await Promise.all(commandSessions(conversationId).map(session=>session.abort({commandOwner:ownerOf(pending.ctx)})));
+      await subagents.cancelByRootRun(runId,{reason});
+      await entry?.agent.recordGoalStop({runId,reason,inputs});
+      await persist(conversationId);
+      return;
+    }
     await Promise.all([
       !entry || entry.ctx.runId === runId ? abort(conversationId) : null,
       subagents.cancelByRootRun(runId, {reason}),
@@ -934,6 +1057,9 @@ export function createAgentRuntime({
   }
 
   function disposeAll() {
+    shuttingDown=true;backgroundGoals.clear();
+    for(const sessions of retainedCommandSessions.values())for(const session of sessions)session.dispose();
+    retainedCommandSessions.clear();
     for (const [, entry] of agents) {
       entry.goalController?.abort();
       entry.agent.dispose();
@@ -951,6 +1077,7 @@ export function createAgentRuntime({
     return closePromise;
   }
   async function closeRuntime() {
+    shuttingDown=true;
     try {
       // Initialization/recovery also writes the journal when no conversation ran.
       await journalReady;
@@ -966,5 +1093,5 @@ export function createAgentRuntime({
     } finally {journal.dispose();disposeAll();environment?.release();}
   }
 
-  return { backgroundCommand, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
+  return { resumeBackground, backgroundContext, backgroundCommand, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
 }

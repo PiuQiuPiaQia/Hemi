@@ -1212,7 +1212,13 @@ export function createSubagentManager({
       : [...tasks.values()].filter((task) => task.phase !== 'terminal');
     let stopped = 0;
     for (const task of targets) {
-      if (task.phase === 'terminal') continue;
+      if (task.phase === 'terminal') {
+        // 推理已结束也可能留有后台命令；停止仍须回收实际工作，不改写既有报告。
+        if(task.session?.hasTreeCommands?.({conversationId:task.conversationId,rootRunId:task.rootRunId,generation:task.generation??0})) {
+          await task.session.abort();stopped++;
+        }
+        continue;
+      }
       task.stopRequested = true;
       task.cancelAdmission?.();
       task.stopReason = { user: '用户停止', cancel: '主 agent 取消', stall: '长时间无响应，自动停止', 'long-tool': '单个工具执行过久，自动停止', 'parent-abort': '主 agent 被叫停', dispose: '对话已关闭' }[reason] ?? '已停止';

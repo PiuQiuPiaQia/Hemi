@@ -19,11 +19,18 @@ async function fixture(t, mode, goalPolicy={}) {
     let content,tool;
     if(checking){
       checks++;
-      if(mode==='cancel'||mode==='cancel-blocked')await new Promise(resolve=>{releaseCheck=resolve;});
-      content=mode==='invalid'?'not json':JSON.stringify(verdict(mode==='blocked'||mode==='cancel-blocked'?'blocked':mode==='no-progress'||mode==='round-limit'||!await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null)?'continue':'complete'));
+      if(mode==='cancel'||mode==='cancel-blocked'||mode==='cancel-invalid')await new Promise(resolve=>{releaseCheck=resolve;});
+      content=mode==='invalid'||mode==='fail-open'||mode==='cancel-invalid'?'not json':JSON.stringify(verdict(mode==='blocked'||mode==='cancel-blocked'?'blocked':mode==='no-progress'||mode==='round-limit'||!await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null)?'continue':'complete'));
+      if(mode==='background-chunk'){
+        const facts=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence),live=facts.backgroundJobs.filter(j=>j.status==='running');
+        if(live.length)content=JSON.stringify({...verdict('continue'),remaining:['核对原命令的实际结果'],nextAction:'等待原后台命令结果',waitForJobs:live.map(j=>j.id)});
+      }
     } else {
       generated++;
-      if(mode==='background-chunk') {
+      if(mode==='fail-open') {
+        if(generated===1)tool={id:'side-effect-once',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "require('fs').appendFileSync('proof.txt','goal proof\\n')"`,yield_ms:1000})}};
+        else content='命令回执已核对，操作完成。';
+      } else if(mode==='background-chunk') {
         if(!body.messages.some(message=>message.role==='tool'))tool={id:'quota-background',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "setTimeout(()=>require('fs').writeFileSync('proof.txt','goal proof'),500)"`,run_in_background:true,yield_ms:20})}};
         else content='等待已受理的命令完成。';
       } else if(mode==='subagent-chunk') {
@@ -95,17 +102,31 @@ test('real Bot/SDK delivers a failing command to the main agent and closes block
  assert.ok(Object.values(next.runs).every(r=>r.outcome==='blocked'));assert.equal(next.timeline.filter(x=>x.kind==='user').length,2);
 });
 
-for(const [mode,policy,code] of [['invalid',{},'goal-verification-failed'],['no-progress',{noProgressRounds:3},'goal-no-progress'],['round-limit',{maxRounds:2,noProgressRounds:5},'goal-budget-limit']])test(`real Bot leaves ${mode} task incomplete and records its reason`,{timeout:45000},async t=>{
+for(const [mode,policy] of [['no-progress',{noProgressRounds:3}],['round-limit',{maxRounds:2,noProgressRounds:5}]])test(`real Bot leaves ${mode} task incomplete and records its reason`,{timeout:45000},async t=>{
   const f=await fixture(t,mode,policy);await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});
-  assert.equal(Object.values(flow.runs)[0].outcome,mode==='invalid'?'failed':'partial');const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
-  assert.notEqual(root.status,'completed');assert.equal(root.goal.phase,mode==='round-limit'?'budget_limited':mode==='invalid'?'failed':'no_progress');assert.ok(root.goal.reason);
+  assert.equal(Object.values(flow.runs)[0].outcome,'partial');const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);
+  assert.notEqual(root.status,'completed');assert.equal(root.goal.phase,mode==='round-limit'?'budget_limited':'no_progress');assert.ok(root.goal.reason);
   const notices=flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice');assert.ok(notices.some(part=>/未完成|未确认完成|预算|进展/.test(part.text)));
-  assert.equal(notices.filter(p=>p.level==='error').length,mode==='invalid'?1:0);
+  assert.equal(notices.filter(p=>p.level==='error').length,0);
   if(mode==='no-progress')assert.equal(f.checks,3);
 });
 
-for(const mode of ['cancel','cancel-blocked'])test(`stop during completion verification rejects late ${mode==='cancel-blocked'?'blocked':'success'} and never starts a continuation`, {timeout:45000}, async t=>{
-  const f=await fixture(t,mode);await f.send();await until(()=>f.checks===1);
+test('real Bot fails open on verifier format error without repeating a completed command or creating another input', {timeout:45000}, async t=>{
+ const f=await fixture(t,'fail-open');await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});
+ assert.equal(Object.values(flow.runs)[0].outcome,'completed');assert.equal(f.checks,1);
+ assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof\n');
+ assert.equal(flow.timeline.filter(item=>item.kind==='user').length,1);assert.equal(Object.keys(flow.runs).length,1);
+ assert.equal(flow.timeline.flatMap(item=>item.parts??[]).filter(item=>item.kind==='notice'&&item.level==='error').length,0);
+ const j=await f.journal(),root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id);
+ assert.equal(root.goal.round,1);assert.equal(root.goal.verifications.length,1);
+ assert.equal(root.goal.verificationAttempts[0].bypassed,true);assert.equal(root.goal.verifications[0].verificationBypassed,true);
+ assert.equal(Object.values(j.processes).filter(item=>item.owner.rootRunId===root.owner.rootRunId).length,1);
+ await f.restart();await wait(100);assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof\n');
+});
+
+for(const mode of ['cancel','cancel-blocked','cancel-invalid'])test(`stop during completion verification rejects late ${mode} and never starts a continuation`, {timeout:45000}, async t=>{
+  const expectedChecks=1;
+  const f=await fixture(t,mode);await f.send();await until(()=>f.checks===expectedChecks);
   const checking=await f.flow();
   assert.equal(checking.phase,'running');
   assert.equal(checking.runs[checking.activeRunId].activity.phase,'verifying');
@@ -113,7 +134,7 @@ for(const mode of ['cancel','cancel-blocked'])test(`stop during completion verif
   assert.ok(answer?.endedAt, 'Bot 在校验前也必须关闭正文输出，快照可恢复该事实');
   await f.call('flow.command',{id:f.id,command:{type:'stop'}});f.release();
   const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'?v:null;});
-  assert.equal(Object.values(flow.runs)[0].outcome,'stopped');await wait(100);assert.equal(f.checks,1);
+  assert.equal(Object.values(flow.runs)[0].outcome,'stopped');await wait(100);assert.equal(f.checks,expectedChecks);
   const root=Object.values((await f.journal()).roots).find(root=>root.owner.conversationId===f.id);assert.notEqual(root.goal.phase,'complete');
 });
 
@@ -129,7 +150,7 @@ test('real background child report is consumed once when the shared request chun
 
 
 test('accepted background command finishes despite a shared chunk limit before completion is verified', {timeout:45000}, async t=>{
- const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.keys(v.runs).length?v:null;});assert.equal(Object.values(flow.runs)[0].outcome,'completed',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
+ const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.values(v.runs).some(run=>run.source==='event'&&run.outcome==='completed')?v:null;});assert.equal(Object.values(flow.runs)[0].outcome,'awaiting-background',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');const j=await f.journal(),processes=Object.values(j.processes).filter(item=>item.owner.conversationId===f.id);assert.equal(processes.length,1);assert.equal(processes[0].state,'finished');assert.equal(processes[0].cleanupConfirmed,true);assert.notEqual(processes[0].status,'cancelled');
- const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.equal(root.goal.round,2);assert.equal(root.goal.checkpoints.length,1);assert.equal(root.goal.checkpoints[0].work.processes[0].id,processes[0].id);
+ const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.ok(root.goal.round>=2);assert.equal(root.goal.verifications.length,1);assert.equal(root.goal.verifications[0].status,'complete');
 });

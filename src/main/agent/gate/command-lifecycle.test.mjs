@@ -7,9 +7,9 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {runCommand,createCommandScope} from './command-execution.mjs';
 import {withExecutionScope} from '../../agent-runtime/execution-scope.mjs';
-import {assertCommandCleanup} from './command-deadline.mjs';
 import {processBirth,recoverOwnedProcesses} from '../../agent-runtime/owned-processes.mjs';
 import {randomUUID} from 'node:crypto';
+import {createRunJournal} from '../../agent-runtime/run-journal.mjs';
 const exec=promisify(execFile), pause=ms=>new Promise(r=>setTimeout(r,ms));
 const quote=s=>process.platform==='win32'?`'${s.replaceAll("'","''")}'`:`'${s.replaceAll("'","'\\''")}'`;
 const deadline=(promise,ms=15000)=>Promise.race([promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('command did not settle')),ms);timer.unref();})]);
@@ -53,20 +53,25 @@ for(const mode of ['abort','timeout','registration-failure','registration-stall'
   assert.equal(await fs.readFile(marker,'utf8').catch(()=>null),null);
 });
 
-test('late or failed persistence quarantines execution and cannot start a command after settlement',{timeout:30000},async t=>{
+test('late or failed persistence stops only its execution and cannot start a command after settlement',{timeout:30000},async t=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-command-persist-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const script=path.join(dir,'effect.cjs'),marker=path.join(dir,'marker');
   await fs.writeFile(script,`require('fs').writeFileSync(${JSON.stringify(marker)},'executed');`);
-  let release;const ended=[];
-  const journal={processStart:()=>new Promise(resolve=>{release=resolve;}),processEnd:async(id,result)=>{ended.push(result);}};
+  let release,starts=0;const ended=[],saved=Promise.withResolvers();
+  const journal={processStart:()=>++starts===1?new Promise(resolve=>{release=resolve;}):Promise.resolve(),processEnd:async(id,result)=>{ended.push(result);saved.resolve();}};
   const execution={owner:{conversationId:'c',rootRunId:'r',generation:1},journal};
   const commands=createCommandScope({persistenceTimeoutMs:100,settleTimeoutMs:1000});
   await assert.rejects(deadline(withExecutionScope(execution,null,()=>commands.run({command:`"${process.execPath}" "${script}"`}))),{code:'cleanup-unconfirmed'});
   assert.equal(await fs.readFile(marker,'utf8').catch(()=>null),null);
-  assert.throws(()=>assertCommandCleanup(journal),{code:'cleanup-unconfirmed'});
-  release();await pause(100);
-  assert.equal(ended.at(-1).state,'unknown');
+  assert.equal(execution.cleanupUnconfirmed,true);
+  release();await saved.promise;
+  assert.equal(ended.at(-1).state,'finished');assert.equal(ended.at(-1).cleanupConfirmed,true);
   await assert.rejects(commands.run({command:'echo forbidden'}),{code:'cleanup-unconfirmed'});
+  const independent=createCommandScope();
+  const other={journal,owner:{conversationId:'other',rootRunId:'other-root',generation:1}};
+  const result=await deadline(withExecutionScope(other,null,()=>independent.run({command:'echo independent'})));
+  assert.equal(result.status,'succeeded');assert.match(result.stdout,/independent/);
+  await independent.abort();
 
   const failing={processStart:async()=>{},processEnd:async()=>{throw Error('disk failure');}};
   const second=createCommandScope({persistenceTimeoutMs:100});
@@ -78,6 +83,28 @@ test('late or failed persistence quarantines execution and cannot start a comman
   const long=path.join(dir,'long.cjs');await fs.writeFile(long,'setInterval(()=>{},1000);');
   await assert.rejects(deadline(withExecutionScope({...execution,journal:backgroundJournal},null,()=>third.run({command:`"${process.execPath}" "${long}"`,runInBackground:true}))),{code:'cleanup-unconfirmed'});
   await assert.rejects(third.abort(),{code:'cleanup-unconfirmed'});
+});
+
+test('cancellation before start registration finishes preserves the confirmed process cleanup',{timeout:15000},async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-command-late-registration-'));
+  const journal=createRunJournal({dir}),owner={conversationId:'late',rootRunId:'late-root',generation:1};
+  t.after(async()=>{journal.dispose();await fs.rm(dir,{recursive:true,force:true});});
+  await journal.beginRoot(owner);
+  const registration=Promise.withResolvers(),entered=Promise.withResolvers(),saved=Promise.withResolvers();
+  const delayed={
+    processStart:async record=>{entered.resolve();await registration.promise;return journal.processStart(record);},
+    processEnd:async(id,result)=>{await journal.processEnd(id,result);saved.resolve();},
+  };
+  const controller=new AbortController(),commands=createCommandScope(),marker=path.join(dir,'forbidden');
+  const running=withExecutionScope({journal:delayed,owner},null,()=>commands.run({command:`printf forbidden > ${quote(marker)}`,signal:controller.signal}));
+  await entered.promise;controller.abort();
+  const result=await deadline(running);
+  assert.equal(result.status,'cancelled');assert.equal(result.cleanupConfirmed,true);
+  registration.resolve();await saved.promise;
+  const [record]=Object.values((await journal.snapshot()).processes);
+  assert.equal(record.state,'finished');assert.equal(record.cleanupConfirmed,true);assert.equal(record.status,'cancelled');
+  assert.equal(await fs.readFile(marker,'utf8').catch(()=>null),null);
+  await commands.abort();
 });
 
 test('supervisor death reaps owned descendants; stale Windows PID records cannot kill another Job',{timeout:30000},async t=>{
@@ -110,7 +137,7 @@ test('Windows recovery drains the recorded Job even when the saved parent PID is
   const until=Date.now()+7000;while(!await fs.readFile(marker,'utf8').catch(()=>false)){assert.ok(Date.now()<until);await pause(30);}
   const pid=Number(await fs.readFile(marker,'utf8')),ended=[];
   const legacy={id:'legacy',state:'active',pid,birth:await processBirth(pid),token:randomUUID()};
-  await assert.rejects(recoverOwnedProcesses({snapshot:async()=>({processes:{legacy}}),processEnd:async(_id,result)=>{assert.equal(result.cleanupConfirmed,false);}}),{code:'cleanup-unconfirmed'});
+  await recoverOwnedProcesses({snapshot:async()=>({processes:{legacy}}),processEnd:async(_id,result)=>{assert.equal(result.cleanupConfirmed,false);}});
   assert.ok(await processBirth(pid),'legacy recovery must not kill an unowned service');
   const record={id:'interrupted',state:'unknown',cleanupConfirmed:false,isolation:'windows-job-v1',pid:2147483647,token};
   await recoverOwnedProcesses({snapshot:async()=>({processes:{interrupted:record}}),processEnd:async(id,result)=>{ended.push({id,...result});}});

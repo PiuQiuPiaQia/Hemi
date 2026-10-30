@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { MODEL_PREFLIGHT, modelConnectionError } from '../lib/model-transport.mjs';
 
 // Protocol references: Z.ai's published CLI OAuth and project access token APIs.
 // Hemi owns this implementation; no ZCode runtime or proxy is bundled.
@@ -24,11 +25,54 @@ export function tokenClaims(token) {
   catch { return {}; }
 }
 
+/** Same store lock as Pi's OAuth resolver; never call this from oauth.refresh,
+ * which already owns that lock. A caller can stop waiting without cancelling
+ * a renewal that has started or discarding its persisted result. */
+export function ensureCodingCredential(credentials, { authKey, fetchImpl = (...args) => globalThis.fetch(...args),
+  signal = new AbortController().signal, rejectedAccess } = {}) {
+  const checked = credential => {
+    if (!credential || codingAuthKey(credential) !== authKey) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
+    return credential;
+  };
+  const needsRefresh = credential => credential.expires <= Date.now() + 5 * 60_000
+    || (rejectedAccess !== undefined && credential.access === rejectedAccess);
+  const operation = (async () => {
+    signal.throwIfAborted();
+    let credential = checked(await credentials.read('bigmodel', { signal }));
+    if (!needsRefresh(credential)) return credential;
+    const lockWait = new AbortController();
+    const abortLockWait = () => lockWait.abort(signal.reason);
+    signal.addEventListener('abort', abortLockWait, { once: true });
+    if (signal.aborted) abortLockWait();
+    try {
+      await credentials.modify('bigmodel', async current => {
+        signal.removeEventListener('abort', abortLockWait);
+        signal.throwIfAborted();
+        checked(current);
+        if (!needsRefresh(current)) return undefined;
+        return projectCredential(fetchImpl, current, AbortSignal.timeout(15000));
+      }, { signal: lockWait.signal });
+    } finally {
+      signal.removeEventListener('abort', abortLockWait);
+    }
+    // Logout/reconnect queued during renewal must win before inference sends.
+    credential = checked(await credentials.read('bigmodel', { signal }));
+    if (credential.expires <= Date.now()) throw new Error('GLM 编程套餐续签返回的有效期不足，请稍后重试。');
+    return credential;
+  })();
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) abort();
+  });
+}
+
 /** Responses may carry credentials: only controlled messages leave this module. */
 export async function codingJson(fetchImpl, url, { signal, stage = '服务请求', ...init } = {}) {
   signal?.throwIfAborted();
   try {
-    const response = await fetchImpl(url, { ...init, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
+    const response = await fetchImpl(url, { ...init, [MODEL_PREFLIGHT]: true, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
     if (response.status === 401 || response.status === 403) throw loginRequired();
     if (!response.ok) throw new Error(`GLM 编程套餐${stage}失败（HTTP ${response.status}），请稍后重试。`);
     const body = await response.json();
@@ -37,7 +81,7 @@ export async function codingJson(fetchImpl, url, { signal, stage = '服务请求
   } catch (error) {
     signal?.throwIfAborted();
     if (/^GLM 编程套餐/.test(error?.message)) throw error;
-    throw new Error('GLM 编程套餐连接失败，请检查网络后重试。');
+    throw modelConnectionError(error, `GLM 编程套餐${stage}连接失败，请稍后重试。`);
   }
 }
 
@@ -52,8 +96,9 @@ async function projectCredential(fetchImpl, credential, signal) {
   const expires = Math.min(Number(data?.expiresAt) * 1000, Date.now() + Number(data?.expiresIn) * 1000, Number(claims.exp) * 1000);
   if (data?.enable === false || data?.enabled === false) throw new Error('GLM 编程套餐暂未开放项目令牌，请稍后重试。');
   if (!validText(data?.accessToken) || claims.token_use !== 'project_access' || claims.api_key !== credential.apiKeyId || !Number.isFinite(expires) || expires <= Date.now()) {
-    throw new Error('GLM 编程套餐项目令牌无效，请重新登录。');
+    throw new Error('GLM 编程套餐返回的项目令牌无效，请稍后重试。');
   }
+  if (expires - 120000 <= Date.now()) throw new Error('GLM 编程套餐续签返回的有效期不足，请稍后重试。');
   return { ...credential, access: data.accessToken, expires: expires - 120000 };
 }
 

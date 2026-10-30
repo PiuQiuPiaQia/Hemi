@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import http from 'node:http';
 import { createLocalSecretStorage } from '../lib/local-secrets.mjs';
 import { createOAuthCredentials } from './oauth-credentials.mjs';
 import { createOAuthModels, setOAuthRuntime } from './oauth-models.mjs';
@@ -12,6 +13,8 @@ import { chatTurn, pingTextModel } from './text-model.mjs';
 import { answerAboutImage } from './vision-model.mjs';
 import { createCodingTransport } from './bigmodel-coding-transport.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
+import { createRunJournal } from '../agent-runtime/run-journal.mjs';
+import { freezeModelPolicy, resolveModelPlan } from '../agent-runtime/model-policy.mjs';
 import { startOAuthTestServer, waitForOAuth } from '../../../scripts/oauth-test-fixture.mjs';
 
 async function fixture(t) {
@@ -97,6 +100,243 @@ test('复用的主会话在项目令牌过期后继续执行，重试不持有�
   assert.equal(after.modelError, null);
   assert.match(after.texts.join(''), /OAuth OK/);
   assert.equal(f.transport.bigmodel.state.issued, 2);
+});
+
+test('SDK 已完成认证后项目令牌到期，原请求续签后继续且只提交一次推理', async t => {
+  const f = await fixture(t); await f.connect();
+  let payloads = 0;
+  const reply = await f.runtime.models.completeSimple(f.runtime.models.getModel('bigmodel', 'glm-5.3-flash'), {
+    messages: [{ role: 'user', content: 'late expiry', timestamp: Date.now() }],
+  }, { onPayload: async () => {
+    payloads++;
+    await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+  } });
+  assert.equal(reply.stopReason, 'stop', reply.errorMessage);
+  assert.equal(payloads, 1, 'continue this request rather than replaying the agent turn');
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+});
+
+test('签名预检期间项目令牌到期，当前请求自行续签并重建签名', async t => {
+  const f = await fixture(t); await f.connect();
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+  let expire = true;
+  const fetchImpl = async (url, init) => {
+    const response = await f.transport.fetch(url, init);
+    if (expire && String(url).endsWith('/v2/client')) {
+      expire = false;
+      await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    }
+    return response;
+  };
+  const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+    'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+      method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+    });
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json().catch(() => null)));
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+  assert.equal(f.transport.bigmodel.state.handshakes, 2);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+});
+
+test('上游明确拒绝项目令牌时续签一次，重试使用新令牌和新签名', async t => {
+  const f = await fixture(t); await f.connect();
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+  let reject = true;
+  const fetchImpl = async (url, init) => {
+    const response = await f.transport.fetch(url, init);
+    if (reject && String(url).endsWith('/ultra/anthropic/v1/messages')) {
+      reject = false;
+      await response.body?.cancel();
+      return Response.json({ error: { reason: 'VERIFY_APIKEY_EXPIRED' } }, { status: 401 });
+    }
+    return response;
+  };
+  const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+    'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+      method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+    });
+  assert.equal(response.status, 200);
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+  assert.equal(f.transport.bigmodel.state.handshakes, 2);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 2);
+});
+
+test('复用 Hemi 会话处理追加指令时，SDK 认证后到期不会中断或重放回合', async t => {
+  const f = await fixture(t); await f.connect();
+  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const native = f.runtime.models.getProvider('bigmodel');
+  const derive = native.auth.oauth.toAuth;
+  let expire = false;
+  native.auth.oauth.toAuth = async credential => {
+    const auth = await derive(credential);
+    if (expire) {
+      expire = false;
+      await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    }
+    return auth;
+  };
+  const session = createHemiSession({ cwd: f.dir, agentDir: path.join(f.dir, 'agent'), routing: { execution: config, fallbacks: [] },
+    tools: [], features: {}, settings: { retry: { enabled: false } } });
+  t.after(() => session.dispose());
+  assert.equal((await session.prompt('先调研')).modelError, null);
+  expire = true;
+  const reply = await session.prompt('请收敛范围并形成报告');
+  assert.equal(reply.modelError, null);
+  assert.match(reply.texts.join(''), /OAuth OK/);
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 2);
+});
+
+test('传输层与 SDK 并发续签只签发一次；取消发起者和排队者不影响其他请求', { timeout: 10000 }, async t => {
+  const f = await fixture(t); await f.connect();
+  const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+  await f.credentials.modify('bigmodel', async current => ({ ...current, expires: Date.now() + 240000 }));
+  const arrived = Promise.withResolvers(), blocked = Promise.withResolvers();
+  t.after(() => blocked.resolve());
+  const fetchImpl = async (url, init) => {
+    if (String(url).endsWith('/access_tokens')) { arrived.resolve(); await blocked.promise; }
+    return f.transport.fetch(url, init);
+  };
+  const transport = createCodingTransport(f.credentials);
+  const send = signal => transport.forRequest({ fetchImpl, authKey })(
+    'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+      method: 'POST', signal, body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+    });
+  const active = new AbortController(), queued = new AbortController();
+  const first = send(active.signal);
+  await arrived.promise;
+  const second = send(queued.signal);
+  const survivor = send();
+  const sdk = f.runtime.models.getAuth('bigmodel');
+  active.abort(); queued.abort();
+  await Promise.all([assert.rejects(first, { name: 'AbortError' }), assert.rejects(second, { name: 'AbortError' })]);
+  blocked.resolve();
+  assert.equal((await survivor).status, 200);
+  await sdk;
+  assert.equal(f.transport.bigmodel.state.issued, 2);
+  assert.equal(f.transport.bigmodel.state.handshakes, 1);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+});
+
+test('续签期间排队的退出或重登阻止旧请求，续签结果不会覆盖新登录', async t => {
+  for (const change of ['logout', 'reconnect']) await t.test(change, async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    const arrived = Promise.withResolvers(), blocked = Promise.withResolvers();
+    t.after(() => blocked.resolve());
+    const fetchImpl = async (url, init) => {
+      if (String(url).endsWith('/access_tokens')) { arrived.resolve(); await blocked.promise; }
+      return f.transport.fetch(url, init);
+    };
+    const pending = createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+      'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+      });
+    await arrived.promise;
+    const mutation = change === 'logout' ? f.credentials.delete('bigmodel')
+      : f.credentials.modify('bigmodel', async current => ({ ...current, authSessionId: 'synthetic-new-login' }));
+    blocked.resolve();
+    await mutation;
+    assert.equal((await pending).status, 401);
+    assert.equal(f.transport.bigmodel.state.modelCalls, 0);
+    const credential = await f.credentials.read('bigmodel');
+    if (change === 'logout') assert.equal(credential, undefined);
+    else {
+      assert.equal(credential.authSessionId, 'synthetic-new-login');
+      const reply = await f.runtime.models.completeSimple(f.runtime.models.getModel('bigmodel', 'glm-5.3'), {
+        messages: [{ role: 'user', content: 'new login', timestamp: Date.now() }],
+      });
+      assert.equal(reply.stopReason, 'stop', reply.errorMessage);
+    }
+  });
+});
+
+test('续签失败保留登录失效与连接错误的区别，不发送推理或泄露上游内容', async t => {
+  for (const failure of [401, 503, 'ECONNREFUSED', 'invalid-token', 'short-lived-token']) await t.test(String(failure), async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    let renewals = 0;
+    const fetchImpl = async (url, init) => {
+      if (String(url).endsWith('/access_tokens')) {
+        renewals++;
+        if (failure === 'ECONNREFUSED') throw new TypeError('PRIVATE UPSTREAM', { cause: Object.assign(new Error('synthetic-bigmodel-login'), { code: failure }) });
+        if (failure === 'invalid-token') return Response.json({ code: 200, data: { accessToken: 'PRIVATE UPSTREAM synthetic-bigmodel-login' } });
+        if (failure === 'short-lived-token') {
+          const response = await f.transport.fetch(url, init), body = await response.json();
+          body.data.expiresIn = 60;
+          return Response.json(body);
+        }
+        return new Response('PRIVATE UPSTREAM synthetic-bigmodel-login', { status: failure });
+      }
+      return f.transport.fetch(url, init);
+    };
+    const pending = createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+      'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+      });
+    if (failure === 'ECONNREFUSED') await assert.rejects(pending,
+      error => error.code === failure && !/PRIVATE|synthetic-bigmodel-login/.test(error.message));
+    else {
+      const response = await pending;
+      assert.equal(response.status, typeof failure === 'number' ? failure : 503);
+      const body = await response.text();
+      assert.doesNotMatch(body, /PRIVATE|synthetic-bigmodel-login/);
+      if (failure === 401) assert.match(body, /请重新登录/);
+      else assert.doesNotMatch(body, /请重新登录/);
+    }
+    assert.equal(renewals, 1);
+    assert.equal(f.transport.bigmodel.state.modelCalls, 0);
+  });
+});
+
+test('明确令牌拒绝最多重发一次，普通 401 不续签；并发已换发的令牌直接复用', async t => {
+  for (const mode of ['expired-twice', 'ordinary-401', 'already-renewed']) await t.test(mode, async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    let calls = 0;
+    const fetchImpl = async (url, init) => {
+      const response = await f.transport.fetch(url, init);
+      if (String(url).endsWith('/ultra/anthropic/v1/messages')) {
+        calls++;
+        if (mode === 'already-renewed' && calls > 1) return response;
+        await response.body?.cancel();
+        if (mode === 'already-renewed') {
+          await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+          await f.runtime.models.getAuth('bigmodel');
+        }
+        return Response.json({ reason: mode === 'ordinary-401' ? 'UNAUTHORIZED' : 'VERIFY_APIKEY_EXPIRED' }, { status: 401 });
+      }
+      return response;
+    };
+    const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+      'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+      });
+    assert.equal(response.status, mode === 'already-renewed' ? 200 : 401);
+    assert.equal(f.transport.bigmodel.state.issued, mode === 'ordinary-401' ? 1 : 2);
+    assert.equal(calls, mode === 'ordinary-401' ? 1 : 2);
+  });
+});
+
+test('推理已返回 HTTP 200 后流中断，不续签或自动重放生成', async t => {
+  const f = await fixture(t); await f.connect();
+  globalThis.fetch = async (url, init) => {
+    const response = await f.transport.fetch(url, init);
+    if (!String(url).endsWith('/ultra/anthropic/v1/messages')) return response;
+    await response.body?.cancel();
+    return new Response(new ReadableStream({ start(controller) {
+      controller.error(new Error('stream terminated'));
+    } }), { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const reply = await f.runtime.models.completeSimple(f.runtime.models.getModel('bigmodel', 'glm-5.3'), {
+    messages: [{ role: 'user', content: 'stream interruption', timestamp: Date.now() }],
+  });
+  assert.equal(reply.stopReason, 'error');
+  assert.equal(f.transport.bigmodel.state.issued, 1);
+  assert.equal(f.transport.bigmodel.state.modelCalls, 1);
 });
 
 test('旧格式登录的既有请求跟随令牌刷新，重新登录使旧请求失效', async t => {
@@ -222,4 +462,73 @@ test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或�
   const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
   await assert.rejects(pingTextModel(config), error => /签名握手失败（HTTP 404）/.test(error.message) && !/PRIVATE UPSTREAM/.test(error.message));
   assert.equal(f.transport.bigmodel.state.modelCalls, 0);
+});
+
+test('GLM 真实 SDK 与恢复器：连接拒绝可恢复，EPIPE 不伪装 503 或重复提交推理', async t => {
+  for (const code of ['ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET', 'preflight EPIPE']) await t.test(code, async t => {
+    const f = await fixture(t); await f.connect();
+    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const owner = { conversationId: 'transport-test', rootRunId: 'run', generation: 1 };
+    const journal = createRunJournal({ dir: path.join(f.dir, 'journal') });
+    await journal.beginRoot(owner);
+    let inferenceAttempts = 0, handshakeAttempts = 0, received = 0;
+    let dropUrl;
+    if (code === 'UND_ERR_SOCKET') {
+      const server = http.createServer(async (req) => {
+        for await (const _ of req) { /* Receive generation, then drop without a response. */ }
+        received++;
+        req.socket.destroy();
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      dropUrl = `http://127.0.0.1:${server.address().port}/messages`;
+      t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+    }
+    globalThis.fetch = async (url, init) => {
+      if (code === 'preflight EPIPE' && String(url).endsWith('/v2/client') && ++handshakeAttempts === 1) {
+        await f.transport.fetch(url, init);
+        throw new TypeError('PRIVATE_UPSTREAM SYNTHETIC_SECRET', { cause: Object.assign(new Error('PRIVATE_ADDRESS'), { code: 'EPIPE' }) });
+      }
+      if (String(url).endsWith('/ultra/anthropic/v1/messages') && ++inferenceAttempts === 1) {
+        if (dropUrl) return f.transport.originalFetch(dropUrl, init);
+        if (code !== 'preflight EPIPE')
+          throw new TypeError('PRIVATE_UPSTREAM SYNTHETIC_SECRET', { cause: Object.assign(new Error('PRIVATE_ADDRESS'), { code }) });
+      }
+      return f.transport.fetch(url, init);
+    };
+    const policy = await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey });
+    const execution = { journal, owner, purpose: 'main', plan: resolveModelPlan(policy),
+      store: f.profiles, budgets: { ...policy.budgets, maxRequestsPerRun: 10 }, cancelled: () => false };
+    const session = createHemiSession({ cwd: f.dir, agentDir: path.join(f.dir, 'agent'), routing: { execution: config, fallbacks: [] },
+      tools: [], features: {}, executionContext: execution, initTimeoutMs: 2000, stallTimeoutMs: 5000 });
+    t.after(() => session.dispose());
+    const result = await session.prompt('只回复 OK');
+    const records = Object.values((await journal.snapshot()).requests);
+    const failed = records.find(row => row.failure?.transportCode === (code === 'preflight EPIPE' ? 'EPIPE' : code));
+    assert.ok(failed, JSON.stringify({ records, modelError: result.modelError, inferenceAttempts }));
+    assert.equal(failed.httpStatus, undefined, 'local connection failure is not an upstream HTTP status');
+    assert.equal(failed.failure.kind, 'transport');
+    assert.equal(failed.failure.phase, 'connection', 'preflight responses do not start the inference output deadline');
+    assert.doesNotMatch(JSON.stringify(records) + String(result.modelError), /PRIVATE_|SYNTHETIC_SECRET|503/);
+    if (code === 'ECONNREFUSED' || code === 'preflight EPIPE') {
+      assert.equal(result.modelError, null);
+      assert.equal(inferenceAttempts, code === 'preflight EPIPE' ? 1 : 2);
+      assert.equal(failed.failure.retryable, true);
+      assert.ok(failed.recovery);
+      assert.equal(records.at(-1).httpStatus, 200);
+      if (code === 'preflight EPIPE') {
+        assert.equal(failed.failure.preflight, true);
+        assert.equal(failed.failure.delivery, 'sent');
+        assert.equal(handshakeAttempts, 2);
+        assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+      }
+    } else {
+      assert.match(result.modelError, /(?:EPIPE|UND_ERR_SOCKET).*请求可能已发送/);
+      assert.equal(inferenceAttempts, 1);
+      assert.equal(failed.failure.retryable, false);
+      assert.equal(failed.recovery, undefined);
+      assert.equal(f.transport.bigmodel.state.modelCalls, 0);
+      if (dropUrl) { assert.equal(received, 1); assert.equal(failed.failure.delivery, 'sent'); }
+      assert.ok(records.some(row => row.httpStatus === 200), 'successful preflight status cannot hide an inference disconnect');
+    }
+  });
 });

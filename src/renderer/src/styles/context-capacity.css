@@ -1,15 +1,64 @@
 /**
- * 当前上下文：输入框工具行里的静态叠页入口 + 悬浮用量面板（InfoPopover openOnHover）。
+ * 当前上下文：输入框下方信息行（会话用量右侧）的静态叠页入口 + 悬浮用量面板（InfoPopover openOnHover）。
  * 数据口径见 src/main/agent/context-usage.mjs（总量 usage 锚点、分类字符估算）。
  * 类目圆点只借现有 token 充当图表色（--conversation-unread 的 sky 不带未读语义、
  * --warn 不带告警语义），不新增色板。
  */
-.ctx-cap-trigger {
-  padding: 0 var(--sp-8);
+/* 输入框下方信息行：沿用 048 用量预览的 20px 底部留白（零高度锚点，不增加
+   输入区高度），用量文字与上下文图标并排居中；无用量记录时只剩图标居中。 */
+.compact-shell .h24-composer-meta {
+  position: relative;
+  height: 0;
+  min-width: 0;
+}
+
+.compact-shell .h24-composer-meta-row {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+}
+
+/* 用量预览改由信息行定位：取消 048 自身的零高度绝对定位。 */
+.compact-shell .h24-composer-meta .h48-usage {
+  height: auto;
+}
+
+.compact-shell .h24-composer-meta .h48-usage-entry {
+  position: static;
+  transform: none;
+}
+
+/* 与用量预览同高同色同悬停态，读作同一行里的另一个信息入口。 */
+.compact-shell .ctx-cap-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background-color var(--dur-1) linear, color var(--dur-1) linear;
+}
+
+.compact-shell .ctx-cap-trigger:hover,
+.compact-shell .ctx-cap-trigger[aria-expanded='true'] {
+  background: var(--bg-hover);
+  color: var(--ink);
 }
 
 .ctx-cap-icon {
   display: block;
+  width: 12px;
+  height: 12px;
 }
 
 /* 面板＝InfoPopover（h37-info-*）：头部标题行收窄并让总量右对齐同一基线。 */
