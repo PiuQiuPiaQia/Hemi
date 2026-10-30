@@ -12,6 +12,9 @@ third-party/*.tar.gz -text
 third-party/pdfjs/cmaps.zip -text
 third-party/licenses/Playwright-LICENSE -text
 third-party/licenses/Pptx-embedded-NOTICES.txt -text
+# Native-Rust 清单同样按原始 CRLF 字节钉死（release-materials.json）；
+# 归一化为 LF 会让干净 checkout 的 CI 校验失败（2026-10-30 v0.2.31 win CI 实测）。
+third-party/licenses/Native-Rust-NOTICES.txt -text
 package-lock.json text eol=lf
 src/renderer/public/licenses/** text eol=lf
 # 生成后逐字节比对（skin-registry 测试与 prebuild 的 generate-appearance --check）。
