@@ -48,11 +48,10 @@ async function fixture(t, { routing = false, count = 2, configureBotRouting = ro
       if (!network) throw Object.assign(new Error('Offline'), { code: 'offline' });
       requests.push({ method, params: structuredClone(params) });
       if (legacy && method === 'model.configure') throw Object.assign(new Error('Unsupported method'), { code: 'unsupported' });
-      // The client runs on Windows; the Host's /bin/sh residency probe runs on
-      // Linux. Keep the real model/receipt store and replace only that OS boundary.
-      const reply = process.platform === 'win32' && method === 'initialize.verify'
-        ? {ok: true} : await host.request(method, params);
-      if (process.platform === 'win32' && method === 'handshake') reply.configured = true;
+      // 客户端与 Host 同机运行：initialize.verify 的驻留探针在 host.mjs 内已有
+      // Windows 原生分支（process.execPath），必须真实执行才能持久化 state.initialized；
+      // 短路成 {ok:true} 会让重连绑定（existing:true）的守卫永远失败。
+      const reply = await host.request(method, params);
       if (refreshBeforeReply && method === 'model.configure') await client.refresh();
       if (drop && method === 'model.configure') { drop = false; throw Object.assign(new Error('Lost receipt'), { code: 'needs-review' }); }
       return reply;
