@@ -30,7 +30,9 @@ export async function buildBotRuntime({
         const source = path.join(dir, entry.name),
           target = path.join(stage, relative, entry.name);
         if (entry.isDirectory())
-          await copy(source, path.join(relative, entry.name));
+          // path.posix.join：Windows 上 relative 也要是正斜杠，gate/roles 的
+          // 目录匹配（windows-command-job.cs/exe、角色 .md）才不会失配漏打包。
+          await copy(source, path.posix.join(relative, entry.name));
         else if ((/\.(mjs|json)$/.test(entry.name) || (relative === 'src/main/agent/gate' && /^windows-command-job\.(?:cs|exe)$/.test(entry.name)) || (relative === 'src/main/agent/roles' && entry.name.endsWith('.md')))) {
           await fs.mkdir(path.dirname(target), { recursive: true });
           await fs.copyFile(source, target);
