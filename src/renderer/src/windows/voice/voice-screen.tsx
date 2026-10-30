@@ -115,6 +115,7 @@ type VoiceScreenProps = {
    * 裁决）；回合收口后传 null，卡回原位、交代照常排其后。 */
   turnStartedAt: number | null;
   runActivity?: import('@shared/protocol').RunActivityView | null;
+  backgroundJobs?: import('@shared/protocol').BackgroundJobView[];
   /** 通话计时（Call Dock 显示；callActive 门控由 page 侧保证）。 */
   elapsedSeconds: number;
   /** 024：用户静音（Call Dock 静音键；true 时上行被静音门压制）。 */
@@ -210,7 +211,6 @@ type VoiceScreenProps = {
   /** 模型未配置的「去设置」直达（→ 模型与路由）；普通设置入口走 onOpenSettings（→ 通用）。 */
   onOpenModelSettings?: () => void;
   skillMarketOpen?: boolean;
-  onOpenSkillMarket?: () => void;
   onCloseSkillMarket?: () => void;
   /** 034 fixtures 专用：技能页内部预置状态（透传给 SkillMarket 的 demo）。产品代码不传。 */
   skillMarketScene?: string;
@@ -331,6 +331,7 @@ export function VoiceScreen({
   turnPhase,
   turnStartedAt,
   runActivity,
+  backgroundJobs,
   elapsedSeconds,
   callMuted,
   dockCollapsed,
@@ -385,7 +386,6 @@ export function VoiceScreen({
   onOpenSettings,
   onOpenModelSettings,
   skillMarketOpen = false,
-  onOpenSkillMarket,
   onCloseSkillMarket,
   skillMarketScene,
   workflowStudioOpen,
@@ -868,10 +868,6 @@ export function VoiceScreen({
             onCloseSkillMarket?.();
             onCloseWorkflowStudio?.();
           }}
-          onShowSkills={() => {
-            onCloseWorkflowStudio?.();
-            onOpenSkillMarket?.();
-          }}
           onShowWorkflows={onOpenWorkflowStudio ? () => {
             onCloseSkillMarket?.();
             onOpenWorkflowStudio();
@@ -1048,7 +1044,7 @@ export function VoiceScreen({
                   {contextError ? <span className="context-error">{contextError}</span> : null}
                 </div>
               ) : null}
-              <RunActivity key={currentConversationId} readOnly={conversationReadOnly} conversationId={currentConversationId} generation={timelineGeneration} active={!skillMarketOpen && !workflowStudioOpen} activity={runActivity} />
+              <RunActivity key={currentConversationId} readOnly={conversationReadOnly} conversationId={currentConversationId} generation={timelineGeneration} active={!skillMarketOpen && !workflowStudioOpen} activity={runActivity} backgroundJobs={backgroundJobs} />
               <TextComposer
                 value={textDraft}
                 onChange={onTextDraftChange}

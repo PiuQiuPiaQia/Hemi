@@ -27,7 +27,7 @@ import type { FlowSnapshotView, UsageRecord } from '@shared/protocol';
 import { ScopePopover } from '@/windows/voice/scope-popover';
 import { AccessAddDialog } from '@/windows/voice/access-add-dialog';
 import { RemoteFolderDialog } from '@/windows/voice/remote-folder-dialog';
-import { SettingsScreen } from '@/windows/voice/settings-screen';
+import { SettingsScreen, type SettingsPage } from '@/windows/voice/settings-screen';
 import { ModelProfilesSection, setModelProfilesFixtureState } from '@/windows/voice/model-profiles-section';
 import { resetSubscriptionQuotaCache } from '@/windows/voice/lib/use-subscription-quota';
 import { setProviderImportFixtureState } from '@/windows/voice/newapi-import-section';
@@ -1697,8 +1697,6 @@ function screenProps(input: Partial<ScreenProps> & { streamingParts?: TurnPart[]
 
 const settingsProps = {
   onClose: () => {},
-  // 037：设置成为壳内页面，图标栏「技能」入口（fixtures 不跳转）。
-  onOpenSkills: () => {},
   saving: false,
   config: { apiKey: '', endpoint: '', hasApiKey: true },
   modelConfig: { model: 'deepseek-v4-flash', apiKey: '', baseUrl: 'https://api.deepseek.com/v1', hasApiKey: true, keyStoredSecurely: true, thinkingLevel: 'default', supportsVision: true, visionModel: '' },
@@ -1981,6 +1979,127 @@ function stubExecutor(overrides: Record<string, unknown> = {}) {
     setComputerUse: async (next: { enabled?: boolean }) => ({ enabled: next?.enabled ?? true }),
     getVisionPermissions: async () => ({ screenRecording: true, accessibility: true }),
     openVisionPermissionPane: () => {},
+  };
+}
+
+/** 2026-10-30 settings-bot 场景的 Bot 桥桩：绑定＋在线的最小状态，
+ *  command 对能力检查 / 记忆读取 / 角色路由返回可用默认值，其余回 { ok: true }。 */
+function stubBotBridge() {
+  const fixtureState = new URLSearchParams(location.search).get('state') ?? 'online';
+  const calls: Array<{method: string; params: Record<string, unknown>}> = [];
+  const capabilities = {
+    platform: fixtureState === 'windows' ? 'win32' : 'linux',
+    browserEnabled: true,
+    computerUseEnabled: false,
+    computerUseSupported: fixtureState === 'windows',
+    webSearchEnabled: true,
+    hasSearchKey: true,
+    browserActEnabled: true,
+    hasBrowserActKey: true,
+    browserActUrl: 'https://api.typesafe.ai',
+    browserActModel: 'typesafe-ai/jev',
+    browser: { executable: '/usr/bin/chromium', error: '' },
+  };
+  const state = {
+    clientId: 'fixture-client',
+    binding: {
+      host: 'bot.example.com',
+      platform: 'linux',
+      instanceId: 'fixture-bot',
+      protocol: 1,
+      version: '0.3.0',
+      componentVersion: { version: '0.3.0', build: 'a1b2c3d4e5f6' },
+      home: '/home/user',
+      dataDir: '/home/user/.local/share/hemi-bot',
+      boundAt: now - 86_400_000,
+    },
+    online: true,
+    error: '',
+    busy: '',
+    componentStatus: { phase: 'current', checkedAt: now - 3_600_000 },
+    lastConnectedAt: now - 600_000,
+    stoppedConfirmed: false,
+    syncStatus: null,
+    cache: {
+      instanceId: 'fixture-bot',
+      revision: 3,
+      enabled: true,
+      defaultDir: '/home/user/hemi',
+      defaultModel: 'mp-deep/m-chat',
+      recentDirs: ['/home/user/hemi', '/srv/data'],
+      models: [
+        { key: 'mp-deep/m-chat', providerId: 'mp-deep', name: 'DeepSeek', model: 'deepseek-chat',
+          baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions', supportsVision: false,
+          revision: 'r1', keyStoredSecurely: true, oauthConnected: true, thinkingLevel: 'default' },
+      ],
+      modelConfigRevision: 'mcr-1',
+      roleModels: { main: 'mp-deep/m-chat' },
+      sessions: [],
+      details: {},
+    },
+    candidate: null,
+  };
+  const visibleState = {...state, online: fixtureState !== 'offline', binding: fixtureState === 'unbound' ? null : state.binding};
+  (window as unknown as {__botSettingsCalls: typeof calls}).__botSettingsCalls = calls;
+  const command = async (method: string, params: Record<string, unknown> = {}) => {
+    calls.push({method, params});
+    switch (method) {
+      case 'capabilities.inspect':
+        if (fixtureState === 'inspect-error') throw new Error('Bot 能力读取失败（测试）');
+        if (fixtureState === 'loading') await new Promise(resolve => setTimeout(resolve, 1200));
+        return {...capabilities};
+      case 'capabilities.configure': {
+        if (fixtureState === 'save-error') throw new Error('Bot 配置保存失败（测试）');
+        const config = params.config as Record<string, unknown>;
+        const {searchApiKey, browserActApiKey, ...rest} = config;
+        Object.assign(capabilities, rest, searchApiKey ? {hasSearchKey: true} : {}, browserActApiKey ? {hasBrowserActKey: true} : {});
+        return {...capabilities};
+      }
+      case 'agent-environment.inspect':
+        return {
+          owner: 'fixture-bot',
+          memoryDir: '/home/user/.local/share/hemi-bot/memory',
+          files: [
+            { path: 'MEMORY.md', modifiedAt: now - 7_200_000, size: 2048 },
+            { path: 'daily/2026-10-30.md', modifiedAt: now - 3_600_000, size: 512 },
+          ],
+          summaryUsageIncluded: true,
+        };
+      case 'agent-environment.read-file':
+        return { path: String(params.path ?? ''), text: '# MEMORY\n\nBot 记忆（fixtures 桩）。\n' };
+      case 'models.roles':
+        return {
+          roles: [
+            { name: 'explorer', title: '侦察', description: '并行查证本地与网页资料。', needsVision: false },
+            { name: 'oracle', title: '评审', description: '独立分析，检验假设与方案。', needsVision: false },
+            { name: 'fixer', title: '执行', description: '改文件、跑命令、操作界面。', needsVision: false },
+            { name: 'designer', title: '设计', description: '界面与体验实现。', needsVision: true },
+          ],
+          slots: {
+            main: { modelKey: 'mp-deep/m-chat', needsVision: false, ready: true, reason: null },
+            explorer: { modelKey: null, needsVision: false, ready: true, reason: null },
+            oracle: { modelKey: null, needsVision: false, ready: true, reason: null },
+            fixer: { modelKey: null, needsVision: false, ready: true, reason: null },
+            designer: { modelKey: null, needsVision: true, ready: true, reason: null },
+            fallback: { modelKey: null, needsVision: false, ready: true, reason: null },
+          },
+          ready: true,
+        };
+      case 'skills.state':
+        // 复用技能 fixtures 的桩数据（安装列表＋目录），技能中心页直接可渲染。
+        return await stubBridgeMethods.getSkillState();
+      default:
+        return { ok: true };
+    }
+  };
+  (window as unknown as { hemiVoice: Record<string, unknown> }).hemiVoice = {
+    ...((window as unknown as { hemiVoice: object }).hemiVoice ?? {}),
+    bot: {
+      getState: async () => visibleState,
+      onChanged: () => () => {},
+      command,
+      commandResult: async (method: string, params: Record<string, unknown>) => ({ ok: true, result: await command(method, params) }),
+    },
   };
 }
 
@@ -2511,7 +2630,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: true,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
         skillMarketScene: 'mp-results',
       })}
@@ -2524,7 +2642,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: true,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
         skillMarketScene: 'mp-preview',
       })}
@@ -2537,7 +2654,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: true,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
         skillMarketScene: 'mp-detail',
       })}
@@ -2550,7 +2666,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: true,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
         skillMarketScene: 'installed',
       })}
@@ -2563,7 +2678,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: true,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
         skillMarketScene: 'builtin',
       })}
@@ -2575,7 +2689,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         sessionState: 'idle',
         callActive: false,
         skillMarketOpen: false,
-        onOpenSkillMarket: () => {},
         onCloseSkillMarket: () => {},
       })}
     />
@@ -5078,6 +5191,18 @@ const scenes: Record<string, () => React.ReactElement> = {
       getBrowserAct: async () => ({ enabled: true, baseUrl: 'https://api.typesafe.ai', model: 'typesafe-ai/jev', hasApiKey: true }),
     });
     return <SettingsScreen {...settingsProps} initialPage="control" />;
+  },
+  // 2026-10-30 Bot 设置六分类对齐：设置对象切到 Bot 后导航仍是六分类，
+  // 各页渲染 Bot 版内容（连接管理在通用、云端无语音、能力在电脑与浏览器、
+  // Tavily 在联网搜索、Jev 在模型与路由）。?page= 可指定初始分类。
+  'settings-bot': () => {
+    stubExecutor();
+    stubBotBridge();
+    return <SettingsScreen
+      {...settingsProps}
+      initialEnvironment="bot"
+      initialPage={(new URLSearchParams(location.search).get('page') ?? 'general') as SettingsPage}
+    />;
   },
   'settings-model-voice-mac': () => {
     stubExecutor({

@@ -17,7 +17,7 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-nav-rail-'));
 const profile = path.join(root, 'profile');
 const playwright = process.env.HEMI_PLAYWRIGHT_MODULE ?? path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const { _electron } = await import(pathToFileURL(playwright).href);
-const labels = ['对话', 'Bot', '技能中心', '工作流', '换肤', '设置'];
+const labels = ['对话', 'Bot', '工作流', '使用记录', '换肤', '设置'];
 const report = { mode, commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), workingTree: true, node: process.version, platform: `${process.platform}/${process.arch}`, checks: [], errors: [], screenshots: [], sources: {} };
 for (const file of ['src/renderer/src/windows/voice/nav-rail.tsx', 'src/renderer/src/windows/voice/page.tsx', 'src/renderer/src/windows/voice/lib/conversation-bridge.tsx', 'src/renderer/src/styles/037-shell.css', 'src/renderer/src/components/skin-picker.tsx', 'src/renderer/src/windows/bot/page.tsx', 'src/renderer/src/windows/bot/styles.css']) report.sources[file] = createHash('sha256').update(await fs.readFile(path.join(repo, file))).digest('hex');
 await fs.mkdir(evidence, { recursive: true });
@@ -79,30 +79,17 @@ try {
   const draft = 'NAV_LOCAL_DRAFT';
   await page.locator('textarea.text-composer-input').fill(draft);
   await current('对话');
-  for (const name of ['Bot', '技能中心', '工作流', '设置', 'Bot', '对话']) {
+  for (const name of ['Bot', '工作流', '设置', 'Bot', '对话']) {
     await navigate(name);
     if (name === 'Bot') await page.getByRole('heading', { name: /让 Hemi 在云端持续工作/ }).waitFor();
-    if (name === '技能中心') await page.locator('[data-market-open="true"]').waitFor();
     if (name === '工作流') await page.locator('[data-testid="workflow-studio"]').waitFor();
     if (name === '设置') await page.locator('[data-page="settings"]').first().waitFor();
     await layout(`${name}: stable order, one selected page, utilities pinned`);
   }
   assert.equal(await page.locator('textarea.text-composer-input').inputValue(), draft);
   note('Local draft survives navigation through all global destinations');
-  await navigate('设置');
-  await page.getByRole('navigation', { name: '设置导航', exact: true }).getByRole('button', { name: '记忆', exact: true }).click();
-  await page.getByRole('button', { name: '添加记忆', exact: true }).first().click();
-  await page.getByRole('textbox', { name: '记忆标题', exact: true }).fill('Navigation guard');
-  await page.getByRole('textbox', { name: '记忆正文', exact: true }).fill('Unsaved content');
-  await button('Bot').click();
-  await page.getByRole('heading', { name: '还有修改没保存', exact: true }).waitFor();
-  await current('设置');
-  await page.getByRole('button', { name: '继续编辑', exact: true }).click();
-  assert.equal(await page.getByRole('textbox', { name: '记忆正文', exact: true }).inputValue(), 'Unsaved content');
-  await button('工作流').click();
-  await page.getByRole('button', { name: '放弃修改', exact: true }).click();
-  await current('工作流');
-  note('Global navigation preserves the memory editor leave/cancel guard');
+  // 记忆页已改为原生文件视图（无编辑器脏状态），离开守卫用工作流编辑器覆盖。
+  await navigate('工作流');
   await page.getByRole('button', { name: '新建工作流', exact: true }).first().click();
   await page.getByRole('textbox', { name: '工作流名称', exact: true }).fill('Unsaved navigation workflow');
   await button('Bot').click();
@@ -142,10 +129,10 @@ try {
   await layout('Short window 375×320: all icons reachable');
   await capture('bot-short');
   await resize(768);
-  await button('技能中心').focus();
+  await button('工作流').focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
-  await current('技能中心');
+  await current('工作流');
   note('Keyboard activation routes to the named page');
   await app.close(); app = null;
 
@@ -183,7 +170,6 @@ try {
     assert.equal(await page.locator('textarea.text-composer-input').inputValue(), 'NAV_BOT_DRAFT');
     await capture(`bot-conversation-${width}`);
   }
-  await navigate('技能中心');
   await navigate('Bot');
   await navigate('工作流');
   await navigate('Bot');

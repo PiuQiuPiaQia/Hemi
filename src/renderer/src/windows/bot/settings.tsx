@@ -3,19 +3,33 @@ import { MoreHorizontal } from 'lucide-react';
 import { Menu, MenuItem } from '@/components/menu';
 import type { AgentEnvironmentSnapshot } from '@shared/protocol';
 import { MemorySection } from '../voice/memory-section';
+import type { SettingsPage } from '../voice/settings-screen';
 import type { BotMethod, BotState } from '@shared/bot';
 import { BotButton, BotDialog } from './dialogs';
 import { BotModelsSettings } from './models-settings';
 import { BotPairing } from './pairing';
 import { useApplicationNavigation } from '../voice/lib/conversation-bridge';
-import {BotCapabilitiesSettings} from './capabilities-settings';
+import {BotControlCapabilities, BotWebSearchSettings} from './capabilities-settings';
 import {BotSkillsSettings} from './skills-settings';
 import './styles.css';
 
 type Dialog = 'pairing' | 'address' | 'stop' | 'remove' | 'forget' | 'update';
 
-/** Settings use the desktop Bot bridge directly; local configuration APIs are never substituted. */
-export function BotSettings({page = 'general'}: {page?: 'general' | 'models' | 'memory'}) {
+/**
+ * Bot 设置：2026-10-30 与 PC 设置分类对齐——通用 / 语音与通话 / 模型与路由 /
+ * 电脑与浏览器 / 联网搜索 / 记忆 / 技能中心（本地与 Bot 共有第七分类，技能在
+ * Bot 主机上）；导航由 settings-screen 统一渲染，
+ * 各页内容为 Bot 版本（云端连接管理在通用页，语音与通话云端不可用）。
+ * decisionOpen/onToggleDecision/onConfigureDecision/onBackToBrowser 把
+ * 「浏览器决策模型」在电脑与浏览器页与模型与路由页之间的双向定位接到外壳。
+ */
+export function BotSettings({page = 'general', decisionOpen = false, onToggleDecision, onConfigureDecision, onBackToBrowser}: {
+  page?: SettingsPage;
+  decisionOpen?: boolean;
+  onToggleDecision?: () => void;
+  onConfigureDecision?: () => void;
+  onBackToBrowser?: () => void;
+}) {
   const api = window.hemiVoice?.bot;
   const [state, setState] = useState<BotState | null>(null);
   const [error, setError] = useState('');
@@ -81,9 +95,68 @@ export function BotSettings({page = 'general'}: {page?: 'general' | 'models' | '
         </section>
       </div>
     );
-  if (page === 'models') return <BotModelsSettings key={state.binding.instanceId} state={state} />;
+  if (page === 'models') return <BotModelsSettings key={state.binding.instanceId} state={state} decisionOpen={decisionOpen} onToggleDecision={onToggleDecision} onBackToBrowser={onBackToBrowser} />;
   if (page === 'memory') return <BotMemorySettings key={state.binding.instanceId} instanceId={state.binding.instanceId} />;
+  if (page === 'voice') return <BotVoiceSettings />;
+  if (page === 'control') return <BotControlSettings key={state.binding.instanceId} state={state} onConfigureDecision={onConfigureDecision} />;
+  if (page === 'web') return <BotWebSettings key={state.binding.instanceId} state={state} />;
+  if (page === 'skills') return <BotSkillsSettings key={state.binding.instanceId} state={state} />;
   return <ConnectedBotSettings key={state.binding.instanceId} state={state} />;
+}
+
+/** 语音与通话页：Bot 在云服务器上运行，没有麦克风与扬声器，仅本机 App 可用。 */
+function BotVoiceSettings() {
+  return (
+    <div className="h37-enter">
+      <div className="h37-page-head">
+        <div>
+          <h2>语音与通话</h2>
+          <p>Bot 在云端服务器上执行任务，不使用语音与通话。</p>
+        </div>
+      </div>
+      <section className="h37-section">
+        <div className="h37-section-head">
+          <h3>语音与通话</h3>
+        </div>
+        <div className="h37-group">
+          <SettingsRow
+            title="仅本机 App 支持"
+            description="语音输入、通话与播报需要本机麦克风和扬声器；请把上方「设置对象」切回「本地」配置。"
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/** 电脑与浏览器页：Bot 的操作能力（浏览器/桌面控制）。技能中心是独立分类。 */
+function BotControlSettings({ state, onConfigureDecision }: { state: BotState; onConfigureDecision?: () => void }) {
+  return (
+    <div className="h37-enter">
+      <div className="h37-page-head">
+        <div>
+          <h2>电脑与浏览器</h2>
+          <p>管理 Bot 主机上的操作能力与授权。</p>
+        </div>
+      </div>
+      <BotControlCapabilities state={state} onConfigureDecision={onConfigureDecision} />
+    </div>
+  );
+}
+
+/** 联网搜索页：Bot 自己的联网检索开关与 Tavily Key。 */
+function BotWebSettings({ state }: { state: BotState }) {
+  return (
+    <div className="h37-enter">
+      <div className="h37-page-head">
+        <div>
+          <h2>联网搜索</h2>
+          <p>搜索资料，读取公开网页（Bot 主机自己的配置）。</p>
+        </div>
+      </div>
+      <BotWebSearchSettings state={state} />
+    </div>
+  );
 }
 
 function BotMemorySettings({ instanceId }: { instanceId: string }) {
@@ -118,7 +191,6 @@ function SettingsRow({
 function ConnectedBotSettings({ state }: { state: BotState }) {
   const api = window.hemiVoice.bot;
   const [screen, setScreen] = useState<Dialog | null>(null);
-  const [skillsOpen, setSkillsOpen] = useState(false);
   const [host, setHost] = useState(state.binding?.host ?? '');
   const [pending, setPending] = useState<BotMethod | null>(null);
   const [error, setError] = useState('');
@@ -191,8 +263,6 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
     forget: 'connection.forget',
     update: 'component.update',
   } as const;
-
-  if (skillsOpen) return <BotSkillsSettings state={state} onBack={() => setSkillsOpen(false)}/>;
 
   return (
     <div className="h37-enter">
@@ -279,7 +349,6 @@ function ConnectedBotSettings({ state }: { state: BotState }) {
           </SettingsRow>
         </div>
       </section>
-      <BotCapabilitiesSettings state={state} onOpenSkills={() => setSkillsOpen(true)}/>
       <section className="h37-section">
         <div className="h37-section-head">
           <h3>移除连接</h3>

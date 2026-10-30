@@ -889,7 +889,6 @@ export function BotPage({
               conversationTitle={current?.title ?? 'Hemi Bot'}
               thinkingLevel={current?.thinking ?? 'default'}
               onThinkingLevelChange={(thinking) => void update({ thinking })}
-              onOpenSkillMarket={() => setPanel('capabilities')}
               onOpenWorkflowStudio={() => setPanel('capabilities')}
               attachments={attachments}
               draftAttachments={selectedAttachments}

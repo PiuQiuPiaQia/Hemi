@@ -3694,12 +3694,6 @@ export default function Home() {
         onClose={() => {
           void navigate(settingsTarget?.environment === 'bot' ? 'bot' : 'home');
         }}
-        onOpenSkills={() => {
-          // 037：设置成为壳内页面——图标栏「技能」先关设置再打开技能中心。
-          setSettingsTarget(null);
-          setSettingsOpen(false);
-          setSkillMarketOpen(true);
-        }}
         onConfigChange={updateConfigForm}
         onModelConfigChange={updateModelForm}
         onTogglePrimarySpeaker={handleTogglePrimarySpeaker}
@@ -3730,11 +3724,6 @@ export default function Home() {
     <ApplicationNavigationContext.Provider value={navigation}>
       <VoiceScreen
         skillMarketOpen={skillMarketOpen}
-        onOpenSkillMarket={async () => {
-          if(!await confirmWorkflowLeave())return;
-          setSkillMarketOpen(true);
-          setWorkflowStudioOpen(false);
-        }}
         onCloseSkillMarket={() => setSkillMarketOpen(false)}
         workflowStudioOpen={workflowStudioOpen}
         onOpenWorkflowStudio={() => {
@@ -3747,6 +3736,7 @@ export default function Home() {
         turnPhase={turnPhase}
         turnStartedAt={Number(flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.startedAt) || null}
         runActivity={flowSnapshot?.phase !== 'stopping' ? flowSnapshot?.runs[flowSnapshot.activeRunId ?? '']?.activity : null}
+        backgroundJobs={flowSnapshot?.backgroundJobs}
         elapsedSeconds={elapsedSeconds}
         callMuted={callMuted}
         dockCollapsed={dockCollapsed}

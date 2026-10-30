@@ -1,4 +1,4 @@
-import { Activity, Bot, MessageCircle, Settings, Sparkles, Workflow, type LucideIcon } from 'lucide-react';
+import { Activity, Bot, MessageCircle, Settings, Workflow, type LucideIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { SkinPicker } from '@/components/skin-picker';
 import { UpdateButton } from './update-button';
@@ -11,7 +11,6 @@ export function NavRail({
   page,
   onShowHome,
   homePreviewProps,
-  onShowSkills,
   onShowWorkflows,
   onShowUsage,
   onOpenSettings,
@@ -19,7 +18,6 @@ export function NavRail({
   page: ApplicationPage;
   onShowHome?: () => void;
   homePreviewProps?: Pick<ComponentProps<'button'>, 'id' | 'aria-controls' | 'aria-expanded' | 'onPointerEnter' | 'onPointerLeave' | 'onFocusCapture' | 'onBlurCapture'>;
-  onShowSkills?: () => void;
   onShowWorkflows?: () => void;
   onShowUsage?: () => void;
   onOpenSettings?: () => void;
@@ -63,10 +61,10 @@ export function NavRail({
           {item('home', '对话', MessageCircle, onShowHome)}
           {navigation ? item('bot', 'Bot', Bot) : null}
         </div>
-        {navigation || onShowSkills || onShowWorkflows || onShowUsage ? <>
+        {navigation || onShowWorkflows || onShowUsage ? <>
           <div className="h24-navrail-divider" aria-hidden="true" />
           <div className="h24-navrail-group" role="group" aria-label="扩展工具">
-            {navigation || onShowSkills ? item('skills', '技能中心', Sparkles, onShowSkills) : null}
+            {/* 2026-10-30：技能中心收进设置页（本地与 Bot 一致），图标栏不再单列入口。 */}
             {navigation || onShowWorkflows ? item('workflows', '工作流', Workflow, onShowWorkflows) : null}
             {navigation || onShowUsage ? item('usage', '使用记录', Activity, onShowUsage) : null}
           </div>

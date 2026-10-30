@@ -170,10 +170,10 @@ try {
   await closed();
   check('topbar drawer and new conversation still work');
 
-  await page.getByRole('button', { name: '技能中心', exact: true }).click();
+  await page.getByRole('button', { name: '工作流', exact: true }).click();
   await trigger.hover();
   await page.waitForTimeout(300);
-  check('hover does not navigate away from skills or reveal hidden list', !(await sidebar.isVisible()) && await workspace.getAttribute('data-nav-open') === 'false');
+  check('hover does not navigate away from workflows or reveal hidden list', !(await sidebar.isVisible()) && await workspace.getAttribute('data-nav-open') === 'false');
   await trigger.click();
   await page.locator('textarea.text-composer-input').click();
   await page.evaluate(() => window.hemiVoice.setAppearance({ requestId: 'nav-check-classic', skinId: 'classic', mode: 'light' }));

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Brain, ChevronDown, Cpu, Menu, Mic, Monitor, Search, Settings as SettingsIcon } from 'lucide-react';
+import { Brain, ChevronDown, Cpu, Menu, Mic, Monitor, Search, Settings as SettingsIcon, Sparkles } from 'lucide-react';
 
 import { openExternal } from '@/shared/open-external';
 import { SaveIndicator, type SaveState } from '@/components/save-indicator';
@@ -24,12 +24,16 @@ import { AccessSection } from '@/windows/voice/access-section';
 import { PushToTalkSection } from '@/windows/voice/push-to-talk-section';
 import { VisionSection } from '@/windows/voice/vision-section';
 import { WebSection } from '@/windows/voice/web-section';
+import { SkillMarket } from '@/windows/voice/skill-market';
 import { BotSettings } from '@/windows/bot/settings';
 
 /**
  * 设置整页视图。
  * 041 信息架构重组（2026-10-05，六分类候选基线）：通用 / 语音与通话 / 模型与路由 /
  * 电脑与浏览器 / 联网搜索 / 记忆；日志降为导航底部辅助入口；≤880 分类收进抽屉。
+ * 2026-10-30：Bot 设置对象沿用同一套分类（此前仅通用/模型与路由/记忆三类），
+ * 各页内容由 BotSettings 渲染为 Bot 版本；技能中心收进设置页并成为本地与 Bot
+ * 共有的第七个分类（图标栏不再单列技能入口）。
  * 旧五分类（模型 / 权限与控制 / 浏览器控制 / 联网搜索 / 记忆）经 PAGE_ALIASES 映射，
  * 032 修复条、记忆提示等历史直达目标不迁移调用方；模型「文本 / 语音」子 tab 拆为
  * 「模型与路由」「语音与通话」两个一级分类。
@@ -40,7 +44,7 @@ import { BotSettings } from '@/windows/bot/settings';
  * .settings-form-section 保留在模型区块外层（取证脚本就绪标记）。
  */
 
-export type SettingsPage = 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory';
+export type SettingsPage = 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory' | 'skills';
 export type SettingsEnvironment = 'local' | 'bot';
 
 /** 旧直达目标别名（038/032 时代的五分类键）。 */
@@ -59,6 +63,9 @@ const PAGES: Array<{ key: SettingsPage; label: string; icon: ReactNode }> = [
   { key: 'control', label: '电脑与浏览器', icon: <Monitor aria-hidden="true" /> },
   { key: 'web', label: '联网搜索', icon: <Search aria-hidden="true" /> },
   { key: 'memory', label: '记忆', icon: <Brain aria-hidden="true" /> },
+  // 2026-10-30：技能中心收进设置页（本地与 Bot 一致）；图标栏不再单列技能入口，
+  // 会话内任务审批仍走对话里的权限卡片。
+  { key: 'skills', label: '技能中心', icon: <Sparkles aria-hidden="true" /> },
 ];
 
 /**
@@ -83,8 +90,6 @@ type SettingsScreenProps = {
   ttsConfig: TtsConfigForm;
   primarySpeakerEnabled: boolean;
   onClose: () => void;
-  /** 037：图标栏「技能」——先关设置再打开技能中心（缺省时等同回主页）。 */
-  onOpenSkills?: () => void;
   onConfigChange: (next: Partial<ConfigForm>) => void;
   onModelConfigChange: (next: Partial<TextModelConfigForm>) => void;
   onTogglePrimarySpeaker: (enabled: boolean) => void;
@@ -120,7 +125,6 @@ export function SettingsScreen({
   ttsConfig,
   primarySpeakerEnabled,
   onClose,
-  onOpenSkills,
   onConfigChange,
   onTogglePrimarySpeaker,
   onPreviewTts,
@@ -131,10 +135,7 @@ export function SettingsScreen({
   onCallEnd,
 }: SettingsScreenProps) {
   const [environment, setEnvironment] = useState(initialEnvironment);
-  const [page, setPage] = useState<SettingsPage>(() => {
-    const next = resolveInitialPage(initialPage, initialModelTab);
-    return initialEnvironment === 'bot' && next !== 'models' && next !== 'memory' ? 'general' : next;
-  });
+  const [page, setPage] = useState<SettingsPage>(() => resolveInitialPage(initialPage, initialModelTab));
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 深层定位：切页后滚动到锚点并短暂强调（browser-decision 同时展开 Jev 组）。
   const [pendingSection, setPendingSection] = useState<string | null>(initialSection ?? null);
@@ -184,15 +185,14 @@ export function SettingsScreen({
     if (next === environment) return;
     {
       setEnvironment(next);
-      if (page !== 'general' && page !== 'models' && page !== 'memory') setPage('general');
       setModelView('overview');
       setPendingSection(null);
       setDrawerOpen(false);
     }
   };
-  const pages = environment === 'bot'
-    ? PAGES.filter((item) => item.key === 'general' || item.key === 'models' || item.key === 'memory')
-    : PAGES;
+  // 2026-10-30：本地与 Bot 同一套分类导航（六分类＋技能中心，共七项），
+  // 各页内容按环境渲染对应版本；切换设置对象保留当前分类。
+  const pages = PAGES;
 
   const navItems = (onPick: (key: SettingsPage) => void) =>
     pages.map((item) => (
@@ -249,7 +249,6 @@ export function SettingsScreen({
         <NavRail
           page="settings"
           onShowHome={close}
-          onShowSkills={onOpenSkills ?? onClose}
           onOpenSettings={() => {}}
         />
         <section className="h24-workspace h37-settings-workspace">
@@ -282,7 +281,13 @@ export function SettingsScreen({
                 </span>
               </label>
               {environment === 'bot' ? (
-                <BotSettings page={page === 'models' || page === 'memory' ? page : 'general'} />
+                <BotSettings
+                  page={page}
+                  decisionOpen={jevOpen}
+                  onToggleDecision={() => setJevOpen((prev) => !prev)}
+                  onConfigureDecision={() => goTo('models', 'browser-decision')}
+                  onBackToBrowser={() => goTo('control', 'browser')}
+                />
               ) : <>
               <div hidden={page !== 'memory'} className="h37-enter">
                 <div className="h37-page-head">
@@ -419,6 +424,8 @@ export function SettingsScreen({
                       <WebSection />
                     </>
                   ) : null}
+
+                  {page === 'skills' ? <LocalSkillsSettings /> : null}
                 </div>
               ) : null}
               </>}
@@ -460,8 +467,24 @@ export function SettingsScreen({
   );
 }
 
-/** 语音页「语音识别（豆包）＋语音播报」：字段与行为同 031，041 从模型子 tab 独立成页。 */
-function VoiceModelForm({
+/** 技能中心页（本地，2026-10-30 从图标栏一级入口收进设置页）：技能安装在本机；
+ *  与 Bot 环境同名分类对应（那边渲染 Bot 主机版本）。任务内的技能审批仍在对话中处理。 */
+function LocalSkillsSettings() {
+  return (
+    <div className="h37-enter">
+      <div className="h37-page-head">
+        <div>
+          <h2>技能中心</h2>
+          <p>技能安装在本机，供各个对话使用；各项目的技能也会自动发现。</p>
+        </div>
+      </div>
+      {/* SkillMarket 的 onBack 只用于会话内审批返回；设置页内无对话可回，传空实现。 */}
+      <SkillMarket inline initialTab="installed" onBack={() => {}} />
+    </div>
+  );
+}
+
+/** 语音页「语音识别（豆包）＋语音播报」：字段与行为同 031，041 从模型子 tab 独立成页。 */function VoiceModelForm({
   saving,
   config,
   ttsConfig,

@@ -247,9 +247,11 @@ function InstallBar({ phase, elapsed, installed, locked, onInstall, onManage }: 
   );
 }
 
-export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = window.hemiVoice, remote = false, initialTab = 'discover' }: {
+export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = window.hemiVoice, remote = false, inline = false, initialTab = 'discover' }: {
   api?: SkillMarketApi;
   remote?: boolean;
+  /** 嵌入非整页容器（如设置页）时用 section 根，避免 main 套 main；行为仍按本地/远端。 */
+  inline?: boolean;
   initialTab?: Tab;
   onBack: () => void;
   pendingApproval?: boolean;
@@ -948,7 +950,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     </section>
   );
 
-  const MarketRoot = remote ? 'section' : 'main';
+  const MarketRoot = inline || remote ? 'section' : 'main';
   return (
     <MarketRoot ref={scrollRef} className="h34-market" aria-label="技能市场" data-detail-open={detailOpen ? 'true' : 'false'}>
       {topbarSlot ? createPortal(topbar, topbarSlot) : <div className="h34-inline-top">{topbar}</div>}

@@ -163,7 +163,6 @@ try {
     await page.locator('.h37-settings-drawer').waitFor({ state: 'hidden' });
     await page.locator('.app-topbar-back').click(); await page.locator('textarea.text-composer-input').waitFor();
     result.checks.push('settings drawer and common back action work at narrow width');
-    await navigate('技能中心', 'skills'); await matrix('skills');
     await navigate('工作流', 'workflows'); await matrix('workflows');
     await page.getByRole('button', { name: '新建工作流', exact: true }).filter({ visible: true }).first().click();
     await page.getByRole('textbox', { name: '工作流名称', exact: true }).waitFor();

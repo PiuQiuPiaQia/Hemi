@@ -5,8 +5,14 @@ import { ModelProfilesSection, type ModelView } from '../voice/model-profiles-se
 import { botModelDirectory, callBot } from './bridge';
 import { createBotModelSettingsBridge } from './model-settings-bridge';
 import { BotModelsSyncDialog } from './models-sync-dialog';
+import { BotBrowserDecisionSettings } from './capabilities-settings';
 
-export function BotModelsSettings({ state }: { state: BotState }) {
+export function BotModelsSettings({ state, decisionOpen = false, onToggleDecision = () => {}, onBackToBrowser }: {
+  state: BotState;
+  decisionOpen: boolean;
+  onToggleDecision?: () => void;
+  onBackToBrowser?: () => void;
+}) {
   const current = useRef(state); current.current = state;
   const [view, setView] = useState<ModelView['kind']>('overview');
   const [comparing, setComparing] = useState(false), [error, setError] = useState('');
@@ -28,5 +34,7 @@ export function BotModelsSettings({ state }: { state: BotState }) {
       void callBot(api, 'oauth.start', { provider, expectedInstanceId: state.binding?.instanceId })
         .then(() => setOpenAddRequest(value => value + 1)).catch(reason => setError(reason instanceof Error ? reason.message : '未能发起 Bot 授权。'));
     }} /> : null}
+    {/* 与 PC 模型页一致：供应商下钻时隐藏决策模型区块。 */}
+    {view === 'overview' ? <BotBrowserDecisionSettings state={state} open={decisionOpen} onToggle={onToggleDecision} onBack={onBackToBrowser} /> : null}
   </div>;
 }
