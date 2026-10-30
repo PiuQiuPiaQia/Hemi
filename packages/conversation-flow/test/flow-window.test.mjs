@@ -4,6 +4,18 @@ import {moduleUnderTest} from './compile.mjs';
 const {projectFlowWindow,flowHistoryPage,createFlowWindowProjector,applyFlowChange,createConversation}=await moduleUnderTest('../src/core.ts');
 const item=i=>({kind:'user',id:'input-'+i,runId:'run-'+i,text:String(i)+':'+ 'x'.repeat(64*1024),inputSource:'text',attachmentIds:[],acceptedAt:0,deliveredAt:0});
 const full={schemaVersion:1,conversationId:'long',generation:1,revision:1,phase:'idle',activeRunId:null,queuePaused:false,pending:[],timeline:Array.from({length:100},(_,i)=>item(i)),runs:{},tasks:{},permissions:{},artifacts:{},pendingReports:[]};
+test('windowed clients retain background jobs and receive output/removal patches while foreground is idle',()=>{
+ let authoritative={...full,timeline:[]};const project=createFlowWindowProjector(applyFlowChange,()=>authoritative);
+ let view=project({type:'reset',snapshot:{detail:{id:'long',flow:authoritative}}}).snapshot.detail.flow;
+ const job={id:'job',runId:'old',generation:1,command:'pnpm dev',status:'running',output:'Ready'};
+ for(const jobs of [[job],[{...job,output:'New output'}],[]]){
+  const change={kind:'patch',conversationId:'long',generation:1,baseRevision:authoritative.revision,revision:authoritative.revision+1,changes:[{kind:'background-jobs',jobs}]};
+  authoritative=applyFlowChange(authoritative,change).snapshot;
+  const frame=project({type:'flow',id:'long',change});const applied=applyFlowChange(view,frame.change);
+  assert.equal(applied.ok,true);view=applied.snapshot;assert.deepEqual(view.backgroundJobs,jobs);
+  assert.equal(view.phase,'idle');assert.equal(view.activeRunId,null);
+ }
+});
 test('long histories have a bounded active baseline and every historical row remains retrievable',()=>{
  const head=projectFlowWindow(full);assert.ok(Buffer.byteLength(JSON.stringify(full))>6*1024*1024);assert.ok(Buffer.byteLength(JSON.stringify(head))<256*1024);
  let before=head.history.start,rows=head.timeline;

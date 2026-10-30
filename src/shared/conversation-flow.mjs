@@ -43,6 +43,7 @@ export function createFlowSnapshot({ conversationId, revision = 0, generation = 
     artifacts: {},
     permissions: {},
     pendingReports: [],
+    backgroundJobs: [],
   };
 }
 
@@ -346,6 +347,14 @@ export function applyFlowFact(snapshot, fact) {
       const next = { ...snapshot, revision: snapshot.revision + 1, runs: { ...snapshot.runs, [fact.runId]: run } };
       return { snapshot: next, patch: { kind: 'runs', runs: next.runs }, applied: true };
     }
+    case 'background-jobs': {
+      const jobs=fact.jobs;
+      if(!Array.isArray(jobs)||jobs.some(job=>!job?.id||!job.runId||job.generation!==generation)
+        ||new Set(jobs.map(job=>job.id)).size!==jobs.length)return {snapshot,patch:null,applied:false,dropped:'invalid-jobs'};
+      if(JSON.stringify(snapshot.backgroundJobs??[])===JSON.stringify(jobs))return {snapshot,patch:null,applied:false,dropped:'no-op'};
+      const next={...snapshot,revision:snapshot.revision+1,backgroundJobs:structuredClone(jobs)};
+      return {snapshot:next,patch:{kind:'background-jobs',jobs:next.backgroundJobs},applied:true};
+    }
     case 'run-activity': {
       if (snapshot.activeRunId !== fact.runId || !runAccepts(snapshot, fact.runId) || snapshot.phase === 'stopping') {
         return { snapshot, patch: null, applied: false, dropped: 'not-active-run' };
@@ -490,11 +499,11 @@ export function applyFlowFact(snapshot, fact) {
       const artifacts = Object.fromEntries(Object.entries(snapshot.artifacts).filter(([, artifact]) => !removedTasks.has(artifact.taskId)));
       const permissions = Object.fromEntries(Object.entries(snapshot.permissions).filter(([, permission]) => !removedTasks.has(permission.taskId)));
       const pendingReports = snapshot.pendingReports.filter((report) => !removedTasks.has(report.taskId));
-      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, awaitingUser:null, timeline, tasks, artifacts, permissions, pendingReports };
+      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, awaitingUser:null, timeline, tasks, artifacts, permissions, pendingReports,backgroundJobs:[] };
       return {
         snapshot: next,
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'timeline', timeline },
-          { kind: 'tasks', tasks }, { kind: 'artifacts', artifacts }, { kind: 'permissions', permissions }, { kind: 'reports', pendingReports }] },
+          { kind: 'tasks', tasks }, { kind: 'artifacts', artifacts }, { kind: 'permissions', permissions }, { kind: 'reports', pendingReports },{kind:'background-jobs',jobs:[]}] },
         applied: true,
       };
     }
@@ -555,6 +564,7 @@ function applyPatch(snapshot, patch) {
       return { ...snapshot, timeline };
     }
     case 'runs': return { ...snapshot, runs: patch.runs };
+    case 'background-jobs': return {...snapshot,backgroundJobs:patch.jobs};
     case 'tasks': return { ...snapshot, tasks: patch.tasks };
     case 'artifacts': return { ...snapshot, artifacts: patch.artifacts };
     case 'permissions': return { ...snapshot, permissions: patch.permissions };

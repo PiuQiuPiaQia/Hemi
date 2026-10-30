@@ -24,6 +24,8 @@ import {
   readDocumentBytes,
 } from '../composer/documents.mjs';
 import { buildSkillDirectiveBlock } from '../../shared/skill-directives.mjs';
+import { validateSkillSelections } from '../composer/capability-catalog.mjs';
+import { skillDiagnosticsMessage } from '../skills/skill-definition.mjs';
 import {
   BOT_PROTOCOL,
   BOT_VERSION,
@@ -411,6 +413,8 @@ export async function createBotHost({
     const availableLease = collectSkills({skillService: capabilities.skills, workspace: {dir}});
     const available = availableLease.items, skills = [];
     availableLease.release();
+    const verdict = validateSkillSelections(input.skills, available, availableLease.diagnostics);
+    if (!verdict.ok) fail(`所选技能不可用：${verdict.missing.map(item => `${item.name}（${item.reason}）`).join('；')}`, 'missing');
     for (const selection of (input.skills ?? []).slice(0, 10)) {
       const resolved = available.find(
         (skill) =>
@@ -1588,7 +1592,7 @@ export async function createBotHost({
           { id: 'model', name: '/model', description: '切换当前会话模型' },
         ],
         skills,
-        skillsError: '',
+        skillsError: skillDiagnosticsMessage(lease.diagnostics),
       };
     }
     // Durable operation identities prevent an uncertain SSH outcome from silently repeating side effects.

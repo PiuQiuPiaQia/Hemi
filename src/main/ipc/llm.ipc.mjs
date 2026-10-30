@@ -246,6 +246,7 @@ export function getAgentRuntime() {
     saveArchiveAgent: saveConversationAgent,
     onEventTurn: handleEventTurn,
     onBackgroundReady:(conversationId,event)=>flowService?.controllerFor(conversationId).enqueueBackground(event),
+    onBackgroundJobs:(conversationId,view)=>{if(flowService?.has(conversationId))flowService.controllerFor(conversationId).applyFact({type:'background-jobs',...view});},
     getSkillService,
     nativeMemory: true,
     onGoalVerification: (conversationId, call) => {
@@ -867,9 +868,9 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     const skillSelections = sanitizeSkillSelections(payload?.skills);
     if (skillSelections.length) {
       const { validateSkillSelections } = await import('../composer/capability-catalog.mjs');
-      const collected = collectSkills({ skillService: getSkillService(), workspace });
+      const collected = collectSkills({ skillService: getSkillService(), workspace, log: llmLog });
       try {
-        const verdict = validateSkillSelections(skillSelections, collected.items);
+        const verdict = validateSkillSelections(skillSelections, collected.items, collected.diagnostics);
         if (!verdict.ok) {
           const detail = verdict.missing.map((item) => `${item.name}（${item.reason}）`).join('、');
           throw new Error(`这回合要用的技能已不可用，请移除或重新选择：${detail}`);

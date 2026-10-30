@@ -57,6 +57,18 @@ Electron 验证走实际 UI → preload → IPC → Runtime → Pi SDK → Shell
 
 日志、截图与最终检查结果保存在忽略目录 `.visual/workflow/background-goals/`。未验证 Windows 真机、移动设备、真实外部模型的完成判断或安装包更新后行为；没有对真实项目或个人配置进行启动、迁移或写入。
 
+## 2026-10-30：前台收口后的后台列表
+
+主／子会话命令作用域通过独立的 `background-jobs` 事件向共享 Runtime 发布受管命令快照，不依赖本轮模型或 activity 监听。Runtime 汇总为会话级 `backgroundJobs`，通过同一 flow 控制器、快照与增量补丁送到桌面和 Bot／移动端；窗口化历史投影也保留该字段。它不参与 `phase`、`activeRunId`、正文生成光标或待发送调度。
+
+输入框上方单独显示后台任务数，展开可看操作说明、原命令、最近输出、运行时长和单条停止入口。每条命令带原 `runId` 与 generation，跨回合控制仍校验真实归属；同一命令在前台活动与后台列表间去重。主对话结束、继续问答或 renderer 重载都保留列表，日志继续更新；真实退出后移除，停止一条不影响其他命令。清理未确认的命令保留“清理待确认”，不冒充退出或允许重复停止。回卷隔离旧代次与旧执行器的迟到事件；列表推送不重新创建已删除会话的控制器。Host 重启恢复清空旧 UI 列表，进程回收与不重放契约不变。
+
+本轮基线为 `02651574b547dcda77daa75808d07e169e54204a` 加未提交修改；macOS arm64、Node 22.22.3、Electron 44（内置 Node 24.18.1）、Pi SDK 1.3.0，源码版本 0.2.29。验证全部使用新的临时数据目录和合成模型服务，实际 IPC、Runtime、SDK、Shell、HTTP 与界面正常运行，没有写入个人对话或生产配置。
+
+执行桌面构建、移动端类型检查及构建、间距检查、共享 flow／窗口补丁／恢复／实际 Bot 命令定向测试，并运行 `node scripts/verify-background-goals.mjs` 与 `node scripts/verify-background-goals.mjs --dev`。两种桌面 renderer 均验证空闲时列表保留、回复后的日志推送、重载、双命令去重、完成移除和跨回合点击停止；页面错误列表为空，截图已复核。证据位于 `.visual/workflow/background-jobs-list/{built,dev}/`，检查日志为 `.visual/workflow/background-goals/list-*.log`。React 改动按 `react-best-practices` 核对 hook、重复订阅、派生状态、只读边界和可访问名称；没有增加模型轮询、独立 UI 数据源或依赖。
+
+首轮完整回归的用量历史 SSE 测试在 `record.tps > 0` 的时间断言失败；未改动用量模块，其定向 8 项复验通过。随后用相同四个测试根目录、Node 文件并发 2、全新临时数据目录完整复跑全部 291 个测试文件：2230 项中 2209 通过、21 跳过、0 失败；命令为 `HEMI_TEST_CONCURRENCY=2 node .visual/workflow/background-goals/run-full-suite.mjs`，结果为 `list-full-final.log`。停止／清理／控制器专项 56 项通过；桌面构建、移动端类型检查及构建、间距与空白检查通过。Windows 真机、实体移动设备和真实外部模型未验；没有提交本轮修改、发版、替换安装版或部署生产 Bot。
+
 ## 锁的范围
 
 - 普通 Bash／PowerShell 不申请工作目录租约；命令前台运行或转后台都不会阻塞其他会话对同目录文件的读取、写入或其他命令。文件工具仍按显式目标协调冲突读写，浏览器按会话使用 `browser:<owner>`，桌面使用交互资源租约。

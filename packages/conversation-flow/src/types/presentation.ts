@@ -257,6 +257,7 @@ export type RunActivityView = {
     | "compacting" | "verifying" | "continuing" | "finishing";
   since: number | null;
   jobs: Array<{
+    runId?: string; generation?: number; taskId?: string; cleanupConfirmed?: boolean;
     id: string;
     toolCallId?: string;
     command: string;
@@ -282,6 +283,8 @@ export type RunActivityView = {
     }>;
   }>;
 };
+
+export type BackgroundJobView = RunActivityView['jobs'][number] & {runId:string;generation:number};
 
 export type TaskPermissionRequest = {
   id: string;

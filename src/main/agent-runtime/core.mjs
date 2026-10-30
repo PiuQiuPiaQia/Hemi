@@ -24,7 +24,8 @@ import { createMainAgent, buildAgentAppendSystem, entriesFromTurns } from '../ag
 import { createHemiSession, backgroundCommandEvent } from '../agent/hemi-session.mjs';
 import { createSubagentManager } from '../agent/subagents.mjs';
 import { loadRoles, buildRoutingSection, ROLE_NAMES } from '../agent/agent-roles.mjs';
-import { discoverProjectSkills } from '../skills/project-skills.mjs';
+import { collectSkills } from '../skills/skill-catalog.mjs';
+export { collectSkills } from '../skills/skill-catalog.mjs';
 import { resolveRoleModel } from '../lib/role-models.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
 import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-runtime/model-policy.mjs';
@@ -67,21 +68,6 @@ export async function resolveWorkspacePlacement(workspace, { log } = {}) {
 }
 
 
-/** 主 agent／子 agent 共用的 Skill 清单：Hemi 技能库（受控快照）＋项目 Skill（本机工作区）。 */
-export function collectSkills({ skillService, workspace }) {
-  let lease = null;
-  try {
-    lease = skillService?.snapshot?.(null) ?? null;
-  } catch {
-    lease = null;
-  }
-  const library = (lease?.items ?? []).map((item) => ({ id: item.id, name: item.name, path: item.path, source: 'library', description: item.description ?? '' }));
-  const project = workspace?.host ? [] : discoverProjectSkills(workspace?.dir ?? null);
-  const names = new Set(library.map((item) => item.name));
-  const merged = [...library, ...project.filter((item) => !names.has(item.name))];
-  return { items: merged, release: () => lease?.release?.() };
-}
-
 /**
  * 模型计划：手选物理模型或带备用的路由快照（038 虚拟模型只承担故障切换）。
  * config＝主模型 ResolvedConfig；fallback＝备用（可空）。
@@ -118,6 +104,7 @@ export function createAgentRuntime({
   saveArchiveAgent,
   onEventTurn,
   onBackgroundReady = null,
+  onBackgroundJobs = null,
   getSkillService = () => null,
   nativeMemory = false,
   goalPolicy = {},
@@ -144,6 +131,8 @@ export function createAgentRuntime({
   const dispatchInFlight = new Map();
   // Pending goals hold no foreground slot. Only a live, unconsumed result may wake one.
   const backgroundGoals = new Map(), retainedCommandSessions = new Map();
+  const backgroundJobViews = new Map();
+  const invalidatedCommandViews = new WeakSet();
   let shuttingDown = false;
   async function wakeBackground(owner,{review=false}={}) {
     const pending=backgroundGoals.get(owner?.rootRunId);
@@ -157,6 +146,16 @@ export function createAgentRuntime({
     catch(error){pending.queued=false;log?.warn?.(`后台结果通知失败：${error.message}`);}
   }
   function observeCommands(session) {
+    session.on('background-jobs',({owner,jobs})=>{
+      if(!owner||shuttingDown||invalidatedCommandViews.has(session)||owner.rootRunId?.startsWith('wrun-'))return;
+      const current=agents.get(owner.conversationId)?.ctx;
+      if(current&&current.generation!==owner.generation)return;
+      if(jobs.length)backgroundJobViews.set(session,{conversationId:owner.conversationId,jobs});
+      else backgroundJobViews.delete(session);
+      const all=[...backgroundJobViews.values()].filter(view=>view.conversationId===owner.conversationId)
+        .flatMap(view=>view.jobs).filter(job=>job.generation===owner.generation);
+      onBackgroundJobs?.(owner.conversationId,{generation:owner.generation,jobs:all});
+    });
     session.on('command-settled',job=>{void (async()=>{
       if(job.status==='cancelled'){
         const pending=backgroundGoals.get(job.owner.rootRunId);
@@ -271,7 +270,7 @@ export function createAgentRuntime({
 
   async function currentRoleLoadout(workspace) {
     const [caps, placement] = await Promise.all([resolveCapabilities(), resolvePlacement(workspace, {log})]);
-    const skills = collectSkills({skillService: getSkillService(), workspace});
+    const skills = collectSkills({skillService: getSkillService(), workspace, log});
     try { return await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: false}); }
     finally { skills.release(); }
   }
@@ -279,7 +278,7 @@ export function createAgentRuntime({
   async function createRoleSession({ role, conversationId, accessId, workspace, inputSource, modelPlan, sessionRef, sessionSource, sessionState = null }) {
     const caps = await resolveCapabilities();
     const placement = await resolvePlacement(workspace, { log });
-    const skills = collectSkills({ skillService: getSkillService(), workspace });
+    const skills = collectSkills({ skillService: getSkillService(), workspace, log });
     try {
       if (modelPlan.loadoutRevision && modelPlan.loadoutRevision !== await sessionLoadoutRevision({caps, placement, skills: skills.items, agentDir, memoryEnabled: false})) throw new Error('工具、技能或项目规范已变化，请重新派单');
     } catch (error) { skills.release(); throw error; }
@@ -389,7 +388,7 @@ export function createAgentRuntime({
     const { conversationId } = turn;
     const caps = await resolveCapabilities();
     const placement = await resolvePlacement(turn.workspace, { log });
-    const skills = collectSkills({ skillService: getSkillService(), workspace: turn.workspace });
+    const skills = collectSkills({ skillService: getSkillService(), workspace: turn.workspace, log });
     // 角色可用性：解析不出模型（如 designer 没有视觉模型）的角色不进路由卡。
     const available = new Set();
     for (const name of ROLE_NAMES) {
@@ -410,7 +409,7 @@ export function createAgentRuntime({
       // 不在驻留 key／日志中保留凭据；有效模型／扩展配置变化必须重建 provider 闭包。
       config: createHash('sha256').update(JSON.stringify({ modelOptions, extensions: caps.extensionConfig })).digest('hex'),
       thinking: modelOptions.thinking, cwd: cwdKeyOf(placement), features: caps.features,
-      skills: skills.items.map((item) => item.path), system: appendSystem,
+      skills: skills.items.map((item) => [item.path, item.revision]), system: appendSystem,
     });
     const existing = agents.get(conversationId);
     if (existing && existing.key === key && !existing.agent.isDisposed()) {
@@ -910,7 +909,9 @@ export function createAgentRuntime({
     request={...request,runId:await journal.rootForFlow(conversationId,request.runId)};
     const entry=agents.get(conversationId);
     const pending=backgroundGoals.get(request.runId);
-    if(!entry || (!pending&&(entry.ctx.runId!==request.runId || entry.ctx.cancelled)))throw new Error('当前目标已变化');
+    const listed=[...backgroundJobViews.values()].some(view=>view.conversationId===conversationId&&view.jobs.some(job=>job.runId===request.runId
+      &&job.generation===entry?.ctx.generation&&(!request.jobId||job.id===request.jobId)));
+    if(!entry || (!pending&&!listed&&(entry.ctx.runId!==request.runId || entry.ctx.cancelled)))throw new Error('当前目标已变化');
     if(request.action==='review'&&pending){await wakeBackground(ownerOf(pending.ctx),{review:true});return {accepted:true};}
     const controllerOwner=ownerOf(entry.ctx),sources=commandSessions(conversationId);
     if(request.action==='review')return entry.agent.backgroundCommand(request);
@@ -992,6 +993,8 @@ export function createAgentRuntime({
    * 内存授权随之消失）。
    */
   function invalidate(conversationId) {
+    for(const session of commandSessions(conversationId))invalidatedCommandViews.add(session);
+    for(const [session,view]of backgroundJobViews)if(view.conversationId===conversationId){invalidatedCommandViews.add(session);backgroundJobViews.delete(session);}
     for(const [id,pending]of backgroundGoals)if(pending.ctx.conversationId===conversationId)backgroundGoals.delete(id);
     for(const session of retainedCommandSessions.get(conversationId)??[])session.dispose();
     retainedCommandSessions.delete(conversationId);
@@ -1058,6 +1061,7 @@ export function createAgentRuntime({
 
   function disposeAll() {
     shuttingDown=true;backgroundGoals.clear();
+    backgroundJobViews.clear();
     for(const sessions of retainedCommandSessions.values())for(const session of sessions)session.dispose();
     retainedCommandSessions.clear();
     for (const [, entry] of agents) {

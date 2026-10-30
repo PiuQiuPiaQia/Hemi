@@ -1599,6 +1599,7 @@ export type RunActivityView = {
     | 'compacting' | 'verifying' | 'continuing' | 'finishing';
   since: number | null;
   jobs: Array<{
+    runId?: string; generation?: number; taskId?: string; cleanupConfirmed?: boolean;
     id: string; toolCallId?: string; command: string;
     description?: string; commandTruncated?: boolean; lastOutputAt?: number | null;
     deadlineAt?: number; outputBytes?: number; earliestOutput?: number;
@@ -1611,6 +1612,8 @@ export type RunActivityView = {
     blockers: Array<{ tool?: string; description?: string; owner?: { conversationId?: string } | string }>;
   }>;
 };
+
+export type BackgroundJobView = RunActivityView['jobs'][number] & {runId:string;generation:number};
 
 export type FlowSnapshotView = {
   schemaVersion: number;
@@ -1628,6 +1631,7 @@ export type FlowSnapshotView = {
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
+  backgroundJobs?: BackgroundJobView[];
 };
 
 export type FlowInputView = {

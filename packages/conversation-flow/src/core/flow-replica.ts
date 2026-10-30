@@ -56,6 +56,7 @@ export function applyFlowChange(snapshot: FlowSnapshotView, change: FlowChangeVi
             break;
           }
           case 'runs': next = { ...next, runs: patch.runs as FlowSnapshotView['runs'] }; break;
+          case 'background-jobs': next = {...next, backgroundJobs: patch.jobs as FlowSnapshotView['backgroundJobs']}; break;
           case 'tasks': next = { ...next, tasks: patch.tasks as FlowSnapshotView['tasks'] }; break;
           case 'artifacts': next = { ...next, artifacts: patch.artifacts as FlowSnapshotView['artifacts'] }; break;
           case 'permissions': next = { ...next, permissions: patch.permissions as FlowSnapshotView['permissions'] }; break;

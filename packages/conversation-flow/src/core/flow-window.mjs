@@ -71,6 +71,7 @@ function diff(previous,next) {
     else if(!equal(previous.timeline[index],next.timeline[index]))changes.push({kind:'item-updated',item:next.timeline[index]});
   }
   for(const key of ['runs','tasks','artifacts','permissions'])if(!equal(previous[key],next[key]))changes.push({kind:key,[key]:next[key]});
+  if(!equal(previous.backgroundJobs??[],next.backgroundJobs??[]))changes.push({kind:'background-jobs',jobs:next.backgroundJobs??[]});
   if(!equal(previous.pendingReports,next.pendingReports))changes.push({kind:'reports',pendingReports:next.pendingReports});
   return {kind:'patch',conversationId:next.conversationId,generation:next.generation,baseRevision:previous.revision,revision:next.revision,changes};
 }

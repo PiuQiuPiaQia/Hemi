@@ -1,10 +1,10 @@
 import {useMemo} from 'react';
 import {useConversationBridge,useConversationEnvironmentId} from './lib/conversation-bridge';
 import type {FlowActionHandler} from '@hemi/conversation-flow';
-import type { RunActivityView } from "@shared/protocol";
+import type { BackgroundJobView, RunActivityView } from "@shared/protocol";
 import {
   ConversationFlowProvider,
-  RunActivity as SDKRunActivity,
+  ConversationActivity as SDKRunActivity,
 } from "@hemi/conversation-flow/parts";
 import { useDesktopFlowAppearance } from "./conversation-flow";
 import { useAppearance } from "@/appearance/use-appearance";
@@ -12,12 +12,14 @@ import { useAppearance } from "@/appearance/use-appearance";
 /** Keep the run summary beside the desktop composer, using the SDK's actual implementation. */
 export function RunActivity({
   activity,
+  backgroundJobs,
   active = true,
   conversationId,
   generation,
   readOnly,
 }: {
   activity?: RunActivityView | null;
+  backgroundJobs?: BackgroundJobView[];
   conversationId?: string | null;
   generation?: number;
   readOnly?: boolean;
@@ -44,7 +46,7 @@ export function RunActivity({
         appearance={{ tokens }}
         active={active && visibility.visible}
       >
-        <SDKRunActivity activity={activity} readOnly={readOnly} />
+        <SDKRunActivity activity={activity} backgroundJobs={backgroundJobs} readOnly={readOnly} />
       </ConversationFlowProvider>
     </div>
   );

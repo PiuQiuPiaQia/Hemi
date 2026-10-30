@@ -60,6 +60,7 @@ export function createConversationController({
   // ------------------------------------------------------------ 状态与发布
 
   function commit(fact) {
+    const previousJobs=snapshot.backgroundJobs??[];
     if(fact.type==='run-closed'&&(fact.cleanupUnconfirmed||fact.dispatchPaused)&&snapshot.activeRunId===fact.runId&&snapshot.generation===(fact.generation??snapshot.generation)){
       // A failed handoff/save preserves its replacement for review, without dispatching it.
       if(pendingNext){
@@ -94,7 +95,8 @@ export function createConversationController({
       previousActivity?.phase !== fact.activity?.phase
       || JSON.stringify(previousActivity?.jobs?.map(job => job.id)) !== JSON.stringify(fact.activity?.jobs?.map(job => job.id))
     );
-    if (fact.type === 'input-delivered' || fact.type === 'run-closed' || fact.type === 'run-recovery' || activityChanged) {
+    const jobsChanged=fact.type==='background-jobs'&&JSON.stringify(previousJobs.map(job=>[job.id,job.status]))!==JSON.stringify((snapshot.backgroundJobs??[]).map(job=>[job.id,job.status]));
+    if (fact.type === 'input-delivered' || fact.type === 'run-closed' || fact.type === 'run-recovery' || activityChanged || jobsChanged) {
       // 派发与收口是持久事实：长任务／退出前也必须保存正式输入，不能只留下
       // preparing 快照，让 turns 已有用户项而 flow 缺项。文本流不逐 token 写盘。
       void store.update(conversationId, { revision: snapshot.revision }).catch(() => {});
@@ -472,7 +474,8 @@ export function createConversationController({
       switch (command.type) {
         case 'send': return commandSend(command);
         case 'backgroundCommand': {
-          if((snapshot.activeRunId!==command.targetRunId&&snapshot.runs[command.targetRunId]?.outcome!=='awaiting-background') || snapshot.phase==='stopping')return {ok:false,code:'run-changed'};
+          const listed=(snapshot.backgroundJobs??[]).some(job=>job.runId===command.targetRunId&&(!command.jobId||job.id===command.jobId));
+          if((!listed&&snapshot.activeRunId!==command.targetRunId&&snapshot.runs[command.targetRunId]?.outcome!=='awaiting-background') || snapshot.phase==='stopping')return {ok:false,code:'run-changed'};
           if(!['list','read','review','stop'].includes(command.action))return {ok:false,code:'unsupported'};
           try {return {ok:true,data:await runtime.backgroundCommand?.({runId:command.targetRunId,action:command.action,jobId:command.jobId,from:command.from})};}
           catch(error){return {ok:false,code:'failed',message:error.message};}

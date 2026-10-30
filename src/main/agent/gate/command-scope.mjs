@@ -31,13 +31,16 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   };
   const view = record => ({
     id: record.id, toolCallId: record.toolCallId, command: record.command.slice(0, 8000),
+    runId:record.owner?.rootRunId,generation:record.owner?.generation,taskId:record.owner?.taskId,
+    cleanupConfirmed:record.result?.cleanupConfirmed??false,
     commandTruncated: record.command.length > 8000, description: record.description, lastOutputAt: record.lastOutputAt,
     deadlineAt:record.commandDeadlineAt, outputBytes:record.log.total, earliestOutput:record.log.total-record.log.bytes,
     startedAt: record.startedAt, endedAt: record.endedAt ?? null,
     status: record.error ? 'failed' : record.result?.status ?? 'running',
     code: record.result?.code ?? null, output: record.output,
   });
-  const publish = () => onChange([...active].filter(r => r.background).map(view));
+  const publish = () => onChange([...recordsById.values()].filter(r => r.background
+    && (!r.settled || (r.error?.code==='cleanup-unconfirmed'&&!r.result?.cleanupConfirmed))).map(view));
   const backgroundFor = (owner, jobIds) => [...active, ...completed].filter(r => r.background
     && (!r.goalClosed || jobIds)
     && (jobIds ? jobIds.includes(r.id) && canControl(r, owner) : sameOwner(r.owner, owner)));

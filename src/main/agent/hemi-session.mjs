@@ -7,6 +7,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { prepareSkills, reportSkillDiagnostics } from '../skills/skill-definition.mjs';
 
 import hemiGate from './gate/pi-gate.mjs';
 import hemiFileTools, { hemiCommandTool } from './gate/file-tools.mjs';
@@ -446,7 +447,11 @@ export function createHemiSession({
     if (!acknowledgedCommands.delete(job.id)) pendingCommandEnds.set(job.id,event);
     else emitter.emit('progress',event);
   }
-  const commands = createCommandScope({quietReviewMs:backgroundQuietReviewMs, onChange: jobs => { backgroundJobs = jobs; publishActivity(); }, onSettled:commandEnded });
+  const commands = createCommandScope({quietReviewMs:backgroundQuietReviewMs, onChange: jobs => {
+    backgroundJobs = jobs;
+    emitter.emit('background-jobs',{owner:runtimeExecution?.owner,jobs});
+    publishActivity();
+  }, onSettled:commandEnded });
   const interactive = getInteractiveResourceCoordinator();
   const leases = new Map();
   const releaseInteraction = callId => {
@@ -752,7 +757,8 @@ export function createHemiSession({
     const build = (async () => {
       await accessReady;
       const sessionCwd = remoteInfo ? ensureRemoteCwdPlaceholder(agentDir) : cwd;
-      const skillFiles = skills.map((skill) => path.join(skill.path, 'SKILL.md'));
+      const prepared = prepareSkills(skills);
+      reportSkillDiagnostics(log, prepared.diagnostics);
       const resourceLoader = new DefaultResourceLoader({
         cwd: sessionCwd,
         agentDir,
@@ -768,15 +774,8 @@ export function createHemiSession({
           ...(remoteInfo ? [remoteWorkspaceSystemBlock(remoteInfo)] : []),
         ].filter(Boolean).join('\n\n'),
         appendSystemPromptOverride: () => [],
-        additionalSkillPaths: skillFiles,
-        // SDK 设置即使带入其他 Skill，也只留宿主给的清单（Hemi 库快照＋项目 Skill）。
-        skillsOverride: (base) => {
-          const allowed = new Set(skillFiles.map((file) => path.resolve(file)));
-          return {
-            skills: base.skills.filter((skill) => allowed.has(path.resolve(skill.filePath))),
-            diagnostics: base.diagnostics,
-          };
-        },
+        // Hemi 已处理发现、校验与诊断；Pi 只消费定义，不再次发现或解析 Skill 文件。
+        skillsOverride: () => ({ skills: prepared.items.map(item => item.skill), diagnostics: [] }),
         noSkills: true,
         noPromptTemplates: true,
         noThemes: true,

@@ -5,6 +5,7 @@ import {
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseSkillMetadata, prepareSkills } from './skill-definition.mjs';
 
 const OFFICIAL_DIR = fileURLToPath(new URL('./official/', import.meta.url));
 export const OFFICIAL_CATALOG_URL =
@@ -61,35 +62,7 @@ function safeRelative(name) {
 }
 
 function metadataOf(bytes) {
-  const text = bytes.toString('utf8');
-  if (!text.startsWith('---\n')) failure('SKILL.md 缺少 YAML frontmatter');
-  const end = text.indexOf('\n---', 4);
-  if (end < 0 || end > 8192) failure('SKILL.md frontmatter 格式错误或过长');
-  const front = text.slice(4, end);
-  const field = (key) => {
-    const lines = front.split('\n');
-    const index = lines.findIndex((line) => new RegExp(`^${key}:`).test(line));
-    if (index < 0) return '';
-    const inline = lines[index].slice(key.length + 1).trim().replace(/^["']|["']$/g, '');
-    // 块标量（> 折叠 / | 保留换行，可带 -/+ 折行指示）：取后续缩进续行，生态里
-    // 长 description 普遍用这种写法（如 jinchenma94/bazi-skill）。
-    if (/^[>|][0-9]?[+-]?$/.test(inline)) {
-      const block = [];
-      for (let i = index + 1; i < lines.length && (lines[i].startsWith(' ') || lines[i].startsWith('\t') || !lines[i].trim()); i++) {
-        if (!lines[i].trim()) continue;
-        block.push(lines[i].trim());
-      }
-      return block.join(inline.startsWith('>') ? ' ' : '\n');
-    }
-    return inline;
-  };
-  const name = field('name');
-  const title = field('title') || name;
-  const description = field('description');
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) failure('Skill name 必须是小写英文、数字或连字符');
-  if (!description || description.length > 1024) failure('Skill description 缺失或超过 1024 字');
-  if (title.length > 80) failure('Skill title 超过 80 字');
-  return { name, title, description };
+  return parseSkillMetadata(bytes.toString('utf8'));
 }
 
 function validateFiles(files) {
@@ -391,20 +364,22 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     snapshot(skillId = null) {
       const enabled = index.installed.filter((item) => item.enabled);
       if (skillId && !enabled.some((item) => item.id === skillId)) failure('指定的 Skill 未安装或已禁用');
-      const items = enabled.map((item) => ({
+      const candidates = enabled.map((item) => ({
         id: item.id, name: item.name, version: item.version, sha256: item.sha256,
         description: item.description ?? '',
-        path: directoryOf(item),
+        path: directoryOf(item), source: 'library',
       }));
-      for (const item of items) {
-        const skillFile = path.join(item.path, 'SKILL.md');
-        if (!existsSync(item.path) || !lstatSync(item.path).isDirectory()
-          || !existsSync(skillFile) || !lstatSync(skillFile).isFile()) failure(`Skill 文件失效：${item.name}`);
+      const diagnostics = storageError ? [{ type: 'warning', source: 'library', path: indexFile, message: storageError }] : [];
+      const { items } = prepareSkills(candidates, { diagnostics });
+      if (skillId && !items.some(item => item.id === skillId)) {
+        const invalid = diagnostics.find(item => item.skillId === skillId);
+        failure(`指定的 Skill 不可用：${invalid?.path ?? skillId}：${invalid?.message ?? '文件失效'}`);
       }
       for (const item of items) refs.set(item.path, (refs.get(item.path) ?? 0) + 1);
       let released = false;
       return {
         items,
+        diagnostics,
         selectedId: skillId,
         release() {
           if (released) return;

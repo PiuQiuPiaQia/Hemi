@@ -14,7 +14,7 @@
  * @param {Array<{name: string, version?: string, path?: string}>} params.available 当前可用的 Skill（collectSkills/snapshot items）
  * @returns {{ ok: boolean, selected: Array, missing: Array<{name: string, reason: string}> }}
  */
-export function resolveSkillRefs({ refs, available }) {
+export function resolveSkillRefs({ refs, available, diagnostics = [] }) {
   const byName = new Map((available ?? []).map((item) => [item.name, item]));
   const selected = [];
   const missing = [];
@@ -25,7 +25,8 @@ export function resolveSkillRefs({ refs, available }) {
     }
     const hit = byName.get(ref.name);
     if (!hit) {
-      missing.push({ name: ref.name, reason: '未安装或已禁用' });
+      const invalid = diagnostics.find(item => item.name === ref.name);
+      missing.push({ name: ref.name, reason: invalid ? `${invalid.message}；${invalid.path}` : '未安装或已禁用' });
       continue;
     }
     // 版本声明时比对；skill-store 本地导入 version='本地导入'（非 semver），只有声明
@@ -62,7 +63,7 @@ export function acquireSkillLease({ refs, skillService }) {
     wrapped.code = 'dependency-unavailable';
     throw wrapped;
   }
-  const verdict = resolveSkillRefs({ refs, available: lease.items ?? [] });
+  const verdict = resolveSkillRefs({ refs, available: lease.items ?? [], diagnostics: lease.diagnostics });
   if (!verdict.ok) {
     lease.release();
     const error = new Error(`Skill 依赖不可用：${verdict.missing.map((m) => `${m.name}（${m.reason}）`).join('；')}`);

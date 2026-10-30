@@ -20,7 +20,7 @@ async function fixture(t){
   else if(JSON.stringify(body.messages.at(-1)?.content).includes('FOLLOW_UP_QUESTION')){followEntered=true;await followGate;content='FOLLOW_UP_ANSWER';}
   else if(!body.messages.some(m=>m.role==='tool'))tools=[
    tool('bash',{command:cmd("process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('cancelled.txt','BAD'),10000)"),run_in_background:true,timeout_ms:14000}),
-   tool('bash',{command:cmd("process.stdout.write('SECOND_ALIVE');const t=setInterval(()=>{if(require('fs').existsSync('release')){clearInterval(t);require('fs').writeFileSync('proof.txt','DONE')}},30)"),run_in_background:true,timeout_ms:14000}),
+   tool('bash',{command:cmd("process.stdout.write('SECOND_ALIVE');let reported=false;const t=setInterval(()=>{if(!reported&&require('fs').existsSync('progress')){reported=true;process.stdout.write('SECOND_PROGRESS')}if(require('fs').existsSync('release')){clearInterval(t);require('fs').writeFileSync('proof.txt','DONE')}},30)"),run_in_background:true,timeout_ms:14000}),
   ];
   else if(all.includes('后台命令状态观察')&&!toolMessages.some(m=>m.name==='job_list'))tools=[tool('job_list',{})];
   else if(toolMessages.some(m=>m.name==='job_list')&&!toolMessages.some(m=>m.name==='job_output')){
@@ -44,11 +44,17 @@ test('real Host/SDK: jobs release foreground; results wait behind a question and
  const control=(action,jobId,targetRunId=runId)=>f.call('flow.command',{id:f.id,command:{type:'backgroundCommand',targetRunId,action,jobId}});
  const jobs=(await control('list')).data.toSorted((a,b)=>Number(b.command.includes('FIRST_ALIVE'))-Number(a.command.includes('FIRST_ALIVE')));
  assert.equal(jobs.length,2);assert.ok(jobs.every(j=>j.deadlineAt));
+ assert.equal(initial.backgroundJobs.length,2);assert.ok(initial.backgroundJobs.every(job=>job.runId===runId));
+ assert.equal((await f.call('flow.snapshot',{id:f.id,windowed:true})).backgroundJobs.length,2);
+ await fs.writeFile(path.join(f.workspace,'progress'),'go');
+ await until(async()=>{const flow=await f.flow();return flow.phase==='idle'&&flow.backgroundJobs.some(job=>job.output.includes('SECOND_PROGRESS'));});
  await until(async()=>/FIRST_ALIVE/.test((await control('read',jobs[0].id)).data?.text));
  const count=f.requests.length;await pause(150);assert.equal(f.requests.length,count,'waiting never polls the model');
  assert.equal(f.requests.filter(b=>JSON.stringify(b.messages).includes(GOAL_CHECK_SYSTEM)).length,0,'no verifier gates background handoff');
  assert.equal((await control('read',jobs[0].id,'other-run')).code,'run-changed');
  assert.equal((await control('stop',jobs[0].id)).ok,true);
+ await until(async()=>(await f.flow()).backgroundJobs.length===1);
+ assert.equal((await f.flow()).backgroundJobs[0].id,jobs[1].id);
  await until(async()=>{const s=await f.flow();return s.phase==='idle'&&Object.keys(s.runs).length===1;});
  await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'follow-input',text:'FOLLOW_UP_QUESTION'}}});
  await until(f.followEntered);
@@ -58,6 +64,7 @@ test('real Host/SDK: jobs release foreground; results wait behind a question and
  assert.equal(Object.values(busy.runs).filter(r=>r.source==='event').length,0,'completion cannot steal the question slot');
  f.releaseFollow();
  const done=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&Object.values(s.runs).filter(r=>r.source==='event').length===1?s:null;});
+ assert.deepEqual(done.backgroundJobs,[]);
  assert.equal(done.timeline.filter(x=>x.kind==='user').length,2,'host completion is no fake user message');
  assert.match(JSON.stringify(done.timeline),/FOLLOW_UP_ANSWER/);
  assert.match(JSON.stringify(done.timeline),/成果已核对完成/);

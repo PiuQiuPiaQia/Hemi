@@ -43,7 +43,7 @@ import {
 import { CompactDelegation } from "./compact-delegation.js";
 import { DeliverableContext } from "./deliverable-card.js";
 import { PermissionCard } from "./permission-card.js";
-import { RunActivity } from "./run-activity.js";
+import { ConversationActivity } from "./run-activity.js";
 import { TranscriptBoundary } from "./transcript-boundary.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 
@@ -532,7 +532,7 @@ function ConversationFlowBody({
           {error}
         </p>
       ) : null}
-      {state?.runActivity ? <RunActivity activity={state.runActivity} readOnly={state.readOnly} /> : null}
+      <ConversationActivity activity={state?.runActivity} backgroundJobs={state?.backgroundJobs} readOnly={state?.readOnly}/>
     </DeliverableContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 export { FlowProvider as ConversationFlowProvider } from "./host/context.js";
 export { PermissionStack } from "./components/conversation-flow.js";
-export { RunActivity } from "./components/run-activity.js";
+export { RunActivity, ConversationActivity } from "./components/run-activity.js";
 export { WorkflowCard } from "./components/workflow-card.js";
 export { ThinkingBlock } from "./components/thinking-block.js";
 export { ToolActivity } from "./components/tool-activity.js";

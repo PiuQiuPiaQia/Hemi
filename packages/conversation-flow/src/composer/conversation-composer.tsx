@@ -902,8 +902,12 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
       {panel?.kind === 'slash' && activeToken ? (<div className="h24-command-menu h63-panel" role="menu" aria-label="命令与技能">
           <p className="h24-command-hint">命令与技能 · ↑/↓ 选择，Enter 确认，Esc 返回输入</p>
           {slashLoading ? <p className="h63-panel-status">正在读取技能…</p> : null}
-          {!slashLoading && !slashCommands.length && !slashSkills.length ? (<p className="h63-panel-status">
-              {slashResult?.result.skillsError ?? '没找到相关命令或技能——改关键词，或按 Esc 返回输入'}
+          {!slashLoading && slashResult?.result.skillsError ? <details className="h63-panel-status" role="status">
+              <summary>部分技能不可用，查看原因</summary>
+              <p className="break-words">{slashResult.result.skillsError}</p>
+            </details> : null}
+          {!slashLoading && !slashCommands.length && !slashSkills.length && !slashResult?.result.skillsError ? (<p className="h63-panel-status">
+              没找到相关命令或技能——改关键词，或按 Esc 返回输入
             </p>) : null}
           {slashCommands.length ? (<div className="h63-panel-group" data-group="命令">
               {slashCommands.map((item, offset) => (<button key={`command:${item.id}`} type="button" role="menuitem" className="h24-model-item h63-panel-item" data-active={offset === panelIndex ? 'true' : undefined} onMouseEnter={() => setPanelIndex(offset)} onClick={() => confirmPanelItem(offset)}>

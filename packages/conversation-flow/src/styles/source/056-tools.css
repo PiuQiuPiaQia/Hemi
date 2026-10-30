@@ -288,6 +288,7 @@ html.kb-nav .compact-shell .h56-run-activity-head:focus-visible { outline: none;
 .compact-shell .h56-background-job-head { display: flex; align-items: center; gap: var(--sp-8); margin-bottom: var(--sp-4); }
 .compact-shell .h56-background-job-description { flex: 1; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
 .compact-shell .h56-background-job pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
+.compact-shell .h56-background-job .h56-background-job-command { margin-bottom: var(--sp-4); color: var(--muted); }
 .compact-shell .h56-tool-copy { flex: 1; min-width: 0; }
 .compact-shell .h56-tool-copy pre { max-height: calc(var(--sp-32) * 4); margin: var(--sp-4) 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
 

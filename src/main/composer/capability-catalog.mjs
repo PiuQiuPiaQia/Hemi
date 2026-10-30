@@ -65,7 +65,7 @@ export function filterSlashCandidates({ commands = SLASH_COMMANDS, skills = [] }
  * @param {Array<{id:string,name:string,source?:string}>} available collectSkills 的 items
  * @returns {{ok:boolean, missing:Array<{name:string,reason:string}>}}
  */
-export function validateSkillSelections(selections, available) {
+export function validateSkillSelections(selections, available, diagnostics = []) {
   const list = (Array.isArray(selections) ? selections : []).filter(Boolean);
   if (!list.length) return { ok: true, missing: [] };
   const index = new Set();
@@ -78,7 +78,8 @@ export function validateSkillSelections(selections, available) {
   for (const selection of list) {
     const source = selection.source === 'project' ? 'project' : 'library';
     if (!index.has(`${source}:${selection.skillId}`)) {
-      missing.push({ name: selection.name || selection.skillId || '技能', reason: '已删除、禁用或不可读' });
+      const invalid = diagnostics.find(item => item.skillId === selection.skillId && item.source === source);
+      missing.push({ name: selection.name || selection.skillId || '技能', reason: invalid ? `${invalid.message}；${invalid.path}` : '已删除、禁用或不可读' });
     }
   }
   return { ok: missing.length === 0, missing };

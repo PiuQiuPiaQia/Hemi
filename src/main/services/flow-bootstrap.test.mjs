@@ -136,3 +136,8 @@ test('restart closes run, tool and thinking from a single fact; repairs older in
   assert.deepEqual(restoreFlowSnapshot(next),next);
   assert.equal(flow.timeline[1].parts[1].status,'running');
 });
+
+ test('重启恢复不把持久化后台命令列表冒充本进程仍在运行',()=>{
+ const saved={schemaVersion:1,conversationId:'jobs',revision:1,generation:1,phase:'idle',activeRunId:null,pending:[],runs:{},timeline:[],tasks:{},artifacts:{},permissions:{},pendingReports:[],backgroundJobs:[{id:'old',runId:'old',generation:1,status:'running'}]};
+ const restored=restoreFlowSnapshot(saved);assert.deepEqual(restored.backgroundJobs,[]);assert.equal(saved.backgroundJobs.length,1);
+});

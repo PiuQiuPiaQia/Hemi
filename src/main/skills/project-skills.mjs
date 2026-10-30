@@ -8,10 +8,10 @@
  * 只收「目录 + SKILL.md」形态；软链目录照收（常见软链到 ~/.claude/skills）。
  * 有界：最多 MAX_PROJECT_SKILLS 个，exFAT 的 `._*` 垃圾一律跳过。
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { parseFrontmatter } from '@earendil-works/pi-coding-agent';
+import { prepareSkills } from './skill-definition.mjs';
 
 export const PROJECT_SKILL_DIRS = [['.claude', 'skills'], ['.agents', 'skills']];
 const MAX_PROJECT_SKILLS = 40;
@@ -40,17 +40,11 @@ function skillDirsIn(root) {
 
 /** SKILL.md frontmatter 的 description（单行或块标量；读不到给空串，不影响发现）。 */
 export function skillDescriptionOf(skillDir) {
-  let text = '';
-  try {
-    text = readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8').slice(0, 8192);
-  } catch { return ''; }
-  // 056 审查：复用 SDK parseFrontmatter（与 skill-store/agent-roles 同一解析器）。
-  const { frontmatter } = parseFrontmatter(text);
-  return frontmatter?.description ? String(frontmatter.description).slice(0, 200).trim() : '';
+  return prepareSkills([{ path: skillDir, source: 'project' }]).items[0]?.description ?? '';
 }
 
 /** 从工作区目录逐级向上（到 git 根或文件系统根）收集项目 Skill 目录。 */
-export function discoverProjectSkills(workspaceDir) {
+export function discoverProjectSkills(workspaceDir, { diagnostics = [] } = {}) {
   if (!workspaceDir || !path.isAbsolute(workspaceDir)) return [];
   const found = [];
   const seen = new Set();
@@ -58,10 +52,11 @@ export function discoverProjectSkills(workspaceDir) {
   for (let depth = 0; depth < 12; depth += 1) {
     for (const parts of PROJECT_SKILL_DIRS) {
       for (const skillDir of skillDirsIn(path.join(dir, ...parts))) {
-        const name = path.basename(skillDir);
-        if (seen.has(name)) continue; // 近处优先（子目录覆盖祖先同名）
-        seen.add(name);
-        found.push({ id: `project:${name}`, name, path: skillDir, source: 'project', description: skillDescriptionOf(skillDir) });
+        const directoryName = path.basename(skillDir);
+        const skill = prepareSkills([{ id: `project:${directoryName}`, name: directoryName, path: skillDir, source: 'project' }], { diagnostics }).items[0];
+        if (!skill || seen.has(skill.name)) continue; // 无效项不遮住其他来源，名称使用已校验元数据。
+        seen.add(skill.name);
+        found.push(skill);
         if (found.length >= MAX_PROJECT_SKILLS) return found;
       }
     }

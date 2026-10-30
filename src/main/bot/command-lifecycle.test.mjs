@@ -102,6 +102,8 @@ test('an asynchronous cleanup failure wakes no model, fails the event turn and p
  const count=f.requests.filter(body=>body.tools?.length).length;
  await until(async()=>{const flow=await f.flow();return flow.phase==='idle'&&Object.values(flow.runs).some(run=>run.source==='event'&&run.outcome==='failed');});
  const final=await f.flow();assert.equal(final.queuePaused,true);
+ assert.equal(final.backgroundJobs.length,1,'unknown cleanup remains visible independently of the failed foreground turn');
+ assert.equal(final.backgroundJobs[0].cleanupConfirmed,false);assert.ok(final.backgroundJobs[0].endedAt);
  assert.equal(f.requests.filter(body=>body.tools?.length).length,count,'unsafe cleanup cannot start a continuation model');
  const state=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
  assert.ok(Object.values(state.processes).some(process=>process.state==='unknown'&&!process.cleanupConfirmed));

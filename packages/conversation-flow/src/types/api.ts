@@ -8,6 +8,7 @@ import type {
   WorkflowInputParameter,
   WorkflowInteractionProjection,
   RunActivityView,
+  BackgroundJobView,
   TaskPermissionChoice,
 } from "./presentation.js";
 
@@ -219,6 +220,7 @@ export interface FlowSurfaceState {
   retryBlocked?: string;
   permissionRequests?: readonly PermissionView[];
   runActivity?: RunActivityView;
+  backgroundJobs?: readonly BackgroundJobView[];
   scrollIntent?: { id: string; kind: "follow-latest" };
   /** Transient speech text is display data; this package never starts recording. */
   interimText?: string;

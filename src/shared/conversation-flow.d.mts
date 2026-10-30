@@ -90,6 +90,7 @@ export type FlowSnapshot = {
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
+  backgroundJobs?: import('./protocol').BackgroundJobView[];
 };
 
 export type FlowPatch =
@@ -100,6 +101,7 @@ export type FlowPatch =
   | { kind: 'item-updated'; item: FlowItem }
   | { kind: 'runs' | 'tasks' | 'artifacts' | 'permissions'; [key: string]: unknown }
   | { kind: 'reports'; pendingReports: FlowSnapshot['pendingReports'] }
+  | { kind: 'background-jobs'; jobs: NonNullable<FlowSnapshot['backgroundJobs']> }
   | { kind: 'multi'; changes: FlowPatch[] };
 
 export type FlowChange =

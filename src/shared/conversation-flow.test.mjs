@@ -14,6 +14,30 @@ const makeInput = (inputId, text = `消息${inputId}`, extra = {}) => ({
   inputId, editRevision: 0, text, inputSource: 'text', attachmentIds: [], references: null, createdAt: 1, ...extra,
 });
 
+test('会话后台列表跨回合保留和更新，不占前台；完成、回卷及旧代次正确处理',()=>{
+  let state=createFlowSnapshot({conversationId:'jobs'}),replica=structuredClone(state);
+  const apply=fact=>{
+    const previous=state,result=applyFlowFact(state,fact);assert.equal(result.applied,true);
+    state=result.snapshot;
+    replica=applyFlowChange(replica,{kind:'patch',conversationId:'jobs',generation:state.generation,baseRevision:previous.revision,revision:state.revision,changes:[result.patch]}).snapshot;
+    assert.deepEqual(replica,state);
+  };
+  apply({type:'run-preparing',runId:'first'});apply({type:'run-started',runId:'first'});apply({type:'input-delivered',runId:'first',input:makeInput('original')});
+  const job={id:'command',runId:'first',generation:1,command:'pnpm dev',status:'running',output:'Ready',startedAt:1,endedAt:null,code:null};
+  apply({type:'background-jobs',jobs:[job]});
+  apply({type:'run-closed',runId:'first',outcome:'awaiting-background'});
+  assert.equal(state.phase,'idle');assert.equal(state.activeRunId,null);assert.equal(state.backgroundJobs.length,1);
+  apply({type:'background-jobs',jobs:[{...job,output:'New log'}]});assert.equal(state.phase,'idle');
+  assert.equal(applyFlowFact(state,{type:'background-jobs',generation:0,jobs:[]}).applied,false);
+  assert.equal(applyFlowFact(state,{type:'background-jobs',jobs:[{...job,generation:2}]}).applied,false);
+  assert.equal(applyFlowFact(state,{type:'background-jobs',jobs:[job,job]}).applied,false);
+  apply({type:'run-preparing',runId:'next'});apply({type:'run-started',runId:'next'});
+  assert.equal(state.backgroundJobs[0].runId,'first');
+  apply({type:'run-closed',runId:'next',outcome:'completed'});
+  apply({type:'background-jobs',jobs:[]});assert.equal(state.phase,'idle');
+  apply({type:'background-jobs',jobs:[job]});apply({type:'generation-bumped',cutAfterInputId:'original'});assert.deepEqual(state.backgroundJobs,[]);
+});
+
 test('后台等待属于原运行且保留待发送队列；收口后旧 activity 不能复活状态', () => {
   const setup = prepared();
   const activity = { phase: 'waiting-background', since: 20, jobs: [{ id: 'j', command: 'wait-ci' }], resources: [] };

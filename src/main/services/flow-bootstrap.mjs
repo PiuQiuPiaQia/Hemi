@@ -182,6 +182,8 @@ export function normalizeFlowHistory(flow, turns, { conversationId = flow?.conve
 export function restoreFlowSnapshot(flow) {
   if (!flow || typeof flow !== 'object') return null;
   const snapshot = structuredClone(flow);
+  // Process ownership is recovered by the host, never inferred from a saved UI list.
+  snapshot.backgroundJobs=[];
   const at = Date.now();
   for (const run of Object.values(snapshot.runs ?? {})) {
     if (!run.legacy && run.closedAt == null && (run.runId === snapshot.activeRunId || run.outcome == null)) {

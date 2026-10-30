@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import test from 'node:test';
 import { createHemiSession } from './hemi-session.mjs';
+import { collectSkills } from '../skills/skill-catalog.mjs';
 
 async function fixture(t, respond) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-model-test-'));
@@ -56,6 +57,26 @@ test('格式覆盖通过生产会话进入 SDK 请求；不依赖注入 defaultT
   await session.prompt('FORMAT');
   assert.equal(requests[0].body.enable_thinking, true);
   assert.ok(!('reasoning_effort' in requests[0].body));
+});
+
+test('Hemi 预处理后交给真实 Pi SDK：坏技能隔离，新会话仍可请求，有效技能的完整描述保持一致', async t => {
+  const { root, requests, make } = await fixture(t);
+  fs.mkdirSync(path.join(root, '.git'));
+  for (const [name, description] of [['good', 'GOOD_SKILL_DESCRIPTION'], ['bad', 'Invalid: "nested"'], ['manual', 'MANUAL_SKILL_DESCRIPTION']]) {
+    const dir = path.join(root, '.agents/skills', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n${name === 'manual' ? 'disable-model-invocation: true\n' : ''}---\n${name} body`);
+  }
+  const catalog = collectSkills({ workspace: { dir: root } });
+  t.after(catalog.release);
+  assert.equal(catalog.diagnostics.length, 1);
+  for (const input of ['FIRST_CONVERSATION', 'NEW_CONVERSATION']) {
+    const session = make({ skills: catalog.items, tools: ['read'] });
+    assert.equal((await session.prompt(input)).lastText, 'OK');
+    const system = JSON.stringify(requests.at(-1).body.messages.filter(message => message.role === 'system'));
+    assert.match(system, /GOOD_SKILL_DESCRIPTION/);
+    assert.doesNotMatch(system, /MANUAL_SKILL_DESCRIPTION|<name>bad<\/name>/);
+  }
 });
 
 test('自定义系统提示词下，浏览器托管规则实际进入模型请求；未声明浏览器工具时不误报能力', async t => {

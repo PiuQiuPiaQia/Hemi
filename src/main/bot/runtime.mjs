@@ -127,6 +127,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
     },
     onTaskState: snapshot => taskFacts?.publish(snapshot),
     onBackgroundReady:(id,event)=>flowService?.controllerFor(id).enqueueBackground(event),
+    onBackgroundJobs:(id,view)=>{if(flowService?.has(id))flowService.controllerFor(id).applyFact({type:'background-jobs',...view});},
     onDeliveryDeclared({conversationId, rootRunId, file}) {
       const owner = active.get(conversationId);
       if (owner && owner.spec.runId === rootRunId && !owner.ctx.cancelled) deliver(owner, [file]);

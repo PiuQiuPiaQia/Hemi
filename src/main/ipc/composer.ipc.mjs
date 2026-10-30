@@ -18,6 +18,7 @@ import { getRemoteService } from '../remote/remote-service.mjs';
 import { answerAboutImage } from '../services/vision-model.mjs';
 import { state } from '../state.mjs';
 import { collectSkills } from '../agent-runtime/index.mjs';
+import { skillDiagnosticsMessage } from '../skills/skill-definition.mjs';
 import { getConversationMetadata, getConversationTaskHistory, listConversationSessions } from './conversation.ipc.mjs';
 import { getWorkContext } from './context.ipc.mjs';
 import { getSkillService } from './skills.ipc.mjs';
@@ -308,11 +309,12 @@ export function registerComposerIpc() {
   ipcMain.handle(IPC.composer.listSlashCandidates, async (_event, payload) => {
     const workspace = await resolveConversationWorkspace(payload);
     try {
-      const collected = collectSkills({ skillService: getSkillServiceForCandidates(), workspace });
+      const collected = collectSkills({ skillService: getSkillServiceForCandidates(), workspace, log });
       try {
         return {
           commands: SLASH_COMMANDS,
           skills: skillCandidatesOf(collected.items),
+          skillsError: skillDiagnosticsMessage(collected.diagnostics),
         };
       } finally {
         collected.release?.();

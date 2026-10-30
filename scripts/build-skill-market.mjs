@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { validateFileSet } from '../src/main/skills/skill-store.mjs';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -28,10 +29,7 @@ const items = [];
 await mkdir(path.join(outRoot, 'bundles'), { recursive: true });
 for (const definition of definitions) {
   const files = await sourceFiles(path.join(sourceRoot, definition.id));
-  const skill = Buffer.from(files.find((file) => file.path === 'SKILL.md')?.contentBase64 ?? '', 'base64').toString('utf8');
-  const name = skill.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-  const title = skill.match(/^title:\s*(.+)$/m)?.[1]?.trim();
-  const description = skill.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const { metadata: { name, title, description } } = validateFileSet(files);
   if (name !== definition.id || !title || !description) throw new Error(`Skill 元数据缺失：${definition.id}`);
   const bundleName = `${definition.id}-${definition.version}.json`;
   const bytes = Buffer.from(JSON.stringify({ schema: 1, files }) + '\n');

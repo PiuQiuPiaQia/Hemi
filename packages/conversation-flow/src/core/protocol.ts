@@ -1,5 +1,5 @@
 /** Shared client protocol. Runtime transport and server execution are supplied by the host. */
-import type {MessageAttachmentView, MessageReferenceView, SkillSelectionView, RunActivityView, ModelRecoveryView} from '../types/presentation.js';
+import type {MessageAttachmentView, MessageReferenceView, SkillSelectionView, RunActivityView, ModelRecoveryView, BackgroundJobView} from '../types/presentation.js';
 export type FlowPhase = 'idle' | 'preparing' | 'running' | 'stopping';
 export type TurnQueueItemView = {
   /** Present only for a client outbox item that upstream has not accepted. */
@@ -38,6 +38,7 @@ export type FlowSnapshotView = {
   artifacts: Record<string, Record<string, unknown>>;
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
+  backgroundJobs?: BackgroundJobView[];
   /** Negotiated active window; older items remain available through history paging. */
   history?: {start:number;total:number;gap?:{start:number;end:number;beforeId:string};continuation?:{questionId:string|null}};
 };
