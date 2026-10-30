@@ -29,13 +29,18 @@ export function atomicJson(file, data) {
   const tmp = `${file}.${randomUUID()}.tmp`;
   const fd = fs.openSync(tmp, 'wx', 0o600);
   try {
-    fs.writeFileSync(fd, JSON.stringify(data));
-    fs.fsyncSync(fd);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(data));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (process.platform === 'win32') replaceJson(tmp, file);
+    else fs.renameSync(tmp, file);
   } finally {
-    fs.closeSync(fd);
+    // A failed commit must retain the old destination and its original error.
+    try { fs.rmSync(tmp, { force: true }); } catch {}
   }
-  if (process.platform === 'win32') replaceJson(tmp, file);
-  else fs.renameSync(tmp, file);
 }
 export function publicModel(config, revision, source = 'local') {
   const endpoint = new URL(config.baseUrl);

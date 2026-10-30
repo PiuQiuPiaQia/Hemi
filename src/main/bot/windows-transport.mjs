@@ -32,7 +32,9 @@ $desktopTaskName = $taskName + '-Desktop'
 
 export const windowsRootSetupScript = rootScript + String.raw`
 [IO.Directory]::CreateDirectory($root) | Out-Null
-$acl = Get-Acl -LiteralPath $root
+# powershell.exe runs on .NET Framework. Use its ACL API directly: inherited
+# PSModulePath can select a different PowerShell edition's Security module.
+$acl = [IO.Directory]::GetAccessControl($root)
 $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
 $private = $acl.AreAccessRulesProtected -and $rules.Count -eq 2
 foreach ($rule in $rules) {
@@ -46,7 +48,7 @@ if (-not $private) {
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($who, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
     $acl.AddAccessRule($rule)
   }
-  Set-Acl -LiteralPath $root -AclObject $acl
+  [IO.Directory]::SetAccessControl($root, $acl)
 }
 `;
 

@@ -281,15 +281,27 @@ test('Windows pre-install directory browser executes the real PowerShell path ha
 test('Windows installation gives a new root only owner/SYSTEM access and preserves the ACL on repeat', {skip:process.platform!=='win32'}, async t => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'hemi-root-acl-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  const script=powershellSource(windowsRootSetupScript+`\n$before=(Get-Acl -LiteralPath $root).Sddl\n${windowsRootSetupScript}\nif((Get-Acl -LiteralPath $root).Sddl -ne $before){throw 'Existing private ACL changed'}\n$acl=Get-Acl -LiteralPath $root; $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));if(-not $acl.AreAccessRulesProtected -or $rules.Count -ne 2){throw 'Root is not private'}\nforeach($rule in $rules){if($rule.IdentityReference.Value -notin @($sid,'S-1-5-18')){throw 'Unexpected ACL identity'}}`);
+  const script=powershellSource(windowsRootSetupScript+`\n$before=[IO.Directory]::GetAccessControl($root).Sddl\n${windowsRootSetupScript}\nif([IO.Directory]::GetAccessControl($root).Sddl -ne $before){throw 'Existing private ACL changed'}\n$acl=[IO.Directory]::GetAccessControl($root); $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));if(-not $acl.AreAccessRulesProtected -or $rules.Count -ne 2){throw 'Root is not private'}\nforeach($rule in $rules){if($rule.IdentityReference.Value -notin @($sid,'S-1-5-18') -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.InheritanceFlags -ne 'ContainerInherit,ObjectInherit' -or $rule.PropagationFlags -ne 'None'){throw 'Unexpected ACL rule'}}`);
   const encoded=Buffer.from(script,'utf16le').toString('base64');
-  // CI runner 上 Security 模块自动加载偶发竞态（Get-Acl 找得到但加载失败）；有界重试。
-  let lastError;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env:{...process.env,USERPROFILE:root}}); lastError = null; break; }
-    catch (error) { lastError = error; if (!/Microsoft\.PowerShell\.Security|Get-Acl|TypeData|AccessControl/.test(String(error.message))) throw error; await new Promise(resolve => setTimeout(resolve, 400)); }
-  }
-  if (lastError) throw lastError;
+  // Model an inherited PS7 module path deterministically, without requiring an
+  // installed pwsh. This manifest exports Get-Acl but cannot load in PS5.1.
+  const modules=path.join(root,'PowerShell7','Modules'),security=path.join(modules,'Microsoft.PowerShell.Security');
+  await fs.mkdir(security,{recursive:true});
+  // PS7's real Security manifest declares PowerShellVersion=3.0 (not 7.0),
+  // so PS5 discovers it even though its implementation is Core-only.
+  await fs.writeFile(path.join(security,'Microsoft.PowerShell.Security.psd1'),`@{ModuleVersion='7.0.0';GUID='a94c8c7e-9810-47c0-b8af-65089c13a35a';PowerShellVersion='3.0';CompatiblePSEditions=@('Core');RootModule='Security.psm1';FunctionsToExport=@('Get-Acl');CmdletsToExport=@()}`);
+  await fs.writeFile(path.join(security,'Security.psm1'),`throw 'Fixture: Core-only Security implementation cannot load in Desktop'; function Get-Acl {}`);
+  const env={...process.env,USERPROFILE:root,PSModulePath:modules};
+  // Establish the original failure from real module resolution, not a mock.
+  await assert.rejects(exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; try { Get-Acl -LiteralPath $env:USERPROFILE } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"],{env}),error=>{
+    assert.match(error.stderr,/Microsoft\.PowerShell\.Security/); return true;
+  });
+  const detail=await exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',"try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; exit 0 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"],{env}).catch(error=>error);
+  assert.equal(detail.code,1); assert.match(detail.stderr,/Core-only Security/);
+  t.diagnostic('Inherited PSModulePath underlying import error: '+detail.stderr.trim());
+  // Production setup must work on the FIRST attempt with the same hostile env.
+  await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env});
+  await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env:{...process.env,USERPROFILE:root}});
 });
 
 test('Windows PowerShell can atomically replace the active pointer without creating a backup path', {skip:process.platform!=='win32'}, async t => {
