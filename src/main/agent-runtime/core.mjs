@@ -5,7 +5,7 @@ import { currentExecutionScope } from './execution-scope.mjs';
 import { recoverOwnedProcesses } from './owned-processes.mjs';
 import os from 'node:os';
 import path from 'node:path';
-import {assertCommandCleanup,commandDeadline} from '../agent/gate/command-deadline.mjs';
+import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { mkdirSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -138,7 +138,7 @@ export function createAgentRuntime({
   const sessionStore = createSessionStore({ dir: path.join(userDataDir, 'runtime-v2/sessions'), log });
   const contextStore = createContextStore({ dir: path.join(userDataDir, 'runtime-v2/contexts') });
   const conversationHistory = loadArchiveSession ? createConversationHistoryReader({ loadSession: loadArchiveSession, contextStore }) : null;
-  const journalReady = journal.ready().then(() => recoverOwnedProcesses(journal)).then(() => journal.recover());
+  const journalReady = journal.ready().then(() => recoverOwnedProcesses(journal, {log})).then(() => journal.recover());
   void journalReady.catch(error => log?.error?.(error.message));
   const dispatchInFlight = new Map();
   const ownerOf = ctx => ({ conversationId: ctx.conversationId, rootRunId: ctx.runId, generation: ctx.generation ?? 0 });
@@ -657,7 +657,6 @@ export function createAgentRuntime({
   }
 
   async function prepareExecution(ctx) {
-    assertCommandCleanup(journal);
     await journalReady;await journal.beginRoot(ownerOf(ctx), {policySnapshot:ctx.policySnapshot,workspace:ctx.workspace});
     return executionFor(ctx,ctx.modelPlan,'input-preparation');
   }

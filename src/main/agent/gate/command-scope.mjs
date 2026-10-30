@@ -4,7 +4,7 @@ import { runCommand, commandToolResult } from './command-execution.mjs';
 import { currentExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 import { processBirth } from '../../agent-runtime/owned-processes.mjs';
 import { normalizeCommandDescription } from '../../../shared/command-display.mjs';
-import {commandDeadline, cleanupFailure, blockCommandCleanup} from './command-deadline.mjs';
+import {commandDeadline, cleanupFailure} from './command-deadline.mjs';
 import { isBackgroundWaitCommand } from '../background-wait.mjs';
 
 export const COMMAND_FOREGROUND_MS = 10_000;
@@ -22,7 +22,6 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
   let quarantine = null;
   const uncertain = (execution, message) => {
     quarantine = cleanupFailure(message);
-    blockCommandCleanup(execution?.journal,quarantine);
     if (execution) {execution.cleanupUnconfirmed=true;execution.fatalError=message;}
     return quarantine;
   };
@@ -106,10 +105,16 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
           const registration = execution.journal.processStart({ id: record.id, token, pid, birth, ...isolation, owner: execution.owner,
             command: options.command, description: record.description, cwd: options.cwd, toolCallId: record.toolCallId,
           });
-          // A late durable write must not resurrect an already closed command.
+          // 登记落盘可能晚于取消收尾，必须保留真实清理结果，不能将已退出命令改成未知。
           void registration.then(async()=>{
             registered=true;
-            if(record.settled)await execution.journal.processEnd(record.id,{state:'unknown',cleanupConfirmed:false,status:'registration-late'});
+            if(record.settled) {
+              const result = record.result;
+              await execution.journal.processEnd(record.id, result ? {
+                state:result.cleanupConfirmed?'finished':'unknown', cleanupConfirmed:result.cleanupConfirmed,
+                status:result.status, code:result.code, output:record.output, lastOutputAt:record.lastOutputAt,
+              } : {state:'unknown',cleanupConfirmed:false,status:'registration-late'});
+            }
           }).catch(()=>{});
           try {await commandDeadline(registration,persistenceTimeoutMs,'命令归属保存超时，用户命令未启动');}
           catch(error){throw uncertain(execution,error.message);}
@@ -133,7 +138,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
         }
       }
       if (!result.cleanupConfirmed) {
-        throw uncertain(execution,'命令进程尚未确认退出，已停止后续操作；请核对后重启运行时');
+        throw uncertain(execution,'命令进程尚未确认退出，当前任务已停止；请先核对原命令状态');
       }
       if (record.background && execution?.contextStore) {
         record.outputRef = await commandDeadline(execution.contextStore.put({ owner: execution.owner, kind: 'tool',
@@ -286,7 +291,7 @@ export function createCommandScope({ onChange = () => {}, onSettled = () => {}, 
       if(quarantine)throw quarantine;
       const failure = results.find(result => result.status === 'rejected');
       if (failure) throw uncertain(currentExecutionScope()?.execution,failure.reason.message);
-      if (results.some(result => !result.value.cleanupConfirmed)) throw uncertain(currentExecutionScope()?.execution,'命令所属进程未确认退出，请核对后重启运行时');
+      if (results.some(result => !result.value.cleanupConfirmed)) throw uncertain(currentExecutionScope()?.execution,'命令所属进程未确认退出，当前任务已停止；请先核对原命令状态');
     },
   };
 }

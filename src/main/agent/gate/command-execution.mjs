@@ -9,8 +9,10 @@ import { CommandOutput } from './command-output.mjs';
 import { BACKGROUND_WAIT_GUIDANCE } from '../background-wait.mjs';
 const exec=promisify(execFile), pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const MAX_OUTPUT=8*1024*1024;
+/** 进程组存活探针：默认 /bin/ps 快照（可注入，供回归测试模拟 ps 偶发失败）。 */
+const defaultGroupProbe = timeoutMs => exec('/bin/ps', ['-axo', 'pgid=,stat='], { timeout: timeoutMs });
 
-export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=process.env,maxOutput=MAX_OUTPUT,onSpawn=null,onOutput=null,ownerToken=randomUUID(),registrationTimeoutMs=10000,cleanupTimeoutMs=8000,outputDrainMs=250}) {
+export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=process.env,maxOutput=MAX_OUTPUT,onSpawn=null,onOutput=null,ownerToken=randomUUID(),registrationTimeoutMs=10000,cleanupTimeoutMs=8000,outputDrainMs=250,groupProbe=defaultGroupProbe}) {
   const empty={code:null,signal:null,stdout:'',stderr:'',aborted:false,timedOut:false,cleanupConfirmed:true,truncated:false,spawnError:null,cleanupError:null};
   if(signal?.aborted)return {...empty,aborted:true,status:'cancelled'};
   const windows=process.platform==='win32';
@@ -40,7 +42,11 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
       try {process.kill(-child.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')signalError=error;}
       const until=Date.now()+Math.max(100,cleanupTimeoutMs-500);
       do{
-        const {stdout:rows}=await exec('/bin/ps',['-axo','pgid=,stat='],{timeout:1000});
+        let rows;
+        // ps 偶发慢/失败（CI 高负载下实测会让单次探针超时）不等于进程还活着：
+        // 期限内重试；确认只认探针的阳性证据，到期仍无证据按未确认处理（fail-closed）。
+        try {({stdout:rows}=await groupProbe(2000));}
+        catch {await pause(50);continue;}
         if(!rows.split('\n').some(row=>{const [group,state]=row.trim().split(/\s+/);return Number(group)===child.pid&&state&&!state.startsWith('Z');}))return true;
         await pause(25);
       }while(Date.now()<until);

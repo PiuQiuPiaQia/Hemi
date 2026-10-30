@@ -54,6 +54,37 @@ test('060 已取消信号不启动命令，不留下副作用', posix, async () 
   assert.equal(commandToolResult(out).isError, true);
 });
 
+test('060 清理确认：ps 探针偶发失败在期限内重试，不误判为清理失败', posix, async () => {
+  // 复现 CI 实撞（v0.2.28 mac runner）：单次 /bin/ps 超时曾把 cleanupConfirmed 打成 false。
+  const real = async timeoutMs => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    return promisify(execFile)('/bin/ps', ['-axo', 'pgid=,stat='], { timeout: timeoutMs });
+  };
+  let failures = 2;
+  const flaky = async timeoutMs => {
+    if (failures-- > 0) throw Object.assign(new Error('probe timed out (simulated)'), { code: 'ETIMEDOUT' });
+    return real(timeoutMs);
+  };
+  const controller = new AbortController();
+  const running = runCommand({ command: 'sleep 30', signal: controller.signal, groupProbe: flaky });
+  await pause(60);
+  controller.abort();
+  const result = await running;
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.cleanupConfirmed, true, JSON.stringify(result));
+});
+
+test('060 清理确认：探针全程失败仍按未确认处理（fail-closed 不放宽）', posix, async () => {
+  const controller = new AbortController();
+  const running = runCommand({ command: 'sleep 30', signal: controller.signal, cleanupTimeoutMs: 900, groupProbe: async () => { throw new Error('ps unavailable'); } });
+  await pause(60);
+  controller.abort();
+  const result = await running;
+  assert.equal(result.cleanupConfirmed, false);
+  assert.equal(result.status, 'cleanup-failed');
+});
+
 test('后台短时间连续输出的最后一条仍推送到界面，不把无输出期误记为旧进度', posix, async () => {
   const views = [];
   const commands = createCommandScope({ onChange: jobs => views.push(jobs) });

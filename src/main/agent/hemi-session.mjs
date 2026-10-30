@@ -1114,7 +1114,12 @@ export function createHemiSession({
     promptWaitAbort?.abort();
     cancelPendingInteractions();
     await ensurePromise?.catch(() => {});
-    if (!session || disposed) { await commands.abort(); await reclaimBrowserPages(); return; }
+    if (!session || disposed) {
+      try { await commands.abort(); }
+      catch (error) { if (error.code === 'cleanup-unconfirmed') dispose(); throw error; }
+      finally { await reclaimBrowserPages(); }
+      return;
+    }
     clearTimeout(stallTimer);
     releasePermissions();
     try {
@@ -1124,8 +1129,10 @@ export function createHemiSession({
       dispose();
     } finally {
       session?.clearQueue();
-      await commands.abort();
-      await reclaimBrowserPages();
+      try { await commands.abort(); }
+      // 清理异常只结束当前执行器；下一任务由现有 obtain 路径按历史重建，不保留永久锁。
+      catch (error) { if (error.code === 'cleanup-unconfirmed') dispose(); throw error; }
+      finally { await reclaimBrowserPages(); }
     }
   }
 

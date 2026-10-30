@@ -5,7 +5,7 @@
 ## 控制与等待
 
 - `job_list` 列出当前目标所属的后台命令；`job_output` 通过命令 ID 读取状态和增量输出，可有限等待，最长 30 秒。等待到限返回当前快照，原命令继续，硬截止时间不变。
-- `job_kill` 仅取消指定命令，并等待进程清理确认。其他命令继续运行。进程清理未确认会隔离后续执行，不伪写为成功。
+- `job_kill` 仅取消指定命令，并等待进程清理确认。其他命令继续运行。进程清理未确认使当前任务失败并暂停其自动发送，不伪写为成功，也不锁住其他会话或用户后来明确发起的新任务。
 - 命令按照 conversationId、rootRunId、generation、taskId 复核归属，不能读取、取消或唤醒其他目标。观察者读取不会消费完成通知；模型读取已完成结果后不会再重复收到同一完成事件。
 - 模型停止生成后，宿主保留原目标和预算等待后台结果；达到执行分段上限时，通过持久化检查点进入下一段，已受理任务沿用原身份和截止时间，继续接受检查与停止。连续 60 秒没有新输出时，每段静默只发送一次状态观察，同一目标最多自动发送三次。新输出可开启新的观察段；显式“检查进展”不受自动观察次数限制。观察与真实完成都沿原会话继续，不制造用户输入或新目标。分段交接与目标完成的当前契约见 [任务目标续跑与完成判断](task-goal-completion.md)。
 - 静默不是失败证据。主 agent 收到观察后，可读取任务输出并做只读核验，再决定继续等待、停止已不需要的工作，或提出必要的用户接手请求。没有周期性模型轮询，不自动重试原命令，也不延长原截止时间。
@@ -21,6 +21,33 @@ Bot 列表、桌面实时缓存与共享投影统一显示后台等待和等待�
 显式外部阻塞仍以 `blocked` 正常结束。连续无进展和目标总预算耗尽以 `partial` 结束，分别保留 `halted.kind = no_progress / budget_limited`、原因、剩余事项和后续动作；已耗尽预算的用户答复不会再次请求模型。真正的模型、持久化、校验格式或清理异常继续失败，目标阶段记录为 failed，避免用 blocked 包装异常。取消优先，旧结果不能复活已停止目标。
 
 `awaiting-user` 进入新结果提醒范围，后台时使用“等待你的回复”通知。Bot 桌面实时流只通知新收口；重连快照和重启不会重播旧通知。现有历史记录、待发送输入与等待用户的问题不做迁移或重放。
+
+## 命令故障的影响范围（2026-10-30）
+
+继续使用现有共享 Runtime、每会话执行器和命令事实库，不新增工作区进程、恢复队列或永久会话锁。
+
+- 运行中的命令清理或持久化异常由当前任务失败收口，执行器停止本任务后续操作并释放。用户明确发起下一任务时，按原历史重建执行器；待发送输入继续保持暂停，不因恢复自动执行。
+- 启动恢复逐条核对旧命令。只清理身份可确认的进程；无法确认的命令保留 `unknown / cleanupConfirmed:false` 和原因，并记录所属会话。继续检查其他记录和启动运行时，不重跑命令，不把历史未知状态变成全应用启动失败。
+- 命令登记晚于进程收尾时，保存真实清理结果；不能无条件将已经确认退出的命令改成未知。
+- 事实库读取、结构校验或写入失败仍向上报错。这是共享存储故障，不按单条命令异常忽略。
+
+本次验证基线为 `de447c7f603b1e4cda00fa50a833cafe1b717532` 加本次修改及工作区原有未提交改动；macOS arm64 / Node 22.22.3 / Electron 44.0.0。原有模型传输、OAuth 等改动保留，未提交、发布或替换安装版及生产 Bot，也未修改个人会话数据。
+
+执行与结果：
+
+```sh
+node --test src/main/agent-runtime/owned-processes.test.mjs src/main/agent/gate/command-lifecycle.test.mjs src/main/agent-runtime/command-isolation.test.mjs
+ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --test src/main/agent-runtime/command-isolation.test.mjs src/main/agent-runtime/owned-processes.test.mjs src/main/agent/gate/command-lifecycle.test.mjs
+HEMI_USER_DATA_DIR=<新的临时目录> npm test
+node --test --test-name-pattern='GLM 真实 SDK 与恢复器' src/main/services/bigmodel-coding.test.mjs
+git diff --check
+```
+
+初始定向 13 通过、1 个 Windows 场景跳过；补充事实库损坏场景后，Electron 定向 14 通过、1 跳过。真实 Runtime、Pi SDK、Shell 和事实库覆盖旧会话不存在时两个新会话执行命令、单条命令保存失败后其他会话继续、原会话执行器重建后明确新任务执行命令、取消先于登记完成、未知记录不妨碍另一受管进程回收、独立进程不被误杀，以及公共事实库损坏仍拒绝执行。只有模型 HTTP 响应和指定的一次保存失败使用合成输入。
+
+全量首轮的 GLM 网络测试用 `/503/` 匹配整份记录，命中随机请求 ID 中的 `503`，同一断言导致父、子测试合计两项失败；该无关测试未修改，单独复验 5 项通过。第二轮完整 `npm test`：2168 项，2147 通过、21 跳过、0 失败，包含实际 Bot Host 的取消、逃逸输出持有者与队列暂停场景。最终将隔离测试的 Shell 验证命令改为跨平台 Node 命令后，Node 与 Electron 各复验 3 项通过；`git diff --check` 通过。
+
+日志在 `.visual/workflow/command-isolation/`。未使用外部模型账号；没有渲染器或 IPC 改动，未执行 Vite／构建 renderer、Windows 真机或移动设备回归。
 
 ## 验证记录
 

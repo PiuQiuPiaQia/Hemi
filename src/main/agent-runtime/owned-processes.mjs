@@ -1,16 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {windowsCommandHelper, reapWindowsCommand} from '../agent/gate/windows-command-job.mjs';
-import {cleanupFailure,clearCommandCleanup} from '../agent/gate/command-deadline.mjs';
 const exec = promisify(execFile);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function groupMembers(pid) {
-  const {stdout} = await exec('/bin/ps', ['-axo','pid=,pgid=,stat=']);
+  const {stdout} = await exec('/bin/ps', ['-axo','pid=,pgid=,stat='], {timeout:2000});
   return stdout.split('\n').map(row=>row.trim().split(/\s+/)).filter(([,group,status])=>Number(group)===pid&&status&&!status.startsWith('Z')).map(([id])=>Number(id));
 }
 export async function processBirth(pid) {
   if (process.platform !== 'win32') {
-    const {stdout} = await exec('/bin/ps',['-p',String(pid),'-o','lstart=,pgid=,uid=,stat=']);
+    const {stdout} = await exec('/bin/ps',['-p',String(pid),'-o','lstart=,pgid=,uid=,stat='],{timeout:2000});
     if (!stdout.trim()) throw new Error('无法核对命令进程身份');
     const parts=stdout.trim().split(/\s+/);
     return parts.at(-1)?.startsWith('Z') ? null : parts.slice(0,-1).join(' ');
@@ -20,37 +19,47 @@ export async function processBirth(pid) {
   return stdout.trim();
 }
 
-/** 重启先核实 PID 出生信息与随机启动标记，再清理本应用的旧命令，不重放旧命令。 */
-export async function recoverOwnedProcesses(journal) {
+async function recoverProcess(record) {
+  if (process.platform === 'win32' && record.isolation === 'windows-job-v1') {
+    await reapWindowsCommand(record.token);
+    return {state:'recovered',cleanupConfirmed:true,reason:'按随机 Job 身份回收全部成员；旧命令不重跑'};
+  }
+  if (process.platform === 'win32') throw new Error('旧版命令没有 Job 归属，无法确认子进程；没有清理或重跑现有服务');
+  if (record.state === 'unknown' && record.cleanupConfirmed === false) {
+    throw new Error(record.reason ?? '旧命令清理未确认，保留待核对记录；没有重跑命令');
+  }
+  const birth = await processBirth(record.pid).catch(error => {
+    if (error.code === 1 && !error.stdout?.trim()) return null;
+    throw error;
+  });
+  let state = 'gone';
+  if (birth && birth === record.birth) {
+    const {stdout:args} = await exec('/bin/ps',['-p',String(record.pid),'-o','command='],{timeout:2000});
+    if (!args.includes(`hemi-command:${record.token}`)) throw new Error('旧命令身份标记缺失，未执行清理');
+    try {process.kill(-record.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}
+    const deadline=Date.now()+3000;
+    while ((await groupMembers(record.pid)).length) {if(Date.now()>deadline)throw new Error('旧命令进程组尚未退出');await pause(30);}
+    state='recovered';
+  } else {
+    // PID 复用不能成为误杀依据；查询失败也不能当作进程已经消失。
+    if ((await groupMembers(record.pid)).length) throw new Error('旧命令进程组仍在，未确认归属；未执行清理');
+    if (birth) state='identity-changed';
+  }
+  return {state,cleanupConfirmed:true,reason:'进程重启，按真实归属核对；旧命令不重跑'};
+}
+
+/** 逐条核实并回收旧命令。单条未知状态不阻止其他会话，事实库故障仍向上报错。 */
+export async function recoverOwnedProcesses(journal, {log} = {}) {
   const records = Object.values((await journal.snapshot()).processes ?? {}).filter(item=>['active','unknown'].includes(item.state));
   for (const record of records) {
-    if (process.platform === 'win32' && record.isolation === 'windows-job-v1') {
-      try {await reapWindowsCommand(record.token);}
-      catch {throw cleanupFailure('旧命令 Job 尚未确认退出，已阻止恢复执行；请核对运行状态后重试');}
-      await journal.processEnd(record.id,{state:'recovered',cleanupConfirmed:true,reason:'按随机 Job 身份回收全部成员；旧命令不重跑'});
-      continue;
+    let result;
+    try { result = await recoverProcess(record); }
+    catch (error) {
+      result = {state:'unknown',cleanupConfirmed:false,reason:error.message};
+      log?.warn?.(`[command ${record.id}] ${record.owner?.conversationId ?? '归属未知'}：${error.message}`);
     }
-    if (process.platform === 'win32') {
-      // A legacy PID/tree snapshot cannot prove ownership of detached descendants.
-      // Do not kill a still-useful service, or claim all children were reclaimed.
-      // 记录保持 unknown/cleanupConfirmed=false 原样（与 POSIX 分支一致，不做任何日志写入），
-      // 抛错即阻断恢复；写入 processEnd 反而会被「未确认不得落状态」的口径拒绝。
-      throw cleanupFailure('旧版 Windows 命令缺少 Job 归属，子进程需人工核对；没有清理或重跑现有服务');
-    }
-    if(record.state==='unknown'&&record.cleanupConfirmed===false)throw cleanupFailure('旧命令存在未确认的子进程，重启不能代替清理确认；需人工核对进程归属');
-    const birth = await processBirth(record.pid).catch(()=>null);
-    let state='gone';
-    if (birth && birth === record.birth) {
-      const {stdout:args} = await exec('/bin/ps',['-p',String(record.pid),'-o','command=']);
-      if (!args.includes(`hemi-command:${record.token}`)) throw new Error('旧命令身份标记缺失，未执行清理；请核对运行状态');
-      try {process.kill(-record.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')throw error;}
-      const deadline=Date.now()+3000;
-      while ((await groupMembers(record.pid)).length) {if(Date.now()>deadline)throw new Error(`旧命令进程组尚未退出（${record.pid}）`);await pause(30);}
-      state='recovered';
-    } else if (birth) state='identity-changed'; // PID 已复用，不能向新进程发送信号。
-    else if ((await groupMembers(record.pid)).length) throw cleanupFailure('旧命令主进程已丢失但进程组仍在，未确认归属；请核对后重试');
-    await journal.processEnd(record.id,{state,reason:'进程重启，按真实归属核对；旧命令不重跑'});
+    // 存储错误不属于某条命令的清理失败，不能在逐条恢复时吞掉。
+    await journal.processEnd(record.id,result);
   }
-  clearCommandCleanup(journal);
   return records.length;
 }
