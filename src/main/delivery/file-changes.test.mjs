@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 import {
   diffTreeChanges,
@@ -19,7 +20,8 @@ import {
 
 const gitSync = (cwd, args, env = {}) =>
   execFileSync('git', args, { cwd, env: { ...process.env, ...env }, encoding: 'utf8' }).trim();
-const sha = (p) => (existsSync(p) ? createHash('sha256').update(execFileSync('cat', [p])).digest('hex') : 'missing');
+// Windows 没有 cat：直接按字节读文件算哈希（与 cat 输出逐字节一致，平台无关）。
+const sha = (p) => (existsSync(p) ? createHash('sha256').update(readFileSync(p)).digest('hex') : 'missing');
 
 test('A. 私有 index 快照：任务前脏改动不计入、A/M/D/R 识别、用户 index 不变', async () => {
   const repo = mkdtempSync(path.join(os.tmpdir(), 'hemi050-repo-'));

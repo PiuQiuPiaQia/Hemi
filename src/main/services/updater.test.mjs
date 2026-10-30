@@ -557,7 +557,8 @@ test('pickStagingDir：与旧包同卷时暂存放 Caches，异卷退回旧包�
   const home = mkdtempSync(path.join(tmpdir(), 'hemi-updater-pick-'));
   const bundle = path.join(home, 'Hemi.app');
   const cachePick = pickStagingDir({ bundlePath: bundle, homeDir: home, statFn: () => ({ dev: 1 }) });
-  assert.match(cachePick, new RegExp(`hemi-updater-staging${path.sep}staging-\\d+$`));
+  // path.sep 直接拼正则时反斜杠会被当转义（\s 成空白类）——先归一成 '/' 再匹配。
+  assert.match(cachePick.split(path.sep).join('/'), /hemi-updater-staging\/staging-\d+$/);
   const crossVolumePick = pickStagingDir({
     bundlePath: bundle,
     homeDir: home,
