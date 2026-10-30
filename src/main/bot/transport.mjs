@@ -122,7 +122,10 @@ export function createBotTransport({ runner, archivePath }) {
         'unsupported',
       );
     }
-    return r.stdout.toString('utf8');
+    const text = r.stdout.toString('utf8');
+    // PowerShell 5.1 hosts on UTF-8 system locales emit a leading BOM into piped
+    // stdout before any payload; legitimate reply payloads never start with one.
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   }
   async function executeWindows(host, script, stdin, timeoutMs, signal) {
     const command = powershellCommand(script);

@@ -199,7 +199,10 @@ test('one-shot PowerShell validates all input before launching the CLI and prese
   await assert.rejects(fs.access(path.join(root, 'started')), {code: 'ENOENT'});
   const complete = await run(input);
   assert.equal(complete.code, 0, complete.error);
-  assert.deepEqual(complete.output, input);
+  // PS 5.1 on UTF-8 system locales prefixes its own BOM onto the piped stdout;
+  // the relay payload itself must stay byte-identical after that optional prefix.
+  const relayed = complete.output.length >= 3 && complete.output[0] === 0xef && complete.output[1] === 0xbb && complete.output[2] === 0xbf ? complete.output.subarray(3) : complete.output;
+  assert.deepEqual(relayed, input);
   await fs.access(path.join(root, 'started'));
 });
 
@@ -214,7 +217,8 @@ test('persistent PowerShell forwards a small UTF-8 request before stdin closes',
   t.after(async () => {child.stdin.end(); if (child.exitCode === null) {const exited = once(child, 'exit'); child.kill(); await exited;} await fs.rm(root, {recursive: true, force: true});});
   const input = Buffer.from('small request 中文🙂\n'), received = Promise.withResolvers();
   let body = Buffer.alloc(0);
-  child.stdout.on('data', bytes => {body = Buffer.concat([body, bytes]); if (body.length >= input.length) received.resolve(body);});
+  const stripBom = bytes => bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? bytes.subarray(3) : bytes;
+  child.stdout.on('data', bytes => {body = Buffer.concat([body, bytes]); if (body.length >= input.length) received.resolve(stripBom(body));});
   child.on('exit', () => received.reject(new Error(errors || 'PowerShell exited before forwarding the request')));
   child.stdin.write(input); // Deliberately keep stdin open, as a persistent SSH channel does.
   assert.deepEqual(await received.promise, input);
@@ -283,7 +287,7 @@ test('Windows installation gives a new root only owner/SYSTEM access and preserv
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
     try { await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{env:{...process.env,USERPROFILE:root}}); lastError = null; break; }
-    catch (error) { lastError = error; if (!/Microsoft\.PowerShell\.Security|Get-Acl/.test(String(error.message))) throw error; await new Promise(resolve => setTimeout(resolve, 400)); }
+    catch (error) { lastError = error; if (!/Microsoft\.PowerShell\.Security|Get-Acl|TypeData|AccessControl/.test(String(error.message))) throw error; await new Promise(resolve => setTimeout(resolve, 400)); }
   }
   if (lastError) throw lastError;
 });

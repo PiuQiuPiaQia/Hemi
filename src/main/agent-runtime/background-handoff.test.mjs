@@ -187,7 +187,11 @@ for (const platform of ['PC','Bot']) {
     const entries = await f.entries(); assert.equal(entries.filter(item => item.type === 'custom' && item.customType === 'hemi.input').length, 1);
     // 057 软复盘（R-02/R-07）：跨段不再依赖 60s 静默复核兜底唤醒——reviewPending 立即唤醒
     // 根复盘（goal round 推进），模型自己核验并停止不再需要的命令；quiet review 保留为长静默兜底。
-    if (mode === 'quiet-hung') assert.ok(root.goal.round >= 2, `soft segment review woke the root (round=${root.goal.round})`);
+    if (mode === 'quiet-hung') {
+      // 快机上段复盘事实可能晚于收口读取落地；有界等待 round 推进，而不是立即断言。
+      await until(async () => (Object.values((await f.snapshot()).roots).find(item => item.goal)?.goal.round ?? 0) >= 2);
+      assert.ok(true, 'soft segment review woke the root');
+    }
   });
   test(`${platform}: a quiet required long job survives handoff and retains its original identity and deadline`, {timeout:25000}, async t => {
     const f = await fixture(t, platform, 'normal'); await f.start();

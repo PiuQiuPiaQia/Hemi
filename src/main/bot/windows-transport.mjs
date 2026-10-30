@@ -31,9 +31,6 @@ $desktopTaskName = $taskName + '-Desktop'
 `;
 
 export const windowsRootSetupScript = rootScript + String.raw`
-# Get-Acl lives in Microsoft.PowerShell.Security; module auto-loading can lose a
-# discovery race under parallel PowerShell sessions (observed on CI runners).
-Import-Module Microsoft.PowerShell.Security
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $acl = Get-Acl -LiteralPath $root
 $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
