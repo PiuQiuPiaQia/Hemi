@@ -1,4 +1,4 @@
-首个 Windows 正式安装包（NSIS x64）：全新安装、开始菜单快捷方式、系统卸载入口与应用内更新（latest.yml）。本版包含 v0.2.24–v0.2.27 的全部桌面修复，并补齐 Windows 平台适配。
+首个 Windows 正式安装包（NSIS x64）：全新安装、开始菜单快捷方式、系统卸载入口与应用内更新（latest.yml）。本版包含 v0.2.24–v0.2.28 的全部桌面功能与修复（订阅额度进度与余额查询、用量热力图、完成轮折叠、会话列表性能、更新器暂存清理等），并补齐 Windows 平台适配。
 
 - Windows 窗口与导航：单行集成标题栏（保留系统最小化/最大化/关闭按钮），常驻「文件 / 编辑 / 视图 / 帮助」菜单；窄窗口自动收起会话栏。
 - 桌面操控接入：设置页真实能力探测与应用授权，支持应用发现、启动与界面操作；浏览器操控走独立后台窗口。
@@ -8,7 +8,7 @@
 
 ---
 
-The first official Windows installer (NSIS x64): fresh install, Start Menu shortcut, system uninstall entry, and in-app updates (latest.yml). This release includes all desktop fixes from v0.2.24 through v0.2.27 plus the Windows platform work.
+The first official Windows installer (NSIS x64): fresh install, Start Menu shortcut, system uninstall entry, and in-app updates (latest.yml). This release includes all desktop features and fixes from v0.2.24 through v0.2.28 (subscription quota progress and balance lookup, usage heatmap, completed-turn folding, conversation-list performance, updater staging cleanup) plus the Windows platform work.
 
 - Windows window and navigation: a single integrated titlebar (native minimize/maximize/close preserved), a persistent File / Edit / View / Help menu, and an auto-collapsing conversation sidebar in narrow windows.
 - Desktop control wired in: real capability probing and per-app authorization in Settings, app discovery/launch/UI automation, and browser control through a dedicated background window.
