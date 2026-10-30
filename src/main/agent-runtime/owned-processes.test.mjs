@@ -9,9 +9,15 @@ import {recoverOwnedProcesses,processBirth} from './owned-processes.mjs';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 test('an explicitly unconfirmed legacy tree cannot be declared gone merely because its parent PID vanished',async()=>{
  const record={id:'unknown',state:'unknown',cleanupConfirmed:false,pid:99999999,birth:'old',token:'old'};
- let writes=0;
- await assert.rejects(recoverOwnedProcesses({snapshot:async()=>({processes:{unknown:record}}),processEnd:async()=>{writes++;}}),{code:'cleanup-unconfirmed'});
- assert.equal(writes,0);
+ const writes=[],warnings=[];
+ assert.equal(await recoverOwnedProcesses({snapshot:async()=>({processes:{unknown:record}}),processEnd:async(id,result)=>{writes.push({id,...result});}}, {log:{warn:message=>warnings.push(message)}}),1);
+ assert.equal(writes[0].state,'unknown');assert.equal(writes[0].cleanupConfirmed,false);
+ assert.equal(warnings.length,1);
+});
+test('shared journal failures still reject recovery',async()=>{
+ await assert.rejects(recoverOwnedProcesses({snapshot:async()=>{throw Error('read failed');}}),/read failed/);
+ const record={id:'unknown',state:'unknown',cleanupConfirmed:false};
+ await assert.rejects(recoverOwnedProcesses({snapshot:async()=>({processes:{unknown:record}}),processEnd:async()=>{throw Error('write failed');}}),/write failed/);
 });
 test('宿主崩溃后按随机归属标记回收实际进程组；相同PID但标记不符的独立工作存活', {skip:process.platform==='win32'?'Windows进程树需真机验证':false}, async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'hemi064-orphans-'));
@@ -29,8 +35,11 @@ test('宿主崩溃后按随机归属标记回收实际进程组；相同PID但�
   const orphan=spawn('/bin/bash',['-c','sleep 30; __hemi_status=$?; exit "$__hemi_status"','hemi-command:recovery-test'],{detached:true,stdio:'ignore'});
   await new Promise(r=>orphan.once('spawn',r));const orphanExited=new Promise(r=>orphan.once('exit',r));
   const ownerForOrphan={conversationId:'c',rootRunId:'r',generation:0};
+  await journal.processStart({id:'unknown',pid:99999999,token:'unknown',birth:'old',owner:ownerForOrphan});
+  await journal.processEnd('unknown',{state:'unknown',cleanupConfirmed:false});
   await journal.processStart({id:'orphan',pid:orphan.pid,token:'recovery-test',birth:await processBirth(orphan.pid),owner:ownerForOrphan});
   await recoverOwnedProcesses(journal);await orphanExited;assert.equal((await journal.snapshot()).processes.orphan.state,'recovered');
+  assert.equal((await journal.snapshot()).processes.unknown.cleanupConfirmed,false,'one unconfirmed record must not prevent cleanup of the next owned process');
   independent=spawn('/bin/bash',['-c',`sleep 0.3; printf safe > '${separate}'`],{detached:true,stdio:'ignore',env:{...process.env,HEMI_COMMAND_TOKEN:'independent'}});
   const owner={conversationId:'c',rootRunId:'r',generation:0};await journal.processStart({id:'stale',pid:independent.pid,birth:'different-birth',token:'wrong-token',owner});
   await recoverOwnedProcesses(journal);await pause(2200);
