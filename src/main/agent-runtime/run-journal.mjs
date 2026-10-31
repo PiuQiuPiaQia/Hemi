@@ -14,8 +14,12 @@ const sourceRoot = (s, owner) => {
   return s.roots[root?.sourceRootRunId ?? owner.rootRunId];
 };
 const goalIdentity = root => root?.goal?.id ?? root?.owner.rootRunId;
-const goalRequests = (s, root) => Object.values(s.requests).filter(item => ![BUDGET_SUMMARY_PURPOSE,GOAL_VERIFICATION_PURPOSE].includes(item.purpose)
+const goalRequests = (s, root) => Object.values(s.requests).filter(item => !item.preflight && ![BUDGET_SUMMARY_PURPOSE,GOAL_VERIFICATION_PURPOSE].includes(item.purpose)
   && goalIdentity(sourceRoot(s,item.owner)) === goalIdentity(root)).length;
+// One model call may need several control-plane HTTP requests before inference.
+// Keep the call reserved across preflights; a second inference or caller is denied.
+const singleModelCallAvailable = (previous, request) => previous.every(item => item.preflight === true
+  && typeof request.logicalCallId === 'string' && request.logicalCallId && item.logicalCallId === request.logicalCallId);
 const assertExecuting = (s, owner) => {
   // 057 软复盘后 requestLimitReached 只代表硬预算收口（goal 总额或无 goal 的 per-run 上限），
   // 不再用于每段边界；段边界由根调度在回合边界主动 checkpoint（agent-task-lifecycle R-02/R-07）。
@@ -227,7 +231,8 @@ export function createRunJournal({ dir }) {
       const requests = Object.values(s.requests).filter(item => item.owner.rootRunId === owner.rootRunId
         && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round);
       const attempts = (root.goal.verificationAttempts ??= []);
-      if (result.attempt !== requests.length || !requests.length || requests.some(item => !item.endedAt)
+      const calls = new Set(requests.map(item => item.logicalCallId ?? item.requestId));
+      if (result.attempt !== calls.size || !requests.length || requests.some(item => !item.endedAt)
         || attempts.some(item => item.round === root.goal.round && item.attempt === result.attempt)) throw new Error('目标校验响应缺少已收口的请求');
       attempts.push({round:root.goal.round, attempt:result.attempt, valid:result.valid, errorCode:result.errorCode,bypassed:Boolean(result.bypassed),
         finishReason:result.finishReason, responseChars:result.responseChars, responseHash:result.responseHash, responseShape:result.responseShape, at:Date.now()});
@@ -384,11 +389,16 @@ export function createRunJournal({ dir }) {
       if (root.kind === 'auxiliary' && source && ['cancelled','failed','blocked','interrupted','continued','awaiting_user'].includes(source.status)) throw new Error('所属目标已停止或等待答复，禁止辅助请求');
       if (s.requests[request.requestId]) throw new Error('重复请求身份');
       if (request.purpose === BUDGET_SUMMARY_PURPOSE) {
-        if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || !root.requestLimitReached || root.budgetSummary?.state !== 'preparing') throw new Error('任务总结机会不可用');
-        Object.assign(root.budgetSummary, { state: 'requested', requestId: request.requestId });
+        const previous = Object.values(s.requests).filter(item => item.owner.rootRunId === owner.rootRunId && item.purpose === BUDGET_SUMMARY_PURPOSE);
+        if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || !root.requestLimitReached || root.budgetSummary?.state !== 'preparing'
+          || !singleModelCallAvailable(previous, request)) throw new Error('任务总结机会不可用');
+        if (!request.preflight) Object.assign(root.budgetSummary, { state: 'requested', requestId: request.requestId });
       } else if (request.purpose === GOAL_VERIFICATION_PURPOSE) {
+        const previous = Object.values(s.requests).filter(item => item.owner.rootRunId === owner.rootRunId
+          && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal?.round);
         if (owner.taskId || root.kind === 'auxiliary' || request.role !== 'main' || root.goal?.phase !== 'checking'
-          || Object.values(s.requests).some(item => item.owner.rootRunId === owner.rootRunId && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round)) throw new Error('目标校验请求不可用');
+          || root.goal.verificationAttempts?.some(item => item.round === root.goal.round)
+          || !singleModelCallAvailable(previous, request)) throw new Error('目标校验请求不可用');
         request = {...request, goalRound: root.goal.round};
       } else {
         // 057 软复盘：段边界（maxRequestsPerRound）只作为回合边界复盘记账，不再拒绝请求；

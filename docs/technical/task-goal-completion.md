@@ -69,3 +69,17 @@ Bot 复用同一核心默认策略及结果约束；保留其远端工具、权�
 本次未替换安装版、发布桌面版本、部署生产 Bot 或修改正式会话状态。原安装版没有留存失败校验的响应原文，历史输出形状无法追溯。真实 GLM-5.3 合成证据探针在此前命令行环境未连通；本轮专项不代表外部服务实测验收或 Windows/实体设备验证。
 
 最终验证：`npm test` 共 2,210 项，2,189 通过、21 跳过、0 失败；包含最终取消竞态和宿主放行标记不能由模型设置的检查。`node scripts/verify-goal-verification.mjs --dev` 与 `node scripts/verify-goal-verification.mjs` 各 5 项界面/重启场景通过，截图已复核。`node --check` 与本次文件 `git diff --check` 通过。开发验证期间 Vite 打印过 ResizeObserver 回环通知，功能断言通过，截图未出现覆盖层；未改 renderer 处理该通知。
+
+## 校验预检与推理请求准入（2026-10-31）
+
+共享传输层在 HTTP 请求准入前读取宿主内部的 `MODEL_PREFLIGHT` 标记，将配置、令牌和签名预检保存为 `preflight:true`。预检仍逐次记录真实 HTTP、结束状态和错误，仍受归属、取消及持久化屏障约束，但不消耗执行推理预算。旧请求没有该标记时保留原计数，不根据 URL 猜测或改写历史事实。
+
+每轮目标校验及触顶总结仍只允许一个模型调用。同一 `logicalCallId` 可先完成多个预检，再准入一次推理；其他调用、第二次推理及推理后的预检均拒绝。校验诊断按模型调用计一次，提交前要求该调用的所有物理请求已收口。仅预检发生服务故障时也可按原宽松策略记录一次失败并放行；诊断提交后禁止追加请求。账本或准入错误继续作为控制错误处理，不改成服务故障放行。
+
+验证基线 `57a27dd4b2288ccfea43411ce0312dc3869a912c` 加本次工作树差异；macOS arm64 / Node 22.22.3 / Pi SDK 1.3.0。`node --test src/main/services/bigmodel-coding.test.mjs src/main/agent-runtime/goal-verification.test.mjs src/main/agent-runtime/goal-driver.test.mjs src/main/agent-runtime/run-journal.test.mjs src/main/agent-runtime/usage-ledger.test.mjs src/main/agent-runtime/budget-summary.test.mjs`：102 项通过。新增回归在修复前复现“目标校验请求不可用”；修复后通过真实 OAuth 装配、GLM 路由/签名、Pi SDK、HTTP SSE 和磁盘账本，覆盖正常校验、坏 JSON、HTTP 故障、预检断连、单次执行预算和触顶总结。模型服务使用本机合成协议端，未使用真实账号或外部模型。每个故障场景的文件只写入一次。
+
+- `node scripts/verify-goal-verification.mjs --dev` 与 `node scripts/verify-goal-verification.mjs`：Vite 开发 renderer 和已有构建 renderer 各 5 项通过，使用新临时 `HEMI_USER_DATA_DIR` 和真实 Electron 44.0.0（内置 Node 24.18.1），覆盖故障放行、明确未完成后续跑、取消和重启不重放。报告与截图保存在忽略目录 `.visual/workflow/goal-verification/fail-open/{dev,built}/`；构建版坏 JSON 场景截图已复核。开发版仍有 ResizeObserver 回环日志，功能检查通过。
+- `npm test`：2,272 项，2,246 通过、23 跳过、3 失败。失败均在另一批未提交改动的 `src/main/skills/skillsmp.test.mjs`：git 引用通告解析、零 API 归档主链路及归档失败回落请求次数。复核时该文件又被另行更新，按当前名称运行 `node --test --test-name-pattern='resolveCommit 走 git|fetchGithubSnapshot 主链路零 API|归档失败/校验' src/main/skills/skillsmp.test.mjs`，前两项仍失败，归档回落一项通过。该文件和 `github-source.mjs` 不依赖本次修改的运行账本或传输封装，未修改它们；未宣称当前工作树全量通过。
+- 本次文件 `git diff --check` 通过。全量日志位于 `/tmp/hemi-goal-preflight-tests-20261031.log`，当前单独复跑日志位于 `/tmp/hemi-goal-preflight-unrelated-current-20261031.log`。
+
+本次不修改正式会话终态，不重放失败回合，不替换安装版或部署生产 Bot。Windows 和实体移动设备未在本轮验证。

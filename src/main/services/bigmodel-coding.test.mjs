@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
@@ -15,6 +15,8 @@ import { createCodingTransport } from './bigmodel-coding-transport.mjs';
 import { createHemiSession } from '../agent/hemi-session.mjs';
 import { createRunJournal } from '../agent-runtime/run-journal.mjs';
 import { freezeModelPolicy, resolveModelPlan } from '../agent-runtime/model-policy.mjs';
+import { driveGoal, goalPolicy, goalRunOutcome, verifyGoalCompletion } from '../agent-runtime/goal-driver.mjs';
+import { summarizeBudget } from '../agent-runtime/budget-summary.mjs';
 import { startOAuthTestServer, waitForOAuth } from '../../../scripts/oauth-test-fixture.mjs';
 
 async function fixture(t) {
@@ -462,6 +464,70 @@ test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或�
   const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
   await assert.rejects(pingTextModel(config), error => /签名握手失败（HTTP 404）/.test(error.message) && !/PRIVATE UPSTREAM/.test(error.message));
   assert.equal(f.transport.bigmodel.state.modelCalls, 0);
+});
+
+test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故障不重放已执行工作', async t => {
+  for (const mode of ['complete', 'malformed', 'http-failure', 'preflight-failure']) await t.test(mode, async t => {
+    const f = await fixture(t); await f.connect();
+    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const owner = { conversationId: 'verification-test', rootRunId: 'run', generation: 1 };
+    const journal = createRunJournal({ dir: path.join(f.dir, 'journal') });
+    await journal.beginRoot(owner);
+    const policy = await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey });
+    const execution = { journal, owner, plan: resolveModelPlan(policy), store: f.profiles, budgets: policy.budgets };
+    const complete = { status: 'complete', reason: '实际文件已核对', evidence: ['文件只写入一次'], remaining: [], nextAction: '' };
+    globalThis.fetch = async (url, init) => {
+      if (mode === 'preflight-failure' && String(url).endsWith('/v2/client'))
+        throw new TypeError('SYNTHETIC_PRIVATE', { cause: Object.assign(new Error('SYNTHETIC_PRIVATE'), { code: 'EPIPE' }) });
+      const response = await f.transport.fetch(url, init);
+      if (!String(url).endsWith('/ultra/anthropic/v1/messages')) return response;
+      if (mode === 'http-failure') { await response.body.cancel(); return Response.json({ error: { message: 'Synthetic outage' } }, { status: 503 }); }
+      if (mode !== 'complete') return response;
+      return new Response((await response.text()).replaceAll('OAuth OK', JSON.stringify(JSON.stringify(complete)).slice(1, -1)), { headers: response.headers });
+    };
+    let runs = 0;
+    const proof = path.join(f.dir, 'proof.txt');
+    const result = await driveGoal({ journal, owner, objective: '写入并核对文件', policy: goalPolicy(), signal: AbortSignal.timeout(10000),
+      run: async () => { runs++; await writeFile(proof, 'EXECUTED_ONCE'); return { texts: ['文件已写入'] }; },
+      verify: (objective, evidence) => verifyGoalCompletion({ execution, objective, evidence, signal: AbortSignal.timeout(5000) }),
+      evidence: () => readFile(proof, 'utf8'), persist: async () => {} });
+    assert.equal(runs, 1); assert.equal(await readFile(proof, 'utf8'), 'EXECUTED_ONCE');
+    assert.equal(goalRunOutcome(result), 'completed'); await journal.finishRoot(owner, 'completed');
+    const state = await journal.snapshot(), goal = state.roots[owner.rootRunId].goal, rows = Object.values(state.requests);
+    assert.equal(goal.verificationAttempts.length, 1); assert.equal(goal.verifications.length, 1);
+    assert.equal(Boolean(goal.verifications[0].verificationBypassed), mode !== 'complete');
+    assert.ok(rows.every(row => row.endedAt)); assert.equal(new Set(rows.map(row => row.logicalCallId)).size, 1);
+    assert.equal(rows.filter(row => !row.preflight).length, mode === 'preflight-failure' ? 0 : 1);
+    assert.equal(rows.filter(row => row.preflight).length, 2);
+    assert.equal(f.transport.bigmodel.state.modelCalls, mode === 'preflight-failure' ? 0 : 1);
+    assert.doesNotMatch(JSON.stringify(state), /SYNTHETIC_PRIVATE|synthetic-project|synthetic-bigmodel-login/);
+  });
+});
+
+test('GLM 预检不消耗执行额度，触顶总结仍只允许一次实际推理', async t => {
+  for (const kind of ['execution', 'summary']) await t.test(kind, async t => {
+    const f = await fixture(t); await f.connect();
+    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const owner = { conversationId: 'budget-test', rootRunId: 'run', generation: 1 };
+    const journal = createRunJournal({ dir: path.join(f.dir, 'journal') }); await journal.beginRoot(owner);
+    const policy = await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey });
+    const execution = { journal, owner, purpose: 'main', plan: resolveModelPlan(policy), store: f.profiles, budgets: { ...policy.budgets, maxRequestsPerRun: 1 } };
+    if (kind === 'execution') {
+      const result = await chatTurn({ ...config, runtimeExecution: execution, messages: [{ role: 'user', content: '只回复 OK' }] });
+      assert.equal(result.content, 'OAuth OK');
+    } else await journal.requestStart(owner, { requestId: 'used', purpose: 'main' }, 1);
+    await assert.rejects(journal.requestStart(owner, { requestId: 'over', purpose: 'main' }, 1), { code: 'request-limit' });
+    if (kind === 'summary') {
+      const result = await summarizeBudget({ execution, brief: '已有文件，尚未验证', fallbackText: 'FALLBACK', signal: AbortSignal.timeout(5000) });
+      assert.equal(result.fallback, false); assert.match(result.text, /OAuth OK/);
+      const again = await summarizeBudget({ execution, brief: '', fallbackText: 'FALLBACK', signal: AbortSignal.timeout(5000) });
+      assert.equal(again.text, result.text);
+    }
+    const rows = Object.values((await journal.snapshot()).requests);
+    assert.equal(rows.filter(row => row.preflight).length, 2);
+    assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+    assert.equal((await journal.root(owner)).requestLimitReached.limit, 1);
+  });
 });
 
 test('GLM 真实 SDK 与恢复器：连接拒绝可恢复，EPIPE 不伪装 503 或重复提交推理', async t => {

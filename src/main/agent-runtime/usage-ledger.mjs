@@ -80,9 +80,9 @@ export function controlledStream(stream, getExecution) {
             if (execution.cancelled?.() || signal.aborted) throw signal.reason ?? new DOMException('执行归属已失效', 'AbortError');
             const requestId = `request-${randomUUID()}`;
             const { apiKey: _secret, encryptedApiKey: _encrypted, ...publicCandidate } = candidate;
-            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, role: plan.role, candidateIndex: index, actualModel: publicCandidate, url: sanitizedUrl(url), cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
-            catch (error) { if (error.code === 'request-limit') execution.onRequestLimit?.(); boundaryFailure = error; throw error; }
             const { [MODEL_PREFLIGHT]: preflight = false, ...wireInit } = init ?? {};
+            try { await execution.journal.requestStart(execution.owner, { requestId, logicalCallId, purpose, ...(preflight ? {preflight:true} : {}), role: plan.role, candidateIndex: index, actualModel: publicCandidate, url: sanitizedUrl(url), cost: { status: 'unknown' } }, execution.budgets.maxRequestsPerRun); }
+            catch (error) { if (error.code === 'request-limit') execution.onRequestLimit?.(); boundaryFailure = error; throw error; }
             const facts = { preflight };
             ids.push(requestId); attempts.set(requestId, { startedAt: Date.now(), facts }); lastRequestId = requestId;
             // Preflight and inference share one SDK call. A successful config

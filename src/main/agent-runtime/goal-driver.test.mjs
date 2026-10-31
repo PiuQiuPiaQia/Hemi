@@ -135,6 +135,26 @@ test('校验格式失败仍保留诊断；每轮只准入一次校验，取消�
  await journal.finishRoot(other,'cancelled');await assert.rejects(journal.recordGoalVerificationAttempt(other,{...invalid,attempt:2}),/失效/);
 });
 
+test('校验预检保留同一次调用归属；并发调用、第二次推理和迟到预检不能占用机会', async t => {
+ const {journal}=await fixture(t); await journal.checkGoal(owner);
+ const check=(requestId,options={})=>journal.requestStart(owner,{requestId,role:'main',purpose:GOAL_VERIFICATION_PURPOSE,logicalCallId:'check',...options},2);
+ await check('route',{preflight:true});
+ await assert.rejects(check('foreign-preflight',{preflight:true,logicalCallId:'other'}),/不可用/);
+ await assert.rejects(check('foreign-inference',{logicalCallId:'other'}),/不可用/);
+ await finish(journal,'route'); await check('sign',{preflight:true}); await finish(journal,'sign');
+ await check('inference'); await assert.rejects(check('second-inference'),/不可用/);
+ await assert.rejects(check('late-preflight',{preflight:true}),/不可用/);
+ const attempt={attempt:1,valid:true,errorCode:null,finishReason:'stop',responseChars:10,responseHash:'a'.repeat(64),responseShape:'object'};
+ await assert.rejects(journal.recordGoalVerificationAttempt(owner,attempt),/已收口/);
+ await finish(journal,'inference'); await journal.recordGoalVerificationAttempt(owner,attempt);
+ await journal.recordGoalCheck(owner,next); await journal.continueGoal(owner); await journal.checkGoal(owner);
+ await check('failed-preflight',{preflight:true}); await finish(journal,'failed-preflight');
+ await journal.recordGoalVerificationAttempt(owner,{...attempt,valid:false,errorCode:'goal-verifier-network',bypassed:true});
+ await assert.rejects(check('after-failure',{preflight:true}),/不可用/);
+ await assert.rejects(check('after-failure-inference'),/不可用/);
+ assert.equal((await journal.root(owner)).goal.verificationAttempts.length,2);
+});
+
 const awaiting = {status:'awaiting_user',question:'文件里写什么内容？',reason:'需要用户提供文件内容',evidence:['助手已询问文件内容'],remaining:['获得内容并写入文件'],nextAction:'等待用户答复'};
 test('等待用户答复独立落盘、重启保持等待；答复明确续接原目标且累计预算不清零',async t=>{
  const {journal,dir}=await fixture(t,{maxRequests:3});await request(journal,'before');await finish(journal,'before');
