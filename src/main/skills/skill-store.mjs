@@ -12,7 +12,9 @@ export const OFFICIAL_CATALOG_URL =
   'https://raw.githubusercontent.com/PiuQiuPiaQia/Hemi/main/src/main/skills/official/catalog.json';
 const OFFICIAL_BASE = new URL('./', OFFICIAL_CATALOG_URL);
 const MAX_PACKAGE = 8 * 1024 * 1024;
-const MAX_FILE = 1024 * 1024;
+// 单文件上限 2026-10-31 自 1 MiB 上调到 2 MiB：真实市场技能带数据文件
+// （pbakaus/impeccable 的 font-index.json 1,100,013B，超旧限 393 字节）被拒。
+const MAX_FILE = 2 * 1024 * 1024;
 const MAX_TOTAL = 4 * 1024 * 1024;
 // 文件数只是登记规模上限，真正的安全边界是总量/单文件字节数；64 会拒绝
 // 真实市场技能（xuemian168/bazi-skill 87 文件，2026-10-09），上调到 256。
@@ -80,7 +82,7 @@ function validateFiles(files) {
       failure(`文件编码无效：${relative}`);
     }
     const bytes = Buffer.from(file.contentBase64, 'base64');
-    if (bytes.length > MAX_FILE) failure(`单文件超过 1 MiB：${relative}`);
+    if (bytes.length > MAX_FILE) failure(`单文件超过 2 MiB：${relative}`);
     if (isExecutableBytes(bytes)) failure(`文件包含可执行内容：${relative}`);
     total += bytes.length;
     if (total > MAX_TOTAL) failure('Skill 文件总量超过 4 MiB');
@@ -221,7 +223,7 @@ async function localFiles(sourceDir, relative = '') {
       out.push(...await localFiles(sourceDir, file));
     } else if (stat.isFile()) {
       safeRelative(file);
-      if (stat.size > MAX_FILE) failure(`单文件超过 1 MiB：${file}`);
+      if (stat.size > MAX_FILE) failure(`单文件超过 2 MiB：${file}`);
       out.push({ path: file, contentBase64: (await readFile(absolute)).toString('base64') });
     } else failure(`不支持的文件类型：${file}`);
     if (out.length > MAX_FILES) failure(`文件数量超过 ${MAX_FILES}`);

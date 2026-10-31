@@ -258,7 +258,7 @@ function blobOf(entry) {
   if (entry.type === 'commit' || entry.mode === '160000') failure(`来源包含子模块引用：${entry.path}`);
   if (entry.type !== 'blob') failure(`不支持的文件类型：${entry.path}`);
   if (entry.mode === '120000') failure(`来源包含符号链接：${entry.path}`);
-  if (!Number.isFinite(entry.size) || entry.size > SKILL_LIMITS.maxFile) failure(`单文件超过 1 MiB：${entry.path}`);
+  if (!Number.isFinite(entry.size) || entry.size > SKILL_LIMITS.maxFile) failure(`单文件超过 2 MiB：${entry.path}`);
   return { path: entry.path, sha: entry.sha, size: entry.size };
 }
 
@@ -272,7 +272,7 @@ async function fetchRaw(fetchImpl, { owner, repo }, commit, repoPath) {
       response = await fetchImpl(url, { signal: AbortSignal.timeout(20000), redirect: 'error' });
       if (!response.ok) failure(`下载 ${repoPath} 失败：HTTP ${response.status}`);
       const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length > SKILL_LIMITS.maxFile) failure(`单文件超过 1 MiB：${repoPath}`);
+      if (bytes.length > SKILL_LIMITS.maxFile) failure(`单文件超过 2 MiB：${repoPath}`);
       return bytes;
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('下载 ')) throw error;
@@ -422,7 +422,7 @@ async function snapshotFromArchive(fetchImpl, location, commit, githubUrl) {
     if (!name.startsWith(prefix)) continue;
     const relative = prefix ? name.slice(prefix.length) : name;
     if (!relative || relative.endsWith('/')) continue;
-    if (bytes.length > SKILL_LIMITS.maxFile) failureFinal(`单文件超过 1 MiB：${relative}`);
+    if (bytes.length > SKILL_LIMITS.maxFile) failureFinal(`单文件超过 2 MiB：${relative}`);
     total += bytes.length;
     if (total > SKILL_LIMITS.maxTotal) failureFinal('Skill 文件总量超过 4 MiB');
     if (rawFiles.length >= SKILL_LIMITS.maxFiles) failureFinal(`文件数量超过 ${SKILL_LIMITS.maxFiles}`);

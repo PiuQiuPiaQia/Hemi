@@ -423,7 +423,7 @@ test('归档目录里出现符号链接时整单拒绝（确定性失败，不�
 
 test('归档枚举发现单文件超限时直接报边界，不回落不烧 API（impeccable 教训）', async () => {
   const { gzipSync } = await import('node:zlib');
-  const oversized = Buffer.alloc(1024 * 1024 + 1, 0x61);
+  const oversized = Buffer.alloc(2 * 1024 * 1024 + 1, 0x61);
   const impl = async (url) => {
     if (url === 'https://github.com/demo-org/skills/info/refs?service=git-upload-pack') {
       return new Response(refAdvertisement([['refs/heads/main', COMMIT]]));
@@ -440,7 +440,7 @@ test('归档枚举发现单文件超限时直接报边界，不回落不烧 API�
   };
   await assert.rejects(
     () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: impl }),
-    /单文件超过 1 MiB：scripts\/data\.json/,
+    /单文件超过 2 MiB：scripts\/data\.json/,
   );
 });
 
