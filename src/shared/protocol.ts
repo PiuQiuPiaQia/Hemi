@@ -1539,8 +1539,8 @@ export type ModelProviderSaveInput = {
   }>;
 };
 
-/** 首启四步主流程，microphone/asr 为可选能力子页。 */
-export type OnboardingStep = 'welcome' | 'model' | 'capabilities' | 'microphone' | 'asr' | 'done';
+/** 首启四步主流程，microphone/asr 为可选能力子页；restore 为欢迎页旁路（从备份恢复）。 */
+export type OnboardingStep = 'welcome' | 'restore' | 'model' | 'capabilities' | 'microphone' | 'asr' | 'done';
 
 /** 数据备份（docs/requirements/data-backup.md）——与 backup-manager 返回结构对齐。 */
 // 2026-11 用户裁决：仅保留轻量档。'full' 只作为旧备份集/历史 lastRun 的只读兼容值出现；
@@ -2140,7 +2140,7 @@ export type HemiVoiceBridge = {
     to: OnboardingStep;
     permissionChoice?: 'granted' | 'skipped';
   }) => Promise<OnboardingActionResult>;
-  completeOnboarding: () => Promise<OnboardingActionResult>;
+  completeOnboarding: (force?: boolean) => Promise<OnboardingActionResult>;
   /** 数据备份（docs/requirements/data-backup.md）：状态（含脱敏目标配置）/ 保存 / 测试 / 执行 / 列表 / 恢复 / 进度订阅。 */
   getBackupState: () => Promise<BackupSettingsView>;
   saveBackupSettings: (payload: BackupSettingsPatch) => Promise<BackupSettingsView>;

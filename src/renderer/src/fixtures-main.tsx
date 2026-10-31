@@ -1728,6 +1728,7 @@ function onboardingScreen(overrides: Partial<Parameters<typeof SetupScreen>[0]> 
       onAdvance={() => {}}
       onSaveAsrKey={() => {}}
       onComplete={() => {}}
+      onSkip={async () => {}}
       onOpenExternal={() => {}}
       onOpenMicrophoneSettings={() => {}}
       {...overrides}
@@ -5437,6 +5438,29 @@ const scenes: Record<string, () => React.ReactElement> = {
   'onboarding-model': () => onboardingScreen({ step: 'model' }),
   'onboarding-capabilities': () => onboardingScreen({ step: 'capabilities', modelSaved: true }),
   'onboarding-complete': () => onboardingScreen({ step: 'done', modelSaved: true }),
+  // 首启「从备份恢复」：?stage=a（选来源）|b（备份列表，含一份损坏）|b-empty（空态）|c（恢复预览）|d（完成）。
+  'onboarding-restore': () => {
+    const stageParam = new URLSearchParams(location.search).get('stage') ?? 'a';
+    const stage = ({ a: 'source', b: 'list', 'b-empty': 'list', c: 'preview', d: 'done' } as const)[stageParam as 'a'] ?? 'source';
+    const nowIso = new Date(now).toISOString();
+    const sets = stageParam === 'b-empty' ? [] : [
+      { name: 'hemi-backup-20261031-1011', createdAt: nowIso, tier: 'light', totals: { rawBytes: 84_000_000, packedBytes: 21_000_000 }, appVersion: '0.2.38', source: 'webdav' },
+      { name: 'hemi-backup-20261030-2204', createdAt: null, tier: null, totals: null, appVersion: null, source: 'webdav', broken: true },
+    ];
+    stubExecutor({
+      getBackupState: async () => ({ schemaVersion: 1, target: stage === 'source' ? null : { kind: 'webdav', url: 'https://dav.jianguoyun.com/dav/', username: 'me@example.com', remoteDir: 'hemi-backups', hasPassword: true }, schedule: { enabled: false, interval: 'daily', tier: 'light' }, keep: 5, lastRun: null }),
+      saveBackupSettings: async () => ({ schemaVersion: 1, target: { kind: 'webdav', url: 'https://dav.jianguoyun.com/dav/', username: 'me@example.com', remoteDir: 'hemi-backups', hasPassword: true }, schedule: { enabled: false, interval: 'daily', tier: 'light' }, keep: 5, lastRun: null }),
+      testBackupConnection: async () => ({ ok: true, message: '连接成功' }),
+      pickBackupDirectory: async () => ({ canceled: false, path: '/Users/demo/Backups/Hemi' }),
+      listBackups: async () => sets,
+      onBackupProgress: () => () => {},
+      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'] } }),
+      applyBackupRestore: async () => { await new Promise(resolve => setTimeout(resolve, 600)); return { ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety' }; },
+      cancelBackupRestore: async () => ({ ok: true }),
+      openExternal: async () => {},
+    });
+    return onboardingScreen({ step: 'restore', restoreStage: stage });
+  },
   // 032：主界面修复条（完成后配置出错的就近修复，不回首启）。
   'onboarding-repair': () => (
     <VoiceScreen

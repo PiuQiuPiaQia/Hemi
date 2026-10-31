@@ -18,11 +18,16 @@ const LIGHT_ENTRIES=[
   'runtime-v2/conversations','runtime-v2/conversation-operations','runtime-v2/task-history',
   'runtime-v2/run-journal.json','runtime-v2/text-model-profiles.json','runtime-v2/migration.json',
   'pi-memory','drafts','bot','appearance.json','onboarding.json','access-grants.json',
+  // 2026-11 用户裁决：凭据随备份（secrets/ 含解密密钥 key-v1，整目录随包即可在新机解密；
+  // 上游 local-secrets 的错误文案本身预期「从备份恢复应用数据」）。备份不加密，
+  // 云端目标保存的是明文等价物，UI 须如实提示。
+  'secrets','provider-logins','remote-passwords.json','doubao-asr.json','runtime-v2/oauth-credentials.json',
 ];
-// 白名单内部仍要剔除的相对路径（可重建或设备绑定凭据）。
+// 白名单内部仍要剔除的相对路径（可重建）。
 const SKIP_REL=new Set(['bot/cache.json']);
-// 凭据防线：任何路径段命中即拒之门外（兜底，防止未来白名单误加）。
-const NEVER_SEGMENTS=new Set(['secrets','provider-logins','oauth-credentials.json','remote-passwords.json','doubao-asr.json']);
+// 2026-11 用户裁决后凭据已随备份（见 LIGHT_ENTRIES 注释），此名单仅留兜底位；
+// 现阶段无整段排除项。
+const NEVER_SEGMENTS=new Set();
 
 function isExcludedRel(rel){
   if(SKIP_REL.has(rel)||NEVER_SEGMENTS.has(rel))return true;

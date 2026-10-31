@@ -15,9 +15,10 @@ import path from 'node:path';
 
 export const ONBOARDING_VERSION = 2;
 /** 主流程：欢迎 → 模型 → 可选能力 → 完成；麦克风/ASR 是可选能力的子页。 */
-export const ONBOARDING_STEPS = ['welcome', 'model', 'capabilities', 'microphone', 'asr', 'done'];
+export const ONBOARDING_STEPS = ['welcome', 'restore', 'model', 'capabilities', 'microphone', 'asr', 'done'];
 const NEXT_STEPS = {
-  welcome: ['model'],
+  welcome: ['model', 'restore'],
+  restore: ['welcome', 'model'],
   model: ['welcome', 'capabilities'],
   capabilities: ['model', 'microphone', 'done'],
   microphone: ['capabilities', 'asr'],
@@ -183,12 +184,13 @@ export function createOnboardingStore({
   }
 
   /** 完成屏「开始使用」：模型就绪即可完成，语音配置可留空（幂等）。 */
-  async function complete() {
+  async function complete({ force = false } = {}) {
     await ensureInitialized();
     if (snapshot.phase === 'complete') return { ok: true, state: await getState() };
     const gates = await readGates();
-    if (snapshot.step !== 'done') return { ok: false, message: '请先完成当前引导步骤' };
-    if (!gates.modelComplete) return { ok: false, message: '主脑模型还没有保存完整' };
+    // force：跳过引导／从备份恢复完成——允许无模型进入主界面，模型可在设置里补配。
+    if (!force && snapshot.step !== 'done') return { ok: false, message: '请先完成当前引导步骤' };
+    if (!force && !gates.modelComplete) return { ok: false, message: '主脑模型还没有保存完整' };
     const stamped = now();
     await persist({
       ...snapshot,

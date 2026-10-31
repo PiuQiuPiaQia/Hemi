@@ -48,7 +48,10 @@ test('collection is light-only: credentials, caches and legacy full-only dirs ex
   assert.ok(!rels.some(r=>r.startsWith('runtime-v2/sessions')));
   assert.ok(!rels.some(r=>r.startsWith('runtime-v2/contexts')));
   assert.ok(!rels.some(r=>r.startsWith('runtime-v2/attachments')));
-  assert.ok(!rels.some(r=>r.includes('secrets')||r.includes('oauth-credentials')||r.includes('remote-passwords')||r.includes('doubao-asr')));
+  // 2026-11 用户裁决：凭据（secrets 密钥目录、oauth、ASR、远端密码）随备份进包
+  assert.ok(rels.includes('secrets/local-secrets.json'),'secrets 目录应进包');
+  assert.ok(rels.includes('remote-passwords.json')&&rels.includes('doubao-asr.json')&&rels.includes('runtime-v2/oauth-credentials.json'),'各凭据文件应进包');
+  assert.ok(!rels.some(r=>r.endsWith('.tmp')||r.endsWith('.log')));
   assert.ok(!rels.some(r=>r.endsWith('.tmp')||r.endsWith('.log')));
 });
 
@@ -63,7 +66,7 @@ test('backup roundtrip: multi-volume light backup restores identical bytes',asyn
   const rels=entries.map(e=>e.rel);
   assert.ok(rels.includes('runtime-v2/conversations/conv-1.json'));
   assert.ok(rels.includes('bot/state.json'));
-  assert.ok(!rels.some(r=>r.includes('cache.json')||r.includes('oauth-credentials')));
+  assert.ok(!rels.some(r=>r.includes('cache.json')),'bot/cache.json 不进包');
   assert.equal(fs.readFileSync(path.join(stage,'runtime-v2/conversations/conv-1.json'),'utf8'),fs.readFileSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),'utf8'));
   assert.equal(fs.readFileSync(path.join(stage,'drafts/draft-new.json'),'utf8'),'{"text":"草稿"}');
   assert.equal(fs.readFileSync(path.join(stage,'pi-memory/daily/2026-10-31.md'),'utf8'),'# 今天\n- 备份功能单测');

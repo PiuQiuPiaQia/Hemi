@@ -2940,13 +2940,14 @@ export default function Home() {
   }, [asrKeyDraft, configForm, updateConfigForm]);
 
   /** 完成屏「开始使用」：主进程复核默认模型后写完成版本并刷新主界面。 */
-  const handleCompleteOnboarding = useCallback(async () => {
+  // force=true：「跳过引导」与「从备份恢复」完成，主进程绕过模型门槛直接写完成版本。
+  const handleCompleteOnboarding = useCallback(async (force = false) => {
     const bridge = window.hemiVoice;
     if (!bridge) return;
     setSavingConfig(true);
     setSetupError('');
     try {
-      const result = await bridge.completeOnboarding();
+      const result = await bridge.completeOnboarding(force || undefined);
       if (!result?.ok) {
         setSetupError(result?.message ?? '还没能完成设置，请检查前面的步骤。');
         return;
@@ -3691,6 +3692,7 @@ export default function Home() {
         onAdvance={handleOnboardingAdvance}
         onSaveAsrKey={() => void handleSaveAsrKey()}
         onComplete={() => void handleCompleteOnboarding()}
+        onSkip={() => handleCompleteOnboarding(true)}
         onOpenExternal={(url) => void window.hemiVoice?.openExternal(url)}
         onOpenMicrophoneSettings={() => void window.hemiVoice?.openMicrophoneSettings()}
       />

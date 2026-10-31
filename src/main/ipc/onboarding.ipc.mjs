@@ -71,9 +71,9 @@ export function registerOnboardingIpc() {
     return result;
   });
 
-  ipcMain.handle(IPC.onboarding.complete, async () => {
+  ipcMain.handle(IPC.onboarding.complete, async (_event, payload) => {
     const before = store.isInProgress();
-    const result = await store.complete();
+    const result = await store.complete({ force: payload?.force === true });
     if (result.ok && before) await afterCompletion();
     return result;
   });

@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   // 032 冷启动引导：快照 / 前进 / 完成（主进程权威，错误回执不带 Key）。
   getOnboardingState: () => ipcRenderer.invoke('onboarding:get-state'),
   advanceOnboarding: (payload) => ipcRenderer.invoke('onboarding:advance', payload),
-  completeOnboarding: () => ipcRenderer.invoke('onboarding:complete'),
+  completeOnboarding: (force) => ipcRenderer.invoke('onboarding:complete', { force }),
   // 数据备份（docs/requirements/data-backup.md）。
   getBackupState: () => ipcRenderer.invoke('backup:get-state'),
   saveBackupSettings: (payload) => ipcRenderer.invoke('backup:save-settings', payload),

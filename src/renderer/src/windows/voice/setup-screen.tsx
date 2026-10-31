@@ -4,6 +4,7 @@ import { BrandIcon } from '@/components/brand-icon';
 import { DOUBAO_CONSOLE_API_KEY_URL, type MicrophonePermissionStatus, type OnboardingStep } from '@/shared/types';
 import { AppTopBar } from '@/components/app-top-bar';
 import { OnboardingModelStep } from './onboarding-model-step';
+import { OnboardingRestoreStep, type OnboardingRestoreStage } from './onboarding-restore-step';
 import { VisionSection } from './vision-section';
 import { BrowserSection } from './browser-section';
 import { ModelRoutingDialog } from './model-routing-dialog';
@@ -24,20 +25,25 @@ type SetupScreenProps = {
   onAdvance: (to: OnboardingStep, permissionChoice?: 'granted' | 'skipped') => void | Promise<void>;
   onSaveAsrKey: () => void;
   onComplete: () => void;
+  /** 跳过引导／恢复完成：主进程 force 完成（绕过模型门槛），由 page 刷新状态；失败原因写入 errorMessage 就地显示，不 reject。 */
+  onSkip: () => Promise<void>;
+  /** fixtures：恢复流程直达某一屏。 */
+  restoreStage?: OnboardingRestoreStage;
   onOpenExternal: (url: string) => void;
   onOpenMicrophoneSettings: () => void;
 };
 
-const STEP_INDEX: Record<OnboardingStep, number> = { welcome: 1, model: 2, capabilities: 3, microphone: 3, asr: 3, done: 4 };
-const BACK_TARGET: Partial<Record<OnboardingStep, OnboardingStep>> = { model: 'welcome', capabilities: 'model', microphone: 'capabilities', asr: 'microphone', done: 'capabilities' };
+const STEP_INDEX: Record<OnboardingStep, number> = { welcome: 1, restore: 2, model: 2, capabilities: 3, microphone: 3, asr: 3, done: 4 };
+const BACK_TARGET: Partial<Record<OnboardingStep, OnboardingStep>> = { restore: 'welcome', model: 'welcome', capabilities: 'model', microphone: 'capabilities', asr: 'microphone', done: 'capabilities' };
 
 function StepIcon({ children }: { children: ReactNode }) {
   return <span className="h37-tile onboarding-step-icon" data-tone="g" aria-hidden="true">{children}</span>;
 }
 
 export function SetupScreen(props: SetupScreenProps) {
-  const { step, microphonePermission, permissionBusy, saving, asrSaved, asrKeySuffix, asrKeyDraft, onAsrKeyChange, modelSaved, errorMessage, onRequestMicrophone, onAdvance, onSaveAsrKey, onComplete, onOpenExternal, onOpenMicrophoneSettings } = props;
+  const { step, microphonePermission, permissionBusy, saving, asrSaved, asrKeySuffix, asrKeyDraft, onAsrKeyChange, modelSaved, errorMessage, onRequestMicrophone, onAdvance, onSaveAsrKey, onComplete, onSkip, restoreStage, onOpenExternal, onOpenMicrophoneSettings } = props;
   const [modelBusy, setModelBusy] = useState(false);
+  const [restoreLocked, setRestoreLocked] = useState(false);
   const [routingOpen, setRoutingOpen] = useState(false);
   const [asrReplacing, setAsrReplacing] = useState(false);
   const micGranted = microphonePermission === 'granted';
@@ -51,7 +57,7 @@ export function SetupScreen(props: SetupScreenProps) {
   return (
     <main className="setup-shell onboarding-page min-h-dvh overflow-hidden" data-step={step}>
       <AppTopBar showBrand={false} back={backTarget ? {
-        label: '返回上一步', disabled: busy, onClick: () => void onAdvance(backTarget),
+        label: '返回上一步', disabled: busy || restoreLocked, onClick: () => void onAdvance(backTarget),
       } : undefined} actions={
         <span className="onboarding-step-count" aria-label={`引导进度 ${index} / 4`}>
           <span className="sr-only">{index} / 4</span>
@@ -65,7 +71,14 @@ export function SetupScreen(props: SetupScreenProps) {
             <h1 className="onboarding-title">你好，我是 Hemi。</h1>
             <p className="onboarding-lead">先连接一个模型，就能用文字交给我任务。</p>
             <div className="onboarding-actions"><button type="button" className="h37-btn h37-btn-primary h37-btn-lg onboarding-primary" disabled={busy} onClick={() => void onAdvance('model')}>开始设置</button></div>
+            <div className="onboarding-alt-entries">
+              <button type="button" className="h37-link onboarding-alt-link" disabled={busy} onClick={() => void onAdvance('restore')}>从备份恢复</button>
+              <span aria-hidden="true">·</span>
+              <button type="button" className="h37-link onboarding-alt-link" disabled={busy} onClick={() => void onSkip()}>跳过引导</button>
+            </div>
           </> : null}
+
+          {step === 'restore' ? <OnboardingRestoreStep initialStage={restoreStage} onFinished={onSkip} onBack={() => void onAdvance('welcome')} onLockChange={setRestoreLocked} /> : null}
 
           {step === 'model' ? <>
             <StepIcon><Cpu /></StepIcon>

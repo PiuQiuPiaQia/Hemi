@@ -10,9 +10,10 @@
 
 - 2026-10-31 用户裁决：**独立「备份」设置分类**（不挂「通用」区块）；**做定时备份**；**不做加密**（备份档明文，凭据剔除因此成为唯一防线，升级为硬约束）。
 - 2026-11 用户裁决：**仅保留轻量备份**——移除完整档、档位选择与解释轻量/完整区别的说明；「立即备份」只有一个按钮，定时只剩开关/每天每周/保留份数。后端只创建轻量范围（不是仅隐藏 UI）；旧 `schedule.tier=full` 一律归一为 `light`，IPC 不再接受 tier 入参；旧 full 包的恢复兼容保留。
+- 2026-11 用户新裁决：**凭据随备份**（推翻早前「永不进备份」）。技术依据：local-secrets 的解密密钥在 `secrets/key-v1`，整目录随包，恢复到新机即可解密（上游错误文案本身预期「从备份恢复应用数据」）。备份不加密，云端目标保存的是明文等价物——UI 须提示「妥善保管网盘账号」。
 - 备份产物是**单次快照归档**（manifest＋分卷文件），不做数据目录的实时同步。
 - 首个云端目标：坚果云 WebDAV（服务器 `https://dav.jianguoyun.com/dav/`，账号＋第三方应用密码）；同时支持「本地文件夹」目标，覆盖 iCloud Drive/OneDrive 等同步目录用户。
-- **凭据一律不进备份（硬约束）**：`secrets/`、`provider-logins/`、`remote-passwords.json`、`runtime-v2/oauth-credentials.json`、`doubao-asr.json`（含 encryptedApiKey，设备绑定）排除。这些走 safeStorage/Keychain，恢复后要求重新登录/重配。
+- ~~**凭据一律不进备份（硬约束）**~~（已被上条 2026-11 裁决取代）：`secrets/`、`provider-logins/`、`remote-passwords.json`、`runtime-v2/oauth-credentials.json`、`doubao-asr.json` 现均随轻量档备份并可在新机解密。
 - 备份时机选**会话空闲**（无进行中回合）做文件级快照；runtime-v2 全部为文件存储（非 SQLite），无需停写。
 
 ### 1.2 本期范围

@@ -216,3 +216,40 @@ test('deleteBackupSet removes local set, rejects unsafe names, and deletes remot
   assert.equal(deletes.length,1);
   assert.ok(deletes[0][1].startsWith('hemi-backups/hemi-backup-'),'远端删除应指向备份集目录');
 });
+
+test('restore swaps decrypt key: password falls back in memory and is re-encrypted after restore',async t=>{
+  const home=tmpDir();
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+  seedUserData(home);
+  // 可变密钥的 secretStorage：key 变化后旧密文解不开（模拟恢复替换 secrets/）
+  let key='key-a';
+  const secretStorage={
+    encryptString:text=>Buffer.from(`${key}:enc:${text}`),
+    decryptString:blob=>{const s=String(blob);const prefix=`${key}:enc:`;if(!s.startsWith(prefix))throw new Error('本地密文无法解密');return s.slice(prefix.length);},
+    isEncryptionAvailable:()=>true,
+  };
+  const webdav=mockWebdav();
+  // 预置一份备份集到远端 mock
+  const older=tmpDir();
+  const {backupDir}=await createBackup({userDataDir:home,outDir:older});
+  const setName=path.basename(backupDir);
+  for(const f of fs.readdirSync(backupDir))webdav.store.set(`hemi-backups/${setName}/${f}`,fs.readFileSync(path.join(backupDir,f)));
+  fs.rmSync(older,{recursive:true,force:true});
+  const mgr=createBackupManager({userDataDir:home,secretStorage,webdavFactory:webdav.factory,log:console});
+  await mgr.saveSettings({target:{kind:'webdav',url:'https://d.example/dav/',username:'u',password:'app-secret',remoteDir:'hemi-backups'}});
+  // 恢复替换了 secrets（密钥换新）——旧密文失效
+  key='key-b';
+  const settingsRaw=JSON.parse(fs.readFileSync(path.join(home,'backup-settings.json'),'utf8'));
+  assert.throws(()=>secretStorage.decryptString(Buffer.from(settingsRaw.target.passwordEncrypted,'base64')),'旧密文应解不开');
+  // 内存兜底：换钥后列举/恢复准备仍可用
+  const sets=await mgr.listBackups();
+  assert.equal(sets.length,1);
+  const prep=await mgr.prepareRestore(setName);
+  assert.equal(prep.ok,true);
+  // 恢复完成后用新密钥重加密落盘，后续进程可正常解密
+  const applied=mgr.applyCurrentRestore();
+  assert.equal(applied.ok,true);
+  const raw2=JSON.parse(fs.readFileSync(path.join(home,'backup-settings.json'),'utf8'));
+  assert.equal(secretStorage.decryptString(Buffer.from(raw2.target.passwordEncrypted,'base64')),'app-secret','恢复后密文应可用新密钥解开');
+  assert.equal((await mgr.listBackups()).length,1,'重加密后列举正常');
+});

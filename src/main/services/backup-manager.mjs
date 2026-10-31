@@ -37,9 +37,14 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
   };
   const persist=()=>{fs.mkdirSync(path.dirname(settingsPath),{recursive:true});fs.writeFileSync(settingsPath,JSON.stringify(load(),null,2));};
   const status=payload=>{try{emit('backup:progress',payload);}catch{}};
+  // 应用密码明文仅在进程内存暂存：恢复备份会整体替换 secrets/（解密密钥随包换新），
+  // 恢复前加密落盘的密文将失效——恢复完成后用当前密钥重加密，解密失败时内存兜底。
+  let lastPassword='';
   const webdavPassword=()=>{
     const enc=load().target?.passwordEncrypted;
-    return enc?secretStorage.decryptString(Buffer.from(enc,'base64')):'';
+    if(!enc)return lastPassword;
+    try{return secretStorage.decryptString(Buffer.from(enc,'base64'))||lastPassword;}
+    catch{return lastPassword;}
   };
   const clientFor=target=>{
     if(target.kind!=='webdav')throw new Error('当前目标不是 WebDAV');
@@ -182,6 +187,15 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
     const {applied}=applyRestore({stagingDir:currentRestore.staging,userDataDir,safeCopyRoot});
     fs.rmSync(currentRestore.staging,{recursive:true,force:true});
     currentRestore=null;
+    // 恢复整体替换了 secrets/（解密密钥换成备份里的）——恢复前落盘的应用密码密文已失效，
+    // 用恢复后的密钥重加密，保证云端目标恢复完即可用。
+    const settings=load();
+    if(lastPassword&&settings.target?.kind==='webdav'){
+      try{
+        settings.target.passwordEncrypted=secretStorage.encryptString(lastPassword).toString('base64');
+        persist();
+      }catch(error){log.warn(`恢复后重加密应用密码失败：${error.message??error}`);}
+    }
     return {ok:true,applied,safeCopyRoot};
   }
   function cancelRestore(){
@@ -208,6 +222,7 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
       const merged=normalizeSettings({...prev,...next});
       if(next.target?.kind==='webdav'&&typeof next.target.password==='string'&&next.target.password){
         merged.target.passwordEncrypted=secretStorage.encryptString(next.target.password).toString('base64');
+        lastPassword=next.target.password;
       }
       if(next.target&&!next.target.password)merged.target.passwordEncrypted=prev.target?.passwordEncrypted??null;
       settings=merged;persist();

@@ -379,6 +379,199 @@
   color: var(--accent-text);
 }
 
+/* —— 欢迎页次入口：从备份恢复 / 跳过引导（文字链，低于主按钮一级） —— */
+.setup-shell .onboarding-alt-entries {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-10);
+  margin-top: var(--sp-20);
+  font-size: var(--fs-13);
+  color: var(--faint);
+}
+
+.setup-shell .onboarding-alt-link {
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-alt-link:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-alt-link:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+/* —— 从备份恢复 —— */
+.setup-shell .onboarding-restore-body {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: var(--sp-24);
+}
+
+.setup-shell .onboarding-restore-kind > button svg {
+  color: var(--faint);
+}
+
+.setup-shell .onboarding-restore-kind > button[aria-pressed='true'] svg {
+  color: var(--accent-text);
+}
+
+.setup-shell .onboarding-restore-fields {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-16);
+  margin: var(--sp-20) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.setup-shell .onboarding-restore-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.setup-shell .onboarding-restore-field > .onboarding-field-label {
+  margin-bottom: var(--sp-6);
+}
+
+.setup-shell .onboarding-restore-field .onboarding-field-top {
+  display: flex;
+  justify-content: space-between;
+}
+
+.setup-shell .onboarding-restore-inline {
+  display: flex;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.setup-shell .onboarding-restore-inline .onboarding-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-shell .onboarding-restore-pick {
+  flex: none;
+  height: 40px;
+}
+
+.setup-shell .onboarding-restore-where {
+  overflow: hidden;
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-shell .onboarding-restore-list {
+  width: 100%;
+  margin: var(--sp-24) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-shell .onboarding-restore-list .h37-row[data-broken='true'] .h37-row-text > b {
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-restore-empty {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-12);
+  margin-top: var(--sp-24);
+  padding: var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-13);
+  color: var(--body);
+}
+
+.setup-shell .onboarding-restore-empty p {
+  margin: 0;
+}
+
+.setup-shell .onboarding-restore-stats {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-8);
+  margin: var(--sp-24) 0 0;
+}
+
+.setup-shell .onboarding-restore-stats > div {
+  padding: var(--sp-12) var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.setup-shell .onboarding-restore-stats dt {
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.setup-shell .onboarding-restore-stats dd {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-restore-note {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: var(--sp-8);
+  margin-top: var(--sp-16);
+}
+
+.setup-shell .onboarding-restore-note p {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.setup-shell .onboarding-restore-note p[data-strong='true'] {
+  padding: var(--sp-12) var(--sp-16);
+  border-radius: var(--r-md);
+  background: var(--warn-50);
+  color: var(--body);
+}
+
+.setup-shell .onboarding-restore-note b {
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.setup-shell .onboarding-restore-note svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: var(--sp-2);
+}
+
+.setup-shell .onboarding-restore-note p[data-strong='true'] svg {
+  color: var(--warn);
+}
+
 /* —— 断点 —— */
 @media (max-width: 880px) {
   .setup-shell .onboarding-shell {
@@ -411,6 +604,10 @@
   .setup-shell .onboarding-openai-fields {
     gap: var(--sp-16);
     margin-top: var(--sp-24);
+  }
+
+  .setup-shell .onboarding-restore-stats > div {
+    padding: var(--sp-10) var(--sp-12);
   }
 
   .setup-shell .onboarding-openai-fields .onboarding-input {

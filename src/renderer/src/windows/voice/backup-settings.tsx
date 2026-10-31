@@ -8,8 +8,8 @@ import type {
   BackupProgressEvent, BackupRestorePrepareResult,
 } from '@shared/protocol';
 
-const tierLabel = (tier: BackupTier | null) => tier === 'full' ? '完整档' : tier === 'light' ? '轻量档' : '档位未知';
-function sizeLabel(bytes?: number | null) {
+export const tierLabel = (tier: BackupTier | null) => tier === 'full' ? '完整档' : tier === 'light' ? '轻量档' : '档位未知';
+export function sizeLabel(bytes?: number | null) {
   if (bytes == null) return '体积未知';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = bytes;
@@ -17,11 +17,11 @@ function sizeLabel(bytes?: number | null) {
   while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} ${units[unit]}`;
 }
-function dateLabel(value?: string | null) {
+export function dateLabel(value?: string | null) {
   if (!value || !Number.isFinite(Date.parse(value))) return '时间未知';
   return new Date(value).toLocaleString('zh-CN');
 }
-function failure(result: { code?: string; message?: string }) {
+export function failure(result: { code?: string; message?: string }) {
   const hint = result.code === 'AUTH_FAILED' ? '账号或应用密码错误，请检查后重试。'
     : result.code === 'NOT_FOUND' ? '未找到目标，请检查服务器地址或目录。' : '操作失败，请重试。';
   return result.message ? `${hint} ${result.message}` : `${hint}${result.code ? `（${result.code}）` : ''}`;
@@ -328,7 +328,7 @@ export function BackupSettings() {
       </fieldset>
       {kind === 'webdav' && <p className="h68-foot">
         {open && <>应用密码在坚果云「账户信息 → 安全选项」中生成。<button type="button" className="h37-link" onClick={() => openExternal('https://help.jianguoyun.com/?p=2064')}>打开教程</button><br /></>}
-        云端保存明文副本；登录凭据不进备份，恢复后需重新登录。
+        备份包含 API 密钥等敏感数据，云端保存明文副本，请妥善保管网盘账号。
       </p>}
     </section>
 

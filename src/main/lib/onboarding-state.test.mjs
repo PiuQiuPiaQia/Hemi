@@ -187,7 +187,25 @@ test('alignStep 只按模型门槛回退，完整配置不自动替用户前进'
   assert.equal(alignStep(base, { modelComplete: true, asrSaved: false }).step, 'done');
   assert.equal(alignStep({ ...base, step: 'model' }, { modelComplete: true }).step, 'model');
   assert.equal(alignStep({ ...base, phase: 'complete' }, { modelComplete: false }).step, 'done');
-  assert.deepEqual(ONBOARDING_STEPS, ['welcome', 'model', 'capabilities', 'microphone', 'asr', 'done']);
+  assert.deepEqual(ONBOARDING_STEPS, ['welcome', 'restore', 'model', 'capabilities', 'microphone', 'asr', 'done']);
+});
+
+test('跳过引导/恢复完成：force complete 无模型也可进入主界面；welcome 可进入 restore', async () => {
+  const store = storeFor(memoryFs({}));
+  await store.getState();
+  const skipped = await store.complete({ force: true });
+  assert.equal(skipped.ok, true, 'force 应绕过模型门槛直接完成');
+  assert.equal((await store.getState()).phase, 'complete');
+  // 非强制仍要求模型
+  const store2 = storeFor(memoryFs({}));
+  await store2.getState();
+  assert.equal((await store2.complete()).ok, false);
+  // welcome → restore 合法（不受模型门拦截）
+  const store3 = storeFor(memoryFs({}));
+  await store3.getState();
+  const entered = await store3.advance({ to: 'restore' });
+  assert.equal(entered.ok, true, 'welcome 应可进入从备份恢复步骤');
+  assert.equal((await store3.getState()).step, 'restore');
 });
 
 test('损坏的 onboarding.json 按无状态重建；并发初始化单飞', async () => {
