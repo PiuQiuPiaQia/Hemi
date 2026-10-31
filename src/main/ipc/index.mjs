@@ -25,6 +25,7 @@ import { state, isSmokeTest, BRAND_NAME } from '../state.mjs';
 import { registerLlmIpc } from './llm.ipc.mjs';
 import { registerAgentEnvironmentIpc } from './agent-environment.ipc.mjs';
 import { registerOnboardingIpc } from './onboarding.ipc.mjs';
+import { registerBackupIpc } from './backup.ipc.mjs';
 import { registerPermissionsIpc } from './permissions.ipc.mjs';
 import { registerPlatformIpc } from './platform.ipc.mjs';
 import { registerProviderImportIpc } from './provider-import.ipc.mjs';
@@ -160,6 +161,8 @@ export async function registerAllIpcHandlers() {
   registerProviderImportIpc();
   registerOAuthIpc();
   registerOnboardingIpc();
+  // 数据备份（docs/requirements/data-backup.md）：注册即启动定时调度（小时级 tick）。
+  registerBackupIpc();
   registerTtsIpc();
   registerAppIpc();
   // 044：应用内更新（未打包实例服务为只读 unsupported 状态面）。

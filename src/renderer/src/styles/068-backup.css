@@ -1,0 +1,248 @@
+/*
+ * 设置 · 备份（docs/requirements/data-backup.md）：系统偏好设置风（2026-11 用户选定方向 B，
+ * 见 .visual/backup-settings/proposal-b.png）。去卡片：无底色、无边框、无阴影；
+ * 灰色小号分组标题＋1px 分隔线＋左标签右控件；已保存值灰字右对齐，修改在原行就地展开。
+ * 只用 tokens 颜色变量，深色/皮肤随变量切换。控件沿用 h37-* 共用类。
+ */
+.h68-backup .h37-section-head h3 {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.h68-backup .h37-section-head {
+  margin-bottom: var(--sp-4);
+}
+
+.h68-list {
+  border-top: 1px solid var(--line);
+}
+
+.h68-list[data-disabled='true'] .h68-row,
+.h68-list[data-disabled='true'] .h37-input {
+  color: var(--faint);
+}
+
+.h68-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  min-height: 44px;
+  padding: var(--sp-8) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-13);
+  color: var(--ink);
+}
+
+.h68-key {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.h68-key > small {
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 编辑态：标签定宽、输入框吃满剩余宽度 */
+.h68-row > .h68-key[data-fixed='true'] {
+  flex: 0 0 7rem;
+}
+
+.h68-field {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.h68-value {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.h68-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+.h68-backup .h37-link:disabled {
+  color: var(--faint);
+  cursor: default;
+  text-decoration: none;
+}
+
+.h68-row .h37-settings-select {
+  flex: none;
+}
+
+.h68-keep {
+  width: 4.5rem;
+  flex: none;
+  text-align: right;
+}
+
+.h68-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.h68-status::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--faint);
+}
+
+.h68-status[data-tone='ok'] {
+  color: var(--accent-text);
+}
+
+.h68-status[data-tone='ok']::before {
+  background: var(--accent);
+}
+
+.h68-status[data-tone='bad'] {
+  color: var(--danger);
+}
+
+.h68-status[data-tone='bad']::before {
+  background: var(--danger);
+}
+
+.h68-danger {
+  color: var(--danger);
+}
+
+/* 就地展开区的操作行与说明 */
+.h68-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  padding: var(--sp-8) 0 var(--sp-12);
+  border-bottom: 1px solid var(--line);
+}
+
+.h68-foot {
+  margin: var(--sp-8) 0 0;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.h68-foot .h37-link {
+  font-size: inherit;
+}
+
+.h68-message {
+  margin: var(--sp-8) 0 0;
+}
+
+/* 恢复确认：紧跟在被选备份行之下，左侧一条强调线标示归属 */
+.h68-restore {
+  display: grid;
+  gap: var(--sp-6);
+  padding: var(--sp-12) 0 var(--sp-12) var(--sp-12);
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--line-strong);
+  font-size: var(--fs-13);
+  color: var(--body);
+}
+
+.h68-restore h4 {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+
+.h68-restore p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.h68-restore .h68-actions {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .h68-row {
+    flex-wrap: wrap;
+    gap: var(--sp-8);
+  }
+  .h68-row > .h68-key[data-fixed='true'] {
+    flex-basis: 100%;
+  }
+}
+
+/* 备份集行内操作组（恢复/删除）：链接之间留出呼吸间距 */
+.h68-row .h37-aside.h68-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-16);
+}
+
+/* 删除确认气泡：锚定「删除」链接的小浮层（浮层是页面里唯一允许的圆角＋浅阴影），
+ * 一句话＋两个按钮；动效沿用 InfoPopover 的 --dur-*／--ease-* token。 */
+.h68-confirm-positioner {
+  z-index: 80;
+}
+
+.h68-confirm {
+  display: grid;
+  gap: var(--sp-10);
+  width: max-content;
+  max-width: min(17rem, calc(100vw - var(--sp-24)));
+  padding: var(--sp-10) var(--sp-12);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--n-900) 22%, transparent);
+  color: var(--body);
+  transform-origin: var(--transform-origin);
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+
+.h68-confirm[data-starting-style],
+.h68-confirm[data-ending-style] {
+  opacity: 0;
+  transform: translateY(-3px) scale(.97);
+}
+
+.h68-confirm:focus {
+  outline: 0;
+}
+
+.h68-confirm-text {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.h68-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h68-confirm {
+    transition: none;
+  }
+}

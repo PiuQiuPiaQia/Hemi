@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Brain, ChevronDown, Cpu, Menu, Mic, Monitor, Search, Settings as SettingsIcon, Sparkles } from 'lucide-react';
+import { Brain, ChevronDown, Cpu, HardDriveDownload, Menu, Mic, Monitor, Search, Settings as SettingsIcon, Sparkles } from 'lucide-react';
 
 import { openExternal } from '@/shared/open-external';
 import { SaveIndicator, type SaveState } from '@/components/save-indicator';
@@ -16,6 +16,7 @@ import { CallDockChip } from '@/windows/voice/call-dock';
 import { AboutUpdateSection } from '@/windows/voice/about-update-section';
 import { BrowserDecisionSection } from '@/windows/voice/browser-decision-model-section';
 import { BrowserSection } from '@/windows/voice/browser-section';
+import { BackupSettings } from '@/windows/voice/backup-settings';
 import { FloatingOrbSection } from '@/windows/voice/floating-orb-section';
 import { MemorySection } from '@/windows/voice/memory-section';
 import { ModelProfilesSection } from '@/windows/voice/model-profiles-section';
@@ -44,7 +45,7 @@ import { BotSettings } from '@/windows/bot/settings';
  * .settings-form-section 保留在模型区块外层（取证脚本就绪标记）。
  */
 
-export type SettingsPage = 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory' | 'skills';
+export type SettingsPage = 'general' | 'voice' | 'models' | 'control' | 'web' | 'memory' | 'skills' | 'backup';
 export type SettingsEnvironment = 'local' | 'bot';
 
 /** 旧直达目标别名（038/032 时代的五分类键）。 */
@@ -66,6 +67,8 @@ const PAGES: Array<{ key: SettingsPage; label: string; icon: ReactNode }> = [
   // 2026-10-30：技能中心收进设置页（本地与 Bot 一致）；图标栏不再单列技能入口，
   // 会话内任务审批仍走对话里的权限卡片。
   { key: 'skills', label: '技能中心', icon: <Sparkles aria-hidden="true" /> },
+  // 2026-10-31：数据备份（docs/requirements/data-backup.md）；Bot 环境不提供（仅本地端）。
+  { key: 'backup', label: '备份', icon: <HardDriveDownload aria-hidden="true" /> },
 ];
 
 /**
@@ -188,11 +191,14 @@ export function SettingsScreen({
       setModelView('overview');
       setPendingSection(null);
       setDrawerOpen(false);
+      if (next === 'bot' && page === 'backup') setPage('general');
     }
   };
   // 2026-10-30：本地与 Bot 同一套分类导航（六分类＋技能中心，共七项），
   // 各页内容按环境渲染对应版本；切换设置对象保留当前分类。
-  const pages = PAGES;
+  // 2026-10-31：新增「备份」仅本地环境（Bot 端无备份能力）；切到 Bot 时若停在
+  // 备份页则回通用，避免空白页。
+  const pages = environment === 'bot' ? PAGES.filter((item) => item.key !== 'backup') : PAGES;
 
   const navItems = (onPick: (key: SettingsPage) => void) =>
     pages.map((item) => (
@@ -426,6 +432,7 @@ export function SettingsScreen({
                   ) : null}
 
                   {page === 'skills' ? <LocalSkillsSettings /> : null}
+                  {page === 'backup' ? <BackupSettings /> : null}
                 </div>
               ) : null}
               </>}

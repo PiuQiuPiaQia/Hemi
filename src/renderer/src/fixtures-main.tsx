@@ -23,7 +23,7 @@ import { projectFlowTimeline } from '@/windows/voice/lib/flow-timeline-view';
 import { WorkflowCard } from '@/windows/voice/workflow-card';
 import { WorkflowParametersDialog } from '@/windows/voice/workflow-parameters-dialog';
 import { SessionUsage } from '@/windows/voice/session-usage-view';
-import type { FlowSnapshotView, UsageRecord } from '@shared/protocol';
+import type { FlowSnapshotView, UsageRecord, BackupProgressEvent } from '@shared/protocol';
 import { ScopePopover } from '@/windows/voice/scope-popover';
 import { AccessAddDialog } from '@/windows/voice/access-add-dialog';
 import { RemoteFolderDialog } from '@/windows/voice/remote-folder-dialog';
@@ -5250,6 +5250,75 @@ const scenes: Record<string, () => React.ReactElement> = {
       initialEnvironment="bot"
       initialPage={(new URLSearchParams(location.search).get('page') ?? 'general') as SettingsPage}
     />;
+  },
+  // 2026-10-31 数据备份分类（docs/requirements/data-backup.md）：?state=empty|configured|backup-fail|backup-late|backup-refresh-fail|pick-ready
+  // 控制桩数据（未配置引导态 / WebDAV 已配＋两份备份集其一损坏 / 立即备份失败 /
+  // 终态事件延迟迟到 / 备份成功但备份集刷新失败 / 目录选择回填）。
+  // 2026-11 重复反馈修复：runBackupNow 按主进程真实时序（先推进度事件、后返回 result）
+  // 触发订阅回调，供回归断言「终态 toast 以返回值为唯一出口、迟到事件不双报、进度行结束即清」。
+  'settings-backup': () => {
+    const state = new URLSearchParams(location.search).get('state') ?? 'empty';
+    const nowIso = new Date(now).toISOString();
+    const configured = ['configured', 'backup-fail', 'backup-late', 'backup-refresh-fail'].includes(state);
+    const view = {
+      schemaVersion: 1,
+      target: configured
+        ? { kind: 'webdav', url: 'https://dav.jianguoyun.com/dav/', username: 'me@example.com', remoteDir: 'hemi-backups', hasPassword: true }
+        : null,
+      schedule: { enabled: configured, interval: 'daily', tier: 'light' },
+      keep: 5,
+      lastRun: configured
+        ? { at: nowIso, ok: true, tier: 'light', trigger: 'manual', packedBytes: 21_000_000, files: 518, durationMs: 1100 }
+        : null,
+    };
+    const sets = configured ? [
+      { name: 'hemi-backup-20261031-1011', createdAt: nowIso, tier: 'light', totals: { rawBytes: 84_000_000, packedBytes: 21_000_000 }, appVersion: '0.2.38', source: 'webdav' },
+      { name: 'hemi-backup-20261030-2204', createdAt: null, tier: null, totals: null, appVersion: null, source: 'webdav', broken: true },
+    ] : [];
+    const deletedSets: string[] = [];
+    const liveSets = () => sets.filter(set => !deletedSets.includes(set.name));
+    const progressSubscribers = new Set<(event: BackupProgressEvent) => void>();
+    const emitProgress = (event: BackupProgressEvent) => { for (const callback of progressSubscribers) callback(event); };
+    let listCalls = 0;
+    stubExecutor({
+      getBackupState: async () => view,
+      // backup-refresh-fail：首次（初始加载）正常，备份成功后的刷新调用失败——
+      // 验证「备份已完成，列表刷新失败」与备份失败区分，不得误报备份失败。
+      listBackups: async () => {
+        listCalls += 1;
+        if (state === 'backup-refresh-fail' && listCalls > 1) throw new Error('模拟列表读取失败');
+        return liveSets();
+      },
+      onBackupProgress: (callback: (event: BackupProgressEvent) => void) => {
+        progressSubscribers.add(callback);
+        return () => { progressSubscribers.delete(callback); };
+      },
+      saveBackupSettings: async () => view,
+      testBackupConnection: async () => ({ ok: true }),
+      // 主进程顺序：status(done|error) 先 emit，runBackup 才 return——fixture 保持同一顺序；
+      // pack 与终态间留 500ms 窗口，供断言「进行中进度行」出现后再被清除。
+      // backup-late：result 返回 1800ms 后再补发一条迟到 done 事件（超过任何启发式窗口），
+      // 验证终态 toast 只认返回值，迟到事件不双报、不残留。
+      runBackupNow: async () => {
+        emitProgress({ phase: 'pack', detail: '打包中' });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (state === 'backup-fail') {
+          emitProgress({ phase: 'error', message: '模拟上传失败' });
+          return { ok: false, code: 'FAILED', message: '模拟上传失败' };
+        }
+        emitProgress({ phase: 'done', tier: 'light', packedBytes: 21_000_000 });
+        if (state === 'backup-late') {
+          setTimeout(() => emitProgress({ phase: 'done', tier: 'light', packedBytes: 21_000_000 }), 1800);
+        }
+        return { ok: true, manifest: { tier: 'light', createdAt: nowIso, files: 518, packedBytes: 21_000_000 } };
+      },
+      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'] } }),
+      applyBackupRestore: async () => ({ ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety' }),
+      cancelBackupRestore: async () => ({ ok: true }),
+      deleteBackupSet: async (name: string) => { if (!name.startsWith('hemi-backup-')) return { ok: false, code: 'INVALID_NAME' }; deletedSets.push(name); return { ok: true }; },
+      pickBackupDirectory: async () => state === 'pick-ready' ? { canceled: false, path: '/Users/demo/Backups/Hemi' } : { canceled: true, path: null },
+    });
+    return <SettingsScreen {...settingsProps} initialPage="backup" />;
   },
   'settings-model-voice-mac': () => {
     stubExecutor({

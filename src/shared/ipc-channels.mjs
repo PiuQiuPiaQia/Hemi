@@ -367,6 +367,23 @@ export const IPC = {
     /** 009：对存档报告重新总结（不触执行器）。 */
     resummarize: 'history:resummarize',
   },
+  /** 数据备份（docs/requirements/data-backup.md）：目标配置 / 执行 / 恢复 / 进度事件。 */
+  backup: {
+    getState: 'backup:get-state',
+    saveSettings: 'backup:save-settings',
+    testConnection: 'backup:test-connection',
+    runNow: 'backup:run-now',
+    list: 'backup:list',
+    restorePrepare: 'backup:restore-prepare',
+    restoreApply: 'backup:restore-apply',
+    restoreCancel: 'backup:restore-cancel',
+    /** 删除单个备份集（本地目录或远端集合，递归）。 */
+    deleteSet: 'backup:delete-set',
+    /** 系统目录选择框（本地文件夹目标）。 */
+    pickDirectory: 'backup:pick-directory',
+    /** 主进程 → 渲染层单向进度事件（phase: start/pack/upload/prune/done/error/restore-*）。 */
+    progressEvent: 'backup:progress',
+  },
   /**
    * 047：New API 站点登录导入（受保护 IPC——仅主窗口受信任顶层 frame）。
    * 状态机/秘密全在主进程；renderer 只消费安全 DTO（无 Key/JWT/Cookie/DOM）。

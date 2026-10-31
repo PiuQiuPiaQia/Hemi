@@ -87,6 +87,22 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   getOnboardingState: () => ipcRenderer.invoke('onboarding:get-state'),
   advanceOnboarding: (payload) => ipcRenderer.invoke('onboarding:advance', payload),
   completeOnboarding: () => ipcRenderer.invoke('onboarding:complete'),
+  // 数据备份（docs/requirements/data-backup.md）。
+  getBackupState: () => ipcRenderer.invoke('backup:get-state'),
+  saveBackupSettings: (payload) => ipcRenderer.invoke('backup:save-settings', payload),
+  testBackupConnection: (target) => ipcRenderer.invoke('backup:test-connection', { target }),
+  runBackupNow: () => ipcRenderer.invoke('backup:run-now'),
+  listBackups: () => ipcRenderer.invoke('backup:list'),
+  prepareBackupRestore: (setName) => ipcRenderer.invoke('backup:restore-prepare', { setName }),
+  applyBackupRestore: () => ipcRenderer.invoke('backup:restore-apply'),
+  cancelBackupRestore: () => ipcRenderer.invoke('backup:restore-cancel'),
+  deleteBackupSet: (setName) => ipcRenderer.invoke('backup:delete-set', { setName }),
+  pickBackupDirectory: () => ipcRenderer.invoke('backup:pick-directory'),
+  onBackupProgress: (callback) => {
+    const fn = (_event, payload) => callback(payload);
+    ipcRenderer.on('backup:progress', fn);
+    return () => ipcRenderer.removeListener('backup:progress', fn);
+  },
   getTextModelConfig: () => ipcRenderer.invoke('llm:get-config'),
   saveTextModelConfig: (config) => ipcRenderer.invoke('llm:save-config', config),
   // 031 多组模型配置：目录 CRUD／默认组／逐组测试。

@@ -1542,6 +1542,77 @@ export type ModelProviderSaveInput = {
 /** 首启四步主流程，microphone/asr 为可选能力子页。 */
 export type OnboardingStep = 'welcome' | 'model' | 'capabilities' | 'microphone' | 'asr' | 'done';
 
+/** 数据备份（docs/requirements/data-backup.md）——与 backup-manager 返回结构对齐。 */
+// 2026-11 用户裁决：仅保留轻量档。'full' 只作为旧备份集/历史 lastRun 的只读兼容值出现；
+// 新创建的备份（manifest/BackupRunResult）恒为 'light'，IPC 不再接受 tier 入参。
+export type BackupTier = 'light' | 'full';
+export type BackupSettingsView = {
+  schemaVersion: 1;
+  target:
+    | { kind: 'local'; dir: string }
+    | { kind: 'webdav'; url: string; username: string; remoteDir: string; hasPassword: boolean }
+    | null;
+  schedule: { enabled: boolean; interval: 'daily' | 'weekly'; tier: 'light' };
+  keep: number;
+  lastRun: {
+    at: string;
+    ok: boolean;
+    tier: BackupTier;
+    trigger: string;
+    packedBytes?: number;
+    files?: number;
+    durationMs?: number;
+    message?: string;
+  } | null;
+};
+export type BackupTargetDraft = {
+  kind: 'local' | 'webdav';
+  dir?: string;
+  url?: string;
+  username?: string;
+  remoteDir?: string;
+  /** 仅在用户本次输入新密码时携带；已存密码不回传渲染层。 */
+  password?: string;
+  hasPassword?: boolean;
+};
+export type BackupSettingsPatch = {
+  target?: BackupTargetDraft & { kind: 'local' | 'webdav' };
+  schedule?: Partial<BackupSettingsView['schedule']>;
+  keep?: number;
+};
+export type BackupConnectionResult = { ok: boolean; code?: string; message?: string };
+export type BackupRunResult = {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  manifest?: { tier: BackupTier; createdAt: string; files: number; packedBytes: number };
+};
+export type BackupSetSummary = {
+  name: string;
+  createdAt: string | null;
+  tier: BackupTier | null;
+  totals: { rawBytes: number; packedBytes: number } | null;
+  appVersion: string | null;
+  source: 'local' | 'webdav';
+  broken?: boolean;
+  dir?: string;
+};
+export type BackupRestorePrepareResult = {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  preview?: { files: number; conversations: number; memoryFiles: number; tops: string[] };
+};
+export type BackupRestoreApplyResult = { ok: boolean; code?: string; applied?: string[]; safeCopyRoot?: string };
+export type BackupProgressEvent = {
+  phase: 'start' | 'pack' | 'upload' | 'prune' | 'done' | 'error' | 'restore-download';
+  tier?: BackupTier;
+  trigger?: string;
+  detail?: string;
+  packedBytes?: number;
+  message?: string;
+};
+
 /** 引导快照（主进程权威；模型为必需配置，语音为可选配置）。 */
 export type OnboardingState = {
   version: number;
@@ -2070,6 +2141,20 @@ export type HemiVoiceBridge = {
     permissionChoice?: 'granted' | 'skipped';
   }) => Promise<OnboardingActionResult>;
   completeOnboarding: () => Promise<OnboardingActionResult>;
+  /** 数据备份（docs/requirements/data-backup.md）：状态（含脱敏目标配置）/ 保存 / 测试 / 执行 / 列表 / 恢复 / 进度订阅。 */
+  getBackupState: () => Promise<BackupSettingsView>;
+  saveBackupSettings: (payload: BackupSettingsPatch) => Promise<BackupSettingsView>;
+  testBackupConnection: (target?: BackupTargetDraft) => Promise<BackupConnectionResult>;
+  runBackupNow: () => Promise<BackupRunResult>;
+  listBackups: () => Promise<BackupSetSummary[]>;
+  prepareBackupRestore: (setName: string) => Promise<BackupRestorePrepareResult>;
+  applyBackupRestore: () => Promise<BackupRestoreApplyResult>;
+  cancelBackupRestore: () => Promise<{ ok: boolean; code?: string }>;
+  /** 删除单个备份集（本地目录或远端集合，递归删除，不可恢复）。 */
+  deleteBackupSet: (setName: string) => Promise<{ ok: boolean; code?: string; message?: string }>;
+  /** 系统目录选择框（本地文件夹目标）；取消时 canceled=true。 */
+  pickBackupDirectory: () => Promise<{ canceled: boolean; path: string | null }>;
+  onBackupProgress: (callback: (event: BackupProgressEvent) => void) => () => void;
   getTextModelConfig: () => Promise<TextModelConfig>;
   saveTextModelConfig: (config: TextModelSaveConfig) => Promise<TextModelConfig>;
   /** 033：思考强度快捷拨盘（只写档位，下一轮对话即生效；031 起可指定组）。 */
