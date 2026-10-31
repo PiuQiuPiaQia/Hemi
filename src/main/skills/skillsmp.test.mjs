@@ -312,15 +312,73 @@ test('parseTarArchive 登记 ustar/GNU/pax 长名的普通文件，剥根目录�
   assert.equal(parsed.get('truncated-name'), undefined, '被长名覆盖的占位条目不得残留');
 });
 
-test('fetchGithubSnapshot 主链路走 codeload 整包（raw 全程不触碰），blob SHA 逐文件校验', async () => {
+/** 构造 git v0 引用通告（pkt-line 流），entries 为 [refname, sha]。 */
+const pktLine = (payload) => `${(payload.length + 5).toString(16).padStart(4, '0')}${payload}\n`;
+function refAdvertisement(entries, { symref = null } = {}) {
+  const lines = [pktLine('# service=git-upload-pack'), '0000'];
+  entries.forEach(([ref, sha], index) => {
+    const caps = index === 0 ? `\0agent=git/2.0${symref ? ` symref=HEAD:${symref}` : ''}` : '';
+    lines.push(pktLine(`${sha} ${ref}${caps}`));
+  });
+  lines.push('0000');
+  return lines.join('');
+}
+
+test('resolveCommit 走 git 引用通告（分支/剥壳标签/HEAD），全程不碰 api.github.com', async () => {
+  const { resolveCommit } = await import('./github-source.mjs');
+  let apiHits = 0;
+  const impl = async (url) => {
+    if (url.startsWith('https://api.github.com/')) {
+      apiHits += 1;
+      return new Response('limit', { status: 403 });
+    }
+    if (url.startsWith('https://github.com/demo-org/skills/info/refs')) {
+      return new Response(refAdvertisement([
+        ['HEAD', OTHER_COMMIT],
+        ['refs/heads/main', COMMIT],
+        ['refs/heads/release/1.0', 'b'.repeat(40)],
+        ['refs/tags/v1', 'c'.repeat(40)],
+        ['refs/tags/v1^{}', OTHER_COMMIT],
+      ], { symref: 'refs/heads/main' }));
+    }
+    return new Response('not found', { status: 404 });
+  };
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: 'main' }, { fetchImpl: impl }), COMMIT);
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: 'release/1.0' }, { fetchImpl: impl }), 'b'.repeat(40));
+  // 附注标签：剥壳行直接给 commit；HEAD：通告行优先，缺失时用 symref 目标。
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: 'v1' }, { fetchImpl: impl }), OTHER_COMMIT);
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: 'HEAD' }, { fetchImpl: impl }), OTHER_COMMIT);
+  assert.equal(apiHits, 0, 'git 协议路不得回落 API');
+  // 40 位 SHA 直接采用，零网络。
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: COMMIT }, { fetchImpl: impl }), COMMIT);
+});
+
+test('resolveCommit 协议路不通时回退 API 路（文案与旧版一致）', async () => {
+  const { resolveCommit } = await import('./github-source.mjs');
+  const impl = async (url) => {
+    if (url.startsWith('https://github.com/')) return new Response('not found', { status: 404 });
+    return fakeGithub()(url);
+  };
+  assert.equal(await resolveCommit({ owner: 'demo-org', repo: 'skills', ref: 'main' }, { fetchImpl: impl }), COMMIT);
+});
+
+test('fetchGithubSnapshot 主链路零 API：git 通告定提交 + codeload 归档枚举（raw/api 全程不触碰）', async () => {
   const { gzipSync } = await import('node:zlib');
   const files = { 'SKILL.md': SKILL_MD, 'references/a.md': REFERENCE };
   const base = fakeGithub({ files });
   let rawHits = 0;
-  const archiveFirst = async (url, init) => {
+  let apiHits = 0;
+  const happyPath = async (url, init) => {
     if (url.startsWith('https://raw.githubusercontent.com/')) {
       rawHits += 1;
       return new Response('not found', { status: 404 });
+    }
+    if (url.startsWith('https://api.github.com/')) {
+      apiHits += 1;
+      return new Response('limit', { status: 403 });
+    }
+    if (url === 'https://github.com/demo-org/skills/info/refs?service=git-upload-pack') {
+      return new Response(refAdvertisement([['refs/heads/main', COMMIT]]));
     }
     if (url.startsWith('https://codeload.github.com/')) {
       const entries = [tarEntry('skills-main/', Buffer.alloc(0), { typeflag: '5' })];
@@ -333,9 +391,57 @@ test('fetchGithubSnapshot 主链路走 codeload 整包（raw 全程不触碰）�
     }
     return base(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: archiveFirst });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: happyPath });
+  assert.equal(snapshot.commit, COMMIT);
   assert.equal(snapshot.files.length, 2);
+  assert.ok(snapshot.bundleSha256);
   assert.equal(rawHits, 0, '归档命中时不得回落 raw');
+  assert.equal(apiHits, 0, '主链路不得打 api.github.com');
+});
+
+test('归档目录里出现符号链接时整单拒绝（确定性失败，不回落旧链）', async () => {
+  const { gzipSync } = await import('node:zlib');
+  const withLink = async (url) => {
+    if (url === 'https://github.com/demo-org/skills/info/refs?service=git-upload-pack') {
+      return new Response(refAdvertisement([['refs/heads/main', COMMIT]]));
+    }
+    if (url.startsWith('https://codeload.github.com/')) {
+      const tar = Buffer.concat([
+        tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)),
+        tarEntry('skills-main/skills/demo-pdf/link.md', Buffer.from('references/checklist.md'), { typeflag: '2' }),
+        Buffer.alloc(1024),
+      ]);
+      return new Response(gzipSync(tar));
+    }
+    return new Response('limit', { status: 403 }); // 回落旧链必报限流，断言符号链接即证明没回落
+  };
+  await assert.rejects(
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: withLink }),
+    /符号链接/,
+  );
+});
+
+test('归档枚举发现单文件超限时直接报边界，不回落不烧 API（impeccable 教训）', async () => {
+  const { gzipSync } = await import('node:zlib');
+  const oversized = Buffer.alloc(1024 * 1024 + 1, 0x61);
+  const impl = async (url) => {
+    if (url === 'https://github.com/demo-org/skills/info/refs?service=git-upload-pack') {
+      return new Response(refAdvertisement([['refs/heads/main', COMMIT]]));
+    }
+    if (url.startsWith('https://codeload.github.com/')) {
+      const tar = Buffer.concat([
+        tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)),
+        tarEntry('skills-main/skills/demo-pdf/scripts/data.json', oversized),
+        Buffer.alloc(1024),
+      ]);
+      return new Response(gzipSync(tar));
+    }
+    return new Response('limit', { status: 403 });
+  };
+  await assert.rejects(
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: impl }),
+    /单文件超过 1 MiB：scripts\/data\.json/,
+  );
 });
 
 test('raw 也断时走第三级 Blobs API（api.github.com）救回——被墙时段的 monorepo 缺口', async () => {
@@ -371,33 +477,34 @@ test('三级全断时报 raw 的网络错误（对用户最有解释力）', asy
   );
 });
 
-test('归档任何失败（缺文件/篡改/5xx/超时）都回落 raw 逐文件救回', async () => {
+test('归档失败/校验不过（坏 gzip/缺 SKILL.md/5xx）都回落旧链 raw 逐文件救回', async () => {
   const { gzipSync } = await import('node:zlib');
   const base = fakeGithub({ files: { 'SKILL.md': SKILL_MD, 'references/a.md': REFERENCE } });
-  const withArchive = (entries) => async (url, init) => {
+  const withArchive = (entries, { corrupt = false } = {}) => async (url, init) => {
     if (url.startsWith('https://codeload.github.com/')) {
-      return entries ? new Response(gzipSync(Buffer.concat(entries))) : new Response('boom', { status: 502 });
+      if (!entries) return new Response('boom', { status: 502 });
+      if (corrupt) return new Response(Buffer.from('不是 gzip 的坏数据'));
+      return new Response(gzipSync(Buffer.concat(entries)));
     }
     return base(url, init);
   };
-  // 缺声明的文件 → 回落 raw 成功（归档可能是流中断/格式边角，树清单仍是权威）。
-  const missing = [tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)), Buffer.alloc(1024)];
-  const missingSnapshot = await fetchGithubSnapshot(
+  // 完整归档缺可选文件：归档即权威（与 git clone 到手一致），1 个文件成功，不回落。
+  const partial = [tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)), Buffer.alloc(1024)];
+  const partialSnapshot = await fetchGithubSnapshot(
     { githubUrl: SKILL.githubUrl },
-    { fetchImpl: withArchive(missing) },
+    { fetchImpl: withArchive(partial) },
   );
-  assert.equal(missingSnapshot.files.length, 2);
-  // 内容与树摘要不符（归档被换）→ 回落 raw，树+raw 仍是完整信任链。
-  const tampered = [
-    tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)),
-    tarEntry('skills-main/skills/demo-pdf/references/a.md', Buffer.from('被换掉')),
-    Buffer.alloc(1024),
-  ];
-  const tamperedSnapshot = await fetchGithubSnapshot(
+  assert.equal(partialSnapshot.files.length, 1);
+  // 归档缺 SKILL.md（结构校验不过，如 export-ignore 场景）→ 回落树清单 + raw 救回。
+  const noSkillMd = [tarEntry('skills-main/skills/demo-pdf/references/a.md', Buffer.from(REFERENCE)), Buffer.alloc(1024)];
+  const rescued = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: withArchive(noSkillMd) });
+  assert.equal(rescued.files.length, 2);
+  // 坏 gzip（gunzip 完整性校验抛错）→ 回落旧链并成功。
+  const corrupt = await fetchGithubSnapshot(
     { githubUrl: SKILL.githubUrl },
-    { fetchImpl: withArchive(tampered) },
+    { fetchImpl: withArchive([], { corrupt: true }) },
   );
-  assert.equal(tamperedSnapshot.files.length, 2);
+  assert.equal(corrupt.files.length, 2);
   // 归档 5xx（网络/服务抖动）→ 回落 raw 逐文件并成功。
   const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: withArchive(null) });
   assert.equal(snapshot.files.length, 2);

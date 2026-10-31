@@ -5,18 +5,32 @@ import { SKILL_LIMITS, bundleBytesOf, validateFileSet } from './skill-store.mjs'
 
 /**
  * 034 SkillsMP：从 GitHub 原仓库按**固定提交**完整收录 Skill 目录的全部文件。
- * 身份链：SkillsMP githubUrl → 解析 owner/repo/ref/目录 → ref 解析成 commit SHA
- * → 该 commit 的 git tree 列文件（拒绝符号链接/子模块）→ raw 按 commit 下载
- * → 每个文件与 tree 的 blob SHA-1 比对 → 与内置/本地同一套边界校验
- * （大小/数量在此预检；可执行内容与路径边界由 validateFiles 兜底）。
+ * 身份链：SkillsMP githubUrl → 解析 owner/repo/ref/目录 → ref 经 git 协议
+ * （github.com/info/refs，不占 api.github.com 未鉴权 60 次/小时的额度，2026-10-31
+ * 起 npx skills 同思路）解析成 commit SHA → codeload 取该 commit 整包归档并按
+ * 目录收录（拒绝符号链接）→ 与内置/本地同一套边界校验（大小/数量在此预检；
+ * 可执行内容与路径边界由 validateFiles 兜底）。
+ * 归档链失败时回落旧链（api 树清单 + raw 逐文件与 blob SHA-1 比对 + Blobs API），
+ * 兼容「raw 与 api 不同境」的网络处境；预览↔安装一致性始终由本地 bundle SHA-256
+ * 锚定（预览展示的摘要与安装落地的摘要必须一致）。
  * 文件类型不设白名单——仓库里有什么（.gitignore/LICENSE/无扩展名文件）就装什么，
  * 安装永远以 commit + bundle SHA-256 为准，与 SkillsMP 元数据无关。
  */
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
+const GITHUB_WEB = 'https://github.com';
 
 function failure(message) {
   throw new Error(message);
+}
+
+/** 确定性失败：api 树只会给出同样结论（大小/数量/链接/目录缺失），直接报给用户，
+ *  不回落旧链白烧 60 次/小时的额度、更不拿网络错误掩盖真实原因（2026-10-31：
+ *  impeccable 技能单文件超限被 403 限流文案掩埋的教训）。 */
+function failureFinal(message) {
+  const error = new Error(message);
+  error.deterministic = true;
+  throw error;
 }
 
 const sha256Of = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -86,10 +100,67 @@ async function githubJson(fetchImpl, url, kind) {
 
 /**
  * 把分支/tag 引用解析成固定 commit SHA（安装与预览都钉在这个 SHA 上）。
- * 走 git/ref 端点（响应只有百来字节）而非 commits/{ref}（带完整 diff，弱网易截断）。
- * 附注标签（annotated tag）会再跟随一次对象链接解引用到 commit。
+ * 主路走 git 智能协议的引用通告（github.com/info/refs）：与 api.github.com 不同境，
+ * 没有 60 次/小时的匿名配额（2026-10-31 实测额度耗尽时照常可用；npx skills 的
+ * clone 同通道）。附注标签用通告里的 `^{}` 剥壳行直接解到 commit。协议路任何
+ * 不确定（非 200/格式认不出/引用没命中）都退回 API 路——错误文案与旧版一致。
  */
 export async function resolveCommit({ owner, repo, ref }, { fetchImpl = fetch } = {}) {
+  if (/^[0-9a-f]{40}$/.test(ref)) return ref;
+  const viaGit = await resolveCommitViaRefsAdvertisement(fetchImpl, { owner, repo, ref }).catch(() => null);
+  if (viaGit && /^[0-9a-f]{40}$/.test(viaGit)) return viaGit;
+  return resolveCommitViaApi(fetchImpl, { owner, repo, ref });
+}
+
+/** git v0 引用通告解析：pkt-line 流里收 refs/heads、refs/tags（含 `^{}` 剥壳）与 HEAD。 */
+async function resolveCommitViaRefsAdvertisement(fetchImpl, { owner, repo, ref }) {
+  const url = `${GITHUB_WEB}/${owner}/${repo}/info/refs?service=git-upload-pack`;
+  const response = await fetchImpl(url, {
+    headers: { 'User-Agent': 'hemi-skill-source' },
+    signal: AbortSignal.timeout(8000),
+    redirect: 'manual',
+  });
+  if (!response.ok) return null; // 3xx/4xx/5xx 交给 API 路报准确原因（改名/下架/删除）
+  const advertisement = parseRefsAdvertisement(await response.text());
+  const { refs, headSymref } = advertisement;
+  if (ref === 'HEAD') return refs.get('HEAD') ?? refs.get(headSymref) ?? null;
+  // 附注标签先看剥壳行（指向 commit）；轻量标签与分支同形。
+  return refs.get(`refs/tags/${ref}^{}`) ?? refs.get(`refs/heads/${ref}`) ?? refs.get(`refs/tags/${ref}`) ?? null;
+}
+
+/**
+ * 按 pkt-line 长度前缀遍历引用通告（不能按行切分：flush 包 `0000` 后无换行，
+ * 直接拼接下一条，行切分会吞掉第一条引用）。首条引用带 `\0capabilities`，
+ * 从中取 `symref=HEAD:` 目标做 HEAD 兜底。
+ */
+function parseRefsAdvertisement(text) {
+  const bytes = Buffer.from(text, 'utf8');
+  const refs = new Map();
+  let headSymref = '';
+  let offset = 0;
+  while (offset + 4 <= bytes.length) {
+    const prefix = bytes.toString('latin1', offset, offset + 4);
+    if (!/^[0-9a-f]{4}$/.test(prefix)) break;
+    const length = Number.parseInt(prefix, 16);
+    if (length === 0 || length === 4) { offset += 4; continue; } // flush-pkt / 空包：跳过，引用清单在首个 flush 之后
+    if (offset + length > bytes.length) break; // 截断
+    const payload = bytes.toString('utf8', offset + 4, offset + length).replace(/\n$/, '');
+    offset += length;
+    const withCaps = payload.match(/^([0-9a-f]{40}) ([^\0]+)\0(.*)$/);
+    if (withCaps) {
+      refs.set(withCaps[2], withCaps[1]);
+      const symref = withCaps[3].match(/(?:^|\s)symref=HEAD:([^\s]+)/);
+      if (symref) headSymref = symref[1];
+      continue;
+    }
+    const plain = payload.match(/^([0-9a-f]{40}) (\S+)$/);
+    if (plain) refs.set(plain[2], plain[1]);
+  }
+  return { refs, headSymref };
+}
+
+/** API 兜底路（原实现）：git/ref 端点小响应；附注标签跟随对象链接解引用。 */
+async function resolveCommitViaApi(fetchImpl, { owner, repo, ref }) {
   const dereference = async (object) => {
     if (object?.type === 'commit' && /^[0-9a-f]{40}$/.test(object.sha ?? '')) return object.sha;
     if (object?.type === 'tag' && typeof object.url === 'string') {
@@ -123,10 +194,11 @@ async function treeOf(fetchImpl, { owner, repo, sha }) {
 }
 
 /**
- * 沿 dirPath 逐段下钻后，优先**一次 recursive 树**拿全子树：未鉴权 API 只有
- * 60 次/小时，逐目录收集会把一次安装放大到几十次调用（20 目录的技能预览+安装
- * ≈44 次，一条技能就烧穿配额；zcode/dsh 均为整包一次请求）。GitHub 对超大
- * 子树会置 truncated，此时回落到逐目录广度收集（每步响应极小，弱网更稳）。
+ * 兜底链的 api 树清单（2026-10-31 起归档主路免 API，此函数只在归档失败时走）：
+ * 沿 dirPath 逐段下钻后，优先**一次 recursive 树**拿全子树——逐目录收集会把一次
+ * 安装放大到几十次调用（20 目录的技能预览+安装 ≈44 次，一条技能就烧穿 60 次/小时
+ * 配额；zcode/dsh 均为整包一次请求）。GitHub 对超大子树会置 truncated，此时回落
+ * 到逐目录广度收集（每步响应极小，弱网更稳）。
  */
 async function listBlobs(fetchImpl, { owner, repo, commit, dirPath }) {
   let treeSha = commit;
@@ -214,13 +286,13 @@ async function fetchRaw(fetchImpl, { owner, repo }, commit, repoPath) {
 const MAX_ARCHIVE = 64 * 1024 * 1024;
 
 /**
- * 整包一次拉取固定提交的 tar.gz（codeload）。raw.githubusercontent.com 在
- * 部分网络时段整段不可达（2026-10-09 晚实测三连 000），而 codeload/api 始终
- * ~1s 可达；zcode（api zipball）/dsh（codeload tar.gz/{sha}）同思路。内容
- * 仍按 api 树的 blob SHA-1 逐文件校验——运输层换成归档不放松完整性锚。
+ * 整包一次拉取固定提交的 tar.gz（codeload）——免 API 主路的运输层。raw.githubusercontent.com
+ * 在部分网络时段整段不可达（2026-10-09 晚实测三连 000），而 codeload/api 始终
+ * ~1s 可达；zcode（api zipball）/dsh（codeload tar.gz/{sha}）同思路。gzip 解压
+ * 即完整性校验（CRC 不符会抛错回落旧链）。
  * 时间预算收紧到 8 秒/次：单技能小仓 ~1.5s 即得；hosting 多技能的 monorepo
- * （如 openclaw/openclaw）整仓归档流几十 MiB，8 秒内下不完就放弃转 raw
- * 逐文件（只拉 Skill 子树，体积小）——两条运输路各救各的场。
+ * （如 openclaw/openclaw）整仓归档流几十 MiB，8 秒内下不完就放弃转旧链逐文件
+ * （只拉 Skill 子树，体积小）——两条运输路各救各的场。
  */
 async function fetchArchiveTarball(fetchImpl, { owner, repo }, commit) {
   const url = `https://codeload.github.com/${owner}/${repo}/tar.gz/${commit}`;
@@ -254,11 +326,12 @@ async function fetchArchiveTarball(fetchImpl, { owner, repo }, commit) {
 
 /**
  * 内存解析 tar（ustar/GNU/pax 长名），只登记普通文件，返回 仓库相对路径 → 内容。
- * 不落盘、不物化符号链接——想要的内容必须与 api 树的 blob 清单对得上才算数，
- * 归档里的其余成员（目录/链接/子树外文件）一律忽略。
+ * 不落盘、不物化符号链接——链接条目记入返回 Map 的 linkEntries 属性，由调用方
+ * 决定是否拒绝（技能目录内出现链接须整单拒绝）；其余成员（目录/子树外文件）忽略。
  */
 export function parseTarArchive(bytes) {
   const files = new Map();
+  const links = [];
   let offset = 0;
   let pendingLongName = null;
   let pendingPaxPath = null;
@@ -306,13 +379,18 @@ export function parseTarArchive(bytes) {
     } else if (prefix) {
       name = `${prefix}/${name}`;
     }
+    if (typeflag === '2' || typeflag === '1') {
+      // 符号/硬链接：不登记内容；剥根后的路径记入 linkEntries 供上层拒绝。
+      const withoutRoot = name.replace(/^[^/]+\//, '');
+      if (withoutRoot) links.push(withoutRoot);
+    }
     if (typeflag === '0' || typeflag === '\0' || typeflag === '7') {
       const withoutRoot = name.replace(/^[^/]+\//, ''); // 剥掉 <repo>-<ref>/ 根目录段
       if (withoutRoot && !withoutRoot.endsWith('/')) files.set(withoutRoot, data);
     }
-    // 目录('5')、符号链接('2')、硬链接('1')等：不登记；想要它的清单若在 blob
-    // 列表里，后续按路径查不到会如实报缺失。
+    // 目录('5')等：不登记。
   }
+  files.linkEntries = links;
   return files;
 }
 
@@ -326,6 +404,36 @@ async function fetchBlobViaApi(fetchImpl, { owner, repo }, sha) {
 }
 
 /**
+ * 归档主链路：codeload 整包一次请求，按技能目录收录普通文件——全程零
+ * api.github.com 调用（未鉴权 60 次/小时配额留给兜底路）。gzip 由 gunzip 校验
+ * 传输完整性；目录内出现链接条目即整单拒绝；大小/数量在此预检，SKILL.md 等
+ * 结构校验交给 validateFileSet。归档内容即该 commit 的权威树（export-ignore
+ * 隐藏的文件不会出现，与 git clone 到手的目录一致）。任何失败由调用方回落旧链。
+ */
+async function snapshotFromArchive(fetchImpl, location, commit, githubUrl) {
+  const tarBytes = await fetchArchiveTarball(fetchImpl, location, commit);
+  const archive = parseTarArchive(tarBytes);
+  const prefix = location.dirPath ? `${location.dirPath}/` : '';
+  const linkPath = (archive.linkEntries ?? []).find((name) => name.startsWith(prefix));
+  if (linkPath) failureFinal(`来源包含符号链接：${prefix ? linkPath.slice(prefix.length) : linkPath}`);
+  const rawFiles = [];
+  let total = 0;
+  for (const [name, bytes] of archive) {
+    if (!name.startsWith(prefix)) continue;
+    const relative = prefix ? name.slice(prefix.length) : name;
+    if (!relative || relative.endsWith('/')) continue;
+    if (bytes.length > SKILL_LIMITS.maxFile) failureFinal(`单文件超过 1 MiB：${relative}`);
+    total += bytes.length;
+    if (total > SKILL_LIMITS.maxTotal) failureFinal('Skill 文件总量超过 4 MiB');
+    if (rawFiles.length >= SKILL_LIMITS.maxFiles) failureFinal(`文件数量超过 ${SKILL_LIMITS.maxFiles}`);
+    rawFiles.push({ path: relative, contentBase64: bytes.toString('base64') });
+  }
+  if (!rawFiles.length) failureFinal('GitHub 来源目录不存在（仓库结构可能已变化）');
+  const { files, metadata } = validateFileSet(rawFiles);
+  return snapshotResult({ commit, location, githubUrl, files, metadata });
+}
+
+/**
  * 读取固定提交快照。pinnedCommit 传入时不再解析引用（安装路径：按预览钉住的
  * commit 重取，摘要必须与预览一致）。返回与市场/本地同一形状的受控文件集。
  */
@@ -334,25 +442,16 @@ export async function fetchGithubSnapshot({ githubUrl, commit: pinnedCommit = nu
   if (!location) failure('来源不是可解析的 GitHub 目录地址');
   const commit = pinnedCommit ?? await resolveCommit(location, { fetchImpl });
   if (!/^[0-9a-f]{40}$/.test(commit)) failure('固定提交号无效');
+  // 主链路：归档枚举（零 API 调用）；确定性失败（大小/数量/链接，树清单只会得出
+  // 同样结论）直接报给用户，其余失败（含归档缺 SKILL.md 等可挽救场景）回落旧链
+  // 用 api 树清单再核一遍——两条运输路各救各的场。
+  const archived = await snapshotFromArchive(fetchImpl, location, commit, githubUrl).catch((error) => {
+    if (error?.deterministic) throw error;
+    return null;
+  });
+  if (archived) return archived;
   const blobs = await listBlobs(fetchImpl, { owner: location.owner, repo: location.repo, commit, dirPath: location.dirPath });
   const prefix = location.dirPath ? `${location.dirPath}/` : '';
-  // 主链路：codeload 整包一次请求（raw 在部分网络时段整段不可达，归档恒 ~1s 可达）。
-  // 归档成员按仓库相对路径对齐 blob 清单，逐文件 git blob SHA-1 校验后才收。
-  const rawFiles = await fetchArchiveTarball(fetchImpl, location, commit)
-    .then((tarBytes) => {
-      const archive = parseTarArchive(tarBytes);
-      return blobs.map((blob) => {
-        const bytes = archive.get(`${prefix}${blob.path}`);
-        if (!bytes) failure(`仓库归档缺少声明的文件：${blob.path}`);
-        if (gitBlobSha(bytes) !== blob.sha) failure(`文件内容与 GitHub 文件树摘要不符：${blob.path}`);
-        return { path: blob.path, contentBase64: bytes.toString('base64') };
-      });
-    })
-    .catch(() => null);
-  if (rawFiles) {
-    const { files, metadata } = validateFileSet(rawFiles);
-    return snapshotResult({ commit, location, githubUrl, files, metadata });
-  }
   let fetched;
   try {
     const collected = new Array(blobs.length);
