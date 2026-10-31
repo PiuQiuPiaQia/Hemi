@@ -6,6 +6,7 @@ import { app } from 'electron';
 import path from 'node:path';
 
 const { startMockSite } = await import('./mock-newapi-site.mjs');
+const { completeOnboardingUi } = await import('./lib/complete-onboarding-ui.mjs');
 const { initializeStableSafeStorageIdentity } = await import('../src/main/lib/config-store.mjs');
 const { registerAllIpcHandlers } = await import('../src/main/ipc/index.mjs');
 const { createMainWindow } = await import('../src/main/windows/main-window.mjs');
@@ -113,13 +114,22 @@ app.whenReady().then(async () => {
     await createMainWindow();
     await sleep(1200); // 等渲染层就绪
 
-    // 进导入登录阶段
+    // 全新数据目录会先出首启引导：按真实 UI 接入 mock 站点的推理端点，
+    // 完成引导后主窗口才有「设置」入口（引导文案改版后曾在这里脱节）。
+    // 与 ui-flow 同款：先在 mock 站注册 bootstrap 令牌，「验证并继续」的
+    // 推理请求才过得了鉴权。
+    site.state.tokens.push({ id: 1, key: 'bootstrap-test', revoked: false });
+    await completeOnboardingUi({ exec, baseUrl: `${site.origin}/v1`, model: 'mock-gpt-5.2', apiKey: 'sk-bootstrap-test' });
+
+    // 进导入登录阶段（添加页默认订阅方式；显式切到 New API 卡再进站点登录）
     check('打开设置', await clickByText('设置', 'document'));
     await waitFor(`Boolean(document.querySelector('.settings-nav'))`, '设置导航');
     check('进模型与路由页', await clickByText('模型与路由', 'document.querySelector(".settings-nav") ?? document')
       || await waitFor(`Boolean(document.body.textContent.includes("添加供应商"))`, '添加入口', 10000));
     await waitFor(`Boolean(document.body.textContent.includes("添加供应商"))`, '添加入口');
     check('点添加供应商', await clickByText('添加供应商'));
+    await waitFor(`Boolean(document.querySelector('.h47n-methods'))`, '添加页方式卡');
+    await exec(`document.querySelector('.h47n-methods [data-method="newapi"]').click()`);
     await waitFor(`Boolean(document.querySelector('#h47n-url'))`, '站点地址输入');
     check('填站点地址', (await setNativeValue('#h47n-url', site.origin)) === 'set');
     check('点打开站点并登录', await clickByText('打开站点并登录'));
@@ -137,6 +147,8 @@ app.whenReady().then(async () => {
     check('切回模型与路由', await clickByText('模型与路由', 'document.querySelector(".settings-nav") ?? document'));
     await waitFor(`Boolean(document.body.textContent.includes("添加供应商"))`, '添加入口');
     check('重新点添加供应商', await clickByText('添加供应商'));
+    await waitFor(`Boolean(document.querySelector('.h47n-methods'))`, '添加页方式卡');
+    await exec(`document.querySelector('.h47n-methods [data-method="newapi"]').click()`);
     await waitFor(`Boolean(document.querySelector('.h47n-browser'))`, '接回活动操作');
     check('接回后站点页恢复可见', await waitForViewVisible(true, 're-adopt'));
 

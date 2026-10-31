@@ -16,7 +16,9 @@ export async function completeOnboardingUi({ exec, baseUrl, model, apiKey, name 
   };
   await wait(`document.querySelector('.onboarding-page')?.dataset.step === 'welcome'`);
   await click('开始设置');
-  await click('手动配置');
+  // 方式卡片是 radiogroup（订阅 / New API / API 配置），按 data-method 点比按文案稳。
+  await wait(`Boolean(document.querySelector('.h47n-methods [data-method="api"]'))`);
+  await exec(`document.querySelector('.h47n-methods [data-method="api"]').click()`);
   await click('自定义', `document.querySelector('[aria-label="选择供应商"]')`);
   await fill('#h37m-add-name', name);
   await fill('#h37m-add-key', apiKey);

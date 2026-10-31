@@ -112,8 +112,10 @@ app.whenReady().then(async () => {
     check('进模型与路由页', onModels);
     await waitFor(`Boolean(document.body.textContent.includes("添加供应商"))`, '添加入口');
 
-    // 2. 添加供应商（默认 New API 方式）
+    // 2. 添加供应商（添加页默认订阅方式；显式切到 New API 卡再进站点登录）
     check('点添加供应商', await clickByText('添加供应商'));
+    await waitFor(`Boolean(document.querySelector('.h47n-methods'))`, '添加页方式卡');
+    await exec(`document.querySelector('.h47n-methods [data-method="newapi"]').click()`);
     await waitFor(`Boolean(document.querySelector('#h47n-url'))`, '站点地址输入');
     check('填站点地址', (await setNativeValue('#h47n-url', site.origin)) === 'set');
     check('点打开站点并登录', await clickByText('打开站点并登录'));
@@ -277,6 +279,8 @@ app.whenReady().then(async () => {
 
     // 8. 再次添加（用户实测坑）：终态不得被收养成旧回执，必须能开新一轮并完成。
     check('二轮点添加供应商', await clickByText('添加供应商'));
+    await waitFor(`Boolean(document.querySelector('.h47n-methods'))`, '二轮添加页方式卡', 15000);
+    await exec(`document.querySelector('.h47n-methods [data-method="newapi"]').click()`);
     const freshEntry = await waitFor(
       `Boolean(document.querySelector('#h47n-url'))`,
       '全新入口', 15000,
