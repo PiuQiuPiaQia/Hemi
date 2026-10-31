@@ -608,10 +608,19 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     }
     if (demo === 'mp-detail') {
       // idle 详情页：只选中不拉来源（验「元数据秒开 + 安装流程说明」的排版）。
-      void api.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }).then((result) => {
-        const skill = result.ok ? (result.skills ?? [])[0] : null;
-        if (skill) select({ kind: 'mp', skill });
-      }).catch(() => {});
+      // 优先选未安装的条目——演示场景要呈现「安装」主按钮而非「更新到最新」。
+      void (async () => {
+        try {
+          const [result, skillState] = await Promise.all([
+            api.searchSkillsMp({ query: 'pdf', sortBy: 'stars' }),
+            api.getSkillState(),
+          ]);
+          const list = result.ok ? result.skills ?? [] : [];
+          const installedIds = new Set((skillState?.installed ?? []).map((item) => item.id));
+          const skill = list.find((entry) => !installedIds.has(`skillsmp:${entry.id}`)) ?? list[0] ?? null;
+          if (skill) select({ kind: 'mp', skill });
+        } catch { /* 静默：演示数据不可用不算错误 */ }
+      })();
     }
     if (demo === 'builtin') setTab('builtin');
   }, [api, demo, runSearch, runInstall]);
@@ -827,6 +836,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           <DetailHero
             tag="SkillsMP 市场"
             title={skill.name}
+            badge={selectedInstalled ? enabledBadge(selectedInstalled) : undefined}
             description={skill.description || '（SkillsMP 未提供描述，以来源文件为准）'}
             meta={(
               <>
@@ -842,6 +852,17 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
                 {skill.githubUrl ? <button type="button" className="h37-link h34-link" onClick={() => openExternal(skill.githubUrl)}><Code aria-hidden="true" /> GitHub 仓库</button> : null}
               </>
             )}
+            /* 安装主操作在头部（好点）；读取/核对/失败态由吸底条接管，避免双主按钮。 */
+            cta={barMode === 'idle' && skill.githubUrl ? (
+              selectedInstalled ? (
+                <div className="h34-cta-row">
+                  <button type="button" className="h37-btn h37-btn-ghost h37-btn-lg" onClick={() => select({ kind: 'installed', id: selectedInstalled.id })}>管理已安装版本</button>
+                  <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" onClick={() => void runInstall(skill)}>更新到最新</button>
+                </div>
+              ) : (
+                <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" onClick={() => void runInstall(skill)}>安装</button>
+              )
+            ) : null}
           />
           {skill.githubUrl ? (
             <>
@@ -882,19 +903,24 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
                   reason={panel.reason ?? ''}
                 />
               )}
-              <div className="h34-bar-spacer" aria-hidden="true" />
-              <InstallBar
-                mode={barMode}
-                elapsed={installElapsed}
-                installed={Boolean(selectedInstalled)}
-                installedVersion={selectedInstalled?.version ?? ''}
-                summary={preview ? `${preview.files.length} 个文件 · 共 ${fmtBytes(preview.totalBytes)} · 提交 ${preview.commit.slice(0, 12)}` : ''}
-                failedStage={saveFailure ? 'save' : 'read'}
-                onInstall={() => void runInstall(skill)}
-                onConfirm={() => { if (preview) void confirmInstall(preview); }}
-                onCancel={() => { setSaveFailure(''); setPanel({ state: 'idle' }); }}
-                onManage={() => selectedInstalled && select({ kind: 'installed', id: selectedInstalled.id })}
-              />
+              {/* 吸底条只在读取/核对/保存/失败态出现；idle 的主操作在头部。 */}
+              {barMode !== 'idle' ? (
+                <>
+                  <div className="h34-bar-spacer" aria-hidden="true" />
+                  <InstallBar
+                    mode={barMode}
+                    elapsed={installElapsed}
+                    installed={Boolean(selectedInstalled)}
+                    installedVersion={selectedInstalled?.version ?? ''}
+                    summary={preview ? `${preview.files.length} 个文件 · 共 ${fmtBytes(preview.totalBytes)} · 提交 ${preview.commit.slice(0, 12)}` : ''}
+                    failedStage={saveFailure ? 'save' : 'read'}
+                    onInstall={() => void runInstall(skill)}
+                    onConfirm={() => { if (preview) void confirmInstall(preview); }}
+                    onCancel={() => { setSaveFailure(''); setPanel({ state: 'idle' }); }}
+                    onManage={() => selectedInstalled && select({ kind: 'installed', id: selectedInstalled.id })}
+                  />
+                </>
+              ) : null}
             </>
           ) : (
             <div className="h37-note h34-review-note" data-tone="warn" role="status"><ShieldAlert aria-hidden="true" /><span>该条目没有 GitHub 来源，无法添加到 Hemi。</span></div>

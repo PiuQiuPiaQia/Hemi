@@ -144,14 +144,14 @@ try {
   const resultCount = await evaluate('document.querySelectorAll(".h34-list-row").length');
   console.log(`「${keyword}」实时结果：${resultCount} 条`);
 
-  // ④ 点条目卡：v5 详情页用市场元数据秒开（吸底安装条立即在场，无网络等待）。
+  // ④ 点条目卡：v5 详情页用市场元数据秒开（头部安装按钮立即在场，无网络等待）。
   if (!(await clickButton(`b.classList.contains("h34-list-row")`))) fail('结果行不可点');
-  await waitFor('详情页秒开（吸底安装条）', `Boolean(document.querySelector('.h34-confirm-bar'))`, 15000);
+  await waitFor('详情页秒开（头部安装按钮）', `Boolean(document.querySelector('.h34-hero-cta'))`, 15000);
   await sleep(300);
   await shot('04-detail-instant');
 
   // ⑤ 点「安装」：读取来源后停在核对态（固定提交 / 文件清单 / 原文），再点「确认安装并启用」才保存，然后切到已安装 Tab。
-  if (!(await clickButton(`b.closest(".h34-confirm-bar") && b.textContent.trim() === "安装"`))) fail('安装按钮不可用');
+  if (!(await clickButton(`b.closest(".h34-hero-cta") && b.textContent.trim() === "安装"`))) fail('安装按钮不可用');
   await waitFor('来源读取完成（核对态）', `Boolean(document.querySelector('.h34-file-row')) && Boolean(document.querySelector('.h34-confirm-bar[data-mode="confirm"]'))`, 90000);
   await sleep(300);
   await shot('04b-install-review');
