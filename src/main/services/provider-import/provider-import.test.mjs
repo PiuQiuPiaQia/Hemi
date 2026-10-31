@@ -159,6 +159,7 @@ function makeFakeElectron(site) {
         async loadURL(url) {
           this.url = url;
           world.pageLoads = (world.pageLoads ?? 0) + 1;
+          if (site.pageGate) await site.pageGate.promise; // 首屏挂起：加载门控测试用
           // 页面启动自发管理请求（登录后带头）→ 推进认证见证。
           await new Promise((resolve) => setTimeout(resolve, 5));
           await site.session.fetch(`${SITE}/api/user/self`, { headers: { 'New-Api-User': String(site.userId) } }).catch(() => undefined);
@@ -274,6 +275,16 @@ async function waitForPhase(harness, phases, timeoutMs = 8000) {
 
 function latest(harness) {
   return harness.states[harness.states.length - 1];
+}
+
+/** 轮询等待条件成立（加载门控等异步边界）。 */
+async function waitUntil(condition, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return Boolean(condition());
 }
 
 test('Bot destination is frozen in preview, journal, recovery and save; unavailable Bot never falls back to local storage', async () => {
@@ -572,4 +583,40 @@ test('显式 http 站点放行（自建站）：过门禁进登录阶段', async
   });
   assert.equal(checked.ok, true);
   assert.equal(checked.state.phase, 'selecting');
+});
+
+test('首屏加载门控：页面加载完成前原生视图保持隐藏，DTO 带加载态', async () => {
+  const harness = buildHarness();
+  harness.site.pageGate = { promise: new Promise((resolve) => { harness.site.releasePageGate = resolve; }) };
+  const starting = harness.coordinator.start(harness.event, { siteUrl: 'vvcode.top' });
+  await waitUntil(() => harness.states.some((state) => state.siteLoading === true));
+  const operationId = latest(harness).operationId;
+  const view = harness.electron.world.childViews[0];
+
+  // 渲染层已上报「显示站点区」：首屏完成前原生视图不放出（渲染层画加载动画）。
+  await harness.coordinator.setViewport(harness.event, {
+    operationId,
+    bounds: { x: 0, y: 0, width: 600, height: 440 },
+    visible: true,
+    layoutGeneration: 1,
+  });
+  assert.equal(view.visible, false);
+  assert.equal(harness.coordinator.testBrowserVisible(), true); // 渲染层意图不被门控改写
+  assert.equal(harness.coordinator.testBrowserContentReady(), false);
+
+  harness.site.releasePageGate();
+  await starting;
+  await waitUntil(() => latest(harness).siteLoading === false);
+  assert.equal(view.visible, true); // 首屏完成后放出
+  assert.equal(harness.coordinator.testBrowserContentReady(), true);
+
+  // 离开页面照常隐藏（门控不改显隐协议）。
+  await harness.coordinator.setViewport(harness.event, {
+    operationId,
+    bounds: { x: 0, y: 0, width: 0, height: 0 },
+    visible: false,
+    layoutGeneration: 2,
+  });
+  assert.equal(view.visible, false);
+  await harness.coordinator.cancel(harness.event, { operationId, revision: latest(harness).revision });
 });

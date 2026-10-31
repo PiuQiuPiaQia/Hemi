@@ -11,9 +11,9 @@ import { loginSiteKey } from './login-store.mjs';
 import { createLoginMemory } from './login-memory.mjs';
 
 /**
- * @param {{ WebContentsView: any, sessionFromPartition: any, mainWindow: any, siteOrigin: string, operationId: string, allowInsecure?: boolean, loginStore?: any, onLoginMemoryError?: Function }} deps
+ * @param {{ WebContentsView: any, sessionFromPartition: any, mainWindow: any, siteOrigin: string, operationId: string, allowInsecure?: boolean, loginStore?: any, onLoginMemoryError?: Function, onContentReady?: Function }} deps
  */
-export function createImportBrowser({ WebContentsView, sessionFromPartition, mainWindow, siteOrigin, operationId, allowInsecure = false, loginStore, onLoginMemoryError }) {
+export function createImportBrowser({ WebContentsView, sessionFromPartition, mainWindow, siteOrigin, operationId, allowInsecure = false, loginStore, onLoginMemoryError, onContentReady }) {
   const partition = `persist:hemi-newapi-${loginSiteKey(siteOrigin)}`;
   const ses = sessionFromPartition(partition);
   // 网站一律拿不到系统权限（通知/剪贴板/媒体/USB……）；不绕证书校验。
@@ -57,6 +57,32 @@ export function createImportBrowser({ WebContentsView, sessionFromPartition, mai
 
   let disposed = false;
   let lastVisible = false;
+  // 首屏就绪门控：原生 View 叠在渲染层之上，渲染层画不了盖在它上面的动画；
+  // 首次加载完成前保持 View 隐藏（渲染层在占位区画加载动画），完成后放出。
+  let contentReady = false;
+  let readyFallbackTimer = null;
+  let readyGraceTimer = null;
+
+  function applyVisibility() {
+    if (disposed || view.isDestroyed?.()) return;
+    view.setVisible(lastVisible && contentReady);
+  }
+
+  function markContentReady() {
+    if (contentReady) return;
+    contentReady = true;
+    if (readyFallbackTimer) { clearTimeout(readyFallbackTimer); readyFallbackTimer = null; }
+    if (readyGraceTimer) { clearTimeout(readyGraceTimer); readyGraceTimer = null; }
+    applyVisibility();
+    try { onContentReady?.(); } catch { /* 回调失败不影响页面 */ }
+  }
+
+  /** 首屏事件已到（loadURL 结束/主文档加载完成）：留一小段让页面完成首帧绘制。 */
+  function scheduleContentReady(graceMs = 150) {
+    if (contentReady || disposed) return;
+    if (readyGraceTimer) clearTimeout(readyGraceTimer);
+    readyGraceTimer = setTimeout(markContentReady, graceMs);
+  }
 
   return {
     view,
@@ -67,7 +93,14 @@ export function createImportBrowser({ WebContentsView, sessionFromPartition, mai
       restored ??= loginMemory?.restore() ?? Promise.resolve();
       await restored;
       if (disposed) throw new Error('导入浏览器已关闭');
-      await contents.loadURL(targetUrl);
+      // 兜底：页面一直不触发加载完成事件（挂起/长连接）也不让加载动画卡死。
+      readyFallbackTimer = setTimeout(markContentReady, 25000);
+      readyFallbackTimer.unref?.();
+      try {
+        await contents.loadURL(targetUrl);
+      } finally {
+        scheduleContentReady();
+      }
     },
     async confirmLogin(identity) { await loginMemory?.confirmLogin(identity); },
     async flushLoginMemory() { await loginMemory?.flush(); },
@@ -76,11 +109,15 @@ export function createImportBrowser({ WebContentsView, sessionFromPartition, mai
       const safe = clampBounds(bounds);
       view.setBounds(safe);
       lastVisible = visible !== false && (safe.width > 0 && safe.height > 0);
-      view.setVisible(lastVisible);
+      applyVisibility();
     },
     /** 最近一次 setViewport 的可见结果（验证 harness 用——View 原生无可见性查询）。 */
     isVisible() {
       return lastVisible;
+    },
+    /** 首屏是否已就绪（验证 harness 用）。 */
+    isContentReady() {
+      return contentReady;
     },
     isDisposed() {
       return disposed;
@@ -88,6 +125,8 @@ export function createImportBrowser({ WebContentsView, sessionFromPartition, mai
     async dispose() {
       if (disposed) return;
       disposed = true;
+      if (readyFallbackTimer) { clearTimeout(readyFallbackTimer); readyFallbackTimer = null; }
+      if (readyGraceTimer) { clearTimeout(readyGraceTimer); readyGraceTimer = null; }
       clearNavigationPolicy(contents.id);
       try { await loginMemory?.dispose(); }
       catch { onLoginMemoryError?.('登录状态未能保存，浏览器已关闭'); }

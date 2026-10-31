@@ -116,6 +116,32 @@ html.kb-nav .h47n-method:focus-visible {
   box-shadow: var(--shadow-1);
 }
 
+/* 首屏加载占位：原生 View 叠在渲染层之上、盖不住，就绪前由主进程保持隐藏，
+   渲染层在这里画加载动画（页面放出后此层随之消失）。 */
+.h47n-browser-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-10);
+  border-radius: var(--r-md);
+  background: var(--n-25);
+  font-size: var(--fs-13);
+  color: var(--muted);
+}
+
+.h47n-browser-loading svg {
+  width: 20px;
+  height: 20px;
+  animation: h47n-loading-spin 0.9s linear infinite;
+}
+
+@keyframes h47n-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .h47n-browser:not([data-wide='true']) {
   min-height: 88px;
   display: flex;
@@ -291,6 +317,10 @@ html.kb-nav .h47n-method:focus-visible {
   .h47n-method,
   .h47n-method:hover {
     transition: none;
+  }
+
+  .h47n-browser-loading svg {
+    animation: none;
   }
 }
 

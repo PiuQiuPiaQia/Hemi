@@ -16,6 +16,7 @@ const BASE = process.env.HEMI_FIXTURES_BASE ?? 'http://127.0.0.1:5173';
 const SCENES = [
   ['settings-model-add-newapi', '.h47n-methods'],
   ['settings-import-login', '.h47n-browser'],
+  ['settings-import-loading', '.h47n-browser-loading'],
   ['settings-import-selecting', '.h47n-search'],
   ['settings-import-progress', '.h47n-steps'],
   ['settings-import-success', '.h47n-panel .h37-section'],

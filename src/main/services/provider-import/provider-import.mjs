@@ -126,6 +126,24 @@ export function createImportCoordinator({
     }
   }
 
+  /** 非状态机转移的界面态更新（首屏加载指示）：不动 revision，不打断进行中的命令。 */
+  function publishQuiet(op) {
+    try {
+      ownerSender?.(publicState(op));
+    } catch {
+      /* 窗口可能已销毁 */
+    }
+  }
+
+  /** 首屏加载完成回调：清加载态并静默推送（View 放出在 import-browser 内部完成）。 */
+  function contentReadyCallback(op) {
+    return () => {
+      if (active !== op || op.siteLoading !== true) return;
+      op.siteLoading = false;
+      publishQuiet(op);
+    };
+  }
+
   function canEncrypt() {
     return Boolean(safeStorage?.isEncryptionAvailable?.());
   }
@@ -139,6 +157,7 @@ export function createImportCoordinator({
     };
     op.phase = 'failed';
     op.control = 'user';
+    op.siteLoading = false;
     publish(op);
     log?.warn?.(`导入 ${op.operationId} 失败于 ${op.lastStep ?? '-'}：${code}`);
   }
@@ -537,6 +556,7 @@ export function createImportCoordinator({
     if (!op.browser) return;
     const browser = op.browser;
     op.browser = null;
+    op.siteLoading = false;
     op.witness?.dispose?.();
     op.witness = null;
     op.adapter?.dispose?.();
@@ -582,7 +602,10 @@ export function createImportCoordinator({
       operationId: op.operationId,
       allowInsecure: siteAllowsInsecure(op),
       ...loginMemoryOptions(op),
+      onContentReady: contentReadyCallback(op),
     });
+    op.siteLoading = true;
+    publishQuiet(op);
     mainWindow.contentView.addChildView(op.browser.view);
     op.browser.setViewport({ bounds: { x: 0, y: 0, width: 0, height: 0 }, visible: false });
     op.witness = createAuthWitness({ webRequest: op.browser.session.webRequest, siteOrigin: op.siteOrigin });
@@ -636,6 +659,8 @@ export function createImportCoordinator({
       cleanupPending: op.cleanupPending ?? null,
       resumeHint: op.resumeHint ?? null,
       loginMemoryError: op.loginMemoryError ?? null,
+      /** 站点页首屏加载中：原生视图尚未放出，渲染层画加载动画。 */
+      siteLoading: op.siteLoading ?? false,
       can: {
         checkLogin: op.phase === 'login',
         setSelection: op.phase === 'selecting',
@@ -735,7 +760,10 @@ export function createImportCoordinator({
           operationId,
           allowInsecure: siteAllowsInsecure(op),
           ...loginMemoryOptions(op),
+          onContentReady: contentReadyCallback(op),
         });
+        op.siteLoading = true;
+        publishQuiet(op);
         mainWindow.contentView.addChildView(op.browser.view);
         op.browser.setViewport({ bounds: { x: 0, y: 0, width: 0, height: 0 }, visible: false });
         op.witness = createAuthWitness({ webRequest: op.browser.session.webRequest, siteOrigin: op.siteOrigin });
@@ -1153,6 +1181,10 @@ export function createImportCoordinator({
     /** 验收 harness 专用：活动浏览器最近一次视口可见性（防「离开后站点页悬浮」回归）。 */
     testBrowserVisible() {
       return active?.browser?.isVisible?.() ?? false;
+    },
+    /** 验收 harness 专用：活动浏览器首屏是否已就绪（加载门控回归）。 */
+    testBrowserContentReady() {
+      return active?.browser?.isContentReady?.() ?? null;
     },
   };
 }

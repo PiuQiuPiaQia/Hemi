@@ -4613,6 +4613,16 @@ const scenes: Record<string, () => React.ReactElement> = {
     }));
     return <SettingsScreen {...settingsProps} initialPage='models' />;
   },
+  // 047 站点导入：首屏加载中（原生视图未放出，占位区显示加载动画）。
+  'settings-import-loading': () => {
+    stubModelV2({ view: { kind: 'add' } });
+    setProviderImportFixtureState(importFixtureState({
+      phase: 'login',
+      control: 'user',
+      siteLoading: true,
+    }));
+    return <SettingsScreen {...settingsProps} initialPage='models' />;
+  },
   'settings-import-login-memory-error': () => {
     stubModelV2({ view: { kind: 'add' } });
     setProviderImportFixtureState(importFixtureState({

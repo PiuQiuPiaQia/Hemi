@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { AlertTriangle, Check, ExternalLink, Globe, Hand, Lock, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, Check, ExternalLink, Globe, Hand, Loader2, Lock, RefreshCw, Search } from 'lucide-react';
 import type {
   ModelProviderApi,
   ProviderImportPendingItem,
@@ -465,6 +465,12 @@ export function NewApiImportView({
               data-wide={containerWide ? 'true' : undefined}
               aria-label="站点页面（应用内浏览器）"
             >
+              {containerWide && op.siteLoading ? (
+                <div className="h47n-browser-loading" role="status" aria-label="站点页面加载中">
+                  <Loader2 aria-hidden />
+                  <span>正在加载站点页面…</span>
+                </div>
+              ) : null}
               {containerWide ? null : (
                 <span className="h47n-browser-note">
                   窗口太窄放不下站点页面：拉宽窗口后这里显示站点页面，控制不变。

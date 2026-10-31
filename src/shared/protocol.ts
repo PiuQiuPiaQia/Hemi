@@ -2073,6 +2073,8 @@ export type ProviderImportState = {
   resumeHint: string | null;
   /** 登录记忆失败原因，不含账号密码或 Cookie。 */
   loginMemoryError?: string | null;
+  /** 站点页首屏是否仍在加载（原生视图就绪前，渲染层在占位区画加载动画）。 */
+  siteLoading?: boolean;
   can: {
     checkLogin: boolean;
     setSelection: boolean;
