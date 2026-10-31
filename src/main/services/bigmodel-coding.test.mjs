@@ -574,7 +574,10 @@ test('GLM 真实 SDK 与恢复器：连接拒绝可恢复，EPIPE 不伪装 503 
     assert.equal(failed.httpStatus, undefined, 'local connection failure is not an upstream HTTP status');
     assert.equal(failed.failure.kind, 'transport');
     assert.equal(failed.failure.phase, 'connection', 'preflight responses do not start the inference output deadline');
-    assert.doesNotMatch(JSON.stringify(records) + String(result.modelError), /PRIVATE_|SYNTHETIC_SECRET|503/);
+    assert.doesNotMatch(JSON.stringify(records) + String(result.modelError), /PRIVATE_|SYNTHETIC_SECRET/);
+    // Check status/error fields, not arbitrary timestamp digits (endedAt can contain "503").
+    assert.ok(records.every(row => row.httpStatus !== 503), 'connection failures must not synthesize HTTP 503');
+    assert.doesNotMatch(String(result.modelError), /503/);
     if (code === 'ECONNREFUSED' || code === 'preflight EPIPE') {
       assert.equal(result.modelError, null);
       assert.equal(inferenceAttempts, code === 'preflight EPIPE' ? 1 : 2);
