@@ -20,7 +20,7 @@ test('Bot 实际 Host/SDK：坏项目技能不阻断普通/新会话，修正后
   const directory = await fixture.call('skills', { id: first.id });
   assert.deepEqual(directory.skills.map(item => item.name), ['good']);
   assert.match(directory.skillsError, /YAML 格式错误/);
-  assert.match(directory.skillsError, /bad\/SKILL.md/);
+  assert.match(directory.skillsError, /bad[\\/]SKILL\.md/);
   for (const id of [first.id, (await fixture.call('session.create')).id]) {
     const detail = await fixture.send(id, 'ORDINARY_INPUT');
     assert.equal(Object.values(detail.flow.runs).at(-1).outcome, 'completed');
