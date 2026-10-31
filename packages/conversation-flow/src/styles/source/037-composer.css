@@ -654,6 +654,8 @@ html.kb-nav .compact-shell .h37-call-strip .h24-call-dock-mute:focus-visible {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: auto;
+  /* 滚动容器横向也裁剪：给拖拽卡片的 1px 线框（--shadow-1 外圈）留出两侧余量。 */
+  padding-inline: var(--sp-2);
 }
 .compact-shell .h24-queue-paused {
   flex-shrink: 0;
@@ -721,7 +723,6 @@ html.kb-nav .compact-shell .h37-call-strip .h24-call-dock-mute:focus-visible {
 }
 .compact-shell .h24-queue-drag { touch-action: none; cursor: grab; }
 .compact-shell .h24-queue-drag:disabled { opacity: 1; cursor: default; }
-.compact-shell .h24-queue-order { color: var(--muted); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .compact-shell .h24-queue-tool:hover:not(:disabled) { color: var(--ink); background: var(--bg-hover); }
 .compact-shell .h24-queue-run {
   display: inline-flex;

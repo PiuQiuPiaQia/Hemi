@@ -2327,7 +2327,7 @@ function auditSessionScene(processOpen: boolean) {
   })} />;
 }
 
-function SortableQueueFixture({ full = false, paused = false }: { full?: boolean; paused?: boolean }) {
+function SortableQueueFixture({ full = false, paused = false, reorderDelay = 0 }: { full?: boolean; paused?: boolean; reorderDelay?: number }) {
     const [draft, setDraft] = useState('');
     const [focusToken, setFocusToken] = useState(0);
     const [queue, setQueue] = useState<TurnQueueState>({ paused, items: [
@@ -2345,11 +2345,15 @@ function SortableQueueFixture({ full = false, paused = false }: { full?: boolean
           revision: 1, dispatchState: 'pending', error: '', createdAt: now, attachmentIds: [], references: [] }] }));
         setDraft('');
       },
-      onReorderQueued: (id, overId) => setQueue((current) => {
-        const items = [...current.items]; const from = items.findIndex((item) => item.queueItemId === id); const to = items.findIndex((item) => item.queueItemId === overId);
-        if (from >= 0 && to >= 0) items.splice(to, 0, items.splice(from, 1)[0]);
-        return { ...current, items };
-      }),
+      onReorderQueued: async (id, overId) => {
+        await new Promise(resolve => setTimeout(resolve, reorderDelay));
+        setQueue((current) => {
+          const items = [...current.items]; const from = items.findIndex((item) => item.queueItemId === id); const to = items.findIndex((item) => item.queueItemId === overId);
+          if (from >= 0 && to >= 0) items.splice(to, 0, items.splice(from, 1)[0]);
+          return { ...current, items };
+        });
+        return true;
+      },
       onPromoteQueued: (id) => setQueue((current) => ({ ...current, items: current.items.map((item) => item.queueItemId === id ? { ...item, dispatchState: 'promoting' } : item) })),
       onEditQueued: (id) => {
         const item = queue.items.find(item => item.queueItemId === id);
@@ -4086,6 +4090,7 @@ const scenes: Record<string, () => React.ReactElement> = {
     />
   ),
   'composer-queue-sortable': () => <SortableQueueFixture />,
+  'composer-queue-slow-sort': () => <SortableQueueFixture reorderDelay={180} />,
   'composer-queue-full': () => <SortableQueueFixture full />,
   'composer-queue-full-paused': () => <SortableQueueFixture full paused />,
   // ---- 057：对话流统一状态与时间线（AC-24 混合回合／AC-29 同角色并发／停止与待核对）----

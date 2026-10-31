@@ -1,5 +1,5 @@
 import type { MessageReferenceView } from '../types/presentation.js';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from '@dnd-kit/core';
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -15,31 +15,65 @@ type QueueActions = {
 };
 const movable = (item: TurnQueueItemView) => !item.operationId && item.dispatchState === 'pending' && !item.error;
 
-/** 展示与派发共用宿主队列；拖动只发送身份操作，不在界面另存一份排队顺序。 */
+/** 展示与派发共用宿主队列；拖动只发送身份操作，顺序的权威来源是宿主快照。
+ *  乐观顺序仅存在于「落手→宿主回执落地」的过渡帧，避免 dnd-kit 先弹回旧位再跳到新位的抖动。 */
 export function TurnQueueTray({ state, onWithdraw, onEdit, onResume, onPromote, onReorder, onContinue, stoppedIdle = false }: QueueActions & {
   state: TurnQueueState;
   onResume: () => void;
-  onReorder?: (inputId: string, overInputId: string, expectedInputIds: string[]) => Promise<void> | void;
+  onReorder?: (inputId: string, overInputId: string, expectedInputIds: string[]) => Promise<boolean | void> | void;
   /** 停止收口（idle）后的「无新任务」态：真续跑（补「继续」回合），不是只解除暂停。 */
   onContinue?: () => void;
   stoppedIdle?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [sorting, setSorting] = useState(false);
+  /** 乐观顺序（queueItemId 序列）：拖拽落手后立即按目标顺序渲染，宿主快照追平后回到权威状态。 */
+  const [optimisticIds, setOptimisticIds] = useState<string[] | null>(null);
   const dragIds = useRef<string[]>([]);
+  /** 渲染用的行序：乐观顺序有效且与快照成员一致时按乐观序，否则按宿主快照序。 */
+  const items = useMemo(() => {
+    if (!optimisticIds) return state.items;
+    const byId = new Map(state.items.map((item) => [item.queueItemId, item]));
+    const ordered = optimisticIds.map((id) => byId.get(id)).filter((item): item is TurnQueueItemView => Boolean(item));
+    if (ordered.length !== optimisticIds.length) return state.items;
+    for (const row of state.items) if (!optimisticIds.includes(row.queueItemId)) ordered.push(row);
+    return ordered;
+  }, [state.items, optimisticIds]);
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  // 宿主顺序追平＝确认，清掉乐观层；快照迟迟不一致（被拒/超时）也回到权威顺序。
+  useEffect(() => {
+    if (!optimisticIds) return;
+    const ids = state.items.map((item) => item.queueItemId);
+    const confirmed = ids.length === optimisticIds.length && ids.every((id, index) => id === optimisticIds[index]);
+    if (confirmed) { setOptimisticIds(null); return; }
+    const fallback = setTimeout(() => setOptimisticIds(null), 3000);
+    return () => clearTimeout(fallback);
+  }, [state.items, optimisticIds]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const collision = useCallback<CollisionDetection>((args) => {
-    const activeIndex = state.items.findIndex((item) => item.queueItemId === args.active.id);
+    const activeIndex = items.findIndex((item) => item.queueItemId === args.active.id);
     const allowed = new Set<string>();
-    for (let i = activeIndex; i >= 0 && movable(state.items[i]); i--) allowed.add(state.items[i].queueItemId);
-    for (let i = activeIndex + 1; i < state.items.length && movable(state.items[i]); i++) allowed.add(state.items[i].queueItemId);
+    for (let i = activeIndex; i >= 0 && movable(items[i]); i--) allowed.add(items[i].queueItemId);
+    for (let i = activeIndex + 1; i < items.length && movable(items[i]); i++) allowed.add(items[i].queueItemId);
     return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((container) => allowed.has(String(container.id))) });
-  }, [state.items]);
+  }, [items]);
   const reorder = async ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id || !onReorder) return;
+    const from = itemsRef.current.findIndex((item) => item.queueItemId === active.id);
+    const to = itemsRef.current.findIndex((item) => item.queueItemId === over.id);
+    if (from < 0 || to < 0) return;
+    // 乐观落位：落手帧就按目标顺序渲染，宿主回执后无缝衔接；被拒或异常立即回弹。
+    const nextIds = itemsRef.current.map((item) => item.queueItemId);
+    nextIds.splice(to, 0, nextIds.splice(from, 1)[0]);
+    setOptimisticIds(nextIds);
     setSorting(true);
-    try { await onReorder(String(active.id), String(over.id), dragIds.current); }
-    finally { setSorting(false); }
+    try {
+      const accepted = await onReorder(String(active.id), String(over.id), dragIds.current);
+      if (accepted === false) setOptimisticIds(null);
+    } catch {
+      setOptimisticIds(null);
+    } finally { setSorting(false); }
   };
   if (!state.items.length && !state.paused) return null;
   // 2026-10-18 用户裁决：手动停止后没有新任务＝只放一个「继续任务」按钮，
@@ -62,13 +96,13 @@ export function TurnQueueTray({ state, onWithdraw, onEdit, onResume, onPromote, 
       <DndContext sensors={sensors} collisionDetection={collision} modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         accessibility={{ screenReaderInstructions: { draggable: '按空格提起消息，上下方向键调整顺序，再按空格放下；Escape 取消。' }, announcements: {
           onDragStart: () => '已提起消息，上下移动调整顺序。',
-          onDragOver: ({ over }) => over ? '移动到第 ' + (state.items.findIndex((item) => item.queueItemId === over.id) + 1) + ' 位。' : undefined,
+          onDragOver: ({ over }) => over ? '移动到第 ' + (items.findIndex((item) => item.queueItemId === over.id) + 1) + ' 位。' : undefined,
           onDragEnd: () => '已放下消息。', onDragCancel: () => '已取消排序。',
         } }}
-        onDragStart={() => { dragIds.current = state.items.map((item) => item.queueItemId); }} onDragEnd={(event) => void reorder(event)}>
-        <SortableContext items={state.items.map((item) => item.queueItemId)} strategy={verticalListSortingStrategy}>
-          {state.items.map((item, index) => <QueueRow key={item.queueItemId} item={item} order={index + 1}
-            sorting={sorting} sortable={Boolean(onReorder) && state.items.filter(movable).length > 1}
+        onDragStart={() => { dragIds.current = items.map((item) => item.queueItemId); }} onDragEnd={(event) => void reorder(event)}>
+        <SortableContext items={items.map((item) => item.queueItemId)} strategy={verticalListSortingStrategy}>
+          {items.map((item, index) => <QueueRow key={item.queueItemId} item={item} order={index + 1}
+            sorting={sorting} sortable={Boolean(onReorder) && items.filter(movable).length > 1}
             onWithdraw={onWithdraw} onEdit={onEdit} onPromote={onPromote} />)}
         </SortableContext>
       </DndContext>
@@ -96,7 +130,7 @@ function QueueRow({ item, order, sortable, sorting, onWithdraw, onEdit, onPromot
     style={{ transform: CSS.Transform.toString(transform), transition }}>
     <button ref={setActivatorNodeRef} type="button" className="h24-queue-tool h24-queue-drag" {...attributes} {...listeners}
       aria-label={'拖拽排序，第 ' + order + ' 条'} title="拖拽排序；也可按空格和上下方向键" disabled={!sortable || locked}>
-      {sortable ? <GripVertical className="size-3.5" /> : <span className="h24-queue-order">{order}</span>}
+      <GripVertical className="size-3.5" />
     </button>
     <div className="h24-queue-content">
       {/* 063：技能/行内引用标签与正式消息同一语义（队列摘要里也按标签回显）。 */}

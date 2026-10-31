@@ -284,7 +284,7 @@ type VoiceScreenProps = {
   onEditQueued?: (queueItemId: string) => void;
   /** 060 R-21：让该条优先（停止当前任务，确认后优先派发）。 */
   onPromoteQueued?: (queueItemId: string) => void;
-  onReorderQueued?: (inputId: string, overInputId: string, expectedInputIds: string[]) => Promise<void> | void;
+  onReorderQueued?: (inputId: string, overInputId: string, expectedInputIds: string[]) => Promise<boolean | void> | void;
   /** 031：模型配置目录与当前会话选择（输入区选择器与 /model 命令共用）。 */
   modelProfiles?: ModelProfilesDirectory | null;
   currentProfileId?: string | null;

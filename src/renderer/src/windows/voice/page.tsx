@@ -607,6 +607,22 @@ export default function Home() {
     );
   }, [invalidateTurn]);
 
+  // 064：对话流内按 Esc＝暂停当前运行（与停止按钮同链路：停本回合＋待发送队列
+  // 暂停，空闲时按了不做任何事）。Esc 先留给各覆盖层：设置/技能/工作流/用量页
+  // 打开时不接管；模态对话框（含密码弹窗）、菜单、输入候选面板、成果预览在场
+  // 时让位（它们自身的 Esc 处理多数会先 preventDefault，DOM 查询是双保险）。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (settingsOpen || skillMarketOpen || usageHistoryOpen || workflowStudioOpen) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], .h37-menu, .scope-popover, .h37-scrim, .h24-preview, .h63-panel')) return;
+      handleStopModelTurn();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen, skillMarketOpen, usageHistoryOpen, workflowStudioOpen, handleStopModelTurn]);
+
   // —— TTS 播报（003）——
 
   const clearDuckReleaseTimer = useCallback(() => {
@@ -1248,15 +1264,17 @@ export default function Home() {
 
   const handleReorderQueued = useCallback(async (inputId: string, overInputId: string, expectedInputIds: string[]) => {
     const cid = conversationIdRef.current;
-    if (!cid || !window.hemiVoice) return;
+    if (!cid || !window.hemiVoice) return false;
     try {
       const result = await sendLocalConversationCommand(cid, { type: 'reorderInput', inputId, overInputId, expectedInputIds });
       if (!result.ok) {
         const message = result.code === 'storage-failed' ? '顺序已调整，但暂未保存，请重试。'
           : result.code === 'locked' ? '编辑或等待交接的消息不能被移过。' : '队列已变化，请按当前顺序重新拖动。';
         flashAttachError(message);
+        return false;
       }
-    } catch (error) { flashAttachError(error instanceof Error ? error.message : String(error)); }
+      return true;
+    } catch (error) { flashAttachError(error instanceof Error ? error.message : String(error)); return false; }
   }, [flashAttachError]);
 
   const handleWithdrawQueued = useCallback(async (queueItemId: string) => {
