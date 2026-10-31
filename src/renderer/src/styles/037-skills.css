@@ -559,7 +559,6 @@ html.kb-nav .h34-market .h34-card:focus-visible {
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   color: var(--accent-text);
-  cursor: pointer;
 }
 
 .h34-market .h34-file-more svg {
@@ -606,7 +605,6 @@ html.kb-nav .h34-market .h34-card:focus-visible {
   font-size: var(--fs-13);
   font-weight: var(--fw-medium);
   color: var(--accent-text);
-  cursor: pointer;
 }
 
 .h34-market .h34-source-toggle:hover {
@@ -716,84 +714,6 @@ html.kb-nav .h34-market .h34-fold > summary:focus-visible {
   outline: 0;
 }
 
-/* 安装流程：三步横排（≤880 竖排），序号圈标出顺序；第一步承载读取进度与失败原因 */
-.h34-market .h34-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.h34-market .h34-step {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-12);
-  min-width: 0;
-  padding: var(--sp-16) var(--pad-card);
-}
-
-.h34-market .h34-step + .h34-step {
-  box-shadow: inset 1px 0 0 var(--line);
-}
-
-.h34-market .h34-step-mark {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--bg-subtle);
-  font-size: var(--fs-12);
-  font-weight: var(--fw-semibold);
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-
-.h34-market .h34-step-mark svg {
-  width: 13px;
-  height: 13px;
-}
-
-.h34-market .h34-step[data-state='active'] .h34-step-mark {
-  background: var(--g-50);
-}
-
-.h34-market .h34-step[data-state='failed'] .h34-step-mark {
-  background: var(--danger-50);
-  color: var(--danger);
-}
-
-.h34-market .h34-step > div {
-  min-width: 0;
-}
-
-.h34-market .h34-step strong {
-  display: block;
-  font-size: var(--fs-13);
-  font-weight: var(--fw-semibold);
-  line-height: 22px;
-  color: var(--ink);
-}
-
-.h34-market .h34-step small {
-  display: block;
-  margin-top: var(--sp-2);
-  font-size: var(--fs-12);
-  line-height: 1.55;
-  color: var(--muted);
-}
-
-.h34-market .h34-step[data-state='active'] small {
-  color: var(--body);
-}
-
-.h34-market .h34-step[data-state='failed'] strong,
-.h34-market .h34-step[data-state='failed'] small {
-  color: var(--danger);
-}
-
 /* 吸底安装条：浮起的一张卡。内容短时由 spacer 撑开落在页底，长页 sticky 常驻同屏 */
 .h34-market .h34-bar-spacer {
   flex: 1 0 var(--sp-32);
@@ -895,14 +815,6 @@ html.kb-nav .h34-market .h34-fold > summary:focus-visible {
   .h34-market .h34-hero-cta {
     align-items: flex-start;
     margin-top: var(--sp-16);
-  }
-
-  .h34-market .h34-steps {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .h34-market .h34-step + .h34-step {
-    box-shadow: inset 0 1px 0 var(--line);
   }
 
   /* 768 双列会留孤行卡；搜索行放不下排序+按钮时换行 */

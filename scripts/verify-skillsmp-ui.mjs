@@ -150,12 +150,12 @@ try {
   await sleep(300);
   await shot('04-detail-instant');
 
-  // ⑤ 点「安装」：读取来源后停在核对态（固定提交 / 文件清单 / 原文），再点「确认安装并启用」才保存，然后切到已安装 Tab。
+  // ⑤ 点「安装」：读取来源后停在核对态（固定提交 / 文件清单 / 原文），再点「确认安装」才保存，然后切到已安装 Tab。
   if (!(await clickButton(`b.closest(".h34-hero-cta") && b.textContent.trim() === "安装"`))) fail('安装按钮不可用');
   await waitFor('来源读取完成（核对态）', `Boolean(document.querySelector('.h34-file-row')) && Boolean(document.querySelector('.h34-confirm-bar[data-mode="confirm"]'))`, 90000);
   await sleep(300);
   await shot('04b-install-review');
-  if (!(await clickButton(`b.textContent.includes("确认安装并启用")`))) fail('确认安装按钮不可用');
+  if (!(await clickButton(`b.textContent.includes("确认安装")`))) fail('确认安装按钮不可用');
   await waitFor('安装后进入已安装详情', `(() => {
     const tab = document.querySelector('.h34-tabs button[aria-selected="true"]');
     const tag = document.querySelector('.h34-detail-tag');

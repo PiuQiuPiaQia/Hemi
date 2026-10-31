@@ -253,50 +253,18 @@ function SourceFold({ text, loading, onOpen }: { text: string; loading: boolean;
   );
 }
 
-type StepState = 'todo' | 'active' | 'failed';
-
-/** 安装流程三步：未开始显示序号；读取中第一步换成转圈与已等秒数；失败换成提示与原因。 */
-function InstallSteps({ read, elapsed, reason }: { read: StepState; elapsed: number; reason: string }) {
-  const readDesc = read === 'active'
-    ? `正在从 GitHub 读取${elapsed >= 1 ? `，已等 ${elapsed} 秒` : ''}。文件多或网络慢时可能要半分钟以上。`
-    : read === 'failed'
-      ? `${reason || '来源文件读取失败'}。可重新读取，或稍后再装。`
-      : '按固定提交从 GitHub 读取全部文件，不跟随仓库后续改动。';
-  return (
-    <section className="h37-section" aria-label="安装流程">
-      <div className="h37-section-head"><h3>安装流程</h3><span className="h37-count">每一步都可以停下</span></div>
-      <ol className="h37-group h34-steps">
-        <li className="h34-step" data-state={read}>
-          <span className="h34-step-mark" aria-hidden="true">
-            {read === 'active' ? <span className="h37-spinner" /> : read === 'failed' ? <ShieldAlert /> : '1'}
-          </span>
-          <div><strong>{read === 'failed' ? '读取来源失败' : '读取来源'}</strong><small role={read === 'todo' ? undefined : 'status'}>{readDesc}</small></div>
-        </li>
-        <li className="h34-step" data-state="todo">
-          <span className="h34-step-mark" aria-hidden="true">2</span>
-          <div><strong>你来核对</strong><small>列出固定提交、全部文件、总大小和 SKILL.md 原文，确认后才保存。</small></div>
-        </li>
-        <li className="h34-step" data-state="todo">
-          <span className="h34-step-mark" aria-hidden="true">3</span>
-          <div><strong>只保存文件</strong><small>不运行脚本、不装依赖。内容与清单不一致时拒绝安装，装完可随时停用或卸载。</small></div>
-        </li>
-      </ol>
-    </section>
-  );
-}
-
 type BarMode = 'idle' | 'reading' | 'confirm' | 'saving' | 'failed';
 
 /** 吸底安装条：左侧状态（标题 + 一行说明），右侧动作。
  *  idle → 安装（先读取来源）→ confirm（核对后确认）→ saving；失败停在 failed 可重试。 */
-function InstallBar({ mode, elapsed, installed, installedVersion, summary, failedStage, onInstall, onConfirm, onCancel, onManage }: {
+function InstallBar({ mode, elapsed, installed, installedVersion, reason, failedStage, onInstall, onConfirm, onCancel, onManage }: {
   mode: BarMode;
   elapsed: number;
   installed: boolean;
   /** 已安装版本的显示文本（提交短号），只在 installed 时用。 */
   installedVersion: string;
-  /** 核对态的清单摘要：「2 个文件 · 2.5 KiB · 提交 1f2a3b4c5d6e」。 */
-  summary: string;
+  /** 读取失败的具体原因。 */
+  reason: string;
   failedStage: 'read' | 'save';
   onInstall: () => void;
   onConfirm: () => void;
@@ -317,17 +285,17 @@ function InstallBar({ mode, elapsed, installed, installedVersion, summary, faile
   }[mode];
   const sub = {
     idle: installed ? '更新同样会先列出新版文件，确认后才替换。' : '先读取来源并列出全部文件，确认后才保存。',
-    reading: '读完会列出文件清单和原文，现在还没有保存任何东西。',
-    confirm: summary,
-    saving: '逐个比对文件摘要，不一致即拒绝安装。',
-    failed: failedStage === 'read' ? '还没有保存任何东西，可重新读取。' : '已安装的版本不受影响，可重试。',
+    reading: '',
+    confirm: '安装后自动启用',
+    saving: '',
+    failed: failedStage === 'read' ? reason : installed ? '已安装的版本不受影响' : '',
   }[mode];
   return (
     <div className="h34-confirm-bar" data-mode={mode} data-busy={busy ? 'true' : 'false'}>
       <span className="h34-bar-icon" aria-hidden="true">{icon}</span>
       <span className="h34-bar-status" role="status">
         <strong>{title}</strong>
-        <small>{sub}</small>
+        {sub ? <small>{sub}</small> : null}
       </span>
       <span className="h34-cta-row">
         {mode === 'idle' && installed ? (
@@ -338,7 +306,7 @@ function InstallBar({ mode, elapsed, installed, installedVersion, summary, faile
         ) : null}
         {mode === 'confirm' || (mode === 'failed' && failedStage === 'save') || mode === 'saving' ? (
           <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={mode === 'saving'} onClick={onConfirm}>
-            {mode === 'saving' ? '正在安装…' : mode === 'failed' ? '重试安装' : installed ? '确认更新并启用' : '确认安装并启用'}
+            {mode === 'saving' ? '正在安装…' : mode === 'failed' ? '重试安装' : installed ? '确认更新' : '确认安装'}
           </button>
         ) : (
           <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={mode === 'reading'} onClick={onInstall}>
@@ -896,13 +864,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
                     </div>
                   ) : null}
                 </>
-              ) : (
-                <InstallSteps
-                  read={barMode === 'reading' ? 'active' : barMode === 'failed' ? 'failed' : 'todo'}
-                  elapsed={installElapsed}
-                  reason={panel.reason ?? ''}
-                />
-              )}
+              ) : null}
               {/* 吸底条只在读取/核对/保存/失败态出现；idle 的主操作在头部。 */}
               {barMode !== 'idle' ? (
                 <>
@@ -912,7 +874,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
                     elapsed={installElapsed}
                     installed={Boolean(selectedInstalled)}
                     installedVersion={selectedInstalled?.version ?? ''}
-                    summary={preview ? `${preview.files.length} 个文件 · 共 ${fmtBytes(preview.totalBytes)} · 提交 ${preview.commit.slice(0, 12)}` : ''}
+                    reason={panel.reason ?? ''}
                     failedStage={saveFailure ? 'save' : 'read'}
                     onInstall={() => void runInstall(skill)}
                     onConfirm={() => { if (preview) void confirmInstall(preview); }}

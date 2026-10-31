@@ -2724,8 +2724,8 @@ const scenes: Record<string, () => React.ReactElement> = {
       })}
     />
   ),
-  // 详情页重排（2026-10）：安装流程三态补拍——读取中（第一步转圈 + 已等秒数）、
-  // 读取失败（第一步与吸底条就地给原因与重试）、长清单核对态（文件收纳 + 原文渐隐）。
+  // 安装状态补拍：读取中（吸底条进度与秒数）、读取失败（吸底条原因与重试）、
+  // 长清单核对态（文件收纳 + 原文渐隐）。
   'skill-mp-reading': () => skillPreviewScene(() => new Promise(() => {})),
   'skill-mp-read-error': () => skillPreviewScene(async () => ({ ok: false, reason: '连接 GitHub 超时' })),
   'skill-mp-preview-long': () => skillPreviewScene(async () => ({ ok: true, preview: LONG_SKILL_PREVIEW })),

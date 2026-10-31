@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const devPort = Number(process.env.HEMI_DEV_PORT || 5173);
-const output = path.resolve('.visual/workflow/vision');
+const output = path.resolve(process.env.HEMI_CAPTURE_OUTPUT || '.visual/workflow/vision');
 const profile = await mkdtemp(path.join(os.tmpdir(), 'hemi-skill-visual-'));
 const browser = spawn(chrome, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -64,8 +64,11 @@ try {
   // 市场场景等全宽列表；settings-model 只在 1440 档补拍（多状态仅宽档）。
   const waitSelector = (scene) => ({
     'skill-home-entry': '.h24-sidebar-new',
-    'skill-mp-preview': '.h34-confirm-bar',
-    'skill-mp-detail': '.h34-steps',
+    'skill-mp-preview': '.h34-confirm-bar[data-mode="confirm"]',
+    'skill-mp-preview-long': '.h34-confirm-bar[data-mode="confirm"]',
+    'skill-mp-detail': '.h34-hero-cta',
+    'skill-mp-reading': '.h34-confirm-bar[data-mode="reading"]',
+    'skill-mp-read-error': '.h34-confirm-bar[data-mode="failed"]',
     'skill-mp-installed': '.h34-detail details',
     'skill-builtin': '.h34-list-rows .h34-list-row',
   }[scene] ?? '.h34-list-row');
@@ -95,12 +98,17 @@ try {
     ['skill-home-entry', [1440, 768, 375]],
     ['skill-market', [1440, 768, 375]],
     ['skill-mp-detail', [1440, 375]],
-    ['skill-mp-preview', [1440]],
-    ['skill-mp-installed', [1440]],
+    ['skill-mp-reading', [1440]],
+    ['skill-mp-read-error', [1440, 375]],
+    ['skill-mp-preview', [1440, 375]],
+    ['skill-mp-preview-long', [1440]],
+    ['skill-mp-installed', [1440, 375]],
     ['skill-builtin', [1440]],
     ['settings-model', [1440]],
   ];
+  const selectedScenes = process.env.HEMI_CAPTURE_SCENES?.split(',');
   for (const [scene, widths] of scenes) {
+    if (selectedScenes && !selectedScenes.includes(scene)) continue;
     for (const width of widths) {
       const height = width === 375 ? 1000 : 900;
       await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -118,10 +126,20 @@ try {
       const metrics = await evaluate('({ width: innerWidth, scroll: document.documentElement.scrollWidth, body: document.body.scrollWidth })');
       if (metrics.scroll > width || metrics.body > width) throw new Error(`${scene}-${width} 横向溢出：${JSON.stringify(metrics)}`);
       if (errors.length) throw new Error(`${scene}-${width} 浏览器错误：${errors.join('; ')}`);
+      // 开发性能浮层不属于产品界面，避免遮住窄屏主按钮。
+      await evaluate(`(() => { const style = document.createElement('style'); style.textContent = '.h65-perf { display: none !important; }'; document.head.append(style); })()`);
       const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, fromSurface: true });
       const target = path.join(output, `${scene}-${width}.png`);
       await writeFile(target, Buffer.from(shot.result.data, 'base64'));
       console.log(target);
+      if (scene === 'skill-mp-preview-long' || (width === 375 && ['skill-mp-preview', 'skill-mp-installed'].includes(scene))) {
+        await evaluate(`(() => { const el = document.querySelector('.h34-market'); el.scrollTop = el.scrollHeight; })()`);
+        await sleep(150);
+        const bottom = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, fromSurface: true });
+        const bottomTarget = path.join(output, `${scene}-${width}-bottom.png`);
+        await writeFile(bottomTarget, Buffer.from(bottom.result.data, 'base64'));
+        console.log(bottomTarget);
+      }
     }
   }
 } finally {
