@@ -31,6 +31,7 @@ macOS 与 Windows 桌面端（Hemi 主应用）的备份/恢复：手动备份�
 | 数据 | 是否备份 | 说明 |
 |---|---|---|
 | runtime-v2/conversations、conversation-operations、task-history、run-journal.json | ✅ 备份 | 会话正文与任务历史，~50M |
+| runtime-v2/workflows、skills、provider-import | ✅ 备份 | 工作流定义、技能安装与账号导入记录（2026-11 用户指出补充） |
 | pi-memory、drafts、bot、各设置 JSON（appearance/onboarding/access-grants 等）、text-model-profiles、migration | ✅ 备份 | 记忆/草稿/设置，~2M，价值密度最高 |
 | runtime-v2/sessions、contexts、attachments | ❌ 不备份 | 上下文与工具产物，~1.3G；原完整档目录，2026-11 裁决随完整档一并移除 |
 | secrets、provider-logins、remote-passwords.json、oauth-credentials.json、doubao-asr.json（encryptedApiKey） | ❌ 永不 | 设备绑定凭据，见 1.1；不加密档中的唯一防线 |

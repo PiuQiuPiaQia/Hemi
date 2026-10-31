@@ -11,6 +11,10 @@ import {collectEntries,createBackup,readManifest,extractBackup,applyRestore,list
 function tmpDir(){return fs.mkdtempSync(path.join(os.tmpdir(),'hemi-backup-'));}
 function seedUserData(dir){
   fs.mkdirSync(path.join(dir,'runtime-v2/conversations'),{recursive:true});
+  fs.mkdirSync(path.join(dir,'runtime-v2/workflows/definitions/wf-1/revisions'),{recursive:true});
+  fs.writeFileSync(path.join(dir,'runtime-v2/workflows/definitions/wf-1/head.json'),'{"id":"wf-1"}');
+  fs.mkdirSync(path.join(dir,'skills/versions/demo'),{recursive:true});
+  fs.writeFileSync(path.join(dir,'skills/versions/demo/SKILL.md'),'---\nname: demo\n---\n');
   fs.mkdirSync(path.join(dir,'runtime-v2/sessions/abc'),{recursive:true});
   fs.mkdirSync(path.join(dir,'secrets'),{recursive:true});
   fs.mkdirSync(path.join(dir,'pi-memory/daily'),{recursive:true});
@@ -44,6 +48,9 @@ test('collection is light-only: credentials, caches and legacy full-only dirs ex
   assert.ok(rels.includes('pi-memory/MEMORY.md'));
   assert.ok(rels.includes('bot/state.json'));
   assert.ok(!rels.includes('bot/cache.json'));
+  // 2026-11 用户指出：工作流定义与技能安装须随备份
+  assert.ok(rels.some(r=>r.startsWith('runtime-v2/workflows/')),'工作流定义应进包');
+  assert.ok(rels.some(r=>r.startsWith('skills/')),'技能安装目录应进包');
   // 2026-11 用户裁决：仅轻量档，sessions/contexts/attachments（原完整档目录）不再归档
   assert.ok(!rels.some(r=>r.startsWith('runtime-v2/sessions')));
   assert.ok(!rels.some(r=>r.startsWith('runtime-v2/contexts')));

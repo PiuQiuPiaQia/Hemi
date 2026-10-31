@@ -17,7 +17,9 @@ export const BACKUP_DIR_PREFIX='hemi-backup-';
 const LIGHT_ENTRIES=[
   'runtime-v2/conversations','runtime-v2/conversation-operations','runtime-v2/task-history',
   'runtime-v2/run-journal.json','runtime-v2/text-model-profiles.json','runtime-v2/migration.json',
+  'runtime-v2/workflows',
   'pi-memory','drafts','bot','appearance.json','onboarding.json','access-grants.json',
+  'skills','provider-import',
   // 2026-11 用户裁决：凭据随备份（secrets/ 含解密密钥 key-v1，整目录随包即可在新机解密；
   // 上游 local-secrets 的错误文案本身预期「从备份恢复应用数据」）。备份不加密，
   // 云端目标保存的是明文等价物，UI 须如实提示。
