@@ -1601,9 +1601,23 @@ export type BackupRestorePrepareResult = {
   ok: boolean;
   code?: string;
   message?: string;
-  preview?: { files: number; conversations: number; memoryFiles: number; tops: string[] };
+  preview?: {
+    files: number;
+    conversations: number;
+    memoryFiles: number;
+    tops: string[];
+    /** 合并恢复的预估处置（与实际合并同口径）：新增/相同跳过/冲突（冲突＝保留较新＋凭据域整组替换）。旧主进程可能不带，渲染层按缺省处理。 */
+    estimate?: { newFiles: number; identical: number; conflicts: number };
+  };
 };
-export type BackupRestoreApplyResult = { ok: boolean; code?: string; applied?: string[]; safeCopyRoot?: string };
+export type BackupRestoreApplyResult = {
+  ok: boolean;
+  code?: string;
+  applied?: string[];
+  safeCopyRoot?: string;
+  /** 合并恢复的实作统计（可选字段，向后兼容旧主进程）。 */
+  stats?: { newFiles: number; identical: number; keepLocal: number; takeBackup: number };
+};
 export type BackupProgressEvent = {
   phase: 'start' | 'pack' | 'upload' | 'prune' | 'done' | 'error' | 'restore-download';
   tier?: BackupTier;

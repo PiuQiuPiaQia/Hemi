@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {createBackup,extractBackup,applyRestore,readManifest,listLocalBackups,BACKUP_DIR_PREFIX} from './backup-service.mjs';
+import {createBackup,extractBackup,mergeRestore,estimateMerge,readManifest,listLocalBackups,BACKUP_DIR_PREFIX} from './backup-service.mjs';
 import {createWebdavClient} from './webdav-client.mjs';
 
 export const DEFAULT_REMOTE_DIR='hemi-backups';
@@ -159,7 +159,7 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
       if(target.kind==='local'){
         const {entries}=await extractBackup({backupDir:path.join(target.dir,setName),stagingDir:staging});
         currentRestore={staging,setName};
-        return {ok:true,preview:summarize(staging,entries)};
+        return {ok:true,preview:await summarize(staging,entries)};
       }
       const client=clientFor(target);
       const tmp=tmpRoot();
@@ -169,26 +169,28 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
         for(const part of manifest.parts)await client.downloadToFile(`${target.remoteDir}/${setName}/${part.name}`,path.join(tmp,part.name));
         const {entries}=await extractBackup({backupDir:tmp,stagingDir:staging});
         currentRestore={staging,setName};
-        return {ok:true,preview:summarize(staging,entries)};
+        return {ok:true,preview:await summarize(staging,entries)};
       }finally{fs.rmSync(tmp,{recursive:true,force:true});}
     }catch(error){
       fs.rmSync(staging,{recursive:true,force:true});
       return {ok:false,code:'FAILED',message:String(error.message??error)};
     }
   }
-  function summarize(staging,entries){
+  // 预览摘要＋合并估计：estimate 与 mergeRestore 同口径（decideRestoreAction），
+  // 「新增/相同跳过/冲突」即确认恢复时将发生的逐文件处置预估。
+  async function summarize(staging,entries){
     const conversations=entries.filter(e=>e.rel.startsWith('runtime-v2/conversations/')&&e.rel.endsWith('.json')).length;
     const memoryFiles=entries.filter(e=>e.rel.startsWith('pi-memory/')).length;
-    return {files:entries.length,conversations,memoryFiles,tops:fs.readdirSync(staging)};
+    return {files:entries.length,conversations,memoryFiles,tops:fs.readdirSync(staging),estimate:await estimateMerge({stagingDir:staging,userDataDir})};
   }
-  function applyCurrentRestore(){
+  async function applyCurrentRestore(){
     if(!currentRestore)return {ok:false,code:'NO_RESTORE'};
     const safeCopyRoot=path.join(userDataDir,'restore-safety',`${Date.now()}`);
-    const {applied}=applyRestore({stagingDir:currentRestore.staging,userDataDir,safeCopyRoot});
+    const {applied,stats}=await mergeRestore({stagingDir:currentRestore.staging,userDataDir,safeCopyRoot});
     fs.rmSync(currentRestore.staging,{recursive:true,force:true});
     currentRestore=null;
-    // 恢复整体替换了 secrets/（解密密钥换成备份里的）——恢复前落盘的应用密码密文已失效，
-    // 用恢复后的密钥重加密，保证云端目标恢复完即可用。
+    // 凭据配套域（secrets/ 等）按备份整组换入（解密密钥随之换成备份里的）——恢复前
+    // 落盘的应用密码密文已失效，用恢复后的密钥重加密，保证云端目标恢复完即可用。
     const settings=load();
     if(lastPassword&&settings.target?.kind==='webdav'){
       try{
@@ -196,7 +198,7 @@ export function createBackupManager({userDataDir,settingsFile=null,secretStorage
         persist();
       }catch(error){log.warn(`恢复后重加密应用密码失败：${error.message??error}`);}
     }
-    return {ok:true,applied,safeCopyRoot};
+    return {ok:true,applied,safeCopyRoot,stats};
   }
   function cancelRestore(){
     if(!currentRestore)return {ok:false,code:'NO_RESTORE'};

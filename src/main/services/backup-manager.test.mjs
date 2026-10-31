@@ -143,7 +143,7 @@ test('restore: prepare gives preview, apply swaps data with safety copy, cancel 
   assert.equal(prep.ok,true);
   assert.ok(prep.preview.memoryFiles>=1);
   assert.ok(prep.preview.tops.includes('pi-memory'));
-  const applied=mgr.applyCurrentRestore();
+  const applied=await mgr.applyCurrentRestore();
   assert.equal(applied.ok,true);
   assert.equal(fs.readFileSync(path.join(home,'pi-memory/MEMORY.md'),'utf8'),'mem');
   assert.ok(fs.existsSync(path.join(home,'restore-safety')),'恢复应留安全副本');
@@ -151,7 +151,7 @@ test('restore: prepare gives preview, apply swaps data with safety copy, cancel 
   const prep2=await mgr.prepareRestore(setName);
   assert.equal(prep2.ok,true);
   assert.equal(mgr.cancelRestore().ok,true);
-  assert.equal(mgr.applyCurrentRestore().ok,false);
+  assert.equal((await mgr.applyCurrentRestore()).ok,false);
   assert.equal(fs.readFileSync(path.join(home,'pi-memory/MEMORY.md'),'utf8'),'mem');
 });
 
@@ -247,7 +247,7 @@ test('restore swaps decrypt key: password falls back in memory and is re-encrypt
   const prep=await mgr.prepareRestore(setName);
   assert.equal(prep.ok,true);
   // 恢复完成后用新密钥重加密落盘，后续进程可正常解密
-  const applied=mgr.applyCurrentRestore();
+  const applied=await mgr.applyCurrentRestore();
   assert.equal(applied.ok,true);
   const raw2=JSON.parse(fs.readFileSync(path.join(home,'backup-settings.json'),'utf8'));
   assert.equal(secretStorage.decryptString(Buffer.from(raw2.target.passwordEncrypted,'base64')),'app-secret','恢复后密文应可用新密钥解开');

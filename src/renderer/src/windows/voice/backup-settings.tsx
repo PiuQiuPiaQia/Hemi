@@ -256,8 +256,9 @@ export function BackupSettings() {
     {busy === 'prepare' && <p role="status">正在准备恢复预览…</p>}
     {restore.preview && <>
       <p>{restore.preview.files} 个文件 · {restore.preview.conversations} 个会话 · {restore.preview.memoryFiles} 条记忆文件</p>
-      <p style={{ color: 'var(--muted)' }}>将覆盖的数据范围：{restore.preview.tops.join('、') || '无'}</p>
-      <p className="h68-danger"><strong>恢复是目录级替换，当前同名数据会先存入安全副本；凭据不随备份恢复。</strong></p>
+      {restore.preview.estimate && <p style={{ color: 'var(--muted)' }}>预计：新增 {restore.preview.estimate.newFiles} · 相同自动跳过 {restore.preview.estimate.identical} · 冲突 {restore.preview.estimate.conflicts}</p>}
+      <p style={{ color: 'var(--muted)' }}>恢复涉及的数据范围：{restore.preview.tops.join('、') || '无'}</p>
+      <p className="h68-danger"><strong>合并恢复：相同数据自动跳过；冲突保留较新版本，落选数据存入安全副本；密钥与加密配置按备份整组恢复，本地较新者如需保留请重填。</strong></p>
     </>}
     {!busy && !restore.preview && <p style={{ color: 'var(--muted)' }}>恢复预览未能完成，请取消后重试。</p>}
     <div className="h68-actions">

@@ -241,9 +241,14 @@ export function OnboardingRestoreStep({ onFinished, onBack, onLockChange, initia
       <div><dt>文件</dt><dd>{preview.files.toLocaleString('zh-CN')}</dd></div>
       <div><dt>会话</dt><dd>{preview.conversations.toLocaleString('zh-CN')}</dd></div>
       <div><dt>记忆</dt><dd>{preview.memoryFiles.toLocaleString('zh-CN')}</dd></div>
+      {preview.estimate && <>
+        <div><dt>新增</dt><dd>{preview.estimate.newFiles.toLocaleString('zh-CN')}</dd></div>
+        <div><dt>相同跳过</dt><dd>{preview.estimate.identical.toLocaleString('zh-CN')}</dd></div>
+        <div><dt>冲突</dt><dd>{preview.estimate.conflicts.toLocaleString('zh-CN')}</dd></div>
+      </>}
     </dl> : null}
     <div className="onboarding-restore-note">
-      <p><CircleAlert aria-hidden="true" /><span>恢复是目录级替换，当前数据会先存入安全副本。</span></p>
+      <p><CircleAlert aria-hidden="true" /><span>合并恢复：相同数据自动跳过；冲突保留较新版本，落选数据存入安全副本；密钥与加密配置按备份整组恢复，本地较新者如需保留请重填。</span></p>
       <p data-strong="true"><KeyRound aria-hidden="true" /><span><b>模型与语音密钥已包含在备份中</b>，恢复后即可直接使用。</span></p>
     </div>
     <div className="onboarding-actions" data-row="true">
@@ -259,7 +264,8 @@ export function OnboardingRestoreStep({ onFinished, onBack, onLockChange, initia
     <h1 className="onboarding-title">已恢复</h1>
     <p className="onboarding-lead">重启应用后完全生效。</p>
     <div className="onboarding-restore-note">
-      <p data-strong="true"><KeyRound aria-hidden="true" /><span><b>模型与语音密钥已随备份恢复。</b>若某项密钥在备份后更换过，请到 设置 → 模型与路由／语音与通话 更新。</span></p>
+      <p><CircleAlert aria-hidden="true" /><span>合并恢复已完成：相同数据自动跳过，冲突保留了较新版本，落选数据存入安全副本。</span></p>
+      <p data-strong="true"><KeyRound aria-hidden="true" /><span><b>模型与语音密钥已随备份恢复。</b>密钥与加密配置按备份整组恢复，若某项在备份后更换过，请到 设置 → 模型与路由／语音与通话 重填。</span></p>
     </div>
     <div className="onboarding-actions">
       <button type="button" className="h37-btn h37-btn-primary h37-btn-lg onboarding-primary" disabled={!!busy} onClick={() => void run('finish', onFinished)}>{busy === 'finish' ? '正在进入…' : '开始使用'}</button>

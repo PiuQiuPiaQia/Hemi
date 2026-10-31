@@ -187,11 +187,12 @@ async function sha256File(abs){
 
 // 增量 tar 解析器：push(chunk) 边到边写盘，不在内存堆积。
 class TarExtractor{
-  constructor(stagingDir){this.dir=stagingDir;this.buf=Buffer.alloc(0);this.state='header';this.need=512;this.longName=null;this.fileStream=null;this.contentSink=null;this.restored=[];this.dirs=0;}
+  constructor(stagingDir){this.dir=stagingDir;this.buf=Buffer.alloc(0);this.state='header';this.need=512;this.longName=null;this.fileStream=null;this.fileTarget=null;this.fileMtimeSec=0;this.contentSink=null;this.restored=[];this.dirs=0;}
   onHeader(header){
     if(header.every(b=>b===0)){this.state='header';this.need=512;return;} // 尾部零块，忽略
     const name=header.subarray(0,100).toString('utf8').replace(/\0.*$/,'');
     const size=parseInt(header.toString('utf8',124,136).replace(/\0.*$/,'').trim(),8)||0;
+    const mtimeSec=parseInt(header.toString('utf8',136,148).replace(/\0.*$/,'').trim(),8)||0; // 打包时刻的修改时间（秒级）
     const type=String.fromCharCode(header[156]);
     const prefix=header.subarray(345,500).toString('utf8').replace(/\0.*$/,'');
     if(type==='L'){this.state='content';this.need=size;this.fileStream=null;this.contentSink=[];this.sinkKind='long';this.pendingPad=(512-(size%512))%512;return;}
@@ -204,8 +205,9 @@ class TarExtractor{
       const target=path.join(this.dir,rel);
       fs.mkdirSync(path.dirname(target),{recursive:true});
       this.fileStream=fs.createWriteStream(target);
+      this.fileTarget=target;this.fileMtimeSec=mtimeSec;
       this.restored.push({rel,type:'file',bytes:size});
-    }else this.fileStream=null;
+    }else{this.fileStream=null;this.fileTarget=null;this.fileMtimeSec=0;}
     this.sinkKind='file';
     this.state='content';this.need=size;
   }
@@ -218,7 +220,13 @@ class TarExtractor{
       }else if(this.state==='content'){
         if(this.need===0){
           if(this.sinkKind==='long'&&this.contentSink){this.longName=Buffer.concat(this.contentSink).toString('utf8').replace(/\0.*$/,'');this.contentSink=null;}
-          if(this.fileStream){await new Promise(resolve=>this.fileStream.end(resolve));this.fileStream=null;}
+          if(this.fileStream){
+            await new Promise(resolve=>this.fileStream.end(resolve));this.fileStream=null;
+            // 合并恢复（mergeRestore）按 mtime 判定新旧：写完即恢复打包时的修改时间，
+            // 让暂存文件与备份源保持一致的时间轴。tar 头只有秒级精度，属预期损耗。
+            if(this.fileMtimeSec>0)fs.utimesSync(this.fileTarget,this.fileMtimeSec,this.fileMtimeSec);
+            this.fileTarget=null;this.fileMtimeSec=0;
+          }
           this.state=this.pendingPad?'pad':'header';this.need=this.pendingPad||512;this.pendingPad=0;
         }else if(this.buf.length>0){
           const take=Math.min(this.buf.length,this.need);
@@ -254,18 +262,128 @@ export async function extractBackup({backupDir,stagingDir}){
   return {manifest,entries:extractor.restored,dirs:extractor.dirs};
 }
 
-export function applyRestore({stagingDir,userDataDir,safeCopyRoot}){
-  fs.mkdirSync(safeCopyRoot,{recursive:true});
-  const items=fs.readdirSync(stagingDir,{withFileTypes:true}).map(e=>({name:e.name,isDir:e.isDirectory()}));
-  const applied=[];
-  for(const item of items){
-    const stagingAbs=path.join(stagingDir,item.name);
-    const targetAbs=path.join(userDataDir,item.name);
-    if(fs.existsSync(targetAbs))fs.renameSync(targetAbs,path.join(safeCopyRoot,item.name));
-    fs.renameSync(stagingAbs,targetAbs);
-    applied.push(item.name);
+// —— 合并恢复（merge，2026-12 升级：目录级替换 → 逐文件合并）——
+// 语义：staging 顶层不存在于本地 → rename 移入；双方都有 → 字节相同跳过，
+// 内容不同保留 mtime 较新的一方、输者移入安全副本；凭据配套域整组替换（见下）。
+// 相对路径（rel）一律用 posix「/」表示，仅在触碰文件系统时经 relToAbs 转平台分隔符。
+const ATOMIC_RESTORE_TOPS=new Set(['secrets','provider-logins','remote-passwords.json','doubao-asr.json']);
+const ATOMIC_RESTORE_RUNTIME_V2_FILES=new Set(['oauth-credentials.json','text-model-profiles.json']);
+const IDENTICAL_INLINE_MAX_BYTES=4*1024*1024;
+
+/** 凭据配套域判定：密文必须与 secrets/ 里的密钥配对，禁止跨备份混搭，恢复时整组替换、
+ * 不参与逐文件合并。覆盖顶层 secrets/、provider-logins/、remote-passwords.json、
+ * doubao-asr.json，以及 runtime-v2/ 下特判的 oauth-credentials.json 与
+ * text-model-profiles.json（密文档案同样与密钥配对）。 */
+export function isAtomicRestoreRel(rel){
+  const segs=rel.split('/');
+  if(segs.length===1)return ATOMIC_RESTORE_TOPS.has(segs[0]);
+  if(segs[0]==='secrets'||segs[0]==='provider-logins')return true;
+  return segs[0]==='runtime-v2'&&segs.length===2&&ATOMIC_RESTORE_RUNTIME_V2_FILES.has(segs[1]);
+}
+const relToAbs=(root,rel)=>path.join(root,...rel.split('/'));
+
+// 字节级相同判定：大小不同直接排除；小文件整读比较；大文件流式 sha256（不进内存）
+async function filesIdentical(a,b){
+  const sa=fs.statSync(a),sb=fs.statSync(b);
+  if(sa.size!==sb.size)return false;
+  if(sa.size<=IDENTICAL_INLINE_MAX_BYTES)return fs.readFileSync(a).equals(fs.readFileSync(b));
+  const [ha,hb]=await Promise.all([sha256File(a),sha256File(b)]);
+  return ha===hb;
+}
+
+/** 单文件处置判定——mergeRestore 与 estimateMerge（预览估计）共用的唯一口径。
+ * 返回 'new'（本地无此文件）/ 'identical'（字节相同，跳过）/ 'keepLocal'（本地较新，
+ * 保留本地）/ 'takeBackup'（取备份版：备份较新、mtime 持平且内容不同，或凭据配套域）。 */
+export async function decideRestoreAction({stagingAbs,localAbs,rel}){
+  if(isAtomicRestoreRel(rel))return fs.existsSync(localAbs)?'takeBackup':'new'; // 配套域：本地存在即整组让位，不做内容/mtime 比较
+  let local;try{local=fs.statSync(localAbs);}catch{return 'new';}
+  if(!local.isFile())return 'takeBackup'; // 本地同名是目录等异类：让备份版落位，本地原件进安全副本
+  const staging=fs.statSync(stagingAbs);
+  if(await filesIdentical(stagingAbs,localAbs))return 'identical';
+  // 秒级比较（tar 头精度）：本地新 → 保本地；备份新或持平 → 取备份版。
+  // 持平取备份：用户此刻的意图就是「恢复这份备份」，无法分出新旧时尊重意图。
+  const localSec=Math.floor(local.mtimeMs/1000),backupSec=Math.floor(staging.mtimeMs/1000);
+  return localSec>backupSec?'keepLocal':'takeBackup';
+}
+
+// 递归列出 root 下全部文件的 posix 相对路径（含 atomic 域内文件，估计与计数共用）
+function walkFiles(abs,relPrefix){
+  const out=[];
+  for(const e of fs.readdirSync(abs,{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:1)){
+    const rel=relPrefix?`${relPrefix}/${e.name}`:e.name;
+    if(e.isDirectory())out.push(...walkFiles(path.join(abs,e.name),rel));else out.push(rel);
   }
-  return {applied,safeCopyRoot};
+  return out;
+}
+function countAction(stats,action){if(action==='new')stats.newFiles+=1;else stats[action]+=1;}
+// 落选/被替换方进安全副本（保持原相对路径结构，便于事后找回）
+function moveIntoSafeCopy(abs,rel,safeCopyRoot){
+  const safeAbs=relToAbs(safeCopyRoot,rel);
+  fs.mkdirSync(path.dirname(safeAbs),{recursive:true});
+  if(fs.existsSync(safeAbs))fs.rmSync(safeAbs,{recursive:true,force:true}); // 理论不可达（单次恢复内每个 rel 只处理一次），防御让位
+  fs.renameSync(abs,safeAbs);
+}
+
+/**
+ * 合并恢复：把 extractBackup 落在 stagingDir 的备份内容并入 userDataDir。
+ * 目录递归 merge；嵌套顶层（如 runtime-v2）整目录递归，仅对配套域文件特判替换。
+ * 返回 {applied（处理的顶层条目名）, safeCopyRoot, stats:{newFiles,identical,keepLocal,takeBackup}}。
+ */
+export async function mergeRestore({stagingDir,userDataDir,safeCopyRoot}){
+  fs.mkdirSync(safeCopyRoot,{recursive:true});
+  const stats={newFiles:0,identical:0,keepLocal:0,takeBackup:0};
+  const mergeFile=async(stagingAbs,targetAbs,rel)=>{
+    const action=await decideRestoreAction({stagingAbs,localAbs:targetAbs,rel});
+    countAction(stats,action);
+    if(action==='identical')return; // 内容相同：跳过，双方原样保留
+    if(action==='keepLocal'){moveIntoSafeCopy(stagingAbs,rel,safeCopyRoot);return;} // 本地较新：备份版进安全副本
+    if(action==='takeBackup'&&fs.existsSync(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot); // 备份胜出：本地旧版进安全副本
+    fs.mkdirSync(path.dirname(targetAbs),{recursive:true});
+    fs.renameSync(stagingAbs,targetAbs);
+  };
+  const mergeDir=async(stagingAbs,targetAbs,relPrefix)=>{
+    if(fs.existsSync(targetAbs)&&!fs.statSync(targetAbs).isDirectory())moveIntoSafeCopy(targetAbs,relPrefix,safeCopyRoot); // 本地同名是文件：让位后再建目录
+    fs.mkdirSync(targetAbs,{recursive:true});
+    for(const e of fs.readdirSync(stagingAbs,{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:1)){
+      const rel=`${relPrefix}/${e.name}`;
+      if(e.isDirectory())await mergeDir(path.join(stagingAbs,e.name),path.join(targetAbs,e.name),rel);
+      else await mergeFile(path.join(stagingAbs,e.name),path.join(targetAbs,e.name),rel);
+    }
+  };
+  const applied=[];
+  for(const e of fs.readdirSync(stagingDir,{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:1)){
+    const rel=e.name;
+    const stagingAbs=path.join(stagingDir,rel),targetAbs=path.join(userDataDir,rel);
+    // 顶层凭据配套目录（secrets/、provider-logins/）：先按与单文件判定相同的口径逐文件
+    // 计数，再整目录换入——域内本地多出的文件一并进安全副本，不留在合并结果里。
+    if(e.isDirectory()&&ATOMIC_RESTORE_TOPS.has(rel)){
+      for(const fileRel of walkFiles(stagingAbs,rel)){
+        const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,fileRel),localAbs:relToAbs(userDataDir,fileRel),rel:fileRel});
+        countAction(stats,action);
+      }
+      if(fs.existsSync(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot);
+      fs.renameSync(stagingAbs,targetAbs);
+      applied.push(rel);continue;
+    }
+    if(e.isDirectory())await mergeDir(stagingAbs,targetAbs,rel);
+    else await mergeFile(stagingAbs,targetAbs,rel);
+    applied.push(rel);
+  }
+  return {applied,safeCopyRoot,stats};
+}
+
+/** 预览估计（prepareRestore 用）：只读扫 staging 与本地逐文件对比，口径与 mergeRestore
+ * 完全同源（decideRestoreAction），返回 {newFiles,identical,conflicts}（conflicts＝
+ * keepLocal＋takeBackup，即「内容不同保留较新」与「配套域整组替换」的合计）。 */
+export async function estimateMerge({stagingDir,userDataDir}){
+  const stats={newFiles:0,identical:0,conflicts:0};
+  for(const rel of walkFiles(stagingDir,'')){
+    const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,rel),localAbs:relToAbs(userDataDir,rel),rel});
+    if(action==='new')stats.newFiles+=1;
+    else if(action==='identical')stats.identical+=1;
+    else stats.conflicts+=1;
+  }
+  return stats;
 }
 
 export function listLocalBackups(rootDir){

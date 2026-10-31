@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {collectEntries,createBackup,readManifest,extractBackup,applyRestore,listLocalBackups,BACKUP_DIR_PREFIX} from './backup-service.mjs';
+import {collectEntries,createBackup,readManifest,extractBackup,mergeRestore,estimateMerge,listLocalBackups,BACKUP_DIR_PREFIX} from './backup-service.mjs';
 
 function tmpDir(){return fs.mkdtempSync(path.join(os.tmpdir(),'hemi-backup-'));}
 function seedUserData(dir){
@@ -150,19 +150,55 @@ test('file truncated during backup window fails honestly instead of producing a 
   await assert.rejects(m.createBackup({userDataDir:dir,outDir:out}),/被改写变短|快照不一致/);
 });
 
-test('applyRestore swaps in restored data and keeps a safe copy of overwritten originals',async t=>{
+test('mergeRestore: identical skipped, newer wins, backup-new files kept, safety copy holds losers',async t=>{
+  const dir=tmpDir();seedUserData(dir);const out=tmpDir();const stage=tmpDir();const safe=tmpDir();
+  t.after(()=>{for(const d of [dir,out,stage,safe])fs.rmSync(d,{recursive:true,force:true});});
+  // 场景数据：conv-1 备份后本地改旧（本地 mtime 旧→备份胜）；conv-same 双方相同；
+  // conv-local-new 本地新写（本地胜，备份版进安全副本）；conv-new 备份后本地新增（保留）
+  fs.utimesSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),new Date(Date.now()-72*3600e3),new Date(Date.now()-72*3600e3));
+  const {backupDir}=await createBackup({userDataDir:dir,outDir:out});
+  fs.writeFileSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),'{"id":"conv-1","turns":[]}');
+  fs.writeFileSync(path.join(dir,'runtime-v2/conversations/conv-new.json'),'new-after-backup');
+  fs.rmSync(path.join(dir,'runtime-v2/conversations/payload.bin')); // 备份后本地删除 → 恢复找回（newFiles）
+  await extractBackup({backupDir,stagingDir:stage});
+  const estimate=await estimateMerge({stagingDir:stage,userDataDir:dir});
+  assert.ok(estimate.newFiles>=1&&estimate.identical>=1&&estimate.conflicts>=1,'估计应含三类计数');
+  const {applied,stats}=await mergeRestore({stagingDir:stage,userDataDir:dir,safeCopyRoot:safe});
+  assert.ok(applied.includes('runtime-v2')&&applied.includes('pi-memory'));
+  // 本地新写的 conv-1（turns:[]）胜出保留
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),'utf8')).turns.length,0,'本地较新版本应保留');
+  assert.ok(fs.existsSync(path.join(safe,'runtime-v2/conversations/conv-1.json')),'备份旧版进安全副本');
+  // 备份后本地新增的文件保留在原地（合并不删本地独有）
+  assert.ok(fs.existsSync(path.join(dir,'runtime-v2/conversations/conv-new.json')),'本地新增文件不应被删');
+  assert.ok(stats.identical>=1,'相同文件应跳过');
+  assert.ok(fs.existsSync(path.join(dir,'pi-memory/MEMORY.md')));
+});
+
+test('mergeRestore: 凭据配套域整组替换，本地多出的凭据文件不留在结果里',async t=>{
   const dir=tmpDir();seedUserData(dir);const out=tmpDir();const stage=tmpDir();const safe=tmpDir();
   t.after(()=>{for(const d of [dir,out,stage,safe])fs.rmSync(d,{recursive:true,force:true});});
   const {backupDir}=await createBackup({userDataDir:dir,outDir:out});
-  // 本地数据在备份后被改动（模拟继续使用后误恢复）
-  fs.writeFileSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),'{"id":"conv-1","turns":[]}');
-  fs.writeFileSync(path.join(dir,'runtime-v2/conversations/conv-new.json'),'new-after-backup');
+  // 备份后本地 secrets 新增一个文件 + 改动 key-v1
+  fs.writeFileSync(path.join(dir,'secrets/extra-local.json'),'{"new":"local"}');
+  fs.writeFileSync(path.join(dir,'secrets/local-secrets.json'),'CHANGED-LOCAL');
   await extractBackup({backupDir,stagingDir:stage});
-  const {applied}=applyRestore({stagingDir:stage,userDataDir:dir,safeCopyRoot:safe});
-  assert.ok(applied.includes('runtime-v2')&&applied.includes('pi-memory'));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'runtime-v2/conversations/conv-1.json'),'utf8')).turns.length,2);
-  assert.ok(!fs.existsSync(path.join(dir,'runtime-v2/conversations/conv-new.json')),'恢复为目录级替换，备份后新增文件被安全副本接管');
-  assert.ok(fs.existsSync(path.join(safe,'runtime-v2/conversations/conv-new.json')),'被替换的本地数据进了安全副本');
+  const {stats}=await mergeRestore({stagingDir:stage,userDataDir:dir,safeCopyRoot:safe});
+  assert.equal(fs.readFileSync(path.join(dir,'secrets/local-secrets.json'),'utf8'),'{"apiKey":"SUPER"}','secrets 整组按备份替换');
+  assert.ok(!fs.existsSync(path.join(dir,'secrets/extra-local.json')),'本地多出的凭据文件不留在合并结果');
+  assert.ok(fs.existsSync(path.join(safe,'secrets/extra-local.json')),'本地旧 secrets 进安全副本');
+  assert.ok(stats.takeBackup>=1,'配套域替换应计入 takeBackup');
+});
+
+test('mergeRestore: 恢复后文件保留打包时的原修改时间',async t=>{
+  const dir=tmpDir();seedUserData(dir);const out=tmpDir();const stage=tmpDir();const safe=tmpDir();
+  t.after(()=>{for(const d of [dir,out,stage,safe])fs.rmSync(d,{recursive:true,force:true});});
+  const stamp=new Date('2026-01-15T08:30:00Z');
+  fs.utimesSync(path.join(dir,'pi-memory/MEMORY.md'),stamp,stamp);
+  const {backupDir}=await createBackup({userDataDir:dir,outDir:out});
+  await extractBackup({backupDir,stagingDir:stage});
+  await mergeRestore({stagingDir:stage,userDataDir:dir,safeCopyRoot:safe});
+  const restored=new Date(fs.statSync(path.join(dir,'pi-memory/MEMORY.md')).mtime);
+  assert.ok(Math.abs(restored.getTime()-stamp.getTime())<2000,'mtime 应恢复为打包时刻');
 });
 
 test('long paths (>100 chars) roundtrip via ustar prefix or GNU longname',async t=>{

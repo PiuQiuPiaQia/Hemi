@@ -5313,8 +5313,8 @@ const scenes: Record<string, () => React.ReactElement> = {
         }
         return { ok: true, manifest: { tier: 'light', createdAt: nowIso, files: 518, packedBytes: 21_000_000 } };
       },
-      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'] } }),
-      applyBackupRestore: async () => ({ ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety' }),
+      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'], estimate: { newFiles: 487, identical: 21, conflicts: 10 } } }),
+      applyBackupRestore: async () => ({ ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety', stats: { newFiles: 487, identical: 21, keepLocal: 3, takeBackup: 7 } }),
       cancelBackupRestore: async () => ({ ok: true }),
       deleteBackupSet: async (name: string) => { if (!name.startsWith('hemi-backup-')) return { ok: false, code: 'INVALID_NAME' }; deletedSets.push(name); return { ok: true }; },
       pickBackupDirectory: async () => state === 'pick-ready' ? { canceled: false, path: '/Users/demo/Backups/Hemi' } : { canceled: true, path: null },
@@ -5454,8 +5454,8 @@ const scenes: Record<string, () => React.ReactElement> = {
       pickBackupDirectory: async () => ({ canceled: false, path: '/Users/demo/Backups/Hemi' }),
       listBackups: async () => sets,
       onBackupProgress: () => () => {},
-      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'] } }),
-      applyBackupRestore: async () => { await new Promise(resolve => setTimeout(resolve, 600)); return { ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety' }; },
+      prepareBackupRestore: async () => ({ ok: true, preview: { files: 518, conversations: 120, memoryFiles: 39, tops: ['runtime-v2', 'pi-memory', 'drafts'], estimate: { newFiles: 518, identical: 0, conflicts: 0 } } }),
+      applyBackupRestore: async () => { await new Promise(resolve => setTimeout(resolve, 600)); return { ok: true, applied: ['runtime-v2', 'pi-memory'], safeCopyRoot: '/tmp/safety', stats: { newFiles: 518, identical: 0, keepLocal: 0, takeBackup: 0 } }; },
       cancelBackupRestore: async () => ({ ok: true }),
       openExternal: async () => {},
     });

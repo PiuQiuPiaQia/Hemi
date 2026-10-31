@@ -161,7 +161,7 @@ browser = await chromium.launch({headless: true, executablePath: process.env.HEM
   assert.equal(await bubble.count(), 0, '删除完成后气泡关闭');
   check('删除备份集（气泡确认＋列表更新）');
 
-  // 6. 恢复向导交互：点击恢复 → 预览（会话/记忆计数＋覆盖警告）→ 取消回到列表；
+  // 6. 恢复向导交互：点击恢复 → 预览（会话/记忆计数＋合并估计＋合并语义警告）→ 取消回到列表；
   //    取消恢复正常路径无需成功提示（2026-11 反馈收敛：取消不出 toast）
   await open('settings-backup', '&state=configured');
   await page.getByRole('button', {name: /^删除 hemi-backup-20261031/}).click();
@@ -171,7 +171,11 @@ browser = await chromium.launch({headless: true, executablePath: process.env.HEM
   assert.equal(await page.locator('.h68-confirm').count(), 0, '展开恢复预览应关闭删除确认气泡');
   const restorePanel = await page.locator('.settings-shell').innerText();
   assert.ok(restorePanel.includes('120'), '恢复预览应显示会话计数');
-  assert.ok(restorePanel.includes('pi-memory') || restorePanel.includes('记忆'), '恢复预览应显示覆盖范围');
+  assert.ok(restorePanel.includes('pi-memory') || restorePanel.includes('记忆'), '恢复预览应显示恢复范围');
+  // 合并恢复（2026-12）：预览展示预估处置（新增/相同跳过/冲突），警告改为合并语义
+  for (const text of ['新增 487', '相同自动跳过 21', '冲突 10']) assert.ok(restorePanel.includes(text), `恢复预览应展示合并估计「${text}」`);
+  for (const text of ['合并恢复', '相同数据自动跳过', '冲突保留较新版本', '按备份整组恢复', '本地较新者如需保留请重填']) assert.ok(restorePanel.includes(text), `恢复警告应为合并语义「${text}」`);
+  assert.ok(!restorePanel.includes('目录级替换'), `不再出现目录级替换文案：${restorePanel}`);
   const cancel = page.getByRole('button', {name: /取消/});
   assert.ok(await cancel.count() > 0, '恢复向导应有取消按钮');
   await cancel.first().click();
