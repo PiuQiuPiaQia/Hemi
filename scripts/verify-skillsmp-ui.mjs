@@ -2,7 +2,7 @@
 /**
  * 034 真实窗口验收：起真实 Electron（隔离 userData，引导完成态），经 CDP 驱动
  * 技能页全流程——首页窄窗入口 → SkillsMP 实时搜索 → 点条目卡自动读 GitHub 固定
- * 提交来源并落确认页（034 v4 路径合并，无中间详情页）→ 确认安装 → 已安装详情 →
+ * 详情页秒开 → 点安装读取来源 → 核对态（固定提交 / 文件 / 原文）→ 确认安装 → 已安装详情 →
  * 手动检查更新。每步截图并断言关键节点，任何 console error 即失败。
  * fixtures 桩不参与：这是真 preload→IPC→网络→store 链路。
  *
@@ -150,11 +150,12 @@ try {
   await sleep(300);
   await shot('04-detail-instant');
 
-  // ⑤ 点「安装并启用」：两阶段流水线（读取来源→核对保存）后应切到已安装 Tab。
-  if (!(await clickButton(`b.textContent.includes("安装并启用")`))) fail('安装按钮不可用');
-  await waitFor('来源读取完成（文件清单出现）', `Boolean(document.querySelector('.h34-file-row'))`, 90000);
+  // ⑤ 点「安装」：读取来源后停在核对态（固定提交 / 文件清单 / 原文），再点「确认安装并启用」才保存，然后切到已安装 Tab。
+  if (!(await clickButton(`b.closest(".h34-confirm-bar") && b.textContent.trim() === "安装"`))) fail('安装按钮不可用');
+  await waitFor('来源读取完成（核对态）', `Boolean(document.querySelector('.h34-file-row')) && Boolean(document.querySelector('.h34-confirm-bar[data-mode="confirm"]'))`, 90000);
   await sleep(300);
-  await shot('04b-install-progress');
+  await shot('04b-install-review');
+  if (!(await clickButton(`b.textContent.includes("确认安装并启用")`))) fail('确认安装按钮不可用');
   await waitFor('安装后进入已安装详情', `(() => {
     const tab = document.querySelector('.h34-tabs button[aria-selected="true"]');
     const tag = document.querySelector('.h34-detail-tag');

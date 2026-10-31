@@ -2489,6 +2489,43 @@ function activityIndicatorsScene(collapsed = false) {
   return <ActivityIndicatorsFixture collapsed={collapsed} />;
 }
 
+/** 技能详情安装流程场景：沿用 mp-preview 的选中逻辑，只替换「读取来源」桩的行为。 */
+const LONG_SKILL_PREVIEW = {
+  skillsmpId: 'demo-excel-helper-skill-md', entryName: 'excel-helper', author: 'demo-org',
+  skillUrl: 'https://skillsmp.com/creators/demo-org/skills-excel-helper',
+  githubUrl: 'https://github.com/demo-org/skills/tree/main/excel-helper',
+  name: 'excel-helper', title: 'excel-helper', description: '生成与核对 Excel 公式、透视表和数据清洗步骤。',
+  repo: 'demo-org/skills', dirPath: 'excel-helper', commit: '9c4e1a7b2d8f3e6c5b0a9d8e7f6a5b4c3d2e1f0a',
+  files: [
+    'SKILL.md', 'references/formulas.md', 'references/pivot-tables.md', 'references/cleaning.md',
+    'references/lookup-functions.md', 'references/date-and-time.md', 'examples/sales-report.md',
+    'examples/inventory.md', 'examples/budget-template.md', 'templates/checklist.md',
+    'templates/naming-rules.md', 'scripts/README.md',
+  ].map((path, index) => ({ path, size: [4812, 2304, 1890, 2120, 1536, 980, 3210, 2760, 1408, 640, 512, 388][index] })),
+  totalBytes: 22560, bundleSha256: '7f3a9c1e5b2d8f4a6c0e9b7d3f1a5c8e2b4d6f9a1c3e5b7d9f2a4c6e8b0d1f3a',
+  skillMd: [
+    '---', 'name: excel-helper', 'description: 生成与核对 Excel 公式、透视表和数据清洗步骤。', '---', '',
+    '# Excel 助手', '', '处理表格任务前，先确认工作簿路径、目标工作表和期望输出。', '',
+    '## 公式', '', '- 优先用 XLOOKUP，旧版 Excel 退回 INDEX + MATCH。', '- 跨表引用写完整表名，避免隐式交集。',
+    '- 给出公式时同时说明每个参数的含义。', '', '## 透视表', '', '1. 先检查源数据是否有合并单元格或空行。',
+    '2. 字段命名统一后再建透视表。', '3. 汇总方式默认求和，计数类字段改为计数。', '', '## 数据清洗', '',
+    '- 去重前先备份原表。', '- 日期列统一成 YYYY-MM-DD。', '- 文本数字转成数值后再参与计算。', '',
+    '## 交付', '', '输出改动清单：改了哪些单元格、为什么改、如何回退。',
+  ].join('\n'),
+};
+
+function skillPreviewScene(preview: () => Promise<unknown>) {
+  const props = screenProps({
+    sessionState: 'idle',
+    callActive: false,
+    skillMarketOpen: true,
+    onCloseSkillMarket: () => {},
+    skillMarketScene: 'mp-preview',
+  });
+  (window as unknown as { hemiVoice: Record<string, unknown> }).hemiVoice.previewSkillsMp = preview;
+  return <VoiceScreen {...props} />;
+}
+
 const scenes: Record<string, () => React.ReactElement> = {
   // Synthetic spacing regression: no session storage or model credentials.
   'desktop-flow-spacing': () => {
@@ -2687,6 +2724,11 @@ const scenes: Record<string, () => React.ReactElement> = {
       })}
     />
   ),
+  // 详情页重排（2026-10）：安装流程三态补拍——读取中（第一步转圈 + 已等秒数）、
+  // 读取失败（第一步与吸底条就地给原因与重试）、长清单核对态（文件收纳 + 原文渐隐）。
+  'skill-mp-reading': () => skillPreviewScene(() => new Promise(() => {})),
+  'skill-mp-read-error': () => skillPreviewScene(async () => ({ ok: false, reason: '连接 GitHub 超时' })),
+  'skill-mp-preview-long': () => skillPreviewScene(async () => ({ ok: true, preview: LONG_SKILL_PREVIEW })),
   'skill-home-entry': () => (
     <VoiceScreen
       {...screenProps({

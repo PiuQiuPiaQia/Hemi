@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, ChevronRight, Code, Download, ExternalLink, FileText, FolderOpen,
-  ListChecks, Plus, RefreshCw, Save, Search, ShieldAlert, ShieldCheck, Star, Trash2,
+  ArrowLeft, ChevronRight, Code, ExternalLink, FileText, FolderOpen,
+  ListChecks, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Star, Trash2,
 } from 'lucide-react';
 
 import type {
@@ -39,6 +39,9 @@ const TAB_LABELS: Record<Tab, string> = {
 /** 037：顶栏分段控件与技能页之间的接线点——voice-screen 在技能页顶栏标题区放这个空槽，
  *  技能页把「市场 / 内置 / 已安装」与导入按钮 portal 进去；找不到槽时退回页内渲染。 */
 export const SKILLS_TOPBAR_SLOT_ID = 'h37-skills-topbar';
+
+/** 元信息行的语言标签：SkillsMP 给的是 ISO 码，常见的换成中文。 */
+const LANG_LABELS: Record<string, string> = { zh: '中文', en: '英文', ja: '日文', ko: '韩文' };
 
 const SUGGESTIONS = ['pdf', 'excel', '网页抓取', '代码审查', '会议纪要', 'git'];
 
@@ -128,28 +131,36 @@ function SkillCard({ name, description, badge, meta, onOpen, added = false }: {
   );
 }
 
-/** 详情页头：48px 图标块＋标签＋名称＋说明＋外链，右侧主操作。 */
-function DetailHero({ tag, title, description, links, meta, cta }: {
+/** 详情页头：48px 图标块 + 来源标签 + 名称（+ 状态 badge）；下面是说明、元信息、外链与操作。
+ *  宽屏正文对齐名称列，≤600 正文改为整行（窄屏不再挤在图标右侧的窄列里）。 */
+function DetailHero({ tag, title, badge, description, links, meta, actions, cta }: {
   tag: ReactNode;
   title: string;
+  /** 名称右侧的状态 badge（已安装详情显示启用状态）。 */
+  badge?: ReactNode;
   description: string;
   links?: ReactNode;
-  /** 标题块下的元信息行（作者·星标·语言·更新），市场详情用它替代独立概况卡。 */
+  /** 元信息行（作者 · 星标 · 语言 · 收录），各项之间用中点分隔。 */
   meta?: ReactNode;
+  /** 头部下方的一行操作按钮（已安装详情）。 */
+  actions?: ReactNode;
   cta?: ReactNode;
 }) {
   return (
-    <div className="h34-hero">
+    <header className="h34-hero">
       <span className="h37-tile h34-hero-tile" data-tone="g"><FileText aria-hidden="true" /></span>
-      <div className="h34-hero-copy">
+      <div className="h34-hero-head">
         <div className="h34-detail-tag">{tag}</div>
-        <h2>{title}</h2>
+        <div className="h34-hero-title"><h2>{title}</h2>{badge}</div>
+      </div>
+      <div className="h34-hero-body">
         <p>{description}</p>
         {meta ? <div className="h34-hero-meta">{meta}</div> : null}
         {links ? <div className="h34-links">{links}</div> : null}
+        {actions ? <div className="h34-detail-actions">{actions}</div> : null}
       </div>
       {cta ? <div className="h34-hero-cta">{cta}</div> : null}
-    </div>
+    </header>
   );
 }
 
@@ -162,86 +173,178 @@ function KvSection({ title, children }: { title: string; children: ReactNode }) 
   );
 }
 
+/** 文件清单先显示前 FILE_PREVIEW 个，其余收在「展开」行里；不再用卡内滚动条（嵌套滚动难核对）。 */
+const FILE_PREVIEW = 8;
+
 function FileSection({ title, count, files }: {
   title: string;
   count?: string;
   files: Array<{ path: string; size?: string }>;
 }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? files : files.slice(0, FILE_PREVIEW);
+  const hidden = files.length - shown.length;
   return (
     <section className="h37-section">
       <div className="h37-section-head"><h3>{title}</h3>{count ? <span className="h37-count">{count}</span> : null}</div>
       <div className="h37-group h34-file-list">
-        {files.map((file) => (
-          <div className="h37-row h34-file-row" key={file.path} title={file.path}>
-            <FileText aria-hidden="true" />
-            <span className="h34-mono">{file.path}</span>
-            {file.size ? <em>{file.size}</em> : null}
-          </div>
-        ))}
+        {shown.map((file) => {
+          const cut = file.path.lastIndexOf('/') + 1;
+          return (
+            <div className="h37-row h34-file-row" key={file.path} title={file.path}>
+              <FileText aria-hidden="true" />
+              <span className="h34-mono">{cut ? <i>{file.path.slice(0, cut)}</i> : null}{file.path.slice(cut)}</span>
+              {file.size ? <em>{file.size}</em> : null}
+            </div>
+          );
+        })}
+        {hidden > 0 || (all && files.length > FILE_PREVIEW) ? (
+          <button type="button" className="h37-row h34-file-more" aria-expanded={all} onClick={() => setAll((value) => !value)}>
+            <ChevronRight aria-hidden="true" />
+            {all ? '收起' : `展开其余 ${hidden} 个文件`}
+          </button>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function SourceSection({ title, text, collapsible = false, hint = '' }: {
-  title: string;
-  text: string;
-  collapsible?: boolean;
-  hint?: string;
-}) {
-  const body = <pre className="h37-group">{text}</pre>;
-  if (!collapsible) {
-    return (
-      <section className="h37-section h34-source">
-        <div className="h37-section-head"><h3>{title}</h3></div>
-        {body}
-      </section>
-    );
-  }
+/** 原文框：超过 SOURCE_CLAMP 行先显示开头一段，底部渐隐 + 「展开全文」；短文直接全显示。 */
+const SOURCE_CLAMP = 16;
+
+function SourceText({ text }: { text: string }) {
+  const long = text.split('\n').length > SOURCE_CLAMP || text.length > 1600;
+  const [open, setOpen] = useState(false);
   return (
-    <details className="h37-section h34-source h34-fold">
-      <summary><span className="h34-fold-title">{title}</span>{hint ? <span className="h37-count">{hint}</span> : null}<ChevronRight aria-hidden="true" /></summary>
-      {body}
+    <div className="h37-group h34-source-box" data-clamped={long && !open ? 'true' : 'false'}>
+      <pre>{text}</pre>
+      {long ? (
+        <button type="button" className="h34-source-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          {open ? '收起原文' : '展开全文'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function SourceSection({ title, text, hint = '' }: { title: string; text: string; hint?: string }) {
+  return (
+    <section className="h37-section h34-source">
+      <div className="h37-section-head"><h3>{title}</h3>{hint ? <span className="h37-count">{hint}</span> : null}</div>
+      <SourceText text={text} />
+    </section>
+  );
+}
+
+/** 已安装 / 内置详情的原文：折叠区块，展开时才读取（替代原来的「查看原文」按钮）。 */
+function SourceFold({ text, loading, onOpen }: { text: string; loading: boolean; onOpen: () => void }) {
+  return (
+    <details
+      className="h37-section h34-source h34-fold"
+      onToggle={(event) => { if ((event.currentTarget as HTMLDetailsElement).open && !text) onOpen(); }}
+    >
+      <summary><span className="h34-fold-title">SKILL.md 原文</span>{text ? <span className="h37-count">{`${text.length.toLocaleString('zh-CN')} 字`}</span> : null}<ChevronRight aria-hidden="true" /></summary>
+      {text ? <SourceText text={text} /> : (
+        <div className="h37-group h34-source-empty" role="status">
+          {loading ? <><span className="h37-spinner" aria-hidden="true" />正在读取原文…</> : '原文暂未读到。收起后再展开可重试。'}
+        </div>
+      )}
     </details>
   );
 }
 
-/** 折叠区块：来源细节、超长原文默认收起，保持确认页「先看到要装什么」。 */
-function FoldSection({ title, hint = '', children }: { title: string; hint?: string; children: ReactNode }) {
+type StepState = 'todo' | 'active' | 'failed';
+
+/** 安装流程三步：未开始显示序号；读取中第一步换成转圈与已等秒数；失败换成提示与原因。 */
+function InstallSteps({ read, elapsed, reason }: { read: StepState; elapsed: number; reason: string }) {
+  const readDesc = read === 'active'
+    ? `正在从 GitHub 读取${elapsed >= 1 ? `，已等 ${elapsed} 秒` : ''}。文件多或网络慢时可能要半分钟以上。`
+    : read === 'failed'
+      ? `${reason || '来源文件读取失败'}。可重新读取，或稍后再装。`
+      : '按固定提交从 GitHub 读取全部文件，不跟随仓库后续改动。';
   return (
-    <details className="h37-section h34-fold">
-      <summary><span className="h34-fold-title">{title}</span>{hint ? <span className="h37-count">{hint}</span> : null}<ChevronRight aria-hidden="true" /></summary>
-      {children}
-    </details>
+    <section className="h37-section" aria-label="安装流程">
+      <div className="h37-section-head"><h3>安装流程</h3><span className="h37-count">每一步都可以停下</span></div>
+      <ol className="h37-group h34-steps">
+        <li className="h34-step" data-state={read}>
+          <span className="h34-step-mark" aria-hidden="true">
+            {read === 'active' ? <span className="h37-spinner" /> : read === 'failed' ? <ShieldAlert /> : '1'}
+          </span>
+          <div><strong>{read === 'failed' ? '读取来源失败' : '读取来源'}</strong><small role={read === 'todo' ? undefined : 'status'}>{readDesc}</small></div>
+        </li>
+        <li className="h34-step" data-state="todo">
+          <span className="h34-step-mark" aria-hidden="true">2</span>
+          <div><strong>你来核对</strong><small>列出固定提交、全部文件、总大小和 SKILL.md 原文，确认后才保存。</small></div>
+        </li>
+        <li className="h34-step" data-state="todo">
+          <span className="h34-step-mark" aria-hidden="true">3</span>
+          <div><strong>只保存文件</strong><small>不运行脚本、不装依赖。内容与清单不一致时拒绝安装，装完可随时停用或卸载。</small></div>
+        </li>
+      </ol>
+    </section>
   );
 }
 
-/** 详情页吸底安装条：安装动作常驻可见；进行中左侧状态行带阶段与已等秒数。 */
-function InstallBar({ phase, elapsed, installed, locked, onInstall, onManage }: {
-  phase: '' | 'read' | 'save';
+type BarMode = 'idle' | 'reading' | 'confirm' | 'saving' | 'failed';
+
+/** 吸底安装条：左侧状态（标题 + 一行说明），右侧动作。
+ *  idle → 安装（先读取来源）→ confirm（核对后确认）→ saving；失败停在 failed 可重试。 */
+function InstallBar({ mode, elapsed, installed, installedVersion, summary, failedStage, onInstall, onConfirm, onCancel, onManage }: {
+  mode: BarMode;
   elapsed: number;
   installed: boolean;
-  locked: boolean;
+  /** 已安装版本的显示文本（提交短号），只在 installed 时用。 */
+  installedVersion: string;
+  /** 核对态的清单摘要：「2 个文件 · 2.5 KiB · 提交 1f2a3b4c5d6e」。 */
+  summary: string;
+  failedStage: 'read' | 'save';
   onInstall: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
   onManage: () => void;
 }) {
+  const busy = mode === 'reading' || mode === 'saving';
+  const icon = busy ? <span className="h37-spinner" />
+    : mode === 'failed' ? <ShieldAlert />
+      : mode === 'confirm' ? <ListChecks />
+        : <ShieldCheck />;
+  const title = {
+    idle: installed ? `已安装提交 ${installedVersion}` : '安装前会先给你核对',
+    reading: `正在读取来源文件${elapsed >= 1 ? `（已等 ${elapsed} 秒）` : ''}`,
+    confirm: '核对无误后再安装',
+    saving: '正在核对并保存',
+    failed: failedStage === 'read' ? '来源文件没读到' : '安装没有完成',
+  }[mode];
+  const sub = {
+    idle: installed ? '更新同样会先列出新版文件，确认后才替换。' : '先读取来源并列出全部文件，确认后才保存。',
+    reading: '读完会列出文件清单和原文，现在还没有保存任何东西。',
+    confirm: summary,
+    saving: '逐个比对文件摘要，不一致即拒绝安装。',
+    failed: failedStage === 'read' ? '还没有保存任何东西，可重新读取。' : '已安装的版本不受影响，可重试。',
+  }[mode];
   return (
-    <div className="h34-confirm-bar" data-busy={phase ? 'true' : 'false'}>
+    <div className="h34-confirm-bar" data-mode={mode} data-busy={busy ? 'true' : 'false'}>
+      <span className="h34-bar-icon" aria-hidden="true">{icon}</span>
       <span className="h34-bar-status" role="status">
-        {phase ? <span className="h37-spinner" aria-hidden="true" /> : null}
-        {phase === 'read'
-          ? `正在读取 GitHub 来源文件（已等 ${elapsed} 秒）`
-          : phase === 'save'
-            ? '正在核对并保存…'
-            : '只保存文件，不运行任何东西'}
+        <strong>{title}</strong>
+        <small>{sub}</small>
       </span>
       <span className="h34-cta-row">
-        {installed ? (
-          <button type="button" className="h37-btn h37-btn-ghost h37-btn-lg" disabled={locked} onClick={onManage}>管理已安装版本</button>
+        {mode === 'idle' && installed ? (
+          <button type="button" className="h37-btn h37-btn-ghost h37-btn-lg" onClick={onManage}>管理已安装版本</button>
         ) : null}
-        <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={locked} onClick={onInstall}>
-          {phase === 'read' ? '正在读取…' : phase === 'save' ? '正在安装…' : installed ? '更新到最新并启用' : '安装并启用'}
-        </button>
+        {mode === 'confirm' || (mode === 'failed' && failedStage === 'save') ? (
+          <button type="button" className="h37-btn h37-btn-ghost h37-btn-lg" onClick={onCancel}>取消</button>
+        ) : null}
+        {mode === 'confirm' || (mode === 'failed' && failedStage === 'save') || mode === 'saving' ? (
+          <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={mode === 'saving'} onClick={onConfirm}>
+            {mode === 'saving' ? '正在安装…' : mode === 'failed' ? '重试安装' : installed ? '确认更新并启用' : '确认安装并启用'}
+          </button>
+        ) : (
+          <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={mode === 'reading'} onClick={onInstall}>
+            {mode === 'reading' ? '正在读取…' : mode === 'failed' ? '重新读取' : installed ? '更新到最新' : '安装'}
+          </button>
+        )}
       </span>
     </div>
   );
@@ -375,11 +478,13 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     void runRecommend(RECOMMEND_WORDS[Math.floor(Math.random() * RECOMMEND_WORDS.length)]);
   }, [demo, tab, runRecommend]);
 
-  // 034 v5（2026-10-09 用户裁决）：详情页用市场元数据秒开，安装点击后才拉来源——
-  // 「读取来源文件（钉固定提交）→ 核对并保存」两阶段流水线，进度在安装条上给。
-  // 文件清单/原文是可选的验看区（安装后自动展开，装前也可手动先看）。
-  const [panel, setPanel] = useState<{ state: 'idle' | 'loading' | 'shown' | 'error'; preview?: SkillsmpPreview }>({ state: 'idle' });
+  // 034 v5（2026-10-09 用户裁决）：详情页用市场元数据秒开，点「安装」后才拉来源。
+  // 2026-10 详情页重排：读取来源（钉固定提交）→ 列出核对材料（固定提交 / 文件清单 /
+  // 总量 / SKILL.md 原文）→ 用户点「确认安装」才核对并保存。读取完不再自动落盘。
+  const [panel, setPanel] = useState<{ state: 'idle' | 'loading' | 'shown' | 'error'; preview?: SkillsmpPreview; reason?: string }>({ state: 'idle' });
   const [installPhase, setInstallPhase] = useState<'' | 'read' | 'save'>('');
+  /** 保存阶段失败的原因：留在详情页上就地重试，不再只靠页顶错误条。 */
+  const [saveFailure, setSaveFailure] = useState('');
   const previewCache = useRef(new Map<string, SkillsmpPreview>());
   const selectedRef = useRef<Selected>(null);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
@@ -389,7 +494,8 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     return current !== null && current.kind === 'mp' && current.skill.id === skillId;
   }, []);
 
-  /** 拉取预览（固定提交快照）供验看区展示；迟到的结果不落到已换看的条目上。 */
+  /** 拉取预览（固定提交快照）作为核对材料；迟到的结果不落到已换看的条目上。
+   *  失败原因记在 panel 上，由安装流程第一步与吸底条就地显示。 */
   const loadPanel = useCallback(async (skill: SkillsmpSkill) => {
     const cached = previewCache.current.get(skill.id);
     if (cached) {
@@ -401,30 +507,36 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
       const result = await api.previewSkillsMp(skill.id);
       if (!stillOn(skill.id)) return null;
       if (!result.ok || !result.preview) {
-        setPanel({ state: 'error' });
-        setError(result.reason || '来源读取失败');
+        setPanel({ state: 'error', reason: result.reason || '来源文件读取失败' });
         return null;
       }
       previewCache.current.set(skill.id, result.preview);
       setPanel({ state: 'shown', preview: result.preview });
       return result.preview;
     } catch (cause) {
-      if (stillOn(skill.id)) {
-        setPanel({ state: 'error' });
-        setError(cause instanceof Error ? cause.message : '来源读取失败');
-      }
+      if (stillOn(skill.id)) setPanel({ state: 'error', reason: cause instanceof Error ? cause.message : '来源文件读取失败' });
       return null;
     }
   }, [api, stillOn]);
 
-  /** 安装流水线：读取来源（阶段一，产出钉提交与摘要）→ 核对并保存（阶段二）。 */
+  /** 安装第一步：读取来源，读完停在核对态。 */
   const runInstall = useCallback(async (skill: SkillsmpSkill) => {
     setError('');
+    setSaveFailure('');
     setInstallPhase('read');
     try {
-      const preview = await loadPanel(skill);
-      if (!preview) return;
-      setInstallPhase('save');
+      await loadPanel(skill);
+    } finally {
+      setInstallPhase('');
+    }
+  }, [loadPanel]);
+
+  /** 安装第二步：用户核对后确认，按已展示的固定提交与摘要保存。 */
+  const confirmInstall = useCallback(async (preview: SkillsmpPreview) => {
+    setError('');
+    setSaveFailure('');
+    setInstallPhase('save');
+    try {
       const result = await api.installSkillsMp({
         skillsmpId: preview.skillsmpId,
         commit: preview.commit,
@@ -439,14 +551,14 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
         setTab('installed');
         void reload();
       } else {
-        setError(result.reason || '安装未完成');
+        setSaveFailure(result.reason || '安装未完成');
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '安装未完成');
+      setSaveFailure(cause instanceof Error ? cause.message : '安装未完成');
     } finally {
       setInstallPhase('');
     }
-  }, [api, loadPanel, reload]);
+  }, [api, reload]);
 
   const runUpdateCheck = useCallback(async (installed: InstalledSkill) => {
     setUpdateCheck({ checking: true });
@@ -479,7 +591,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
       void runSearch('pdf', 'stars');
     }
     if (demo === 'mp-preview') {
-      // 详情页 + 验看区展开（v5：详情页用元数据秒开，验看区是懒加载的）。
+      // 详情页核对态（点「安装」后读完来源、等待用户确认）。
       // 选未安装的条目（fixtures 的 nano-pdf 已预装，选中它吸底条会是更新态）。
       setQuery('pdf');
       void runSearch('pdf', 'stars').then(() => {
@@ -488,7 +600,8 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           const skill = skills.find((entry) => entry.id === 'demo-excel-helper-skill-md') ?? skills[0];
           if (skill) {
             select({ kind: 'mp', skill });
-            void loadPanel(skill);
+            // 走真实的「安装」第一步：读取中带已等秒数，读完停在核对态（不保存）。
+            void runInstall(skill);
           }
         }).catch(() => {});
       });
@@ -501,7 +614,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
       }).catch(() => {});
     }
     if (demo === 'builtin') setTab('builtin');
-  }, [api, demo, runSearch, loadPanel]);
+  }, [api, demo, runSearch, runInstall]);
   useEffect(() => {
     if (demo !== 'installed' || !state || selected) return;
     const item = state.installed.find((entry) => entry.origin === 'skillsmp') ?? state.installed[0];
@@ -562,7 +675,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [detailKey]);
 
-  const clearSelection = () => { selectedRef.current = null; setSelected(null); setSourceText(''); setUpdateCheck(null); setPanel({ state: 'idle' }); };
+  const clearSelection = () => { selectedRef.current = null; setSelected(null); setSourceText(''); setUpdateCheck(null); setPanel({ state: 'idle' }); setSaveFailure(''); };
   const switchTab = (next: Tab) => { setTab(next); clearSelection(); };
   // selectedRef 同步更新：select 后同刻发起的 loadPanel/runInstall（fixtures demo 即如此）
   // 也要能通过 stillOn 守卫，等 effect 异步刷 ref 会误判成「已换看」。
@@ -572,6 +685,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     setSourceText('');
     setUpdateCheck(null);
     setPanel({ state: 'idle' });
+    setSaveFailure('');
   };
 
   const showSkeleton = useDelayedFlag(searchBusy || !state);
@@ -608,11 +722,52 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     </div>
   );
 
+  const actionButtons = (item: InstalledSkill, extra?: ReactNode) => (
+    <>
+      {extra}
+      <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => api.setSkillEnabled(item.id, !item.enabled))}>{item.enabled ? '停用技能' : '启用技能'}</button>
+      {!remote ? <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => api.revealSkill(item.id))}><FolderOpen aria-hidden="true" /> 打开目录</button> : null}
+      <button type="button" className="h37-btn h37-btn-ghost h37-btn-danger" disabled={Boolean(busy)} onClick={() => setConfirmRemove(item.id)}><Trash2 aria-hidden="true" /> 卸载</button>
+    </>
+  );
+  const enabledBadge = (item: InstalledSkill) => (
+    <span className="h37-badge" data-tone={item.enabled ? 'ok' : undefined}>{item.enabled ? '已启用' : '已停用'}</span>
+  );
+  const sourceFold = (id: string) => (
+    <SourceFold text={sourceText} loading={busy === '读取原文'} onOpen={() => void openSource(id)} />
+  );
+
+  const updateNote = (item: InstalledSkill) => {
+    if (!updateCheck || updateCheck.checking === true || !item.github) return null;
+    const github = item.github;
+    const tone = updateCheck.status === 'up-to-date' ? 'g' : updateCheck.status === 'update-available' ? undefined : 'warn';
+    return (
+      <div className="h37-note h34-update-box" data-tone={tone}>
+        {updateCheck.status === 'up-to-date' ? <ShieldCheck aria-hidden="true" /> : updateCheck.status === 'update-available' ? <RefreshCw aria-hidden="true" /> : <ShieldAlert aria-hidden="true" />}
+        <p role="status">
+          <span>
+            {updateCheck.status === 'up-to-date' ? `已是最新，固定提交 ${updateCheck.commit?.slice(0, 12) ?? item.version}。` : null}
+            {updateCheck.status === 'update-available' ? `来源有新提交 ${updateCheck.commit?.slice(0, 12) ?? ''}。更新前会先列出新版文件。` : null}
+            {updateCheck.status === 'source-changed' ? `${updateCheck.reason ?? '来源已变化'}。已安装版本仍按原提交可用。` : null}
+            {updateCheck.status === 'unavailable' ? `${updateCheck.reason ?? '暂无法核对来源'}。已安装版本不受影响。` : null}
+          </span>
+          {updateCheck.status === 'update-available' && updateCheck.githubUrl ? (
+            <button type="button" className="h37-link h34-link" onClick={() => { select({ kind: 'mp', skill: { ...EMPTY_SKILL, id: github.entryId, name: item.name, author: item.author, githubUrl: updateCheck.githubUrl!, skillUrl: github.url || null } }); }}>查看新版并更新</button>
+          ) : null}
+          {updateCheck.status === 'source-changed' ? (
+            <button type="button" className="h37-link h34-link" onClick={() => { select({ kind: 'mp', skill: { ...EMPTY_SKILL, id: github.entryId, name: item.name, author: item.author, githubUrl: github.githubUrl, skillUrl: github.url || null } }); }}>按原来源重新检查</button>
+          ) : null}
+        </p>
+      </div>
+    );
+  };
+
   const installedBody = (item: InstalledSkill) => (
     <>
       <DetailHero
         tag={`${ORIGIN_LABELS[item.origin]} · 已安装`}
         title={item.title}
+        badge={enabledBadge(item)}
         description={item.description}
         links={item.github ? (
           <>
@@ -620,63 +775,53 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
             <button type="button" className="h37-link h34-link" onClick={() => openExternal(githubTreeUrl(item.github!))}><Code aria-hidden="true" /> GitHub（固定提交）</button>
           </>
         ) : null}
+        actions={actionButtons(item)}
       />
-      <div className="h34-detail-actions">
-        <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => api.setSkillEnabled(item.id, !item.enabled))}>{item.enabled ? '停用技能' : '启用技能'}</button>
-        <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void openSource(item.id)}>查看原文</button>
-        {!remote ? <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => api.revealSkill(item.id))}><FolderOpen aria-hidden="true" /> 打开目录</button> : null}
-        <button type="button" className="h37-btn h37-btn-ghost h37-btn-danger" disabled={Boolean(busy)} onClick={() => setConfirmRemove(item.id)}><Trash2 aria-hidden="true" /> 卸载</button>
-      </div>
-      <FoldSection title="来源与完整性" hint={item.github ? item.github.repo : (item.origin === 'local' ? '本地' : '内置')}>
+      <section className="h37-section">
+        <div className="h37-section-head">
+          <h3>来源</h3>
+          <span className="h37-count">{ORIGIN_LABELS[item.origin]}</span>
+          {item.origin === 'skillsmp' && item.github ? (
+            <button type="button" className="h37-btn h37-btn-ghost h37-btn-sm h37-aside" disabled={updateCheck?.checking === true || Boolean(busy)} onClick={() => void runUpdateCheck(item)}>
+              {updateSpinner ? <span className="h37-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />} {updateCheck?.checking === true ? '正在检查…' : '检查更新'}
+            </button>
+          ) : null}
+        </div>
         <dl className="h37-group h34-kv">
-          <div><dt>标识</dt><dd className="h34-mono">{item.name}</dd></div>
-          <div><dt>作者</dt><dd>{item.author}</dd></div>
-          <div><dt>版本</dt><dd>{item.github ? `GitHub 提交 ${item.version}` : item.version}</dd></div>
           {item.github ? (
             <>
               <div><dt>仓库</dt><dd className="h34-mono">{item.github.repo}{item.github.path ? ` / ${item.github.path}` : ''}</dd></div>
-              <div><dt>固定提交</dt><dd className="h34-mono" title={item.github.commit}>{item.github.commit.slice(0, 12)}</dd></div>
+              <div><dt>固定提交</dt><dd className="h34-mono h34-hash">{item.github.commit}</dd></div>
+              <div><dt>作者</dt><dd>{item.author}</dd></div>
               <div><dt>条目</dt><dd className="h34-mono">{item.github.entryId}</dd></div>
             </>
-          ) : <div><dt>来源</dt><dd>{item.origin === 'local' ? item.sourcePath : 'Hemi 内置目录'}</dd></div>}
+          ) : (
+            <>
+              <div><dt>来源</dt><dd className={item.origin === 'local' ? 'h34-mono' : undefined}>{item.origin === 'local' ? item.sourcePath : 'Hemi 内置目录'}</dd></div>
+              <div><dt>版本</dt><dd>{item.version}</dd></div>
+              <div><dt>作者</dt><dd>{item.author}</dd></div>
+              <div><dt>标识</dt><dd className="h34-mono">{item.name}</dd></div>
+            </>
+          )}
         </dl>
-      </FoldSection>
-      {item.origin === 'skillsmp' && item.github ? (
-        <section className="h37-section">
-          <div className="h37-section-head"><h3>更新</h3></div>
-          <div className="h37-group h34-update-box">
-            <button type="button" className="h37-btn h37-btn-secondary" disabled={updateCheck?.checking === true || Boolean(busy)} onClick={() => void runUpdateCheck(item)}>
-              {updateSpinner ? <span className="h37-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />} {updateCheck?.checking === true ? '正在检查…' : '检查更新'}
-            </button>
-            {updateCheck && updateCheck.checking !== true ? (
-              <p role="status">
-                {updateCheck.status === 'up-to-date' ? `已是最新（固定提交 ${updateCheck.commit?.slice(0, 12) ?? item.version}）。` : null}
-                {updateCheck.status === 'update-available' ? `来源有新提交 ${updateCheck.commit?.slice(0, 12) ?? ''}。` : null}
-                {updateCheck.status === 'source-changed' ? `${updateCheck.reason ?? '来源已变化'}。已安装版本仍按原提交可用。` : null}
-                {updateCheck.status === 'unavailable' ? `${updateCheck.reason ?? '暂无法核对来源'}。已安装版本不受影响。` : null}
-                {updateCheck.status === 'update-available' && updateCheck.githubUrl ? (
-                  <button type="button" className="h37-link h34-link" onClick={() => { select({ kind: 'mp', skill: { ...EMPTY_SKILL, id: item.github!.entryId, name: item.name, author: item.author, githubUrl: updateCheck.githubUrl!, skillUrl: item.github!.url || null } }); }}>查看新版并更新</button>
-                ) : null}
-                {updateCheck.status === 'source-changed' ? (
-                  <button type="button" className="h37-link h34-link" onClick={() => { select({ kind: 'mp', skill: { ...EMPTY_SKILL, id: item.github!.entryId, name: item.name, author: item.author, githubUrl: item.github!.githubUrl, skillUrl: item.github!.url || null } }); }}>按原来源重新检查</button>
-                ) : null}
-              </p>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
+        {updateNote(item)}
+      </section>
       <FileSection title="包含文件" count={`${item.files.length} 个`} files={item.files.map((file) => ({ path: file }))} />
-      <div className="h37-note h34-permission-note" data-tone="g"><ShieldCheck aria-hidden="true" /><span>技能只是做事的方法说明；实际工具调用仍按权限设置确认。</span></div>
-      {sourceText ? <SourceSection title="SKILL.md 原文" text={sourceText} /> : null}
+      {sourceFold(item.id)}
+      <p className="h34-footnote"><ShieldCheck aria-hidden="true" /><span>技能只是做事的方法说明，实际工具调用仍按权限设置确认。</span></p>
     </>
   );
 
   const detail = (() => {
     if (selected?.kind === 'mp') {
-      // v5：详情页用市场元数据秒开；安装点击后才拉来源（两阶段进度在吸底安装条上）。
+      // v5：详情页用市场元数据秒开；点「安装」才读来源，读完停在核对态，确认后才保存。
       const skill = selected.skill;
-      const preview = panel.state === 'shown' ? panel.preview : null;
-      const locked = Boolean(busy) || installPhase !== '';
+      const preview = panel.state === 'shown' ? panel.preview ?? null : null;
+      const barMode: BarMode = installPhase === 'save' ? 'saving'
+        : installPhase === 'read' || panel.state === 'loading' ? 'reading'
+          : panel.state === 'error' || saveFailure ? 'failed'
+            : preview ? 'confirm' : 'idle';
+      const langLabel = skill.contentLanguage ? (LANG_LABELS[skill.contentLanguage.toLowerCase()] ?? skill.contentLanguage.toUpperCase()) : '';
       return (
         <>
           <DetailHero
@@ -685,10 +830,10 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
             description={skill.description || '（SkillsMP 未提供描述，以来源文件为准）'}
             meta={(
               <>
-                <span>{skill.author || '未知'}</span>
+                <span>{skill.author || '作者未知'}</span>
                 {skill.stars !== null ? <span><Star aria-hidden="true" />{fmtStars(skill.stars)}</span> : null}
-                {skill.contentLanguage ? <span>{skill.contentLanguage.toUpperCase()}</span> : null}
-                {skill.updatedAt ? <span>收录 {fmtTime(skill.updatedAt)}</span> : null}
+                {langLabel ? <span>{langLabel}</span> : null}
+                {skill.updatedAt ? <span>{fmtTime(skill.updatedAt)} 收录</span> : null}
               </>
             )}
             links={(
@@ -700,81 +845,59 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           />
           {skill.githubUrl ? (
             <>
-              {!preview ? (
-                <section className="h37-section" aria-label="安装流程说明">
-                  <div className="h37-section-head"><h3>点安装后会怎样</h3></div>
-                  <div className="h37-group h34-steps">
-                    <div className="h37-row h34-step">
-                      <Download aria-hidden="true" />
-                      <div><strong>读取来源</strong><small>按固定提交从 GitHub 拉取全部文件；大技能或弱网可能要等十几秒，进度显示在底部。</small></div>
-                    </div>
-                    <div className="h37-row h34-step">
-                      <ListChecks aria-hidden="true" />
-                      <div><strong>逐个核对</strong><small>每个文件与 GitHub 文件树摘要比对，不一致即拒绝安装。</small></div>
-                    </div>
-                    <div className="h37-row h34-step">
-                      <Save aria-hidden="true" />
-                      <div><strong>只保存</strong><small>不运行脚本、不装依赖；装完即可启用，随时可停用或卸载。</small></div>
-                    </div>
-                  </div>
-                </section>
-              ) : null}
               {preview ? (
                 <>
-                  <FileSection
-                    title="将保存的文件"
-                    count={`${preview.files.length} 个 · ${fmtBytes(preview.totalBytes)}`}
-                    files={preview.files.map((file) => ({ path: file.path, size: fmtBytes(file.size) }))}
-                  />
-                  <div className="h37-note h34-permission-note" data-tone="g"><ShieldCheck aria-hidden="true" /><span>只保存这些文件，不运行脚本、不装依赖；内容与本页清单不一致时安装会拒绝。</span></div>
                   {selectedInstalled ? (
-                    <div className="h37-note h34-permission-note" data-tone="warn" role="status">
+                    <div className="h37-note h34-review-note" data-tone="warn" role="status">
                       <ShieldAlert aria-hidden="true" />
-                      <span>已安装{selectedInstalled.github ? `提交 ${selectedInstalled.version}` : ` v${selectedInstalled.version}`}；再次安装会把同一技能换成上面列出的文件。</span>
+                      <span>已安装{selectedInstalled.github ? `提交 ${selectedInstalled.version}` : ` v${selectedInstalled.version}`}。确认后会用下面列出的文件替换它。</span>
                     </div>
                   ) : null}
-                  <FoldSection title="来源与完整性" hint="仓库 · 提交 · 摘要">
+                  <section className="h37-section">
+                    <div className="h37-section-head"><h3>来源</h3><span className="h37-count">安装将锁定这个提交</span></div>
                     <dl className="h37-group h34-kv">
-                      <div><dt>作者</dt><dd>{preview.author || '未知'}</dd></div>
                       <div><dt>仓库</dt><dd className="h34-mono">{preview.repo}{preview.dirPath ? ` / ${preview.dirPath}` : ''}</dd></div>
-                      <div><dt>固定提交</dt><dd className="h34-mono" title={preview.commit}>{preview.commit.slice(0, 12)}</dd></div>
-                      <div><dt>内容摘要</dt><dd className="h34-mono" title={preview.bundleSha256}>SHA-256 {preview.bundleSha256.slice(0, 16)}…</dd></div>
+                      <div><dt>固定提交</dt><dd className="h34-mono h34-hash">{preview.commit}</dd></div>
+                      <div><dt>内容摘要</dt><dd className="h34-mono h34-hash">SHA-256 {preview.bundleSha256}</dd></div>
+                      <div><dt>作者</dt><dd>{preview.author || '作者未知'}</dd></div>
                     </dl>
-                  </FoldSection>
-                  <SourceSection title="SKILL.md 原文" text={preview.skillMd} collapsible hint={`${preview.skillMd.length.toLocaleString('zh-CN')} 字`} />
+                  </section>
+                  <FileSection
+                    title="将保存的文件"
+                    count={`${preview.files.length} 个 · 共 ${fmtBytes(preview.totalBytes)}`}
+                    files={preview.files.map((file) => ({ path: file.path, size: fmtBytes(file.size) }))}
+                  />
+                  <SourceSection title="SKILL.md 原文" text={preview.skillMd} hint={`${preview.skillMd.length.toLocaleString('zh-CN')} 字`} />
+                  {saveFailure ? (
+                    <div className="h37-note h34-review-error" data-tone="danger" role="alert">
+                      <ShieldAlert aria-hidden="true" />
+                      <span>{saveFailure}。</span>
+                    </div>
+                  ) : null}
                 </>
-              ) : panel.state === 'loading' ? (
-                <div className="h37-group h34-loading" role="status">
-                  <span className="h37-spinner" aria-hidden="true" />
-                  <p>正在从 GitHub 读取来源文件{installPhase === 'read' && installElapsed >= 3 ? `（已等 ${installElapsed} 秒）` : ''}…<br /><small>文件多或网络慢时可能要等半分钟以上。</small></p>
-                </div>
-              ) : panel.state === 'error' ? (
-                <div className="h37-note h34-panel-error" data-tone="warn" role="status">
-                  <ShieldAlert aria-hidden="true" />
-                  <span>来源文件读取失败，可能是网络不通。可重试，或稍后再装。</span>
-                  <button type="button" className="h37-btn h37-btn-secondary" disabled={locked} onClick={() => { setPanel({ state: 'idle' }); void loadPanel(skill); }}>重试</button>
-                </div>
               ) : (
-                <div className="h37-group h34-panel-teaser">
-                  <FileText aria-hidden="true" />
-                  <div>
-                    <strong>装前可先看内容</strong>
-                    <small>安装时从 GitHub 固定提交读取全部文件并逐个核对；想先确认，点右侧按钮查看文件与原文。</small>
-                  </div>
-                  <button type="button" className="h37-btn h37-btn-secondary" disabled={locked} onClick={() => void loadPanel(skill)}>查看将保存的文件</button>
-                </div>
+                <InstallSteps
+                  read={barMode === 'reading' ? 'active' : barMode === 'failed' ? 'failed' : 'todo'}
+                  elapsed={installElapsed}
+                  reason={panel.reason ?? ''}
+                />
               )}
+              <div className="h34-bar-spacer" aria-hidden="true" />
               <InstallBar
-                phase={installPhase}
+                mode={barMode}
                 elapsed={installElapsed}
                 installed={Boolean(selectedInstalled)}
-                locked={locked}
+                installedVersion={selectedInstalled?.version ?? ''}
+                summary={preview ? `${preview.files.length} 个文件 · 共 ${fmtBytes(preview.totalBytes)} · 提交 ${preview.commit.slice(0, 12)}` : ''}
+                failedStage={saveFailure ? 'save' : 'read'}
                 onInstall={() => void runInstall(skill)}
+                onConfirm={() => { if (preview) void confirmInstall(preview); }}
+                onCancel={() => { setSaveFailure(''); setPanel({ state: 'idle' }); }}
                 onManage={() => selectedInstalled && select({ kind: 'installed', id: selectedInstalled.id })}
               />
             </>
           ) : (
-            <div className="h37-note" data-tone="warn" role="status"><ShieldAlert aria-hidden="true" /><span>该条目没有 GitHub 来源，无法添加到 Hemi。</span></div>
+            <div className="h37-note h34-review-note" data-tone="warn" role="status"><ShieldAlert aria-hidden="true" /><span>该条目没有 GitHub 来源，无法添加到 Hemi。</span></div>
           )}
         </>
       );
@@ -786,7 +909,11 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           <DetailHero
             tag="Hemi 内置目录"
             title={selectedBuiltin.title}
+            badge={installedItem ? enabledBadge(installedItem) : undefined}
             description={selectedBuiltin.description}
+            actions={installedItem ? actionButtons(installedItem, builtinUpdateAvailable ? (
+              <button type="button" className="h37-btn h37-btn-primary" disabled={Boolean(busy)} onClick={() => void act('更新技能', () => api.installMarketSkill(selectedBuiltin.id))}>更新到 v{selectedBuiltin.version}</button>
+            ) : null) : undefined}
             cta={installedItem ? null : (
               <>
                 <button type="button" className="h37-btn h37-btn-primary h37-btn-lg" disabled={Boolean(busy)} onClick={() => void act('安装技能', () => api.installMarketSkill(selectedBuiltin.id))}>
@@ -797,25 +924,16 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
               </>
             )}
           />
-          {installedItem ? (
-            <div className="h34-detail-actions">
-              {builtinUpdateAvailable ? <button type="button" className="h37-btn h37-btn-primary" disabled={Boolean(busy)} onClick={() => void act('更新技能', () => api.installMarketSkill(selectedBuiltin.id))}>更新到 v{selectedBuiltin.version}</button> : null}
-              <button type="button" className="h37-btn h37-btn-secondary" disabled={Boolean(busy)} onClick={() => void act('切换启用状态', () => api.setSkillEnabled(installedItem.id, !installedItem.enabled))}>{installedItem.enabled ? '停用技能' : '启用技能'}</button>
-              <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void openSource(installedItem.id)}>查看原文</button>
-              {!remote ? <button type="button" className="h37-btn h37-btn-ghost" disabled={Boolean(busy)} onClick={() => void act('打开目录', () => api.revealSkill(installedItem.id))}><FolderOpen aria-hidden="true" /> 打开目录</button> : null}
-              <button type="button" className="h37-btn h37-btn-ghost h37-btn-danger" disabled={Boolean(busy)} onClick={() => setConfirmRemove(installedItem.id)}><Trash2 aria-hidden="true" /> 卸载</button>
-            </div>
-          ) : null}
           <KvSection title="来源">
-            <div><dt>标识</dt><dd className="h34-mono">{selectedBuiltin.name}</dd></div>
-            <div><dt>作者</dt><dd>{selectedBuiltin.author}</dd></div>
-            <div><dt>版本</dt><dd>v{selectedBuiltin.version}</dd></div>
             <div><dt>来源</dt><dd>Hemi 内置目录</dd></div>
+            <div><dt>版本</dt><dd>v{selectedBuiltin.version}</dd></div>
+            <div><dt>作者</dt><dd>{selectedBuiltin.author}</dd></div>
+            <div><dt>标识</dt><dd className="h34-mono">{selectedBuiltin.name}</dd></div>
             <div><dt>目录发布</dt><dd>{state?.publishedAt ?? '未知'}</dd></div>
           </KvSection>
           <FileSection title="包含文件" count={`${selectedBuiltin.files.length} 个`} files={selectedBuiltin.files.map((file) => ({ path: file }))} />
-          <div className="h37-note h34-permission-note" data-tone="g"><ShieldCheck aria-hidden="true" /><span>安装不会运行脚本；任务使用时仍按权限设置确认。</span></div>
-          {sourceText ? <SourceSection title="SKILL.md 原文" text={sourceText} /> : null}
+          {installedItem ? sourceFold(installedItem.id) : null}
+          <p className="h34-footnote"><ShieldCheck aria-hidden="true" /><span>安装不会运行脚本，任务使用时仍按权限设置确认。</span></p>
         </>
       );
     }
