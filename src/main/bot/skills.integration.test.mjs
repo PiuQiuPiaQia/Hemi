@@ -29,7 +29,7 @@ test('Bot 实际 Host/SDK：坏项目技能不阻断普通/新会话，修正后
     assert.doesNotMatch(system, /<name>bad<\/name>/);
   }
   const count = fixture.requests.length;
-  await assert.rejects(fixture.send(first.id, 'EXPLICIT_BAD', { skills: [{ skillId: 'project:bad', source: 'project', name: 'bad', token: 'bad' }] }), /YAML 格式错误.*bad\/SKILL.md/);
+  await assert.rejects(fixture.send(first.id, 'EXPLICIT_BAD', { skills: [{ skillId: 'project:bad', source: 'project', name: 'bad', token: 'bad' }] }), /YAML 格式错误.*bad[\\/]SKILL\.md/);
   assert.equal(fixture.requests.length, count);
   await writeSkill('bad', 'REPAIRED_PROJECT_SKILL');
   await writeSkill('good', 'UPDATED_PROJECT_SKILL');

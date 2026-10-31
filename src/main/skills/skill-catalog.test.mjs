@@ -29,11 +29,11 @@ test('Hemi 安装与发现同用严格解析，坏项目技能不影响候选，
   assert.equal(catalog.items[0].skill.name, candidates[0].name);
   assert.equal(catalog.items[0].skill.description, candidates[0].description);
   assert.equal(catalog.diagnostics.length, 1);
-  assert.match(warnings[0], /broken\/SKILL.md.*YAML 格式错误/);
+  assert.match(warnings[0], /broken[\\/]SKILL\.md.*YAML 格式错误/);
   const selection = { source: 'project', skillId: 'project:broken', name: 'broken' };
   const verdict = validateSkillSelections([selection], catalog.items, catalog.diagnostics);
   assert.equal(verdict.ok, false);
-  assert.match(verdict.missing[0].reason, /YAML 格式错误.*broken\/SKILL.md/);
+  assert.match(verdict.missing[0].reason, /YAML 格式错误.*broken[\\/]SKILL\.md/);
   assert.equal(validateSkillSelections([], catalog.items, catalog.diagnostics).ok, true);
   const firstRevision = catalog.items[0].revision;
   await writeFile(path.join(skills, 'directory-alias', 'SKILL.md'), goodSkill.replace('Valid project', 'Updated project'));

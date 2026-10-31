@@ -23,7 +23,7 @@ test('项目 Skill：.claude/skills 与 .agents/skills 都收，描述按 frontm
     assert.match(byName.beta, /多行/);
     assert.equal(byName.nodoc, undefined);
     assert.equal(diagnostics.length, 1);
-    assert.match(diagnostics[0].path, /nodoc\/SKILL\.md$/);
+    assert.match(diagnostics[0].path, /nodoc[\\/]SKILL\.md$/);
     assert.equal(skillDescriptionOf(path.join(root, 'missing')), '');
   } finally {
     await rm(root, { recursive: true, force: true });

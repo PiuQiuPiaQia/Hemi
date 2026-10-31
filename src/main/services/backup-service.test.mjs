@@ -163,7 +163,7 @@ test('long paths (>100 chars) roundtrip via ustar prefix or GNU longname',async 
   t.after(()=>{for(const d of [dir,out,stage])fs.rmSync(d,{recursive:true,force:true});});
   // 相对路径 >100 字符即触发 ustar prefix/长名逻辑；段数控制在 Windows
   // MAX_PATH(260) 内——绝对路径前缀（macOS /var/folders、Windows %TEMP%）已占 40-55 字符。
-  const deep=path.join('pi-memory','workspace',...Array.from({length:2},(_,i)=>`很长的目录名段-${i}-abcdefghijklmnop`));
+  const deep=['pi-memory','workspace',...Array.from({length:2},(_,i)=>`很长的目录名段-${i}-abcdefghijklmnop`)].join('/');
   fs.mkdirSync(path.join(dir,deep),{recursive:true});
   const rel=`${deep}/超长文件名-abcdefghijklmnopqrstuvwxyz0123456789.md`;
   fs.writeFileSync(path.join(dir,rel),'长路径内容');
