@@ -1,19 +1,11 @@
-新增数据备份与恢复：会话、记忆、设置与 API 密钥可备份到本地文件夹或坚果云，新设备可从备份完整恢复。
+New API 站点登录导入新增首屏加载动画；本版起 macOS 与 Windows 统一版本号、同一发布页同时交付。
 
-- 设置新增「备份」分类：支持本地文件夹（系统目录选择）与坚果云等 WebDAV 网盘；服务器地址预填坚果云，应用密码有官方教程直达，保存前可测试连接。
-- 备份内容为轻量档快照（会话正文、记忆、草稿与全部设置），含 tar+gzip 流式归档、分卷校验与恢复前自动安全副本；上传按分卷进行，损坏分卷会被校验拦截。
-- 凭据随备份：模型密钥、语音密钥与 WebDAV 应用密码采用本机 AES-256-GCM 加密，解密密钥随备份携带，恢复到新设备后即可直接使用。备份包本身不加密，云端保存的是明文等价物，请妥善保管网盘账号。
-- 支持定时备份（每天/每周、保留份数自动清理）与手动备份；备份集支持恢复与删除（气泡式二次确认）。
-- 首次启动引导新增「从备份恢复」与「跳过引导」：换机或重装后无需重新配置，恢复完成即可进入主界面并直接使用已恢复的模型。
-- 修复恢复备份后 WebDAV 应用密码无法解密的问题：恢复会替换本机解密密钥，恢复前保存的密文现于恢复后自动重新加密。
+- 模型设置 → 添加供应商 → New API 站点登录：打开站点后先显示「正在加载站点页面…」加载动画，页面就绪后再显示站点内容，首次加载不再白屏等待；恢复未完成的导入时同样生效。
+- 发布节奏调整：自 0.2.43 起 macOS 与 Windows 共用同一版本号、同时发布（此前 macOS 最新为 0.2.39、Windows 为 0.2.42）；两端「检查更新」将始终拿到同一版本。
 
 ---
 
-Adds data backup and restore: conversations, memory, settings, and API keys can be backed up to a local folder or Nutstore (WebDAV), and a fresh device can restore everything from a backup.
+The New API site sign-in import now shows a first-paint loading indicator; starting with this version, macOS and Windows ship together under one version number on a single release page.
 
-- New "Backup" section in Settings: local folder (with native directory picker) or any WebDAV service such as Nutstore; the Nutstore endpoint is pre-filled, with a link to the official guide for app passwords, and a connection test before saving.
-- Backups are light-tier snapshots (conversation transcripts, memory, drafts, and all settings) packed as streaming tar+gzip volumes with per-volume checksums and an automatic safety copy before restoring; uploads go volume-by-volume and corrupted volumes are rejected by verification.
-- Credentials travel with the backup: model keys, voice keys, and the WebDAV app password are AES-256-GCM encrypted locally, and the decryption key is included in the backup, so a restored setup works immediately on a new device. The backup itself is not encrypted — the cloud copy is plaintext-equivalent, so protect your cloud-drive account.
-- Scheduled backups (daily/weekly with automatic retention) plus manual backup; backup sets can be restored or deleted (with a popover confirmation).
-- Onboarding now offers "Restore from backup" and "Skip onboarding": after reinstalling or switching machines there is no need to reconfigure — restoring finishes into the main app with the model already usable.
-- Fixed the WebDAV app password failing to decrypt after a restore: restoring replaces the local decryption key, and credentials saved before the restore are now re-encrypted automatically.
+- Settings → Models & routing → Add provider → New API site sign-in: after opening a site, a "loading site page" spinner is shown until the page is ready, replacing the blank wait on first load. Resuming an interrupted import gets the same treatment.
+- Release cadence change: from 0.2.43 on, macOS and Windows share one version number and release simultaneously (previously macOS sat at 0.2.39 while Windows was at 0.2.42); check-for-updates on both platforms now always resolves to the same version.
