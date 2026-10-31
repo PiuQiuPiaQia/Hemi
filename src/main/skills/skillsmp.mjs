@@ -4,12 +4,18 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
- * 034：SkillsMP 公开 MCP（https://skillsmp.com/mcp，Streamable HTTP，无鉴权只读）。
- * 只承担发现：search_skills / get_skill。安装来源一律由 github-source 按 GitHub
- * 固定提交独立核对，不信任 SkillsMP 元数据里的任何可安装声明。
+ * 034：SkillsMP 发现层走匿名 REST 关键词搜索（https://skillsmp.com/api/v1/skills/search）。
+ * 背景：公开 MCP（/mcp）自 2026-10-30 起要求账号鉴权（HTTP 401），匿名只剩这个端点；
+ * 匿名限流约 50 次/天、10 次/分钟（响应头 X-RateLimit-*），搜索缓存是限流兜底。
+ * REST 没有详情端点：详情按用途拆两条路——预览用最近搜索缓存命中（用户点的就是缓存
+ * 里的条目，不烧限流额度）；检查更新用 creator（仓库 owner）精确查询拿新鲜数据。
+ * 安装来源一律由 github-source 按 GitHub 固定提交独立核对，不信任 SkillsMP 元数据
+ * 里的任何可安装声明。
  */
-export const SKILLSMP_ENDPOINT = 'https://skillsmp.com/mcp';
-const MCP_PROTOCOL = '2025-06-18';
+export const SKILLSMP_ENDPOINT = 'https://skillsmp.com/api/v1/skills/search';
+
+/** GitHub 用户/组织登录名的宽松校验（与 SkillsMP creator 参数同口径）。 */
+const CREATOR_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
 
 function failure(message) {
   throw new Error(message);
@@ -37,26 +43,20 @@ function normalizeSkill(raw) {
   };
 }
 
-let callSeq = 0;
-
 const describeNetError = (error) => {
   if (error.name === 'TimeoutError' || error.name === 'AbortError') return '请求超时';
   const cause = typeof error.cause?.message === 'string' ? `：${error.cause.message}` : '';
   return `${error.message}${cause}`;
 };
 
-async function mcpRequest(fetchImpl, method, params, { timeoutMs = 15000 } = {}) {
+/** 匿名 GET；网络抖动重试一次，限流（429）与业务错误（success:false）给用户能懂的 reason。 */
+async function restRequest(fetchImpl, url, { timeoutMs = 15000 } = {}) {
   let lastError = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await fetchImpl(SKILLSMP_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream',
-          'MCP-Protocol-Version': MCP_PROTOCOL,
-        },
-        body: JSON.stringify({ jsonrpc: '2.0', id: ++callSeq, method, params }),
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(timeoutMs),
         redirect: 'error',
       });
@@ -66,40 +66,27 @@ async function mcpRequest(fetchImpl, method, params, { timeoutMs = 15000 } = {})
         failure(wait ? `SkillsMP 限流，请约 ${wait} 秒后再试` : 'SkillsMP 限流，请稍后再试');
       }
       if (!response.ok) failure(`SkillsMP 请求失败：HTTP ${response.status}`);
-      const text = await response.text();
       let payload = null;
       try {
-        payload = JSON.parse(text);
+        payload = JSON.parse(await response.text());
       } catch {
-        const dataLine = text.split(/\r?\n/).find((line) => line.startsWith('data:'));
-        if (dataLine) {
-          try { payload = JSON.parse(dataLine.slice(5).trim()); } catch { /* 走下面的格式错误 */ }
-        }
+        payload = null;
       }
       if (!payload || typeof payload !== 'object') {
         lastError = 'SkillsMP 返回格式无法解析';
         continue;
       }
-      if (payload.error) failure(`SkillsMP 服务错误：${typeof payload.error?.message === 'string' ? payload.error.message : '未知错误'}`);
-      return payload.result ?? {};
+      if (payload.success === false) {
+        const message = typeof payload.error?.message === 'string' ? payload.error.message : '';
+        failure(`SkillsMP 服务错误：${message || '未知错误'}`);
+      }
+      return payload.data && typeof payload.data === 'object' ? payload.data : {};
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('SkillsMP ')) throw error;
       lastError = `SkillsMP 连接失败：${describeNetError(error)}`;
     }
   }
   failure(lastError);
-}
-
-async function callTool(fetchImpl, name, args) {
-  const result = await mcpRequest(fetchImpl, 'tools/call', { name, arguments: args });
-  const text = Array.isArray(result?.content) && typeof result.content[0]?.text === 'string'
-    ? result.content[0].text : '';
-  if (result?.isError) failure(`SkillsMP 查询失败：${text.slice(0, 200) || '未知错误'}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    failure('SkillsMP 结果无法解析');
-  }
 }
 
 function validCache(value) {
@@ -110,7 +97,7 @@ function validCache(value) {
 }
 
 /**
- * 搜索缓存只用于离线/失败时展示「上次结果 + 时间」，不把旧数据当实时。
+ * 搜索缓存只用于离线/失败时展示「上次结果 + 时间」与预览详情命中，不把旧数据当实时。
  * 持久化到 userData/skills/skillsmp-cache.json（原子写）。
  */
 export function createSkillsmpClient({ fetchImpl = fetch, cacheFile = null, log = null } = {}) {
@@ -143,15 +130,23 @@ export function createSkillsmpClient({ fetchImpl = fetch, cacheFile = null, log 
       loadCache();
       return cache;
     },
+    /** 预览用：在最近一次搜索结果里按 id 取条目（不发网络请求）。 */
+    cachedEntry(id) {
+      loadCache();
+      const trimmed = String(id ?? '').trim();
+      if (!trimmed) return null;
+      return cache?.skills.find((skill) => skill.id === trimmed) ?? null;
+    },
     async search({ query, sortBy = 'stars', page = 1, limit = 20 }) {
       const term = String(query ?? '').trim();
       if (!term) failure('请输入搜索关键词');
-      const payload = await callTool(fetchImpl, 'search_skills', {
-        query: term.slice(0, 200),
+      const params = new URLSearchParams({
+        q: term.slice(0, 200),
         sortBy: sortBy === 'recent' ? 'recent' : 'stars',
-        page: Math.min(Math.max(1, Math.trunc(page) || 1), 50),
-        limit: Math.min(Math.max(1, Math.trunc(limit) || 20), 50),
+        page: String(Math.min(Math.max(1, Math.trunc(page) || 1), 50)),
+        limit: String(Math.min(Math.max(1, Math.trunc(limit) || 20), 50)),
       });
+      const payload = await restRequest(fetchImpl, `${SKILLSMP_ENDPOINT}?${params.toString()}`);
       const skills = Array.isArray(payload?.skills) ? payload.skills.map(normalizeSkill).filter(Boolean) : [];
       const rawPagination = payload?.pagination && typeof payload.pagination === 'object' ? payload.pagination : {};
       const entry = {
@@ -169,13 +164,22 @@ export function createSkillsmpClient({ fetchImpl = fetch, cacheFile = null, log 
       await persistCache(entry);
       return entry;
     },
-    async detail(id) {
+    /** 检查更新用：按作者（GitHub owner）列条目再按 id 匹配——REST 没有单条详情端点。
+     *  作者技能可能超过一页：跟随 hasNext 翻页，3 页（150 条）封顶防限流放大。 */
+    async detail(id, { creator = null } = {}) {
       const trimmed = String(id ?? '').trim();
       if (!trimmed || trimmed.length > 200) failure('SkillsMP 条目 ID 无效');
-      const payload = await callTool(fetchImpl, 'get_skill', { id: trimmed });
-      const skill = normalizeSkill(payload?.skill);
-      if (!skill) failure('SkillsMP 没有返回该条目的详情（可能已撤架）');
-      return skill;
+      const owner = String(creator ?? '').trim();
+      if (!CREATOR_PATTERN.test(owner)) failure('无法确定条目作者，暂不能在线核对');
+      for (let page = 1; page <= 3; page += 1) {
+        const params = new URLSearchParams({ creator: owner, limit: '50', page: String(page), sortBy: 'stars' });
+        const payload = await restRequest(fetchImpl, `${SKILLSMP_ENDPOINT}?${params.toString()}`);
+        const list = Array.isArray(payload?.skills) ? payload.skills : [];
+        const skill = normalizeSkill(list.find((item) => item?.id === trimmed));
+        if (skill) return skill;
+        if (payload?.pagination?.hasNext !== true) break;
+      }
+      failure('SkillsMP 没有返回该条目的详情（可能已撤架）');
     },
   };
 }

@@ -102,23 +102,27 @@ function fakeGithub({ commit = COMMIT, files = null, symlink = false, repo = 'de
   };
 }
 
-function fakeMcp({ searchPayload = null, detailPayload = null, status = 200 } = {}) {
-  const searches = [];
-  const fetchImpl = async (url, init) => {
-    assert.equal(url, SKILLSMP_ENDPOINT);
-    const body = JSON.parse(init.body);
-    if (body.method === 'tools/call' && body.params.name === 'search_skills') {
-      searches.push(body.params.arguments);
-      if (status !== 200) return new Response('limit', { status, headers: { 'retry-after': '17' } });
-      return Response.json({ jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: JSON.stringify(searchPayload) }] } });
+/** 构造 SkillsMP 匿名 REST 桩：GET search 端点，记录每次请求的查询参数与 headers。
+ *  payload 传数组时按 page 依次返回（模拟作者技能分多页）。 */
+function fakeRest({ payload = SEARCH_RESULT, status = 200 } = {}) {
+  const pages = Array.isArray(payload) ? payload : null;
+  const queries = [];
+  const inits = [];
+  const impl = async (url, init) => {
+    assert.ok(url.startsWith(SKILLSMP_ENDPOINT), `SkillsMP 意外请求：${url}`);
+    const searchParams = new URL(url).searchParams;
+    queries.push(Object.fromEntries(searchParams));
+    inits.push(init ?? {});
+    if (status !== 200) return new Response('limit', { status, headers: { 'retry-after': '17' } });
+    if (pages) {
+      const page = Math.min(Number(searchParams.get('page') || '1'), pages.length);
+      return Response.json({ success: true, data: pages[page - 1] });
     }
-    if (body.method === 'tools/call' && body.params.name === 'get_skill') {
-      return Response.json({ jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: JSON.stringify(detailPayload) }] } });
-    }
-    return Response.json({ jsonrpc: '2.0', id: body.id, result: {} });
+    return Response.json({ success: true, data: payload });
   };
-  fetchImpl.searches = searches;
-  return fetchImpl;
+  impl.queries = queries;
+  impl.inits = inits;
+  return impl;
 }
 
 const SEARCH_RESULT = {
@@ -130,19 +134,18 @@ const SEARCH_RESULT = {
     stars: 1200, updatedAt: 1779015027,
   }],
   pagination: { page: 1, limit: 20, total: 1, totalPages: 1, hasNext: false, hasPrev: false },
-  total: 1,
 };
 
-const DETAIL = { skill: SEARCH_RESULT.skills[0] };
+const SKILL = SEARCH_RESULT.skills[0];
 
 test('仓库被下架（451）与改名转移（3xx）给用户能懂的原因，不再是裸状态码', async () => {
   const statusImpl = (status) => async (url) => new Response('blocked', { status });
   await assert.rejects(
-    () => fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: statusImpl(451) }),
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: statusImpl(451) }),
     /已被 GitHub 下架/,
   );
   await assert.rejects(
-    () => fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: statusImpl(301) }),
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: statusImpl(301) }),
     /改名或转移/,
   );
 });
@@ -170,7 +173,7 @@ test('parseGithubTreeUrl 接受 tree/blob/根目录，拒绝其他形态', () =>
 
 test('fetchGithubSnapshot 按固定提交取文件并核对 blob 摘要', async () => {
   const snapshot = await fetchGithubSnapshot(
-    { githubUrl: DETAIL.skill.githubUrl },
+    { githubUrl: SKILL.githubUrl },
     { fetchImpl: fakeGithub() },
   );
   assert.equal(snapshot.commit, COMMIT);
@@ -190,7 +193,7 @@ test('fetchGithubSnapshot 完整收录来源目录（.gitignore/LICENSE/无扩�
     'references/checklist.md': REFERENCE,
   };
   const snapshot = await fetchGithubSnapshot(
-    { githubUrl: DETAIL.skill.githubUrl },
+    { githubUrl: SKILL.githubUrl },
     { fetchImpl: fakeGithub({ files }) },
   );
   assert.deepEqual(
@@ -203,7 +206,7 @@ test('fetchGithubSnapshot 按魔数拒绝可执行内容，扩展名伪装无效
   const macho = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x00, 0x00, 0x00, 0x01]);
   await assert.rejects(
     () => fetchGithubSnapshot(
-      { githubUrl: DETAIL.skill.githubUrl },
+      { githubUrl: SKILL.githubUrl },
       { fetchImpl: fakeGithub({ files: { 'SKILL.md': SKILL_MD, 'assets/lib.txt': macho } }) },
     ),
     /可执行内容/,
@@ -212,7 +215,7 @@ test('fetchGithubSnapshot 按魔数拒绝可执行内容，扩展名伪装无效
 
 test('fetchGithubSnapshot 拒绝符号链接、目录缺失、未 pin 时的越权改动与 404', async () => {
   await assert.rejects(
-    () => fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: fakeGithub({ symlink: true }) }),
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: fakeGithub({ symlink: true }) }),
     /符号链接/,
   );
   await assert.rejects(
@@ -230,7 +233,7 @@ test('fetchGithubSnapshot 拒绝符号链接、目录缺失、未 pin 时的越�
     return response;
   };
   await assert.rejects(
-    () => fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl, commit: COMMIT }, { fetchImpl: tamperedImpl }),
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl, commit: COMMIT }, { fetchImpl: tamperedImpl }),
     /摘要不符/,
   );
   await assert.rejects(
@@ -249,7 +252,7 @@ test('fetchGithubSnapshot raw 网络抖动重试可恢复（单发超时不再�
     }
     return stable(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: flaky });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: flaky });
   assert.equal(snapshot.files.length, 2);
   assert.ok(flaked);
 });
@@ -258,7 +261,7 @@ test('fetchGithubSnapshot 收录 65+ 文件技能（上限 256，2026-10-09 自 
   const files = { 'SKILL.md': SKILL_MD };
   for (let index = 0; index < 70; index += 1) files[`references/p${String(index).padStart(3, '0')}.md`] = `# ${index}\n`;
   const snapshot = await fetchGithubSnapshot(
-    { githubUrl: DETAIL.skill.githubUrl },
+    { githubUrl: SKILL.githubUrl },
     { fetchImpl: fakeGithub({ files }) },
   );
   assert.equal(snapshot.files.length, 71);
@@ -330,7 +333,7 @@ test('fetchGithubSnapshot 主链路走 codeload 整包（raw 全程不触碰）�
     }
     return base(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: archiveFirst });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: archiveFirst });
   assert.equal(snapshot.files.length, 2);
   assert.equal(rawHits, 0, '归档命中时不得回落 raw');
 });
@@ -350,7 +353,7 @@ test('raw 也断时走第三级 Blobs API（api.github.com）救回——被墙�
     }
     return base(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: ladder });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: ladder });
   assert.equal(snapshot.files.length, 2);
   assert.ok(snapshot.bundleSha256);
 });
@@ -363,7 +366,7 @@ test('三级全断时报 raw 的网络错误（对用户最有解释力）', asy
     return base(url, init);
   };
   await assert.rejects(
-    () => fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: allDown }),
+    () => fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: allDown }),
     /下载 .*SKILL\.md 失败/,
   );
 });
@@ -380,7 +383,7 @@ test('归档任何失败（缺文件/篡改/5xx/超时）都回落 raw 逐文件
   // 缺声明的文件 → 回落 raw 成功（归档可能是流中断/格式边角，树清单仍是权威）。
   const missing = [tarEntry('skills-main/skills/demo-pdf/SKILL.md', Buffer.from(SKILL_MD)), Buffer.alloc(1024)];
   const missingSnapshot = await fetchGithubSnapshot(
-    { githubUrl: DETAIL.skill.githubUrl },
+    { githubUrl: SKILL.githubUrl },
     { fetchImpl: withArchive(missing) },
   );
   assert.equal(missingSnapshot.files.length, 2);
@@ -391,12 +394,12 @@ test('归档任何失败（缺文件/篡改/5xx/超时）都回落 raw 逐文件
     Buffer.alloc(1024),
   ];
   const tamperedSnapshot = await fetchGithubSnapshot(
-    { githubUrl: DETAIL.skill.githubUrl },
+    { githubUrl: SKILL.githubUrl },
     { fetchImpl: withArchive(tampered) },
   );
   assert.equal(tamperedSnapshot.files.length, 2);
   // 归档 5xx（网络/服务抖动）→ 回落 raw 逐文件并成功。
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: withArchive(null) });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: withArchive(null) });
   assert.equal(snapshot.files.length, 2);
 });
 
@@ -408,7 +411,7 @@ test('listBlobs 优先一次 recursive 树，多目录技能只花常数次 API�
     if (url.startsWith('https://api.github.com/')) apiCalls += 1;
     return base(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: counting });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: counting });
   assert.equal(snapshot.files.length, 3);
   // git/ref 1 + 下钻 2 段 + recursive 1 = 4；逐目录路径是 1+2+1+1+1 = 6。
   assert.equal(apiCalls, 4);
@@ -420,33 +423,37 @@ test('recursive 树被 GitHub 截断时回落逐目录收集', async () => {
     if (url.includes('?recursive=1')) return Response.json({ sha: 'x', tree: [], truncated: true });
     return base(url, init);
   };
-  const snapshot = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: truncated });
+  const snapshot = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: truncated });
   assert.equal(snapshot.files.length, 2);
 });
 
-async function withService(callback, { github = fakeGithub(), mcp = fakeMcp({ searchPayload: SEARCH_RESULT, detailPayload: DETAIL }) } = {}) {
+async function withService(callback, { github = fakeGithub(), rest = fakeRest() } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'hemi-skillsmp-test-'));
-  const fetchImpl = async (url, init) => (url === SKILLSMP_ENDPOINT ? mcp(url, init) : github(url, init));
+  const fetchImpl = async (url, init) => (url.startsWith(SKILLSMP_ENDPOINT) ? rest(url, init) : github(url, init));
   const store = createSkillStore({ root, fetchImpl, log: null });
   const service = createSkillsmpService({ store, fetchImpl, cacheFile: path.join(root, 'skillsmp-cache.json'), log: null });
   try {
-    await callback({ store, service, root, fetchImpl });
+    await callback({ store, service, root, fetchImpl, rest });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 test('搜索：成功落缓存（含时间），限流给明确 reason 且缓存仍在', async () => {
-  await withService(async ({ service, root }) => {
+  await withService(async ({ service, root, rest }) => {
     const first = await service.search({ query: 'pdf' });
     assert.equal(first.ok, true);
     assert.equal(first.skills.length, 1);
     assert.equal(first.skills[0].name, 'demo-pdf');
     assert.ok(Number.isFinite(first.checkedAt));
     assert.ok(existsSync(path.join(root, 'skillsmp-cache.json')));
+    // 匿名 GET：q/sortBy 落在查询串上，请求不带任何 Authorization。
+    assert.equal(rest.queries[0].q, 'pdf');
+    assert.equal(rest.queries[0].sortBy, 'stars');
+    assert.equal('Authorization' in (rest.inits[0].headers ?? {}), false);
     const limited = await createSkillsmpService({
       store: createSkillStore({ root }),
-      fetchImpl: fakeMcp({ status: 429 }),
+      fetchImpl: fakeRest({ status: 429 }),
       cacheFile: path.join(root, 'skillsmp-cache.json'),
     }).search({ query: 'pdf' });
     assert.equal(limited.ok, false);
@@ -461,17 +468,20 @@ test('搜索：成功落缓存（含时间），限流给明确 reason 且缓存
 });
 
 test('预览→确认安装：固定提交、摘要一致才落地；登记可追溯，重启一致', async () => {
-  await withService(async ({ service, store, root }) => {
-    const preview = await service.preview({ id: DETAIL.skill.id });
+  await withService(async ({ service, store, root, rest }) => {
+    await service.search({ query: 'pdf' });
+    const preview = await service.preview({ id: SKILL.id });
+    // 预览详情来自搜索缓存命中：不发额外 REST 请求（匿名限流 50 次/天）。
+    assert.equal(rest.queries.length, 1);
     assert.equal(preview.ok, true);
     assert.equal(preview.preview.commit, COMMIT);
     assert.equal(preview.preview.name, 'demo-pdf');
     assert.match(preview.preview.skillMd, /确认路径/);
     assert.equal(store.state().installed.length, 0);
     const installed = await service.install({
-      skillsmpId: DETAIL.skill.id, commit: COMMIT,
+      skillsmpId: SKILL.id, commit: COMMIT,
       bundleSha256: preview.preview.bundleSha256,
-      githubUrl: DETAIL.skill.githubUrl, author: 'demo-org', skillUrl: DETAIL.skill.skillUrl,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
     });
     assert.equal(installed.ok, true);
     assert.equal(installed.skill.origin, 'skillsmp');
@@ -484,13 +494,13 @@ test('预览→确认安装：固定提交、摘要一致才落地；登记可�
     lease.release();
     const reopened = createSkillStore({ root });
     const view = reopened.state().installed[0];
-    assert.equal(view.github.entryId, DETAIL.skill.id);
+    assert.equal(view.github.entryId, SKILL.id);
     assert.equal(view.enabled, true);
     // 预览后来源内容变化（同 commit 摘要不符）→ 拒绝，旧登记不动。
     const drifted = await service.install({
-      skillsmpId: DETAIL.skill.id, commit: COMMIT,
+      skillsmpId: SKILL.id, commit: COMMIT,
       bundleSha256: 'f'.repeat(64),
-      githubUrl: DETAIL.skill.githubUrl, author: 'demo-org', skillUrl: DETAIL.skill.skillUrl,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
     }).catch((error) => ({ ok: false, reason: error.message }));
     assert.equal(drifted.ok, false);
     assert.match(drifted.reason, /不一致/);
@@ -500,11 +510,12 @@ test('预览→确认安装：固定提交、摘要一致才落地；登记可�
 
 test('同名不同来源报冲突并指明双方来源；快照保持旧版直到终态释放', async () => {
   await withService(async ({ service, store }) => {
-    const preview = await service.preview({ id: DETAIL.skill.id });
+    await service.search({ query: 'pdf' });
+    const preview = await service.preview({ id: SKILL.id });
     const installed = await service.install({
-      skillsmpId: DETAIL.skill.id, commit: COMMIT,
+      skillsmpId: SKILL.id, commit: COMMIT,
       bundleSha256: preview.preview.bundleSha256,
-      githubUrl: DETAIL.skill.githubUrl, author: 'demo-org', skillUrl: DETAIL.skill.skillUrl,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
     });
     assert.equal(installed.ok, true);
     // 另一个 SkillsMP 条目落到同名 frontmatter → 冲突，指明已装来源。
@@ -526,11 +537,11 @@ test('同名不同来源报冲突并指明双方来源；快照保持旧版直�
     const moved = fakeGithub({
       files: { 'SKILL.md': SKILL_MD.replace('确认路径', '确认路径（新版）'), 'references/checklist.md': REFERENCE },
     });
-    const movedPreview = await fetchGithubSnapshot({ githubUrl: DETAIL.skill.githubUrl }, { fetchImpl: moved });
+    const movedPreview = await fetchGithubSnapshot({ githubUrl: SKILL.githubUrl }, { fetchImpl: moved });
     const updated = await createSkillsmpService({ store, fetchImpl: moved }).install({
-      skillsmpId: DETAIL.skill.id, commit: COMMIT,
+      skillsmpId: SKILL.id, commit: COMMIT,
       bundleSha256: movedPreview.bundleSha256,
-      githubUrl: DETAIL.skill.githubUrl, author: 'demo-org', skillUrl: DETAIL.skill.skillUrl,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
     });
     assert.equal(updated.ok, true);
     assert.notEqual(updated.skill.sha256, installed.skill.sha256);
@@ -542,22 +553,25 @@ test('同名不同来源报冲突并指明双方来源；快照保持旧版直�
 });
 
 test('检查更新：最新/有新版/来源变化/撤架各有准确状态，不自动安装', async () => {
-  await withService(async ({ service, store }) => {
-    const preview = await service.preview({ id: DETAIL.skill.id });
+  await withService(async ({ service, store, rest }) => {
+    await service.search({ query: 'pdf' });
+    const preview = await service.preview({ id: SKILL.id });
     const installed = await service.install({
-      skillsmpId: DETAIL.skill.id, commit: COMMIT,
+      skillsmpId: SKILL.id, commit: COMMIT,
       bundleSha256: preview.preview.bundleSha256,
-      githubUrl: DETAIL.skill.githubUrl, author: 'demo-org', skillUrl: DETAIL.skill.skillUrl,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
     });
     const same = await service.checkUpdate({ id: installed.skill.id });
     assert.equal(same.status, 'up-to-date');
     assert.equal(same.commit, COMMIT);
-    // 仓库前进到新提交：MCP 返回同一条目（同 repo/path），GitHub ref 解析出新 commit。
+    // 检查更新按 creator 精确列作者的条目（REST 无单条详情端点）。
+    assert.ok(rest.queries.some((query) => query.creator === 'demo-org'));
+    // 仓库前进到新提交：creator 查询返回同一条目（同 repo/path），GitHub ref 解析出新 commit。
     const aheadGithub = fakeGithub({ commit: OTHER_COMMIT });
     const aheadService = createSkillsmpService({
       store,
-      fetchImpl: async (url, init) => (url === SKILLSMP_ENDPOINT
-        ? fakeMcp({ searchPayload: SEARCH_RESULT, detailPayload: DETAIL })(url, init)
+      fetchImpl: async (url, init) => (url.startsWith(SKILLSMP_ENDPOINT)
+        ? fakeRest()(url, init)
         : aheadGithub(url, init)),
     });
     const fresh = await aheadService.checkUpdate({ id: installed.skill.id });
@@ -565,10 +579,8 @@ test('检查更新：最新/有新版/来源变化/撤架各有准确状态，�
     assert.equal(fresh.commit, OTHER_COMMIT);
     const relocated = createSkillsmpService({
       store,
-      fetchImpl: fakeMcp({
-        detailPayload: {
-          skill: { ...DETAIL.skill, githubUrl: 'https://github.com/demo-org/skills/tree/main/skills/moved-pdf' },
-        },
+      fetchImpl: fakeRest({
+        payload: { skills: [{ ...SKILL, githubUrl: 'https://github.com/demo-org/skills/tree/main/skills/moved-pdf' }], pagination: SEARCH_RESULT.pagination },
       }),
     });
     const changed = await relocated.checkUpdate({ id: installed.skill.id });
@@ -576,11 +588,45 @@ test('检查更新：最新/有新版/来源变化/撤架各有准确状态，�
     assert.match(changed.reason, /moved-pdf/);
     const withdrawn = createSkillsmpService({
       store,
-      fetchImpl: fakeMcp({ detailPayload: { skill: null } }),
+      fetchImpl: fakeRest({ payload: { skills: [], pagination: SEARCH_RESULT.pagination } }),
     });
     const gone = await withdrawn.checkUpdate({ id: installed.skill.id });
     assert.equal(gone.status, 'unavailable');
     assert.equal(store.state().installed[0].sha256, installed.skill.sha256);
+  });
+});
+
+test('检查更新翻页核对 creator 条目（作者技能超过一页时仍能找到）', async () => {
+  await withService(async ({ service, store }) => {
+    await service.search({ query: 'pdf' });
+    const preview = await service.preview({ id: SKILL.id });
+    const installed = await service.install({
+      skillsmpId: SKILL.id, commit: COMMIT,
+      bundleSha256: preview.preview.bundleSha256,
+      githubUrl: SKILL.githubUrl, author: 'demo-org', skillUrl: SKILL.skillUrl,
+    });
+    const pagedGithub = fakeGithub();
+    const paged = createSkillsmpService({
+      store,
+      fetchImpl: async (url, init) => (url.startsWith(SKILLSMP_ENDPOINT)
+        ? fakeRest({ payload: [
+          { skills: [{ ...SKILL, id: 'demo-org-skills-other-skill-md', name: 'other' }], pagination: { page: 1, limit: 50, total: 51, totalPages: 2, hasNext: true, hasPrev: false } },
+          { skills: [SKILL], pagination: { page: 2, limit: 50, total: 51, totalPages: 2, hasNext: false, hasPrev: true } },
+        ] })(url, init)
+        : pagedGithub(url, init)),
+    });
+    const result = await paged.checkUpdate({ id: installed.skill.id });
+    assert.equal(result.status, 'up-to-date');
+    assert.equal(result.commit, COMMIT);
+  });
+});
+
+test('预览前没有搜索缓存时给可行动提示，不发网络请求', async () => {
+  await withService(async ({ service, rest }) => {
+    const failed = await service.preview({ id: 'anything-skill-md' }).catch((error) => ({ ok: false, reason: error.message }));
+    assert.equal(failed.ok, false);
+    assert.match(failed.reason, /重新搜索/);
+    assert.equal(rest.queries.length, 0);
   });
 });
 
@@ -589,7 +635,7 @@ test('缓存文件损坏时静默忽略，搜索仍可用', async () => {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(path.join(root, 'skillsmp-cache.json'), '{ broken');
     const client = createSkillsmpClient({
-      fetchImpl: fakeMcp({ searchPayload: SEARCH_RESULT }),
+      fetchImpl: fakeRest(),
       cacheFile: path.join(root, 'skillsmp-cache.json'),
     });
     assert.equal(client.cachedSearch(), null);

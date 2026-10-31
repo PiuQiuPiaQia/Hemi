@@ -6,8 +6,9 @@ const failure = (message) => {
 };
 
 /**
- * 034 SkillsMP 编排层：把「发现（SkillsMP MCP）」与「安装（GitHub 固定提交）」接起来。
- * - preview：SkillsMP 详情 → 解析 githubUrl → 解析固定提交 → 按 tree blob 摘要取文件
+ * 034 SkillsMP 编排层：把「发现（SkillsMP 匿名 REST 搜索）」与「安装（GitHub 固定提交）」接起来。
+ * - preview：详情来自最近搜索缓存（REST 无详情端点；用户点的就是缓存里的条目，不烧限流额度）
+ *   → 解析 githubUrl → 解析固定提交 → 按 tree blob 摘要取文件
  *   → 返回真实 SKILL.md、文件清单、commit 与 bundle 摘要供用户确认；不落任何状态。
  * - install：按预览钉住的 commit 重取文件，bundle 摘要与预览一致才交给 skill-store 原子发布。
  * - checkUpdate：只报告事实（最新/有新版/来源变化/暂不可核对），不自动安装。
@@ -39,7 +40,8 @@ export function createSkillsmpService({ store, fetchImpl = fetch, cacheFile = nu
       }
     },
     async preview({ id } = {}) {
-      const skill = await mp.detail(id);
+      const skill = mp.cachedEntry(id);
+      if (!skill) failure('该条目不在最近搜索结果里，请重新搜索后再添加');
       if (!skill.githubUrl) failure('该条目没有 GitHub 来源，无法添加到 Hemi');
       const snapshot = await snapshotOf(skill.githubUrl);
       return {
@@ -89,7 +91,8 @@ export function createSkillsmpService({ store, fetchImpl = fetch, cacheFile = nu
       if (view.origin !== 'skillsmp' || !view.github) failure('仅 SkillsMP 来源的技能支持在线检查更新');
       let skill;
       try {
-        skill = await mp.detail(view.github.entryId);
+        // creator 用仓库 owner 精确列作者的条目（REST 匿名搜索支持的作者过滤）。
+        skill = await mp.detail(view.github.entryId, { creator: view.github.repo.split('/')[0] });
       } catch (error) {
         return { ok: true, status: 'unavailable', reason: `暂无法核对 SkillsMP 条目：${error.message}` };
       }
