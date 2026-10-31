@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   platform:
-    name: 选择单个平台
+    name: 选择发布平台
     runs-on: ubuntu-latest
     outputs:
       target: ${{ steps.select.outputs.target }}
@@ -35,6 +35,8 @@ jobs:
           SUBJECT=$(git log -1 --format=%s)
           if [[ "$SUBJECT" == *"[win-only]"* ]]; then
             echo "target=win" >> "$GITHUB_OUTPUT"
+          elif [[ "$SUBJECT" == *"[both]"* ]]; then
+            echo "target=both" >> "$GITHUB_OUTPUT"
           else
             echo "target=mac" >> "$GITHUB_OUTPUT"
           fi
@@ -43,7 +45,7 @@ jobs:
     name: macOS arm64 · 安装包与更新清单
     runs-on: macos-15
     needs: platform
-    if: needs.platform.outputs.target == 'mac'
+    if: needs.platform.outputs.target == 'mac' || needs.platform.outputs.target == 'both'
     steps:
       - uses: actions/checkout@v4
 
@@ -96,31 +98,44 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
-            release/*.dmg release/*-mac.zip release/*.blockmap release/latest-mac.yml \
-            release/uiohook-napi-1.5.5-source.tar.gz release/licenses-macos.json \
-            --title "Hemi ${GITHUB_REF_NAME#v}" \
-            --notes-file docs/release-notes.md \
-            --draft
-          node scripts/relay-release-manifest.mjs "$GITHUB_REF_NAME" mac
+          ASSETS="release/*.dmg release/*-mac.zip release/*.blockmap release/latest-mac.yml release/uiohook-napi-1.5.5-source.tar.gz release/licenses-macos.json"
+          # 双端模式两个 job 并行：谁先到谁建草稿，后到的只补资产
+          #（--clobber 兼容重跑重传；绝不并行走 electron-builder publisher）。
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $ASSETS --clobber
+          elif gh release create "$GITHUB_REF_NAME" $ASSETS \
+              --title "Hemi ${GITHUB_REF_NAME#v}" \
+              --notes-file docs/release-notes.md \
+              --draft; then
+            echo "draft release created by mac job"
+          else
+            gh release upload "$GITHUB_REF_NAME" $ASSETS --clobber
+          fi
 
+      - name: 保留另一平台更新清单（仅单平台发版需要中继）
+        if: needs.platform.outputs.target == 'mac'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/relay-release-manifest.mjs "$GITHUB_REF_NAME" mac
       - name: 表观体积（exFAT/du 口径失真，产物体积按字节加总）
         run: |
           BYTES=$(find release/mac-arm64/Hemi.app -type f -exec stat -f %z {} + | awk '{s+=$1} END{print s}')
           echo "app apparent size: $BYTES bytes ($((BYTES / 1024 / 1024)) MB)"
 
-      - name: 发布仅 macOS 版本
+      - name: 发布仅 macOS 版本（仅单平台发版）
+        if: needs.platform.outputs.target == 'mac'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
 
-  # Windows 自己创建并发布 release，不再等待 macOS 构建。
+  # Windows 与 macOS 并行构建（双端模式）；单 win 模式自己建 release 并发布。
   release-win:
     name: Windows x64 · nsis 安装包
     runs-on: windows-latest
     needs: platform
-    if: needs.platform.outputs.target == 'win'
+    if: needs.platform.outputs.target == 'win' || needs.platform.outputs.target == 'both'
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -177,7 +192,7 @@ jobs:
           if (-not $proc.WaitForExit(300000)) { $proc.Kill($true); throw '冒烟 5 分钟未退出' }
           if ($proc.ExitCode -ne 0) { throw "打包体冒烟退出码 $($proc.ExitCode)" }
 
-      - name: 创建并发布 Windows release
+      - name: 创建并上挂 Windows 资产
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -193,9 +208,54 @@ jobs:
           Copy-Item third-party/uiohook-napi-1.5.5-source.tar.gz release/
           $assets += @(Get-ChildItem release -Filter 'uiohook-napi-1.5.5-source.tar.gz')
           if (-not $assets) { throw 'release/ 下没找到安装包' }
-          gh release create $env:GITHUB_REF_NAME @($assets.FullName) --title "Hemi $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file docs/release-notes.md --draft
-          if ($LASTEXITCODE -ne 0) { throw '资产上传失败' }
-          node scripts/relay-release-manifest.mjs $env:GITHUB_REF_NAME win
-          if ($LASTEXITCODE -ne 0) { throw '保留 macOS 更新清单失败' }
+          # 双端模式两个 job 并行：谁先到谁建草稿，后到的只补资产。
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME @($assets.FullName) --clobber
+            if ($LASTEXITCODE -ne 0) { throw '资产补挂失败' }
+          } else {
+            gh release create $env:GITHUB_REF_NAME @($assets.FullName) --title "Hemi $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file docs/release-notes.md --draft
+            if ($LASTEXITCODE -ne 0) { throw '草稿创建失败' }
+          }
+
+      - name: 保留 macOS 更新清单（仅单平台发版需要中继）
+        if: needs.platform.outputs.target == 'win'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: node scripts/relay-release-manifest.mjs "$GITHUB_REF_NAME" win
+
+      - name: 发布仅 Windows 版本（仅单平台发版）
+        if: needs.platform.outputs.target == 'win'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw '发布失败' }
+
+  # 双端齐备后的单一收口：确认两份更新清单都在场，再转正式 + --latest。
+  # 历史上双 publisher 并发发布会撞出同 tag 双 release（v0.4.0～v0.5.1），
+  # 这里让两个平台 job 只建草稿/补资产，发布动作只在这一个 job 发生。
+  publish-release:
+    name: 双端齐备后发布
+    runs-on: ubuntu-latest
+    needs: [platform, release-mac, release-win]
+    if: needs.platform.outputs.target == 'both'
+    steps:
+      - name: 双端资产齐备，正式发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ASSETS=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name]')
+          echo "assets: $ASSETS"
+          # 双端原生清单必须都在本 release（同一 tag 双端安装包 + latest-mac.yml + latest.yml）。
+          for manifest in latest-mac.yml latest.yml; do
+            echo "$ASSETS" | grep -q "\"$manifest\"" || { echo "缺 $manifest"; exit 1; }
+          done
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

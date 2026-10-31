@@ -47,7 +47,10 @@ const args = process.argv.slice(2);
 const fix = args.includes('--fix');
 const noSmoke = args.includes('--no-smoke');
 const fresh = args.includes('--fresh');
-const macOnly = releasePlatform(args) === 'mac';
+const releaseTarget = releasePlatform(args);
+// 双端发版：release 对象按双端完整性核验（不跳过任一端资产）；本机冒烟按宿主平台走。
+const bothMode = releaseTarget === 'both';
+const macOnly = releaseTarget === 'mac' || (bothMode && process.platform === 'darwin');
 const explicitTag = args.find((arg) => /^v/.test(arg));
 const tag = explicitTag ?? `v${pkg.version}`;
 
@@ -180,8 +183,8 @@ ok(`非草稿 · ${release.assets.length} 资产 · ${release.html_url}`);
 // ── 3. 资产与更新清单核验（latest-mac.yml + latest.yml） ─────────────────
 step(`资产与更新清单核验（${MANIFEST}）`);
 for (const suffix of REQUIRED_ASSETS) {
-  if (macOnly && (suffix === '-setup.exe' || suffix === WIN_MANIFEST || suffix === 'licenses-windows.json')) continue;
-  if (!macOnly && ['.dmg', '-mac.zip', 'latest-mac.yml', 'licenses-macos.json'].includes(suffix)) continue;
+  if (macOnly && !bothMode && (suffix === '-setup.exe' || suffix === WIN_MANIFEST || suffix === 'licenses-windows.json')) continue;
+  if (!macOnly && !bothMode && ['.dmg', '-mac.zip', 'latest-mac.yml', 'licenses-macos.json'].includes(suffix)) continue;
   if (!release.assets.some((a) => a.name.endsWith(suffix))) fail(`缺 ${suffix} 产物`);
 }
 for (const blockmap of release.assets.filter((a) => a.name.endsWith('.blockmap'))) ok(`blockmap ${blockmap.name} 在场`);

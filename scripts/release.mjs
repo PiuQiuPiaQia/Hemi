@@ -8,7 +8,8 @@
  *   npm run release -- patch|minor|major   # 按语义递增
  *   npm run release -- 0.4.0               # 显式版本
  *   --skip-tests                           # 跳过全量单测（typecheck/build 仍跑）
- *   默认仅发布当前平台；--mac-only / --win-only 可显式选择目标
+ *   默认双端同 tag 同时发布（CI 双 job，单一收口发布）；--mac-only /
+ *   --win-only 可退回单平台发版。
  *
  * 退出码非 0 即未发版（不产生 commit/tag/push）。
  */
@@ -28,7 +29,7 @@ const platform = releasePlatform(args);
 const bump = args.find((arg) => !arg.startsWith('--'));
 
 if (!bump) {
-  console.error('用法：npm run release -- <patch|minor|major|显式版本> [--skip-tests] [--mac-only|--win-only]');
+  console.error('用法：npm run release -- <patch|minor|major|显式版本> [--skip-tests] [--both|--mac-only|--win-only]');
   process.exit(1);
 }
 
@@ -116,7 +117,9 @@ const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
 writeFileSync(`${repoRoot}${manifestPath}`, manifestBytes);
 writeFileSync(`${repoRoot}dist-renderer/licenses/renderer-components.json`, manifestBytes);
 run('git', ['add', 'package.json', 'package-lock.json', manifestPath]);
-run('git', ['commit', '-m', `release: ${tag} [${platform === 'mac' ? 'mac' : 'win'}-only]`]);
+const PLATFORM_LABEL = platform === 'both' ? 'macOS + Windows' : platform === 'mac' ? 'macOS' : 'Windows';
+// 单平台标记沿用历史 [mac-only]/[win-only] 口径（CI 选择器按它路由 job）。
+run('git', ['commit', '-m', `release: ${tag} [${platform === 'both' ? 'both' : `${platform}-only`}]`]);
 // 必须附注标签：轻量标签在部分推送路径会被静默漏掉（v0.4.0 实测：tag 没上去、CI 没触发）。
 run('git', ['tag', '-a', tag, '-m', tag]);
 // 显式推当版 tag——旧写法 `--follow-tags` 会把本地所有未推的附注标签一起带上去：
@@ -125,10 +128,9 @@ run('git', ['tag', '-a', tag, '-m', tag]);
 run('git', ['push', '--atomic', 'origin', 'HEAD:refs/heads/main', `refs/tags/${tag}`]);
 
 console.log(`
-已发版 ${tag}（仅 ${platform === 'mac' ? 'macOS' : 'Windows'}），已推送。CI 正在构建：
+已发版 ${tag}（${PLATFORM_LABEL}），已推送。CI 正在构建：
   https://github.com/PiuQiuPiaQia/Hemi/actions/workflows/release.yml
-
-产物发布后按 AGENTS.md 打包节验收：
+${platform === 'both' ? '双端各自构建上挂资产，齐备后由收口 job 统一转正式（--latest）。\n' : ''}产物发布后按 AGENTS.md 打包节验收：
   - dmg 表观体积与 ._ * 垃圾清零口径
   - 安装后设置 → 通用 → 关于与更新：检查更新/下载/重启安装走一轮
 `);

@@ -1,11 +1,12 @@
 export function releasePlatform(args, host = process.platform) {
-  const mac = args.includes('--mac-only'), win = args.includes('--win-only');
-  if (mac && win) throw new Error('每次只能发布一个平台，请只选择 --mac-only 或 --win-only。');
+  const mac = args.includes('--mac-only'), win = args.includes('--win-only'), both = args.includes('--both');
+  // 2026-11 起双端同 tag 同时发布为默认；--both 显式声明同一行为。
+  if ([mac, win, both].filter(Boolean).length > 1) throw new Error('平台参数只能选一个：--both（默认）或 --mac-only / --win-only。');
   if (mac) return 'mac';
   if (win) return 'win';
-  if (host === 'darwin') return 'mac';
-  if (host === 'win32') return 'win';
-  throw new Error('请显式选择 --mac-only 或 --win-only。');
+  if (both) return 'both';
+  void host;
+  return 'both';
 }
 
 /** Keep older installed clients on /latest/download working across separate releases. */
