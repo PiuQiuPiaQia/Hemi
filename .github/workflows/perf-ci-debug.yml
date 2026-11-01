@@ -6,6 +6,7 @@ permissions:
   contents: read
 jobs:
   diagnose:
+    if: "!contains(github.event.head_commit.message, 'minimal probe')"
     runs-on: windows-latest
     timeout-minutes: 8
     steps:
@@ -19,3 +20,17 @@ jobs:
       - name: Background handoff with exit diagnostics
         timeout-minutes: 3
         run: node --test src/main/agent-runtime/background-handoff.test.mjs
+  minimal:
+    if: contains(github.event.head_commit.message, 'minimal probe')
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Minimal storage worker exit
+        timeout-minutes: 1
+        run: node --test scripts/debug-storage-exit.test.mjs
