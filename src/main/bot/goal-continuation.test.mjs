@@ -32,7 +32,7 @@ async function fixture(t, mode, goalPolicy={}) {
         if(generated===1)tool={id:'side-effect-once',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "require('fs').appendFileSync('proof.txt','goal proof\\n')"`,yield_ms:1000})}};
         else content='命令回执已核对，操作完成。';
       } else if(mode==='background-chunk') {
-        if(!body.messages.some(message=>message.role==='tool'))tool={id:'quota-background',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "setTimeout(()=>require('fs').writeFileSync('proof.txt','goal proof'),500)"`,run_in_background:true,yield_ms:20})}};
+        if(!body.messages.some(message=>message.role==='tool'))tool={id:'quota-background',type:'function',function:{name:'bash',arguments:JSON.stringify({command:`"${process.execPath}" -e "const fs=require('fs');const t=setInterval(()=>{if(fs.existsSync('release-background')){clearInterval(t);fs.writeFileSync('proof.txt','goal proof')}},20)"`,run_in_background:true,yield_ms:20})}};
         else content='等待已受理的命令完成。';
       } else if(mode==='subagent-chunk') {
         const main=body.tools?.some(tool=>tool.function.name==='task');
@@ -151,7 +151,12 @@ test('real background child report is consumed once when the shared request chun
 
 
 test('accepted background command finishes despite a shared chunk limit before completion is verified', {timeout:90000}, async t=>{
- const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.values(v.runs).some(run=>run.source==='event'&&run.outcome==='completed')?v:null;},60000);assert.equal(Object.values(flow.runs)[0].outcome,'awaiting-background',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
+ const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();
+ // The scenario requires a real foreground handoff, not a clock race between
+ // a short command and the runner's filesystem/model setup latency.
+ await until(async()=>Object.values((await f.flow()).runs).some(run=>run.outcome==='awaiting-background'),60000);
+ await fs.writeFile(path.join(f.workspace,'release-background'),'go');
+ const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.values(v.runs).some(run=>run.source==='event'&&run.outcome==='completed')?v:null;},60000);assert.equal(Object.values(flow.runs)[0].outcome,'awaiting-background',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');const j=await f.journal(),processes=Object.values(j.processes).filter(item=>item.owner.conversationId===f.id);assert.equal(processes.length,1);assert.equal(processes[0].state,'finished');assert.equal(processes[0].cleanupConfirmed,true);assert.notEqual(processes[0].status,'cancelled');
  const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.ok(root.goal.round>=2);assert.equal(root.goal.verifications.length,1);assert.equal(root.goal.verifications[0].status,'complete');
 });
