@@ -12,12 +12,23 @@ import { createLocalSkillScanner } from '../skills/local-agent-skills.mjs';
 import { errorView } from '../bot/storage.mjs';
 
 // 仅替换 Electron/远传边界；实际 handler/preload 原码、scanner、store 在真实临时 FS 上执行。
-async function loadIpc(file, globals, exports) {
-  const source = (await fs.readFile(new URL(file, import.meta.url), 'utf8'))
+function ipcScriptSource(source, exports) {
+  const body = source.replace(/\r\n?/g, '\n')
     .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
-  return new vm.Script(`${source}\n;({${exports.join(',')}})`, { filename: file })
+  return `${body}\n;({${exports.join(',')}})`;
+}
+async function loadIpc(file, globals, exports) {
+  const source = await fs.readFile(new URL(file, import.meta.url), 'utf8');
+  return new vm.Script(ipcScriptSource(source, exports), { filename: file })
     .runInNewContext({ process, console, Buffer, ...globals });
 }
+test('IPC 原码测试装载器兼容 LF 与 Windows CRLF 换行', () => {
+  for (const newline of ['\n', '\r\n']) {
+    const source = ["import { ignored } from 'electron';", 'export const value = 42;', ''].join(newline);
+    const result = new vm.Script(ipcScriptSource(source, ['value'])).runInNewContext({});
+    assert.equal(result.value, 42);
+  }
+});
 async function setup(t) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-skill-ipc-'));
   t.after(() => fs.rm(temp, { recursive: true, force: true }));
