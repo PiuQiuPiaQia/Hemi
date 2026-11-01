@@ -1,0 +1,54 @@
+name: Deploy website to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pages.yml'
+      - 'outputs/hemi-site-simple/index.html'
+      - 'outputs/hemi-site-simple/styles.css'
+      - 'outputs/hemi-site-simple/.nojekyll'
+      - 'outputs/hemi-site-simple/media/icon.svg'
+      - 'outputs/hemi-site-simple/media/poster.jpg'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Assemble public website
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE="${RUNNER_TEMP}/hemi-pages"
+          mkdir -p "${SITE}/media"
+          cp outputs/hemi-site-simple/index.html outputs/hemi-site-simple/styles.css outputs/hemi-site-simple/.nojekyll "${SITE}/"
+          cp outputs/hemi-site-simple/media/icon.svg outputs/hemi-site-simple/media/poster.jpg "${SITE}/media/"
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/hemi-pages
+
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4

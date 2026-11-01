@@ -12,6 +12,14 @@ node outputs/hemi-site-simple/tools/serve.mjs 4320
 
 打开 <http://127.0.0.1:4320/>。服务器仅监听本机，支持视频 Range 请求；这不是公开部署。
 
+## GitHub Pages 发布
+
+线上地址：<https://piuqiupiaqia.github.io/Hemi/>。
+
+仓库 Pages 使用 GitHub Actions。`.github/workflows/pages.yml` 在 `main` 上的官网文件更新时自动部署，也可在 Actions 中手动运行 **Deploy website to GitHub Pages**。
+
+发布采用文件白名单，只包含 `index.html`、`styles.css`、`.nojekyll`、`media/icon.svg` 和 `media/poster.jpg`。视频直接从 OSS 播放，不上传本地 MP4、视频工程、QA 截图、开发工具或说明文件。
+
 ## 内容维护
 
 - 页面与样式：`index.html`、`styles.css`。
