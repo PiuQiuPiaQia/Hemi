@@ -309,6 +309,7 @@ export function applyFlowFact(snapshot, fact) {
       if (fact.continuationOf && snapshot.awaitingUser?.runId !== fact.continuationOf) return {snapshot,patch:null,applied:false,dropped:'stale-continuation'};
       const run = {
         runId: fact.runId,
+        rootRunId: fact.rootRunId ?? fact.runId,
         generation: snapshot.generation,
         source: fact.source ?? 'user',
         inputIds: fact.inputIds ?? [],

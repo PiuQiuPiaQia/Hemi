@@ -5,6 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSy
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createTaskHandoff } from '../../shared/task-handoff.mjs';
 
 import {
   MAX_RECORDS,
@@ -21,11 +22,29 @@ function makeStore(dir, extra = {}) {
   return createTaskHistory({ dir, ...extra });
 }
 
+test('structured handoff and missing-report status survive history recovery without fabricated validation', () => {
+  const dir=mkdtempSync(path.join(os.tmpdir(),'hemi-handoff-history-'));
+  try {
+    const store=makeStore(dir), record=store.createRecord({taskText:'核对文件',context:'已有任务'});
+    const outcomeReason='子任务未提交交接';
+    const handoff=createTaskHandoff({taskId:record.taskId,outcome:'partial',outcomeReason},{owner:{conversationId:'c',rootRunId:'r',generation:1},status:'missing'});
+    store.finishRecord(record.taskId,{outcome:'partial',outcomeReason,resultText:'已有工作',handoff});
+    const recovered=makeStore(dir); recovered.recoverOnBoot();
+    assert.deepEqual(recovered.getRecord(record.taskId).handoff,handoff);
+    assert.deepEqual(snapshotFromRecord(recovered.getRecord(record.taskId)).handoff,handoff);
+    const bad=structuredClone(handoff);bad.version=2;
+    assert.throws(()=>recovered.finishRecord(record.taskId,{outcome:'partial',outcomeReason,handoff:bad}),/信封版本/);
+    assert.deepEqual(recovered.getRecord(record.taskId).handoff,handoff);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
 test('newTaskId/isTerminalOutcome/excerptContext 基本语义', () => {
   const id = newTaskId(3, 1758100000000);
   assert.match(id, /^task-3-[a-z0-9]+$/);
   assert.notEqual(newTaskId(3, 1758100000001), id);
   assert.equal(isTerminalOutcome('complete'), true);
+  assert.equal(isTerminalOutcome('returned'), true);
+  assert.equal(isTerminalOutcome('handoff'), true);
   assert.equal(isTerminalOutcome(null), false);
   assert.equal(excerptContext(''), '');
   const long = excerptContext('字'.repeat(3000), 2000);

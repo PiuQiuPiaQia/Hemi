@@ -5,6 +5,7 @@
  */
 
 import type {AppearanceBootstrap,AppearanceSnapshot,AppearanceSetRequest,AppearanceSetResult,AppearanceApplied,AppearanceActivity} from './appearance/types';
+import type {TaskHandoff} from './task-handoff.mjs';
 export type {AppearanceBootstrap,AppearanceSnapshot,AppearancePreference,AppearanceSetRequest,AppearanceSetResult,AppearanceApplied,AppearanceActivity,SkinId} from './appearance/types';
 
 export type DoubaoConfig = {
@@ -591,6 +592,8 @@ export type TaskPhase =
 
 export type TaskOutcome =
   | 'complete'
+  | 'returned'
+  | 'handoff'
   | 'stopped'
   | 'denied'
   | 'blocked'
@@ -853,6 +856,8 @@ export type TaskStateSnapshot = {
   resultText: string | null;
   /** 050：正文版本（渲染去重身份＝taskId+resultVersion）；旧快照缺省 0。 */
   resultVersion?: number;
+  /** 子任务固定交接；旧档缺省，模型声明不等于独立验收。 */
+  handoff?: TaskHandoff | null;
   /** 050：正文来源（executor / fallback-report / legacy-delivery / legacy-result）。 */
   bodySource?: 'executor' | 'fallback-report' | 'legacy-delivery' | 'legacy-result' | null;
   /** 050：语音短交代（回炉产物）——TTS/字幕读这里，不念正文；旧快照缺省。 */
@@ -1207,6 +1212,7 @@ export type TaskHistoryList = {
 
 /** 009 完整记录（详情）：事实档案，只读展示。 */
 export type TaskHistoryRecord = TaskHistoryView & {
+  handoff?: TaskHandoff | null;
   contextExcerpt: string;
   resultText: string | null;
   report: string | null;

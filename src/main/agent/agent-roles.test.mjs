@@ -86,14 +86,15 @@ test('agent-tools：task 走 spawn 统一受理返回 accepted；重复派单已
   assert.equal(calls[1].background, true);
   // 重复派单已完成时回读既有结果，格式化成报告返回。
   const again = await byName.task.execute('id', { agent: 'explorer', description: '找', prompt: '找文件', session_id: 'explorer-1' });
-  assert.equal(JSON.parse(again.content[0].text).summary, 'R');
+  assert.equal(JSON.parse(again.content[0].text).unstructuredReport, 'R');
   assert.equal(JSON.parse(again.content[0].text).session_id, 'explorer-1');
 });
 
 test('formatSubagentResult：保留真实状态、缺口与报告引用，不重复注入长规则或性能流水账', () => {
   const value = JSON.parse(formatSubagentResult({ alias: 'fixer-1', agent: 'fixer', outcome: 'stopped', outcomeReason: '用户停止', report: '改了一半', reportRef: 'ctx-full-report', truncated: true, totalChars: 20000, taskId: 'rec-1', toolCalls: 2, durationMs: 3000 }));
-  assert.equal(value.outcome, 'stopped'); assert.equal(value.reason, '用户停止');
-  assert.equal(value.summary, '改了一半'); assert.equal(value.reportRef, 'ctx-full-report');
+  assert.equal(value.handoff.execution.outcome, 'stopped'); assert.equal(value.handoff.execution.reason, '用户停止');
+  assert.equal(value.unstructuredReport, '改了一半'); assert.equal(value.handoff.evidence.reportRef, 'ctx-full-report');
+  assert.equal(value.handoff.submission.status, 'legacy');
   assert.equal(value.omitted, true); assert.equal(value.totalChars, 20000);
   assert.equal(JSON.stringify(value).includes(SUBAGENT_RESULT_GUIDANCE), false);
   assert.equal(value.durationMs, undefined);
@@ -122,5 +123,5 @@ test('角色工具覆盖：执行能力均有角色可承接，主控制工具�
 test('模型服务长错误只在默认交接给出必要状态，完整错误由报告引用读取',()=>{
  const raw='模型调用中断：502 {"ray_id":"RAW_DIAGNOSTIC_ID","detail":"upstream unavailable"}';
  const value=JSON.parse(formatSubagentResult({taskId:'t',agent:'oracle',outcome:'unknown',outcomeReason:raw,reportRef:'ctx-error'}));
- assert.match(value.reason,/HTTP 502/);assert.equal(value.reportRef,'ctx-error');assert.equal(JSON.stringify(value).includes('RAW_DIAGNOSTIC_ID'),false);
+ assert.match(value.handoff.execution.reason,/HTTP 502/);assert.equal(value.handoff.evidence.reportRef,'ctx-error');assert.equal(JSON.stringify(value).includes('RAW_DIAGNOSTIC_ID'),false);
 });

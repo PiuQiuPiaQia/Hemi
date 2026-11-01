@@ -31,7 +31,10 @@ test('real SDK child stream, actual file tools and restart preserve a separate t
       await proceed.promise;
       send({ content: 'CHILD_COMMENTARY_ONLY' });
       tool = { id: 'read-proof', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: 'proof.txt' }) } };
-    } else send({ role: 'assistant', content: main ? 'ROOT_DONE' : 'CHILD_DONE' });
+    } else if (!main && childCalls === 2) {
+      send({role:'assistant',content:'CHILD_DONE'});
+      tool={id:'submit-child',type:'function',function:{name:'submit_task_result',arguments:JSON.stringify({version:1,summary:'CHILD_DONE',completed:['读取 proof.txt'],remaining:[],blockers:[],verification:[{check:'文件内容',status:'passed',evidence:'read 返回 CHILD_TOOL_PROOF'}],nextAction:''})}};
+    } else send({ role: 'assistant', content: main ? 'ROOT_DONE' : '' });
     if (tool) send({ role: 'assistant', tool_calls: [{ index: 0, ...tool }] });
     send({}, tool ? 'tool_calls' : 'stop'); res.end('data: [DONE]\n\n');
   });
@@ -68,15 +71,22 @@ test('real SDK child stream, actual file tools and restart preserve a separate t
   proceed.resolve();
   const finished = await wait(async () => { const flow = await call('flow.snapshot', { id }); return flow.phase === 'idle' && flow; });
   const task = Object.values(finished.tasks)[0];
-  assert.equal(task.outcome, 'complete');
+  assert.equal(task.outcome, 'returned');
   const messages = task.conversation.messages;
   assert.deepEqual(messages.map(message => message.author), ['user', 'hemi', 'hemi']);
   assert.deepEqual(messages[1].parts.map(part => part.type), ['thinking', 'text', 'tools']);
   assert.equal(messages[1].parts[2].calls[0].output, 'CHILD_TOOL_PROOF');
   assert.equal(messages[1].parts[2].calls[0].state, 'done');
   assert.equal(messages[2].text, 'CHILD_DONE');
+  const journal=JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
+  const handoff=journal.tasks[task.taskId].result.handoff;
+  assert.equal(handoff.submission.status,'submitted');assert.equal(handoff.owner.taskId,task.taskId);
+  assert.equal(handoff.submission.data.verification[0].status,'passed');
   assert.doesNotMatch(JSON.stringify(finished.timeline), /CHILD_(THINKING|COMMENTARY)_ONLY/);
   await host.close(); host = null; await start();
   const restored = await call('flow.snapshot', { id });
+  assert.equal(Object.values(restored.tasks)[0].outcome, 'returned');
   assert.deepEqual(Object.values(restored.tasks)[0].conversation, task.conversation);
+  const saved=JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
+  assert.deepEqual(saved.tasks[task.taskId].result.handoff,handoff);
 });

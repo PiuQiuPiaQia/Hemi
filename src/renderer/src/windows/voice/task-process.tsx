@@ -36,6 +36,10 @@ function stateLabelOf(snap: TaskStateSnapshot): string {
   if (snap.phase === 'stopping') return '停止中';
   if (snap.phase !== 'terminal') return snap.progressText || '进行中';
   switch (snap.outcome) {
+    case 'returned':
+      return '已返回';
+    case 'handoff':
+      return '已交接';
     case 'complete':
       return '已完成';
     case 'stopped':

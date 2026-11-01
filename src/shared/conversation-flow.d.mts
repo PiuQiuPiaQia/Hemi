@@ -23,6 +23,8 @@ export type FlowInput = {
 
 export type FlowRunSummary = {
   runId: string;
+  /** 后台事件回合保留原执行目标；旧档缺省为自身 runId。 */
+  rootRunId?: string;
   recovery?: import('@hemi/conversation-flow').ModelRecoveryView;
   generation: number;
   source: 'user' | 'queue' | 'event';

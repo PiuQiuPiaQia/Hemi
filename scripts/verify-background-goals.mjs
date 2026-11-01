@@ -21,10 +21,12 @@ fs.writeFileSync(path.join(userData,'appearance.json'),JSON.stringify({schemaVer
 fs.writeFileSync(path.join(workspace,'service.cjs'),`const fs=require('node:fs');let logged=false;setInterval(()=>{if(!logged&&fs.existsSync('emit-output')){logged=true;console.log('DEV_LOG_AFTER_REPLY')}},50);require('node:http').createServer((q,s)=>s.end('REAL_SERVICE_READY')).listen(0,'127.0.0.1',function(){fs.writeFileSync('port',String(this.address().port))});`);
 fs.writeFileSync(path.join(workspace,'probe.cjs'),`const fs=require('node:fs'),end=Date.now()+10000;async function probe(){try{if(fs.existsSync('allow-ready')){const r=await fetch('http://127.0.0.1:'+fs.readFileSync('port','utf8'),{signal:AbortSignal.timeout(500)});if(await r.text()==='REAL_SERVICE_READY'){fs.writeFileSync('ready-proof','HTTP_READY');console.log('BOUNDED_HTTP_READY');return}}}catch{}if(Date.now()>end)process.exit(1);setTimeout(probe,30)}probe();`);
 fs.writeFileSync(path.join(workspace,'build.cjs'),`const fs=require('node:fs');fs.writeFileSync('build-started','YES');const t=setInterval(()=>{if(fs.existsSync('build-release')){clearInterval(t);fs.writeFileSync('build-proof','REAL_BUILD_RESULT');console.log('REAL_BUILD_RESULT')}},30);`);
+fs.writeFileSync(path.join(workspace,'current.cjs'),`require('node:fs').writeFileSync(process.argv[2],'STARTED');setInterval(()=>{},1000);`);
 const report={mode,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),workingTree:true,node:process.version,platform:`${process.platform}/${process.arch}`,checks:[],errors:[]};
-const counts=new Map(),verifications=new Map();let app,page,vite,serviceId;
+const counts=new Map(),verifications=new Map(),held=new Map();let app,page,vite,serviceId;
 const journal=()=>JSON.parse(fs.readFileSync(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
 const reply=(res,body,content,tool)=>{
+  if(res.destroyed)return;
   res.writeHead(200,{'content-type':'text/event-stream'});
   const delta=tool?{role:'assistant',tool_calls:[{index:0,id:randomUUID(),type:'function',function:{name:tool.name,arguments:JSON.stringify(tool.args)}}]}:{role:'assistant',content};
   for(const [value,finish] of [[delta,null],[{},tool?'tool_calls':'stop']])res.write(`data: ${JSON.stringify({id:randomUUID(),model:body.model,choices:[{index:0,delta:value,finish_reason:finish}],...(finish?{usage:{prompt_tokens:25,completion_tokens:10}}:{})})}\n\n`);
@@ -47,10 +49,15 @@ const server=http.createServer(async(req,res)=>{
     }
     if(!body.tools?.length){reply(res,body,'服务生命周期验收');return;}
     const marker=body.messages.filter(m=>m.role==='user').reverse().map(m=>{
-      const text=JSON.stringify(m.content);return text.includes('STOP_SERVICE')?'stop':text.includes('BUILD_CASE')?'build':text.includes('FOLLOW_UP_QUESTION')?'follow':text.includes('START_SERVICE')?'start':null;
+      // 用输入首行分派合成回复，不能把宿主附带的已停止目标摘录当作新输入。
+      const text=(typeof m.content==='string'?m.content:m.content.map(part=>part.text??'').join('\n')).split('\n')[0];
+      return text.match(/CANCEL_SCOPE_(?:STOP|PROMOTE|ESCALATE)/)?.[0]??(text.includes('STOP_SERVICE')?'stop':text.includes('BUILD_CASE')?'build':text.includes('FOLLOW_UP_QUESTION')?'follow':text.includes('START_SERVICE')?'start':null);
     }).find(Boolean)??'start';
     const count=(counts.get(marker)??0)+1;counts.set(marker,count);
-    if(marker==='start'&&count===1)reply(res,body,null,{name:'bash',args:{command:`"${process.execPath}" service.cjs`,description:'启动开发服务供验证',run_in_background:true,timeout_ms:120000}});
+    if(marker.startsWith('CANCEL_SCOPE_'))(report.scopeRequests??=[]).push({marker,count});
+    if(marker.startsWith('CANCEL_SCOPE_')&&count===1)reply(res,body,null,{name:'bash',args:{command:`"${process.execPath}" current.cjs ${marker}`,description:`当前目标命令 ${marker}`,run_in_background:true,timeout_ms:120000}});
+    else if(marker.startsWith('CANCEL_SCOPE_'))held.set(marker,()=>reply(res,body,'CURRENT_REPLY_FINISHED'));
+    else if(marker==='start'&&count===1)reply(res,body,null,{name:'bash',args:{command:`"${process.execPath}" service.cjs`,description:'启动开发服务供验证',run_in_background:true,timeout_ms:120000}});
     else if(marker==='start'&&count===2)reply(res,body,null,{name:'bash',args:{command:`"${process.execPath}" probe.cjs`,description:'有界 HTTP 就绪核验',yield_ms:12000,timeout_ms:15000}});
     else if(marker==='stop'&&count===1)reply(res,body,null,{name:'job_kill',args:{job_id:serviceId}});
     else if(marker==='build'&&count===1)reply(res,body,null,{name:'bash',args:{command:`"${process.execPath}" build.cjs`,description:'构建并核对实际结果',run_in_background:true,timeout_ms:120000}});
@@ -134,13 +141,41 @@ try{
   assert.ok(JSON.stringify(built.timeline).includes('REAL_BUILD_RESULT'));assert.equal(journal().processes[serviceId].state,'active');
   const buildRoot=journal().roots[build.owner.rootRunId];assert.equal(buildRoot.goal.phase,'complete');assert.equal(buildRoot.goal.round,2);
   check('finite build releases foreground, another question completes, then real completion wakes its original goal once');
+  for(const action of ['STOP','PROMOTE','ESCALATE']){
+    const marker=`CANCEL_SCOPE_${action}`,before=(await flow(cid)).backgroundJobs.find(job=>job.id===serviceId);
+    await input().fill(`${marker} 执行当前目标的命令。`);await input().press('Enter');
+    await wait(()=>held.has(marker)&&fs.existsSync(path.join(workspace,marker)),'current goal command and next model request are live');
+    const active=await flow(cid),runId=active.activeRunId;
+    const current=Object.values(journal().processes).find(job=>job.owner.rootRunId===runId);
+    if(action!=='STOP'){
+      await page.evaluate(cid=>window.hemiVoice.flowCommand(cid,{type:'send',input:{inputId:'next-'+Date.now(),text:'FOLLOW_UP_QUESTION 只回答这条新问题。'}}),cid);
+      const pending=(await flow(cid)).pending.at(-1);
+      await page.evaluate(({cid,inputId})=>window.hemiVoice.flowCommand(cid,{type:'promoteInput',inputId}),{cid,inputId:pending.inputId});
+    }
+    if(action!=='PROMOTE')await page.evaluate(cid=>window.hemiVoice.flowCommand(cid,{type:'stop'}),cid);
+    held.get(marker)();
+    const done=await wait(async()=>{const s=await flow(cid);report.lastScopeFlow={phase:s.phase,runId,outcome:s.runs[runId].outcome,activeRunId:s.activeRunId};return s.phase==='idle'&&s.runs[runId].outcome==='stopped'?s:null;},'current goal stops without stopping the earlier service');
+    assert.equal(journal().processes[current.id].status,'cancelled');assert.equal(journal().processes[current.id].cleanupConfirmed,true);
+    const after=done.backgroundJobs.find(job=>job.id===serviceId);
+    assert.deepEqual([after.id,after.startedAt,after.deadlineAt],[before.id,before.startedAt,before.deadlineAt]);
+    assert.equal(journal().processes[serviceId].pid,processFact.pid);assert.equal(journal().processes[serviceId].state,'active');
+    assert.equal(await (await fetch(url,{signal:AbortSignal.timeout(1000)})).text(),'REAL_SERVICE_READY');
+    if(action==='ESCALATE'){
+      assert.equal(done.queuePaused,true);assert.equal(done.pending.length,1,'升级停止后优先项不得悄悄执行');
+      await page.evaluate(cid=>window.hemiVoice.flowCommand(cid,{type:'resumeQueue'}),cid);
+      await wait(async()=>{const s=await flow(cid);return s.phase==='idle'&&s.pending.length===0;},'explicit queue resume');
+    }
+    assert.equal(counts.get(marker),2,'late replies cannot resume the cancelled goal');
+    await page.screenshot({path:path.join(evidence,`cancel-scope-${action.toLowerCase()}.png`)});
+    check(`${action}: current command is reaped; earlier service keeps its PID, deadline, HTTP response and controls`);
+  }
   const finalList=page.getByRole('region',{name:'后台任务列表'});
   if(!(await finalList.locator('details').evaluate(element=>element.open)))await finalList.locator('summary').click();
   await finalList.getByRole('button',{name:'停止此命令：启动开发服务供验证',exact:true}).click();
   await wait(async()=>{const s=await flow(cid);return s.phase==='idle'&&s.backgroundJobs.length===0;},'list stop button controls the original job across turns');
   assert.equal(await page.getByRole('region',{name:'后台任务列表'}).count(),0);
   const stopped=journal().processes[serviceId];assert.equal(stopped.status,'cancelled');assert.equal(stopped.cleanupConfirmed,true);
-  await assert.rejects(fetch(url));assert.equal(counts.get('start'),3);assert.equal(counts.get('follow'),2);
+  await assert.rejects(fetch(url));assert.equal(counts.get('start'),3);assert.equal(counts.get('follow'),4);
   assert.deepEqual(report.errors,[]);check('idle background list stops the original service across turns, clears after confirmed exit and never resumes the cancelled goal');
 }catch(error){
   if(page&&!page.isClosed())await page.screenshot({path:path.join(evidence,'failure.png')}).catch(()=>{});

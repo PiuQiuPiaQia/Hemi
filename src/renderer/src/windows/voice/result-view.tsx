@@ -1,7 +1,7 @@
 import { useTranscriptRowState } from './transcript-row-state';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  ArrowDownToLine, Ban, Check, ChevronRight, Copy, ExternalLink, Eye, File as FileIcon, Folder,
+  ArrowDownToLine, ArrowRight, Ban, Check, ChevronRight, Copy, ExternalLink, Eye, File as FileIcon, Folder,
   Image as ImageIcon, Link as LinkIcon, Maximize2, MoreHorizontal,
   RotateCw, TriangleAlert, X,
 } from 'lucide-react';
@@ -42,6 +42,8 @@ const PauseGlyph = strokeGlyph('M8 6v12M16 6v12');
 /** 状态图标沿稿：浅色圆底＋描线字形（✓ / △ / ✕ / ‖），不用实心圆盘。 */
 const OUTCOME_INFO: Record<string, { key: OutcomeKey; label: string; icon: GlyphComponent }> = {
   complete: { key: 'complete', label: '已完成', icon: Check },
+  returned: { key: 'complete', label: '已返回', icon: ArrowRight },
+  handoff: { key: 'complete', label: '已交接', icon: ArrowRight },
   partial: { key: 'partial', label: '部分完成', icon: TriangleAlert },
   unknown: { key: 'partial', label: '结果待核实', icon: TriangleAlert },
   stopped: { key: 'stopped', label: '已停止', icon: PauseGlyph },

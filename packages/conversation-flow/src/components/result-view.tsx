@@ -4,6 +4,7 @@ import { useTranscriptRowState } from "./transcript-row-state.js";
 import { useCallback, useId, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
+  ArrowRight,
   Ban,
   Check,
   ChevronRight,
@@ -72,6 +73,8 @@ const OUTCOME_INFO: Record<
   { key: OutcomeKey; label: string; icon: GlyphComponent }
 > = {
   complete: { key: "complete", label: "已完成", icon: Check },
+  returned: { key: "complete", label: "已返回", icon: ArrowRight },
+  handoff: { key: "complete", label: "已交接", icon: ArrowRight },
   partial: { key: "partial", label: "部分完成", icon: TriangleAlert },
   unknown: { key: "partial", label: "结果待核实", icon: TriangleAlert },
   stopped: { key: "stopped", label: "已停止", icon: PauseGlyph },

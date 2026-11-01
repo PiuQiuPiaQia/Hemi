@@ -22,7 +22,9 @@
 
 ## 清理和恢复
 
-普通新输入保留后台进程。自动失败或预算收口仅清理所属目标；明确停止、插队、回卷、会话释放及应用退出仍遵守实际清理屏障。模型或工作区切换时，仍持有后台命令或未读结果的旧会话保留命令控制能力；后续事件按原目标的模型策略处理。持有未决后台目标的会话不做空闲淘汰。
+普通新输入保留后台进程。自动失败、静默停止、预算收口、明确停止和插队均按所属目标清理命令及子任务，不清理此前目标的后台命令或后台结果接收方；停止一条命令仍按 job ID 定位。回卷、会话释放及应用退出保留原有清理范围和实际退出屏障。模型或工作区切换时，仍持有后台命令或未读结果的旧会话保留命令控制能力；后续事件按原目标的模型策略处理。持有未决后台目标的会话不做空闲淘汰。
+
+SDK 停止超时只释放模型实例，随后仍按原目标身份确认命令清理。此前目标的后台命令控制器继续由 Runtime 持有，可查询、读取、单条停止及接收完成事件；真正关闭会话时一并清理。插队等待期间再次主动停止也沿用同一目标，不升级为整个会话的命令清理。命令的 PID、开始时间和原硬截止不变，不引入服务分类、自动重启或新的存储格式。
 
 进程启动前持久登记 PID、出生信息和随机归属标记。重启先按真实归属回收旧进程，将旧后台目标标记中断，不恢复服务、不重跑命令、不重放旧通知、不自动执行保留的用户队列。清理未确认时拒绝后续模型动作、标明失败并暂停自动发送。开发验证使用新的临时 `HEMI_USER_DATA_DIR`，不改写个人会话或安装版数据。本实现覆盖主／子 agent 的本机命令；远端 SSH 工具保留原有前台执行、取消及超时语义。
 
@@ -34,6 +36,29 @@
 - DeepSeek Harness `d743267388641bc76f17c45ce8b4c231aed1d32c`：`packages/jobs/jobs-local/src/index.ts` 的 job 归属准确的会话 Agent，可越过工具调用存活，owner disposal 取消并等待实际收尾；`packages/shell/tool-bash/src/background.ts` 分离进程与工具调用取消；`packages/jobs/tool-jobs/src/index.ts` 提供统一查询、输出和停止。
 
 两者的 Bash/Job 层均未按常驻服务与普通任务分类。Hemi 同样将后台进程存活与前台回合占用分离；需要同步等候时由主模型显式有限等待，宿主按实际退出事件交接后续处理。
+
+## 2026-11-01：停止与插队的取消范围
+
+基线 `79efc37406e9bd0fec13c56ad127ca56e548986f` 加本次工作区改动；macOS arm64、Node 22.22.3、Electron 44.0.0（内置 Node 24.18.1）、源码版本 0.2.42。参考 ZCode `a60ba6a` 将前台取消与后台控制分开的边界，复用 Hemi 现有归属和命令控制器，未复制代码或新增依赖。保留 Hemi 当前目标取消会清理其所属后台工作的约定。
+
+新增回归先确认：停止后续目标会把原后台目标标记 cancelled，插队会清空旧后台列表，SDK 停止超时的释放会杀掉旧 HTTP 服务。修复后验证旧命令身份及期限不变、旧目标仍接收结果、单项停止不伤兄弟命令、SDK 超时释放后命令仍可控且最终关闭能清理。
+
+定向检查命令：
+
+```sh
+node --test src/main/agent/background-commands.test.mjs src/main/agent-runtime/background-handoff.test.mjs src/main/agent-runtime/agent-task-lifecycle.test.mjs src/main/agent/gate/background-job-controls.test.mjs src/main/agent/gate/command-lifecycle.test.mjs src/main/bot/background-jobs.test.mjs src/main/bot/command-lifecycle.test.mjs
+node --test src/main/agent/hemi-session.test.mjs src/main/services/conversation-controller.test.mjs src/main/services/conversation-controller.race.test.mjs src/main/agent-runtime/native-session-restart.test.mjs src/main/agent-runtime/command-isolation.test.mjs src/main/bot/execution.test.mjs src/main/bot/goal-continuation.test.mjs
+npm run build
+node scripts/verify-background-goals.mjs
+node scripts/verify-background-goals.mjs --dev
+git diff --check
+```
+
+实际桌面链路覆盖 renderer → preload → IPC → 共享 Runtime → Pi SDK → Shell → HTTP，仅模型回复合成。开发和构建 renderer 各 7 组断言通过：普通停止、插队、插队期间二次停止均清理当前命令，旧服务继续响应 HTTP 且 PID、期限不变；二次停止暂停队列并保留待发送项，显式恢复后才继续；后台列表仍能停止原服务。全部使用新建临时用户数据目录，证据位于 `.visual/workflow/background-jobs-list/{built,dev}/`。页面错误列表为空；开发控制台仍有既有 ResizeObserver 通知循环提示。
+
+两组定向回归共 151 项：150 通过，1 项 Windows 专属检查在 macOS 跳过，0 失败。构建与差异空白检查通过。日志保存在 `.visual/workflow/background-jobs-list/command-stop-{tests,regression,build,built,dev}.log`。
+
+未运行全量测试，未验证 Windows 真机、实体移动设备、真实外部模型或安装版更新；未替换已安装应用、更新生产 Bot、重启真实项目或写入个人会话数据。
 
 ## 本轮验证（2026-10-30）
 

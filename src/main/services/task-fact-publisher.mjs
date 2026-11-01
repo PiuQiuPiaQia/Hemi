@@ -18,10 +18,11 @@ export function createTaskFactPublisher({ flowService, schedule = setTimeout, ca
         if (!conversationId || !flowService.has(conversationId)) continue;
         const controller = flowService.controllerFor(conversationId);
         const flow = controller.getSnapshot();
+        if (task.generation != null && task.generation !== flow.generation) continue;
         // 编辑撤回后，仍在聚合广播中的旧任务不能再次进入正式流。
         const anchors = flow.timeline.flatMap(item => (item.parts ?? [])
           .filter(part => part.kind === 'delegation' && part.toolCallId === task.toolCallId
-            && (!task.rootRunId || item.runId === task.rootRunId))
+            && (!task.rootRunId || (flow.runs[item.runId]?.rootRunId ?? item.runId) === task.rootRunId))
           .map(part => ({ item, part })));
         if (task.toolCallId && anchors.length !== 1) continue;
         const fact = projectTaskFact(task, { generation: flow.generation });

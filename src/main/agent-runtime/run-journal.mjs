@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { readTaskHandoff } from '../../shared/task-handoff.mjs';
 import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
 
 const terminal = new Set(['completed','partial','failed','blocked','cancelled','interrupted','continued']);
@@ -308,6 +309,7 @@ export function createRunJournal({ dir }) {
       record.receipt = receipt; record.state = record.result || receipt.ok === false ? 'terminal' : 'accepted'; return record;
     }),
     completeTask: ({ dispatchKey, owner, result }) => transaction(s => {
+      readTaskHandoff(result, owner);
       const key = result.taskId;
       if (!owns(s.roots[owner.rootRunId], owner)) throw new Error('子任务终态归属无效');
       if (dispatchKey && !owns(s.dispatches[dispatchKey], owner)) throw new Error('子任务派单归属无效');

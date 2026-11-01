@@ -15,11 +15,14 @@ function fakeSession() {
   const responses = [];
   let disposed = false;
   let pending = null;
+  let submission = null;
   return {
     prompts,
     responses,
     emit: (...args) => emitter.emit(...args),
     finish(result) {
+      submission = Object.hasOwn(result, 'taskSubmission') ? result.taskSubmission : result.lastText && !result.aborted && !result.modelError && !result.budgetLimited
+        ? { version: 1, summary: result.lastText, completed: [result.lastText], remaining: [], blockers: [], verification: [], nextAction: '' } : null;
       const waiter = pending;
       pending = null;
       waiter?.(result);
@@ -28,9 +31,11 @@ function fakeSession() {
       on: emitter.on.bind(emitter),
       off: emitter.off.bind(emitter),
       prompt: (text) => {
+        submission = null;
         prompts.push(text);
         return new Promise((resolve) => { pending = resolve; });
       },
+      getTaskHandoff: () => submission,
       steer: async (text) => {
         responses.push(['steer', text]);
         return { ok: true };
@@ -82,6 +87,56 @@ function managerWith({ onTerminal = null, onSettled = null } = {}) {
 }
 
 const done = (text) => ({ texts: [text], lastText: text, usages: [], toolNames: [], modelError: null, aborted: false });
+
+test('missing structured handoff is partial, kept raw, persisted and not guessed from prose', async () => {
+  const {manager,fakes,history}=managerWith();
+  const spawned=await manager.spawn({role:roles.get('fixer'),prompt:'核对',conversationId:'c',rootRunId:'r',generation:3});
+  await tick(); await tick();
+  let repairs=0; fakes[0].session.requestTaskHandoff=async()=>{repairs++;return done('still no submission');};
+  fakes[0].finish({...done('{"completed":["伪装成功"]}'),taskSubmission:null});
+  const result=await manager.waitFor(spawned.taskId);
+  assert.equal(repairs,1); assert.equal(result.outcome,'partial');
+  assert.equal(result.handoff.submission.status,'missing'); assert.equal(result.handoff.submission.data,null);
+  assert.equal(result.handoff.owner.generation,3);
+  assert.match(result.report,/伪装成功/);
+  assert.deepEqual(history.records.get(spawned.taskId).finished.handoff,result.handoff);
+  manager.disposeAll();
+});
+
+test('cancel during handoff repair cannot settle a normal returned result', async () => {
+  const {manager,fakes}=managerWith();
+  const spawned=await manager.spawn({role:roles.get('fixer'),prompt:'核对',conversationId:'c',rootRunId:'r'});
+  await tick(); await tick();
+  const entered=Promise.withResolvers(),release=Promise.withResolvers();
+  fakes[0].session.requestTaskHandoff=async()=>{entered.resolve();await release.promise;return done('late');};
+  fakes[0].finish({...done('已有操作'),taskSubmission:null});
+  await entered.promise;
+  const stopping=manager.stop(spawned.taskId,{conversationId:'c'});release.resolve();await stopping;
+  const result=await manager.waitFor(spawned.taskId);
+  assert.equal(result.outcome,'stopped');assert.equal(result.handoff.submission.status,'interrupted');
+  manager.disposeAll();
+});
+
+test('子任务正文只证明已返回；后台命令尚未交付时标为交接而非完成', async () => {
+  const {manager,fakes,history} = managerWith();
+  const first = await manager.spawn({role:roles.get('designer'),prompt:'调整布局',conversationId:'c',rootRunId:'root'});
+  await tick(); await tick();
+  fakes[0].finish(done('已调整，供主任务验收。'));
+  assert.equal((await manager.waitFor(first.taskId)).outcome,'returned');
+  const second = await manager.spawn({role:roles.get('fixer'),prompt:'运行验收',conversationId:'c',rootRunId:'root'});
+  await tick(); await tick();
+  fakes[1].session.hasTreeCommands = owner => owner.rootRunId === 'root' && owner.taskId === second.taskId;
+  fakes[1].finish(done('验收还在后台执行，等待真实结果。'));
+  const result = await manager.waitFor(second.taskId);
+  assert.equal(result.outcome,'handoff');
+  assert.match(result.report,/等待真实结果/);
+  assert.equal(history.records.get(second.taskId).finished.outcome,'handoff');
+  const limited = await manager.spawn({role:roles.get('fixer'),prompt:'预算内执行',conversationId:'c',rootRunId:'root'});
+  await tick(); await tick();
+  fakes[2].finish({...done('本轮预算已到，还有未完成工作。'),budgetLimited:true});
+  assert.equal((await manager.waitFor(limited.taskId)).outcome,'partial');
+  manager.disposeAll();
+});
 
 test('child stream reaches its own snapshot; reuse cannot append to the previous dispatch', async () => {
   const { manager, fakes } = managerWith();
@@ -149,7 +204,7 @@ test('057 回归：register_delivery 声明随终态落任务档案 deliverables
   fakes[0].emit('progress', { kind: 'tool-end', tool: 'register_delivery', toolCallId: 'tc-2', args: { files: [{ path: '/tmp/note.txt', description: '说明文件' }] }, isError: false });
   fakes[0].finish(done('已创建并声明'));
   const result = await manager.waitFor(spawned.taskId);
-  assert.equal(result.outcome, 'complete');
+  assert.equal(result.outcome, 'returned');
   const [record] = [...history.records.values()];
   assert.ok(record.deliverables?.some((item) => item.path === '/tmp/note.txt' && item.kind === 'file'), 'deliverables 应含声明文件');
 });
@@ -162,17 +217,17 @@ test('统一受理：前台派单立即返回 accepted，报告经 waitFor 回�
   await tick();
   await tick();
   assert.equal(fakes.length, 1);
-  assert.deepEqual(fakes[0].prompts, ['找出所有发布脚本']);
+  assert.deepEqual(fakes[0].prompts.map(text=>JSON.parse(text).assignment.objective), ['找出所有发布脚本']);
   const running = manager.snapshot().tasks[0];
   assert.equal(running.agent, 'explorer');
   assert.equal(running.phase, 'running');
   assert.equal(running.taskText, '找发布脚本');
   fakes[0].finish(done('scripts/publish.mjs:12'));
   const result = await manager.waitFor(spawned.taskId);
-  assert.equal(result.outcome, 'complete');
+  assert.equal(result.outcome, 'returned');
   assert.equal(result.report, 'scripts/publish.mjs:12');
   assert.equal(result.alias, 'explorer-1');
-  assert.equal(history.records.get('rec-1').finished.outcome, 'complete');
+  assert.equal(history.records.get('rec-1').finished.outcome, 'returned');
   assert.equal(manager.snapshot().tasks[0].resultText, 'scripts/publish.mjs:12');
 });
 
@@ -209,7 +264,7 @@ test('续用：同角色已结束的会话再 prompt；运行中/跨角色/跨�
   const again = await manager.spawn({ role: roles.get('explorer'), prompt: '第二问', sessionId: 'explorer-1', conversationId: 'c3' });
   await tick();
   assert.equal(fakes.length, 1, '续用不新建会话');
-  assert.deepEqual(fakes[0].prompts, ['第一问', '第二问']);
+  assert.deepEqual(fakes[0].prompts.map(text=>JSON.parse(text).assignment.objective), ['第一问', '第二问']);
   fakes[0].finish(done('答二'));
   const secondResult = await manager.waitFor(again.taskId);
   assert.equal(secondResult.report, '答二');
@@ -265,7 +320,8 @@ test('停止：stop 收口为 stopped，结果仍回到派单方；message 给�
   await tick(); await tick();
   const steer = await manager.message('fixer-1', '只改 README');
   assert.equal(steer.ok, true);
-  assert.deepEqual(fakes[0].responses.at(-1), ['steer', '只改 README']);
+  assert.equal(fakes[0].responses.at(-1)[0], 'steer');
+  assert.equal(JSON.parse(fakes[0].responses.at(-1)[1]).message, '只改 README');
   assert.equal(manager.snapshot().tasks[0].steeredCount, 1);
   const stopped = await manager.stop('fixer-1');
   assert.equal(stopped.stopped, 1);
@@ -437,7 +493,10 @@ test('派单族按对话及当前目标校验归属，空取消不能升级为�
   assert.equal((await manager.stop(running.taskId, {conversationId: 'owner', rootRunId: 'new-root'})).ok, false);
   assert.equal(manager.status({conversationId: 'owner'})[0].phase, 'running');
   assert.equal((await manager.message(running.taskId, '合法补充', {conversationId: 'owner', rootRunId: 'root-owner'})).ok, true);
-  assert.deepEqual(fakes[0].responses, [['steer', '合法补充']]);
+  assert.equal(fakes[0].responses.length,1);
+  const message=JSON.parse(fakes[0].responses[0][1]);
+  assert.equal(message.message,'合法补充');assert.equal(message.protocol,'hemi.task-message');
+  assert.equal(message.owner.taskId,running.taskId);
   assert.equal((await manager.stop(running.taskId, {conversationId: 'owner', rootRunId: 'root-owner'})).ok, true);
   assert.equal((await manager.waitFor(running.taskId, {conversationId: 'owner'})).outcome, 'stopped');
   manager.disposeAll();
@@ -507,5 +566,5 @@ test('后台终态按调用身份收口，不清除正在执行的独立工具',
   assert.match(manager.snapshot().tasks[0].progressText,/读取/);
   assert.ok(manager.snapshot().tasks[0].log.some(item=>item.text.startsWith('后台命令失败：')));
   f.emit('progress',{kind:'tool-end',tool:'read',toolCallId:'read',text:'INDEPENDENT'});
-  f.finish(done('DONE'));assert.equal((await manager.waitFor(spawned.taskId)).outcome,'complete');manager.disposeAll();
+  f.finish(done('DONE'));assert.equal((await manager.waitFor(spawned.taskId)).outcome,'returned');manager.disposeAll();
 });

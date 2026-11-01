@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {hydrateCandidate} from './model-policy.mjs';
 import {GOAL_VERIFICATION_PURPOSE} from './run-journal.mjs';
+import {readTaskHandoff} from '../../shared/task-handoff.mjs';
 
 export const GOAL_POLICY = Object.freeze({maxRounds: 12, maxRequests: 600, maxRequestsPerRound: 60, noProgressRounds: 3});
 export const GOAL_CHECK_SYSTEM = '［Hemi 目标完成校验］';
@@ -18,7 +19,7 @@ export function goalEvidence(entries, state, owner) {
       text: textOf(entry.message ?? entry).slice(-2500)}));
   const observations = Object.values(state.observations).filter(item => item.owner.rootRunId === owner.rootRunId);
   const tasks = Object.values(state.tasks).filter(item => item.owner.rootRunId === owner.rootRunId)
-    .slice(-8).map(item => ({taskId: item.owner.taskId, result: item.result}));
+    .slice(-8).map(item => ({taskId: item.owner.taskId, handoff: readTaskHandoff(item.result, item.owner)}));
   const backgroundJobs = Object.values(state.processes).filter(item => item.background && item.owner.conversationId === owner.conversationId
     && (item.state==='active'||(item.owner.rootRunId === owner.rootRunId && item.owner.generation === owner.generation))).slice(-64)
     .map(item=>({id:item.id,rootRunId:item.owner.rootRunId,taskId:item.owner.taskId,description:item.description,state:item.state,

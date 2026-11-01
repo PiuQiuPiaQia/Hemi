@@ -68,6 +68,7 @@ test('后台结果与用户输入共用单槽：排队、去重、不造用户�
   assert.equal(effects.runtime.starts.length,3);
   const event=effects.runtime.starts[2];assert.equal(event.spec.source,'event');assert.equal(event.spec.envelope,null);
   assert.equal(event.spec.background.rootRunId,'background-goal');
+  assert.equal(controller.getSnapshot().runs[event.spec.runId].rootRunId,'background-goal');
   event.resolve({});await settle();controller.applyFact({type:'run-closed',runId:controller.getSnapshot().activeRunId,outcome:'completed',at:2002});
   await settle();assert.equal(effects.runtime.starts.length,3);
   assert.equal(controller.getSnapshot().timeline.filter(item=>item.kind==='user').length,2);

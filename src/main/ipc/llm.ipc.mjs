@@ -1,4 +1,5 @@
 import { textFactOf } from '../../shared/message-phase.mjs';
+import {agentReplyText} from '../../shared/agent-reply.mjs';
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
 import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
 import {closeConversationRun} from '../services/run-completion.mjs';
@@ -615,7 +616,7 @@ function createLlmFlowRuntime(conversationId) {
     async stop({ runId, reason }) {
       if (stoppingRuns.has(runId)) {
         // 用户主动停止可把“等待阶段结束”升级为立即取消，仍沿用同一退出屏障。
-        if (reason === 'stop') await runtime?.abort(conversationId);
+        if (reason === 'stop') await runtime?.stopRoot(conversationId,runId,{reason});
         return stoppingRuns.get(runId);
       }
       // 先建立停止屏障；执行收口必须等待主会话及所有所属子工作真正退出。
@@ -1004,7 +1005,8 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         if (run.aborted || runToken.controller.signal.aborted) throw new Error('回合已取消。');
         if (run.modelError) throw new Error(`回合未完成：${describeModelError(run.modelError)}`);
         // 056：多轮工具往返中途的文字（「我先看看」）也是回答的一部分——全部按序拼接。
-        const replyText = run.texts.join('\n\n').trim() || '刚才这一句没有生成内容，请再说一次。';
+        const replyText = agentReplyText(run);
+        if (!run.texts.some(text => text.trim())) streamEvent({kind:'text',text:replyText,phase:'final_answer',phaseSource:'contract'});
         recordUsages(conversationId, ctx, calls);
         const total = calls.reduce((acc, call) => {
           acc.input += call.detail.input; acc.output += call.detail.output;

@@ -15,7 +15,7 @@ const posix = { skip: process.platform === 'win32' ? '真实 POSIX shell；Windo
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) {
   const deadline = Date.now() + 5000;
-  while (!fn()) { assert.ok(Date.now() < deadline, '等待后台状态超时'); await pause(10); }
+  while (!await fn()) { assert.ok(Date.now() < deadline, '等待后台状态超时'); await pause(10); }
 }
 async function fixture(t, command, toolOptions = {}, behavior = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'hemi-background-'));
@@ -66,7 +66,7 @@ async function fixture(t, command, toolOptions = {}, behavior = {}) {
   const config = { modelKey: 'p/test', providerId: 'p', credentialRef: 'p', api: behavior.api ?? 'openai-completions',
     model: 'test-background', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'synthetic' };
   const journal = createRunJournal({ dir: path.join(dir, 'journal') });
-  async function make(id = 'first', role = 'main') {
+  async function make(id = 'first', role = 'main', options = {}) {
     const rootOwner = { conversationId: id, rootRunId: `run-${id}`, generation: 1 };
     const owner = { ...rootOwner, ...(role === 'main' ? {} : { taskId: `task-${id}` }) };
     await journal.beginRoot(rootOwner);
@@ -79,7 +79,7 @@ async function fixture(t, command, toolOptions = {}, behavior = {}) {
     const session = createHemiSession({ cwd: dir, agentDir: path.join(dir, `agent-${id}`), model: config,
       accessWorkspaceDir: dir, tools: ['bash'], features: {}, executionContext: execution,
       appendSystem: role === 'main' ? buildAgentAppendSystem() : [loadRoles().get(role).systemPrompt],
-      settings: { retry: { enabled: false } },backgroundQuietReviewMs:behavior.quietMs??0,
+      settings: { retry: { enabled: false } },backgroundQuietReviewMs:behavior.quietMs??0,...options,
     });
     session.on('activity', activity => activities.push({ id, ...activity }));
     sessions.push(session);
@@ -95,6 +95,33 @@ async function fixture(t, command, toolOptions = {}, behavior = {}) {
 
 const commandCall = (id, command, description) => ({ index: 0, id, type: 'function',
   function: { name: 'bash', arguments: JSON.stringify({ command, description }) } });
+
+for(const automatic of [false,true])test(`真实 SDK：${automatic?'静默停止':'当前目标停止'}超时释放实例，旧目标 HTTP 服务仍受管`,{...posix,timeout:15000},async t=>{
+  let hold=false;const entered=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  const f=await fixture(t,()=>`"${process.execPath}" -e "require('node:http').createServer((q,s)=>s.end('RETAINED_SERVICE')).listen(0,'127.0.0.1',function(){require('node:fs').writeFileSync('port',String(this.address().port))})"`,
+    {run_in_background:true,timeout_ms:12000},{respond:({body})=>JSON.stringify(body.messages).includes('CURRENT_REPLY')?{content:'CURRENT_REPLY_DONE'}:undefined});
+  const {session,execution,owner}=await f.make('retained','main',{abortGraceMs:30,stallTimeoutMs:automatic?200:0,extraExtensions:[{name:'delayed-turn-end',factory:pi=>pi.on('turn_end',async()=>{if(hold){entered.resolve();await release.promise;}})}]});
+  await f.journal.beginGoal(owner,'启动并保留服务',{maxRequests:10,maxRounds:3,maxRequestsPerRound:10,noProgressRounds:3});
+  await session.prompt('启动服务');
+  await until(()=>f.activities.some(a=>a.jobs?.length));
+  const [before]=await session.backgroundCommand({action:'list'});
+  let url;await until(()=>readFile(path.join(f.dir,'port'),'utf8').then(port=>{url=`http://127.0.0.1:${port}`;return true;},()=>false));
+  assert.equal(await (await fetch(url)).text(),'RETAINED_SERVICE');
+  await f.journal.suspendGoal(owner);
+  const current={...owner,rootRunId:'current-goal'};await f.journal.beginRoot(current);session.setExecutionContext({...execution,owner:current});
+  hold=true;const running=session.prompt('CURRENT_REPLY');await entered.promise;
+  if(automatic)await until(()=>session.isDisposed());else await session.abort({commandOwner:current});
+  assert.equal(session.isDisposed(),true,'SDK 未结束时仍释放模型实例');
+  assert.equal(await (await fetch(url,{signal:AbortSignal.timeout(1000)})).text(),'RETAINED_SERVICE');
+  const jobs=await session.backgroundCommand({action:'list',controllerOwner:current});
+  assert.deepEqual(jobs.map(j=>[j.id,j.startedAt,j.deadlineAt]),[[before.id,before.startedAt,before.deadlineAt]]);
+  if(automatic)await session.close();else{
+    const stopped=await session.backgroundCommand({action:'stop',jobId:before.id,controllerOwner:current});
+    assert.equal(stopped.cleanupConfirmed,true);
+  }
+  assert.equal((await f.journal.snapshot()).processes[before.id].cleanupConfirmed,true);await assert.rejects(fetch(url));
+  release.resolve();await running;
+});
 
 test('真实 SDK：服务独立就绪核验后可收口，同会话新问题不用等服务退出',{...posix,timeout:15000},async t=>{
   const f=await fixture(t,()=>`"${process.execPath}" -e "require('node:http').createServer((q,s)=>s.end('REAL_SERVICE_READY')).listen(0,'127.0.0.1',function(){require('node:fs').writeFileSync('service-port',String(this.address().port))})"`,

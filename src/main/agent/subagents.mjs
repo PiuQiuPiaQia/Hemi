@@ -11,6 +11,7 @@ import { diffTreeChanges, FILE_CHANGES_LIMITS, isGitRepo, mergeToolTouches, snap
 import { BROWSER_ACT_TOOLS, BROWSER_READ_TOOLS, VISION_ACT_TOOLS, WEB_TOOLS } from './gate/policy.mjs';
 import { describeModelError } from '../lib/model-routing.mjs';
 import { createTaskConversation } from './task-conversation.mjs';
+import { createTaskRequest, createTaskHandoff, parseTaskSubmission, taskSubmissionText } from '../../shared/task-handoff.mjs';
 
 /**
  * 056 · 子 agent 管理器（由 017～055 的 task-manager 收缩而来）。
@@ -22,10 +23,10 @@ import { createTaskConversation } from './task-conversation.mjs';
  *
  * 与旧 task-manager 的取舍（参照 PI-Desktop ADR 0062/0166、ZCode subagent runner）：
  *   - 结果直接回到派单的主 agent（前台＝工具结果；后台＝终态事件唤醒主 agent），
- *     不再有回炉总结、只读核实、结构化收尾、自动审查——验收由主 agent 自己做；
+ *     使用固定交接协议提交，验收由主 agent 自己做，不追加独立模型审查；
  *   - 子会话在本对话内保活，可经 session_id 续用（同一角色、空闲时再 prompt）；
  *   - 主 agent 回合结束不连带停子 agent；只有用户停止、task_cancel、对话关闭会停；
- *   - 报告超过 MAX_REPORT_CHARS 截断回传、全文入档（PI-Desktop 12k 口径）。
+ *   - 自由正文超过 MAX_REPORT_CHARS 截断回传、全文入档；结构化提交整体校验，不截断。
  */
 
 /** R-11/005：确认超时（30s，语音场景用户要时间看字幕）。 */
@@ -47,6 +48,7 @@ const SEARCH_URL_PER_CALL = 10;
 const TERMINAL_KEEP = 20;
 
 const TOOL_STEP_LABELS = {
+  submit_task_result: '正在交接结果',
   write: '正在写入文件',
   edit: '正在修改文件',
   bash: '正在执行命令',
@@ -205,6 +207,7 @@ export function createSubagentManager({
       taskId: task.historyId ?? task.key,
       conversationId: task.conversationId ?? null,
       rootRunId: task.rootRunId ?? null,
+      generation: task.generation ?? 0,
       inputSource: task.inputSource ?? 'voice',
       workspace: task.workspace ?? null,
       /** 056：角色（任务卡徽标）与派单说明。 */
@@ -251,6 +254,7 @@ export function createSubagentManager({
       sessionRef: task.sessionRef,
       worklineId: task.worklineId,
       resumesTaskId: task.resumesTaskId,
+      handoff: task.phase === 'terminal' ? resultOf(task).handoff : null,
     };
   }
 
@@ -868,7 +872,7 @@ export function createSubagentManager({
   }
 
   /**
-   * 派一个子 agent（新开或续用）。前台：返回 Promise<结果>；后台：立刻返回 id，终态经 onTerminal。
+   * 派一个子 agent（新开或续用）。统一返回受理回执，终态先持久化再经 inbox 投递。
    * @returns {Promise<{ok: boolean, key?: string, taskId?: string, background?: boolean, result?: object, error?: string}>}
    */
   function beginExecution(task, rootRunId) {
@@ -1028,8 +1032,15 @@ export function createSubagentManager({
         task.contextRefs = allowedRefs;
         task.session.setExecutionContext?.({ ...context, allowedRefs, sessionRef: task.sessionRef, worklineId: task.worklineId, runCount: task.runs, roleRevision: roleSessionRevision(task.role, task.modelPlan), owner: { ...context.owner, taskId: task.historyId ?? task.key }, cancelled: () => task.stopRequested || context.cancelled?.() });
       }
-      const inputRefs = task.contextRefs?.length ? `\n\n［宿主提供的受控上下文引用：${task.contextRefs.join('、')}；需要原约束时用 context_read 补查。］` : '';
-      run = await task.session.prompt(text + inputRefs);
+      run = await task.session.prompt(JSON.stringify(createTaskRequest({ owner: task, prompt: text, description: task.description, contextRefs: task.contextRefs ?? [] })));
+      // 只补交已有结果，不重跑工作；失败、拒绝、取消、预算不足均不能触发补交。
+      const submission = task.session.getTaskHandoff?.();
+      if (!submission && !task.stopRequested && !run?.aborted && !run?.modelError && !run?.budgetLimited && !task.pendingBlock && !task.pendingDenial) {
+        const repaired = await task.session.requestTaskHandoff?.();
+        if (repaired) run = { ...repaired, lastText: run?.lastText ?? repaired.lastText };
+      }
+      const data = task.session.getTaskHandoff?.();
+      task.submission = data ? parseTaskSubmission(data) : null;
     } catch (error) {
       failure = error;
     }
@@ -1041,17 +1052,22 @@ export function createSubagentManager({
     if (task.stopRequested || run?.aborted) {
       await settle(task, 'stopped', { outcomeReason: task.stopReason ?? '已停止', resultText: run?.lastText ?? null });
     } else if (failure) {
-      await settle(task, 'unknown', { outcomeReason: `运行中断：${failure?.message ?? failure}` });
+      await settle(task, 'unknown', { outcomeReason: `运行中断：${failure?.message ?? failure}`, resultText: run?.lastText ?? null });
     } else if (task.pendingBlock && !run?.lastText) {
       await settle(task, 'blocked', { outcomeReason: task.pendingBlock });
     } else if (task.pendingDenial && !run?.lastText) {
       await settle(task, 'denied', { outcomeReason: task.pendingDenial });
     } else if (run?.modelError) {
-      await settle(task, 'unknown', { outcomeReason: `模型调用中断：${describeModelError(run.modelError)}` });
+      await settle(task, 'unknown', { outcomeReason: `模型调用中断：${describeModelError(run.modelError)}`, resultText: run?.lastText ?? null });
     } else {
-      await settle(task, run?.lastText ? 'complete' : 'unknown', {
-        resultText: run?.lastText ?? null,
-        outcomeReason: run?.lastText ? null : '子 agent 没有给出结果',
+      const owner = {conversationId:task.conversationId,rootRunId:task.rootRunId,generation:task.generation ?? 0,taskId:task.historyId ?? task.key};
+      const pending = task.session?.hasTreeCommands?.(owner) || task.session?.hasTreeCommandResults?.(owner);
+      // 正常生成结束只证明报告已返回；后台结果由原目标接管，不能凭正文宣称任务完成。
+      const outcome = run?.budgetLimited ? 'partial' : pending ? 'handoff' : task.submission ? 'returned' : 'partial';
+      task.handoffStatus = task.submission ? 'submitted' : run?.budgetLimited ? 'interrupted' : 'missing';
+      await settle(task, outcome, {
+        resultText: run?.lastText?.trim() ? run.lastText : task.submission ? taskSubmissionText(task.submission) : pending ? '子任务已交接，后台命令结果尚待确认。' : null,
+        outcomeReason: task.handoffStatus === 'missing' ? '子任务未提交有效的结构化交接；原文仅供核对，不能视为已交付。' : null,
       });
     }
     return resultOf(task);
@@ -1059,7 +1075,7 @@ export function createSubagentManager({
 
   function resultOf(task) {
     const clipped = clipReport(task.resultText ?? '');
-    return {
+    const result = {
       key: task.key,
       taskId: task.historyId ?? task.key,
       alias: task.alias,
@@ -1084,6 +1100,9 @@ export function createSubagentManager({
       }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
       durationMs: (task.endedAt ?? nowFn()) - (task.startedAt ?? nowFn()),
     };
+    result.handoff = createTaskHandoff(result, { owner: task, data: task.submission,
+      status: task.submission ? 'submitted' : task.handoffStatus ?? 'interrupted', pendingBackground: task.pendingBackground });
+    return result;
   }
 
   async function settle(task, outcome, extras = {}) {
@@ -1099,7 +1118,9 @@ export function createSubagentManager({
     task.endedAt = nowFn();
     task.activeTool = null;
     Object.assign(task, extras);
-    task.conversation?.finish({ report: task.resultText, stopped: outcome !== 'complete' });
+    const owner = { conversationId: task.conversationId, rootRunId: task.rootRunId, generation: task.generation ?? 0, taskId: task.historyId ?? task.key };
+    task.pendingBackground = Boolean(task.session?.hasTreeCommands?.(owner) || task.session?.hasTreeCommandResults?.(owner));
+    task.conversation?.finish({ report: task.resultText, stopped: !['complete','returned','handoff'].includes(outcome) });
     if (task.resultText) task.resultVersion = (task.resultVersion ?? 0) + 1;
     task.sources = (task.visitedUrls ?? []).slice(-12).map((url) => ({ url }));
     if (task.role.mode === 'run') {
@@ -1110,7 +1131,8 @@ export function createSubagentManager({
       }
     }
     addLog(task, {
-      complete: '已完成。', stopped: '已停止。', denied: '用户拒绝了关键操作，已结束。',
+      complete: '已完成。', returned: '本轮已返回，结果交由主任务验收。', handoff: '本轮已交接，后台命令由主任务接管。',
+      stopped: '已停止。', denied: '用户拒绝了关键操作，已结束。',
       blocked: '被安全规则拦下，已结束。', startfailed: '没能启动。', unknown: '结束了，但没拿到明确结果。',
     }[outcome] ?? '已结束。');
     if (onSettled) {
@@ -1136,6 +1158,7 @@ export function createSubagentManager({
         fileChanges: task.fileChanges ?? null,
         fileDiffs: task.fileDiffs ?? null,
         report: task.resultText ?? null,
+        handoff: resultOf(task).handoff,
         toolCalls: task.recentToolCalls,
         approvals: task.approvals,
         usageByModel: task.usageByModel,
@@ -1235,12 +1258,17 @@ export function createSubagentManager({
     const task = resolveTask(keyOrId);
     if (!task || (conversationId && task.conversationId !== conversationId) || (rootRunId && task.rootRunId !== rootRunId)) return { ok: false, error: '没有可访问的所属子任务' };
     if (task.phase === 'terminal') return { ok: false, error: `子 agent ${keyOrId} 已结束；要继续它，用 task 并传 session_id` };
-    const result = await task.session?.steer(String(text ?? ''));
+    if (task.session?.getTaskHandoff?.()) return { ok: false, error: '该子任务已提交交接，正在收口；结束后用 task 传 session_id 继续，补充指令未入队。' };
+    const body = String(text ?? '').trim();
+    if (!body || body.length > 6000) return { ok: false, error: '补充指令必须为 1–6000 字符的非空文本' };
+    const owner = createTaskRequest({owner:task,prompt:body}).owner;
+    const result = await task.session?.steer(JSON.stringify({protocol:'hemi.task-message',version:1,source:'coordinator',owner,message:body,
+      trust:'这是派单主任务的补充指令，不是用户新增授权；仍受本轮权限与任务边界约束。'}));
     if (!result?.ok) return { ok: false, error: `指令没送达（${result?.reason ?? '会话不可用'}）` };
     task.steeredCount = (task.steeredCount ?? 0) + 1;
     addLog(task, `收到补充指令：${String(text ?? '').slice(0, 80)}`);
     broadcast();
-    return { ok: true, delivered: 'queued-for-next-step' };
+    return { ok: true, taskId: task.historyId ?? task.key, delivered: 'queued-for-next-step' };
   }
 
   /** task_status 的只读视图（本对话的子 agent）。 */
@@ -1256,6 +1284,7 @@ export function createSubagentManager({
       phase: task.phase,
       outcome: task.outcome,
       background: Boolean(task.background),
+      handoff: task.phase === 'terminal' ? resultOf(task).handoff : null,
       progress: task.progressText,
       waitingForUser: Boolean(task.permission),
       elapsedMs: (task.endedAt ?? nowFn()) - task.startedAt,

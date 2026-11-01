@@ -9,7 +9,7 @@ async function fixture(t){
  const server=http.createServer(async(req,res)=>{
   let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);requests.push(body);const all=JSON.stringify(body.messages),checking=all.includes(GOAL_CHECK_SYSTEM),main=body.tools?.length;
   const toolMessages=body.messages.filter(m=>m.role==='tool').map(m=>({...m,name:m.name??body.messages.flatMap(x=>x.tool_calls??[]).find(c=>c.id===m.tool_call_id)?.function?.name}));
-  let content,tools;
+  let content,tools;const latest=body.messages.at(-1)?.content,firstLine=(typeof latest==='string'?latest:latest?.map(part=>part.text??'').join('\n')??'').split('\n')[0];
   const tool=(name,args)=>({index:0,id:randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
   if(checking){
    const facts=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence),live=facts.backgroundJobs.filter(j=>j.status==='running');
@@ -17,7 +17,7 @@ async function fixture(t){
     :{status:'complete',reason:'真实后台命令已结束，成果存在，已取消命令没有产生副作用',evidence:['proof.txt 实际写入'],remaining:[],nextAction:''});
   }
   else if(!main)content='后台任务验收';
-  else if(JSON.stringify(body.messages.at(-1)?.content).includes('FOLLOW_UP_QUESTION')){followEntered=true;await followGate;content='FOLLOW_UP_ANSWER';}
+  else if(firstLine.startsWith('FOLLOW_UP_QUESTION')){followEntered=true;await followGate;content='FOLLOW_UP_ANSWER';}
   else if(!body.messages.some(m=>m.role==='tool'))tools=[
    tool('bash',{command:cmd("process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('cancelled.txt','BAD'),10000)"),run_in_background:true,timeout_ms:14000}),
    tool('bash',{command:cmd("process.stdout.write('SECOND_ALIVE');let reported=false;const t=setInterval(()=>{if(!reported&&require('fs').existsSync('progress')){reported=true;process.stdout.write('SECOND_PROGRESS')}if(require('fs').existsSync('release')){clearInterval(t);require('fs').writeFileSync('proof.txt','DONE')}},30)"),run_in_background:true,timeout_ms:14000}),
@@ -34,8 +34,32 @@ async function fixture(t){
  host=await createBotHost(options);const {instanceId}=await host.request('handshake');const call=(method,p={})=>host.request(method,{instanceId,requestId:randomUUID(),...p});
  t.after(async()=>{await host.close();server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});});
  await call('model.sync',{models:[{modelKey:'test/jobs',providerId:'test',model:'jobs',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});const {id}=await call('session.create');
- return {id,call,workspace,requests,releaseFollow,followEntered:()=>followEntered,flow:()=>call('flow.snapshot',{id}),async restart(){await host.close();host=await createBotHost(options);}};
+ return {id,call,root,workspace,requests,releaseFollow,followEntered:()=>followEntered,flow:()=>call('flow.snapshot',{id}),async restart(){await host.close();host=await createBotHost(options);}};
 }
+for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a later goal preserves earlier background commands`,{timeout:30000},async t=>{
+ const f=await fixture(t);
+ const snapshot=async()=>JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+ await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'original',text:'启动两个后台命令并等待真实结果。'}}});
+ const initial=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&s.backgroundJobs.length===2?s:null;});
+ const originalRun=Object.keys(initial.runs)[0],before=initial.backgroundJobs;
+ await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'later',text:'FOLLOW_UP_QUESTION'}}});
+ await until(f.followEntered);
+ if(action==='promoteInput')await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'next',text:'INDEPENDENT_AFTER_STOP'}}});
+ await f.call('flow.command',{id:f.id,command:action==='stop'?{type:'stop'}:{type:'promoteInput',inputId:'next'}});
+ const stopped=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&(action==='stop'||s.timeline.some(i=>i.kind==='user'&&i.id==='next')&&s.pending.length===0)?s:null;});
+ assert.deepEqual(stopped.backgroundJobs.map(j=>[j.id,j.startedAt,j.deadlineAt]),before.map(j=>[j.id,j.startedAt,j.deadlineAt]),'停止新目标不能清理旧目标命令或重置其期限');
+ const state=await snapshot();
+ assert.equal(state.roots[originalRun].status,'waiting_background','原后台目标仍保留完成通知的接收方');
+ assert.ok(before.every(job=>state.processes[job.id].state==='active'));
+ const control=(action,jobId)=>f.call('flow.command',{id:f.id,command:{type:'backgroundCommand',targetRunId:originalRun,action,jobId}});
+ for(const job of before)assert.equal((await control('read',job.id)).data.status,'running');
+ await control('stop',before[0].id);
+ assert.equal((await control('read',before[1].id)).data.status,'running','按 ID 停止一项仍不影响兄弟命令');
+ await control('stop',before[1].id);
+ await until(async()=>(await f.flow()).backgroundJobs.length===0);
+ f.releaseFollow();
+ assert.equal(await fs.stat(path.join(f.workspace,'cancelled.txt')).catch(()=>null),null);
+});
 test('real Host/SDK: jobs release foreground; results wait behind a question and resume the original goal once',{timeout:30000},async t=>{
  const f=await fixture(t);
  await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'jobs-input',text:'启动两个独立后台命令，核对实际结果。'}}});

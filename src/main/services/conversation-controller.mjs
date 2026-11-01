@@ -143,7 +143,7 @@ export function createConversationController({
     const runId = makeId(`run-${++seq.run}`);
     const continuationOf = input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
     preparingAborted = false;
-    commit({ type: 'run-preparing', runId, continuationOf, source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
+    commit({ type: 'run-preparing', runId, rootRunId: background?.rootRunId ?? runId, continuationOf, source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
     try {
       // 受理先落最小快照再执行（契约 §8）：运行记录带 inputIds 保存输入身份；
       // 用户消息项在保存成功后才转正（失败回 pending 时时间线不留残影）。

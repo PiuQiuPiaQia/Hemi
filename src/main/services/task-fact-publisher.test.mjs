@@ -63,3 +63,23 @@ test('064：同名短调用在不同根目标内按任务身份关联，撤回�
   assert.equal(flow.tasks['t-r1'].phase,'terminal');
   publisher.dispose();
 });
+
+test('后台续跑的派单按原目标关联，保留同名调用隔离和回卷保护', () => {
+  let flow = createFlowSnapshot({ conversationId: 'c' });
+  flow.runs = { root: {runId:'root'}, event: {runId:'event',rootRunId:'root'}, other: {runId:'other'} };
+  flow.timeline = ['event','other'].map(runId => ({kind:'assistant',itemId:runId,runId,parts:[{partId:`${runId}-d`,kind:'delegation',toolCallId:'call-0'}]}));
+  const controller = {getSnapshot:()=>flow,applyFact:fact=>{flow=applyFlowFact(flow,fact).snapshot;}};
+  const publisher = createTaskFactPublisher({flowService:{has:()=>true,controllerFor:()=>controller}});
+  const task = {taskId:'child',conversationId:'c',rootRunId:'root',generation:flow.generation,toolCallId:'call-0',phase:'terminal',outcome:'returned'};
+  publisher.publish(task);
+  assert.equal(flow.tasks.child.outcome,'returned');
+  assert.equal(flow.timeline[0].parts[0].taskId,'child');
+  assert.equal(flow.timeline[1].parts[0].taskId,undefined);
+  const revision = flow.revision;
+  publisher.publish({...task,taskId:'stale',generation:flow.generation-1});
+  assert.equal(flow.revision,revision);
+  flow.timeline.shift();
+  publisher.publish({...task,phase:'running'});
+  assert.equal(flow.tasks.child.phase,'terminal','撤回后不借用其他目标的同名锚点');
+  publisher.dispose();
+});

@@ -243,6 +243,8 @@ export type TaskPhase =
 
 export type TaskOutcome =
   | "complete"
+  | "returned"
+  | "handoff"
   | "stopped"
   | "denied"
   | "blocked"

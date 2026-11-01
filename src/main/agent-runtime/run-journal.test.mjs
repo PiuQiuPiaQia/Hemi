@@ -4,8 +4,25 @@ import { mkdtemp, rm, writeFile, readFile, rename, mkdir, readdir } from 'node:f
 import path from 'node:path';
 import os from 'node:os';
 import { createRunJournal, dispatchIdentity, BUDGET_SUMMARY_PURPOSE } from './run-journal.mjs';
+import { createTaskHandoff } from '../../shared/task-handoff.mjs';
 const owner = { conversationId: 'c', rootRunId: 'r', generation: 1 };
 async function fixture(t) { const dir = await mkdtemp(path.join(os.tmpdir(),'h64-journal-')); t.after(() => rm(dir,{recursive:true,force:true})); const journal = createRunJournal({dir}); await journal.ready(); return { dir, journal };  }
+test('handoff identity is checked before admission, then preserved with the inbox across restart', async t => {
+  const {journal,dir}=await fixture(t); await journal.beginRoot(owner);
+  const taskOwner={...owner,taskId:'structured-child'};
+  const result={taskId:taskOwner.taskId,outcome:'partial',outcomeReason:'缺少有效交接',report:'已执行的原文'};
+  result.handoff=createTaskHandoff(result,{owner:taskOwner,status:'missing'});
+  const forged=structuredClone(result); forged.handoff.owner.generation++;
+  await assert.rejects(journal.completeTask({owner:taskOwner,result:forged}),/归属/);
+  assert.equal(Object.keys((await journal.snapshot()).tasks).length,0);
+  await journal.completeTask({owner:taskOwner,result});
+  await journal.completeTask({owner:taskOwner,result});
+  assert.equal((await journal.pending(owner)).length,1);
+  const restored=createRunJournal({dir}); await restored.recover();
+  const state=await restored.snapshot();
+  assert.deepEqual(state.tasks[taskOwner.taskId].result.handoff,result.handoff);
+  assert.deepEqual(state.inbox[`complete:${taskOwner.taskId}`].result.handoff,result.handoff);
+});
 test('background processes may reach goal checking; foreground and unknown cleanup still fence it',async t=>{
   const {journal}=await fixture(t);await journal.beginRoot(owner);await journal.beginGoal(owner,'start service',{maxRounds:3,maxRequests:10,maxRequestsPerRound:10,noProgressRounds:3});
   await journal.processStart({id:'service',pid:1234,token:'test',owner});await journal.processBackground('service');

@@ -214,6 +214,7 @@ export function createMainAgent({
     callAnchor: id => session.callAnchor(id),
     backgroundCommand: request => session.backgroundCommand(request),
     hasLiveBackground: () => session.hasLiveBackground(),
+    abortCommands: owner => session.abortCommands(owner),
     isWaitingForBackground: () => session.isWaitingForBackground(),
     waitForBackground: options => session.waitForBackground(options),
     releaseGoalCommands: owner => session.releaseGoalCommands(owner),

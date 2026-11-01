@@ -38,6 +38,53 @@ async function fixture(t, respond) {
   };
 }
 
+test('real SDK: handoff repair exposes only submission, validates errors and never repeats a write', async t => {
+  const data={version:1,summary:'已写入文件',completed:['生成 proof.txt'],remaining:[],blockers:[],verification:[],nextAction:''};
+  const tool=(id,name,args)=>({tool_calls:[{index:0,id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
+  const f=await fixture(t,(body,count)=>{
+    if(count===1)return tool('write','write',{path:'proof.txt',content:'ONCE'});
+    if(count===2)return {content:'已有工作，漏交协议'};
+    if(count>=3&&count<=4)assert.deepEqual(body.tools.map(item=>item.function.name),['submit_task_result']);
+    if(count===3)return tool('invalid','submit_task_result',{...data,completed:[' ']});
+    if(count===4){
+      assert.match(JSON.stringify(body.messages.at(-1)),/非空/);
+      // Even a later tool in this same batch cannot execute after an accepted handoff.
+      return {tool_calls:[...tool('valid','submit_task_result',data).tool_calls,
+        {...tool('replay','write',{path:'proof.txt',content:'REPLAYED'}).tool_calls[0],index:1}]};
+    }
+    return {content:'收口'};
+  });
+  const session=f.make({tools:['write'],taskHandoff:true});
+  await session.prompt('写入一次并提交交接'); assert.equal(session.getTaskHandoff(),null);
+  await session.requestTaskHandoff();
+  assert.equal(f.requests.length,4,'accepted handoff does not spend another model request on confirmation');
+  assert.deepEqual(session.getTaskHandoff(),data);
+  assert.equal(fs.readFileSync(path.join(f.root,'proof.txt'),'utf8'),'ONCE');
+  const entries=(await session.exportEntries()).entries;
+  await session.prompt('下一次派单不能复用旧提交'); assert.equal(session.getTaskHandoff(),null);
+  const restored=f.make({tools:['write'],taskHandoff:true,entries});
+  await restored.prompt('冷恢复后也是新交接'); assert.equal(restored.getTaskHandoff(),null);
+  const main=f.make({tools:['write']}); await main.prompt('普通主任务');
+  assert.ok(!f.requests.at(-1).body.tools.some(item=>item.function.name==='submit_task_result'));
+});
+
+test('real SDK: an instruction queued before submission is consumed before the final handoff', async t => {
+  const data={version:1,summary:'初次提交',completed:['初次工作'],remaining:[],blockers:[],verification:[],nextAction:''};
+  const f=await fixture(t,(body,count)=>{
+    if(count===2)assert.match(JSON.stringify(body.messages),/最新补充/);
+    const args=count===1?data:{...data,summary:'已处理最新补充',completed:['初次工作','最新补充']};
+    return {tool_calls:[{index:0,id:`submit-${count}`,type:'function',function:{name:'submit_task_result',arguments:JSON.stringify(args)}}]};
+  });
+  const session=f.make({tools:[],taskHandoff:true});let steering;
+  session.on('progress',event=>{
+    if(event.kind==='tool-start'&&event.tool==='submit_task_result'&&!steering)steering=session.steer('最新补充');
+  });
+  await session.prompt('处理任务');
+  assert.equal((await steering).ok,true);
+  assert.equal(session.getTaskHandoff().summary,'已处理最新补充');
+  assert.equal(f.requests.length,2);
+});
+
 test('真实 SDK：进度协议、答案后交付登记、最终确认分别保留身份，恢复后约束仍有效', async t => {
   const answer = '**完整答案**\n\n- 操作一\n- 操作二';
   const { requests, make } = await fixture(t, (body) => {

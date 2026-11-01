@@ -294,6 +294,7 @@ export function createAgentRuntime({
       mode: 'run',
       ...(role.mode === 'verify' ? { boundary: 'readonly' } : {}),
       tools: roleTools(role.tools),
+      taskHandoff: true,
       executionContext: { ...modelPlan.executionContext, sessionRef, roleRevision: roleSessionRevision(role, modelPlan),
         worklineId: sessionState?.worklineId, runCount: sessionState?.runCount },
       // 057：产出文件的角色可声明正式交付（白名单里有才挂，verify 只读不挂）。
@@ -351,6 +352,7 @@ export function createAgentRuntime({
     onSettled: async (task, result) => {
       result.reportRef = await contextStore.put({ owner: { conversationId: task.conversationId, rootRunId: task.rootRunId, taskId: result.taskId, generation: task.generation ?? 0 }, kind: 'report', content: [{ type: 'text', text: [task.resultText, result.outcomeReason ? `［宿主错误详情］\n${result.outcomeReason}` : null].filter(Boolean).join('\n\n') }], source: { kind: 'tool', tool: 'task' } });
       task.reportRef = result.reportRef;
+      result.handoff.evidence.reportRef = result.reportRef;
       await task.session?.persistExecution?.();
       // 057 统一 accepted：所有派单结算（含前台参数与单条停止）都写入结果存储与 inbox，
       // 不再由 background/stopRequested 决定是否产生事件（agent-task-lifecycle R-03/R-11）。
@@ -671,7 +673,7 @@ export function createAgentRuntime({
       if(waitingReason){const error=new Error(waitingReason);error.code='waiting';error.externalOutcomeUnknown=externalOutcomeUnknown;throw error;}
       const owned = [...subagents._internals.tasks.values()].filter(task => task.rootRunId === executionOwner.workflowRunId);
       signal?.throwIfAborted();
-      const failed = owned.find(task => task.outcome !== 'complete');
+      const failed = owned.find(task => !['complete','returned','handoff'].includes(task.outcome));
       if (failed) throw new Error(`子任务未成功：${failed.outcomeReason ?? failed.outcome}`);
       return {...result,toolNames:[...usedTools]};
     }, abort, dispose: () => { retiring(release()); }, isBusy: () => main.isBusy(), requestHandoff: () => main.requestHandoff() };
@@ -902,8 +904,9 @@ export function createAgentRuntime({
   }
 
   function commandSessions(conversationId) {
+    // SDK 停止超时后命令控制器仍归会话所有，不能因模型实例已释放而丢掉后台任务。
     return [...new Set([agents.get(conversationId)?.agent,...(retainedCommandSessions.get(conversationId)??[]),...[...subagents._internals.tasks.values()]
-      .filter(task=>task.conversationId===conversationId).map(task=>task.session)])].filter(session=>session&&!session.isDisposed?.());
+      .filter(task=>task.conversationId===conversationId).map(task=>task.session)])].filter(Boolean);
   }
   async function backgroundCommand(conversationId,request) {
     request={...request,runId:await journal.rootForFlow(conversationId,request.runId)};
@@ -1011,19 +1014,23 @@ export function createAgentRuntime({
   }
 
   async function abort(conversationId, options) {
-    if(!options?.preserveBackground)for(const [id,pending]of backgroundGoals)if(pending.ctx.conversationId===conversationId){
+    const commandOwner = options?.commandOwner;
+    if(!options?.preserveBackground)for(const [id,pending]of backgroundGoals)if(pending.ctx.conversationId===conversationId
+      &&(!commandOwner||(pending.ctx.runId===commandOwner.rootRunId&&(pending.ctx.generation??0)===commandOwner.generation))){
       backgroundGoals.delete(id);await journal.finishRoot(ownerOf(pending.ctx),'cancelled','用户停止后台工作');
     }
     const agent = get(conversationId);
     const entry = agents.get(conversationId);
-    if (entry?.ctx) {
+    const current = !commandOwner || (entry?.ctx.runId===commandOwner.rootRunId&&(entry.ctx.generation??0)===commandOwner.generation);
+    if (entry?.ctx && current) {
       entry.ctx.cancelled = true;
       entry.goalController?.abort();
       for (const job of auxiliaryJobs.values()) if (job.sourceRootRunId === entry.ctx.runId) job.controller.abort();
     }
-    subagents.clearHostedPermission(conversationId);
-    if (agent) await agent.abort(options);
-    if(!options?.preserveBackground)await Promise.all(commandSessions(conversationId).filter(session=>session!==agent).map(session=>session.abort()));
+    if(current)subagents.clearHostedPermission(conversationId);
+    if (agent && current) await agent.abort(options);
+    if(!options?.preserveBackground)await Promise.all(commandSessions(conversationId).filter(session=>session!==agent||!current)
+      .map(session=>commandOwner?session.abortCommands(commandOwner):session.abort()));
   }
 
   async function requestHandoff(conversationId) {
@@ -1039,18 +1046,21 @@ export function createAgentRuntime({
     runId=await journal.rootForFlow(conversationId,runId);
     // A delayed stop cannot abort a newer root in the same conversation.
     if (entry?.activeRootRunId && entry.ctx.runId !== runId) throw new Error('当前运行已变化');
+    const root=(await journal.snapshot()).roots[runId];
+    if(root?.owner.conversationId!==conversationId)return;
     const pending=backgroundGoals.get(runId);
     if(pending?.ctx.conversationId===conversationId){
       backgroundGoals.delete(runId);
       await journal.finishRoot(ownerOf(pending.ctx),'cancelled','用户停止后台目标');
-      await Promise.all(commandSessions(conversationId).map(session=>session.abort({commandOwner:ownerOf(pending.ctx)})));
+      await Promise.all(commandSessions(conversationId).map(session=>session.abortCommands(root.owner)));
       await subagents.cancelByRootRun(runId,{reason});
       await entry?.agent.recordGoalStop({runId,reason,inputs});
       await persist(conversationId);
       return;
     }
     await Promise.all([
-      !entry || entry.ctx.runId === runId ? abort(conversationId) : null,
+      // 插队／停止只取消该目标；此前目标的命令和等待接收方仍归会话管理。
+      abort(conversationId,{commandOwner:root.owner}),
       subagents.cancelByRootRun(runId, {reason}),
     ]);
     if (entry?.ctx.runId === runId) {

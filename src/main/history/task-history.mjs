@@ -6,6 +6,7 @@
 //
 // 边界：本模块只管记录——继续执行归 011，核验归 010；写失败不静默
 // （受理路径抛错、其余路径返回 false 由调用方记日志）。
+import { readTaskHandoff } from '../../shared/task-handoff.mjs';
 import {
   existsSync,
   mkdirSync,
@@ -34,6 +35,8 @@ export const CONTEXT_EXCERPT_LIMIT = 2000;
 /** 004/006 全部终态 outcome（与 protocol.ts TaskOutcome 人肉同步）。 */
 const TERMINAL_OUTCOMES = new Set([
   'complete',
+  'returned',
+  'handoff',
   'stopped',
   'denied',
   'blocked',
@@ -191,6 +194,7 @@ export function snapshotFromRecord(record, seq) {
       : null,
     /** 026：结构化收尾提交（旧档案缺省）。 */
     taskResult: record.taskResult ?? null,
+    handoff: record.handoff ?? null,
     /** 033：受理时冻结的工作区快照（会话载入后任务卡照常显示归属；旧档案 null）。 */
     workspace: record.workspace ?? null,
     // 057：经 artifactViews 重建（实时 stat）——available:false 进详情面「不可用」
@@ -408,9 +412,10 @@ export function createTaskHistory({ dir, log = null, maxRecords = MAX_RECORDS } 
    * verifications（append-only，重试总结不触碰）；018 过程记录（结构化工具
    * 耗时 + 审批等待）随终态入档。
    */
-  function finishRecord(taskId, { agent = null, agentTitle = null, toolCallId = null, rootRunId = null, sessionRef = null, worklineId = null, resumesTaskId = null, outcome, outcomeReason = null, resultText = null, resultVersion = null, conversation = null, bodySource = null, speechText = null, notices = null, sources = null, visitedUrls = null, fileChanges = null, fileDiffs = null, report = null, verification = null, taskResult = null, toolCalls = null, approvals = null, usageByModel = null, at = Date.now() }) {
+  function finishRecord(taskId, { agent = null, agentTitle = null, toolCallId = null, rootRunId = null, sessionRef = null, worklineId = null, resumesTaskId = null, outcome, outcomeReason = null, resultText = null, resultVersion = null, conversation = null, bodySource = null, speechText = null, notices = null, sources = null, visitedUrls = null, fileChanges = null, fileDiffs = null, report = null, verification = null, taskResult = null, handoff = null, toolCalls = null, approvals = null, usageByModel = null, at = Date.now() }) {
     const record = cache.get(taskId) ?? readRecordFile(taskId);
     if (!record || record.corrupt) return false;
+    if (handoff) readTaskHandoff({ taskId, outcome, outcomeReason, handoff });
     record.outcome = outcome;
     record.outcomeReason = outcomeReason;
     record.resultText = resultText;
@@ -449,6 +454,7 @@ export function createTaskHistory({ dir, log = null, maxRecords = MAX_RECORDS } 
     }
     if (typeof report === 'string' && report.trim()) record.report = report;
     if (taskResult && typeof taskResult === 'object') record.taskResult = taskResult;
+    if (handoff) record.handoff = structuredClone(handoff);
     record.endedAt = at;
     record.updatedAt = at;
     record.pendingOnly = false;

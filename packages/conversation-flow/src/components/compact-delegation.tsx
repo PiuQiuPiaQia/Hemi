@@ -1,5 +1,5 @@
 import { useRunningClock } from "../shared/use-running-clock.js";
-import { Check, CircleStop, Square, X } from "lucide-react";
+import { ArrowRight, Check, CircleStop, Square, X } from "lucide-react";
 
 import type {
   TaskActionName,
@@ -17,6 +17,8 @@ import type {
  * data-state=stopped），文案与过程页 stateLabelOf 同一份词汇表。
  */
 export const DELEGATION_OUTCOME_TEXT: Partial<Record<TaskOutcome, string>> = {
+  returned: "已返回",
+  handoff: "已交接",
   stopped: "已停止",
   denied: "未获授权",
   blocked: "已阻止",
@@ -58,8 +60,9 @@ export function CompactDelegation({
   const startedAt = snap.startedAt ?? snap.log?.[0]?.at ?? null;
   const endedAt = snap.endedAt ?? snap.log?.[snap.log.length - 1]?.at ?? null;
   const stopped = !running && snap.outcome === "stopped";
+  const returned = !running && (snap.outcome === "returned" || snap.outcome === "handoff");
   const failed =
-    !running && snap.outcome && snap.outcome !== "complete" && !stopped;
+    !running && snap.outcome && snap.outcome !== "complete" && !stopped && !returned;
   const meta = running
     ? snap.phase === "waiting"
       ? snap.permission
@@ -72,6 +75,8 @@ export function CompactDelegation({
           : ""
     : stopped
       ? DELEGATION_OUTCOME_TEXT.stopped
+      : returned
+        ? DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome]
       : failed
         ? snap.outcomeReason ||
           DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome] ||
@@ -84,7 +89,7 @@ export function CompactDelegation({
       className="h56-tools h56-delegation"
       data-agent={snap.agent}
       data-state={
-        running ? "running" : stopped ? "stopped" : failed ? "failed" : "done"
+        running ? "running" : stopped ? "stopped" : returned ? snap.outcome : failed ? "failed" : "done"
       }
     >
       <div className="h56-delegation-line">
@@ -125,6 +130,8 @@ export function CompactDelegation({
               </CircleStop>
             ) : failed ? (
               <X className="h56-delegation-fail" aria-label="没有完成" />
+            ) : returned ? (
+              <ArrowRight aria-label={DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome]} />
             ) : (
               <Check className="h56-delegation-done" aria-label="已完成" />
             )
