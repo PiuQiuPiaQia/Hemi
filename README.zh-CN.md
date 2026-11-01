@@ -10,8 +10,6 @@
 
 https://github.com/user-attachments/assets/0bf5a0a1-dee3-4e93-b9f2-1bbdf6a5ac66
 
-<sub>[下载原片](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)</sub>
-
 ## 它能帮你做的
 
 ### 用你已有的 AI
@@ -70,12 +68,10 @@ npm run dev
 
 [![Hemi 共享记忆文件](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
 
-截图的真实状态与采集边界见[截图来源](docs/media/screenshots/SOURCES.md)。
-
 </details>
 
 ## 许可与链接
 
-[MIT](LICENSE) · [第三方声明](THIRD-PARTY-NOTICES.md) · [截图来源](docs/media/screenshots/SOURCES.md) · [视频与封面来源](docs/media/PROMO.md)
+[MIT](LICENSE) · [第三方声明](THIRD-PARTY-NOTICES.md) · [截图来源](docs/media/screenshots/SOURCES.md) · [视频来源](docs/media/PROMO.md)
 
-[开发](docs/development.zh-CN.md) · [参与贡献](CONTRIBUTING.md) · [安全与隐私](SECURITY.md)
+[参与贡献](CONTRIBUTING.md) · [安全与隐私](SECURITY.md)

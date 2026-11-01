@@ -10,8 +10,6 @@ English · [简体中文](README.zh-CN.md)
 
 https://github.com/user-attachments/assets/0bf5a0a1-dee3-4e93-b9f2-1bbdf6a5ac66
 
-<sub>[Download the original video](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)</sub>
-
 ## What it can do
 
 ### Use the AI you already have
@@ -70,12 +68,10 @@ Architecture, tests, and packaging: the [development guide](docs/development.md)
 
 [![Hemi shared memory files](docs/media/screenshots/feature-memory.png)](docs/media/screenshots/feature-memory.png)
 
-What each image shows and how it was captured: [Screenshot sources](docs/media/screenshots/SOURCES.md).
-
 </details>
 
 ## License and links
 
-[MIT](LICENSE) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [Screenshot sources](docs/media/screenshots/SOURCES.md) · [Video and poster sources](docs/media/PROMO.md)
+[MIT](LICENSE) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [Screenshot sources](docs/media/screenshots/SOURCES.md) · [Video sources](docs/media/PROMO.md)
 
-[Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security and privacy](SECURITY.md)
+[Contributing](CONTRIBUTING.md) · [Security and privacy](SECURITY.md)
