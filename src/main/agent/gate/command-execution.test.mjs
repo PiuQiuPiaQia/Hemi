@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runCommand, createCommandScope, commandToolResult } from './command-execution.mjs';
+import { runCommand, createCommandScope, commandToolResult, defaultGroupProbe } from './command-execution.mjs';
 import { withExecutionScope } from '../../agent-runtime/execution-scope.mjs';
 
 const posix = { skip: process.platform === 'win32' ? 'POSIX 进程组用例；Windows taskkill 需 Windows 真机验证' : false };
@@ -83,6 +83,50 @@ test('060 清理确认：探针全程失败仍按未确认处理（fail-closed �
   const result = await running;
   assert.equal(result.cleanupConfirmed, false);
   assert.equal(result.status, 'cleanup-failed');
+});
+
+test('060 清理确认：组内无任何成员时 kill-0 内核直接给出空快照，不依赖 ps', posix, async () => {
+  // 复现 v0.2.47 mac CI：高负载下 /bin/ps 单次超过固定探针预算被反复超时，组明明已死却拿不到证据。
+  const { spawn } = await import('node:child_process');
+  const doomed = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' });
+  process.kill(-doomed.pid, 'SIGKILL');
+  await new Promise(resolve => doomed.once('exit', resolve));
+  await pause(20);
+  const snapshot = await defaultGroupProbe(2000, doomed.pid);
+  assert.deepEqual(snapshot, { stdout: '' }, 'ESRCH 应映射为空快照（ps 快照不可能为空）');
+});
+
+test('060 清理确认：kill-0 不会把仍存活的进程组误判为已消失', posix, async () => {
+  const { spawn } = await import('node:child_process');
+  const alive = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try {
+    const snapshot = await defaultGroupProbe(2000, alive.pid);
+    const present = snapshot.stdout.split('\n').some(row => {
+      const [group] = row.trim().split(/\s+/);
+      return Number(group) === alive.pid;
+    });
+    assert.equal(present, true, `存活组必须出现在探针快照中：${snapshot.stdout.slice(0, 200)}`);
+  } finally { try { process.kill(-alive.pid, 'SIGKILL'); } catch {} }
+});
+
+test('060 清理确认：单次探针超过固定片仍能在清理窗口内拿到证据', posix, async () => {
+  // 复现 v0.2.47 mac CI（cleanup-unconfirmed，8.3s）：ps 持续慢于固定 2s 片时全程拿不到快照。
+  const budgets = [];
+  const slowProbe = async timeoutMs => {
+    budgets.push(timeoutMs);
+    await pause(2100);
+    return { stdout: '' };
+  };
+  const controller = new AbortController();
+  const running = runCommand({ command: 'sleep 30', signal: controller.signal, groupProbe: slowProbe });
+  await pause(60);
+  const began = Date.now();
+  controller.abort();
+  const result = await running;
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.cleanupConfirmed, true, JSON.stringify(result));
+  assert.ok(budgets[0] > 2000, `首个探针应拿到剩余清理窗口预算，实际 ${budgets[0]}ms`);
+  assert.ok(Date.now() - began < 5000, `确认应在首个慢探针返回后完成，实际 ${Date.now() - began}ms`);
 });
 
 test('后台短时间连续输出的最后一条仍推送到界面，不把无输出期误记为旧进度', posix, async () => {

@@ -49,7 +49,7 @@ async function fixture(t,hold){
     finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});}
   });
   const {instanceId}=await host.request('handshake'),call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params});
-  await call('model.sync',{models:[{modelKey:'fixture/owned',providerId:'fixture',name:'Isolated lifecycle',model:'fixture',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});
+  await call('model.sync',{models:[{modelKey:'fake-owned-model',providerId:'fixture',name:'Isolated lifecycle',model:'fixture',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'fake-lifecycle-key'}]});
   const {id}=await call('session.create');
   const flow=()=>call('flow.snapshot',{id});
   return {call,id,flow,requests,pidFile,late,root};

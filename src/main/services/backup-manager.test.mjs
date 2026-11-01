@@ -59,7 +59,7 @@ test('settings: webdav password encrypted at rest and never returned; legacy sch
   const mgr=createBackupManager({userDataDir:home,secretStorage,log:console});
   await mgr.saveSettings({target:{kind:'webdav',url:'https://dav.example.com/dav/',username:'u@x.y',password:'app-secret',remoteDir:'hemi-backups'},schedule:{enabled:true,interval:'weekly',tier:'full'}});
   const raw=JSON.parse(fs.readFileSync(path.join(home,'backup-settings.json'),'utf8'));
-  assert.equal(raw.target.passwordEncrypted,'ZW5jOmFwcC1zZWNyZXQ='); // base64(enc:app-secret)
+  assert.equal(raw.target.passwordEncrypted,Buffer.from('enc:app-secret').toString('base64')); // mock encryption, not a stored credential
   assert.equal('password'in raw.target,false);
   assert.equal(raw.schedule.tier,'light','旧 schedule.tier=full 落盘前应归一为 light');
   const view=mgr.getSettings();
