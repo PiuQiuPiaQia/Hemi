@@ -1,0 +1,44 @@
+# macOS 签名信任撤销 preflight：发 tag 前手动运行，验证托管 runner 上
+# 「授予 trustRoot → 生产 revoke（deny + 双证据）→ 幂等」全链路可用。
+# 只用仓库公开 .cer，不引用任何 release secrets，不装依赖、不打包、不发布、
+# 不生成 tag；临时 keychain 的密码是公开占位符（内含公证书，无私钥材料）。
+name: macOS signing trust preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: 无私钥验证信任撤销链路
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 验证信任授予→撤销→幂等（无私钥）
+        timeout-minutes: 10
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: node scripts/verify-macos-trust-revocation.mjs
+
+      # 以下为独立 always 兜底（脚本自身 finally 已清理，这里保证收尾可见）。
+      - name: 兜底清理临时签名钥匙串
+        if: always()
+        timeout-minutes: 3
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: node scripts/cleanup-macos-signing.mjs delete-keychain
+
+      - name: 兜底清理临时签名身份目录
+        if: always()
+        timeout-minutes: 3
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: node scripts/cleanup-macos-signing.mjs remove-directory

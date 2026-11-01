@@ -78,7 +78,8 @@ test('release workflow 三个独立有界清理阶段，LF/CRLF checkout 均成�
       assert.match(step, /timeout-minutes: 3/, `${stage} 必须有 step 上限（${lineEnding}）`);
       assert.match(step, /HEMI_MAC_SIGNING_DIR: \$\{\{ runner\.temp \}\}\/hemi-build-signing/, `${stage} 必须显式传目录（${lineEnding}）`);
     }
-    assert.ok(!/remove-trusted-cert/.test(text), `内联 security 命令必须全部移入脚本（${lineEnding}）`);
+    const offenders = text.split(/\r?\n/).filter(line => line.includes('remove-trusted-cert') && !/^\s*#/.test(line));
+    assert.deepEqual(offenders, [], `内联 security 命令必须全部移入脚本（${lineEnding}）`);
   };
   expect(raw.replace(/\r?\n/g, '\n'), 'LF');
   expect(raw.replace(/\r?\n/g, '\r\n'), 'CRLF');

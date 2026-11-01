@@ -1,17 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   COMMAND_TIMEOUT_MS,
   STAGE_NAMES,
   WATCHDOG_GRACE_MS,
   WATCHDOG_PYTHON_SOURCE,
+  isExpectedTrustDenial,
+  parseAdminTrustPolicies,
   resolveCleanupContext,
   runCleanupStage,
   watchdogRun,
 } from '../cleanup-macos-signing.mjs';
+import { runTrustRevocationPreflight } from '../verify-macos-trust-revocation.mjs';
 import { certificatePath } from '../lib/macos-signing.mjs';
 
 const RUNNER_TEMP = path.join(os.tmpdir(), 'hemi-runner-temp');
@@ -70,13 +75,84 @@ function spyRun(outcomes = []) {
   };
 }
 
-test('托管 runner：撤销经 sudo 包装且命令语义不变', () => {
-  const { run, calls } = spyRun();
+test('托管 runner：revoke-trust 走 deny 覆盖 + 状态/实际双证据', () => {
+  const outcomes = [
+    { ok: true, detail: '', timedOut: false, status: 0, stdout: '', stderr: '' }, // add-trusted-cert deny
+    { ok: true, detail: '', timedOut: false, status: 0, stdout: '', stderr: '' }, // trust-settings-export
+    { ok: false, detail: 'CSSMERR_TP_CERT_TRUST', timedOut: false, status: 1, stdout: 'Cert Verify Result: CSSMERR_TP_CERT_TRUST', stderr: '' }, // verify-cert 预期拒绝
+  ];
+  const { run, calls } = spyRun(outcomes);
   const logs = [];
-  const result = runCleanupStage('revoke-trust', { env: HOSTED, run, log: line => logs.push(line) });
+  const result = runCleanupStage('revoke-trust', {
+    env: HOSTED, run, exists: () => true, log: line => logs.push(line),
+    parseTrustSettings: () => [{ policy: 'codeSign', result: 3 }],
+  });
   assert.deepEqual(result, { ok: true, failures: 0 });
-  assert.deepEqual(calls, [{ command: '/usr/bin/security', args: ['remove-trusted-cert', '-d', certificatePath], options: { sudo: true } }]);
-  assert.ok(logs.some(line => line.includes('remove-trusted-cert')));
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0].args, ['add-trusted-cert', '-d', '-r', 'deny', '-p', 'codeSign', '-k', path.join(SIGNING_DIR, 'hemi-signing.keychain-db'), certificatePath]);
+  assert.equal(calls[0].options.sudo, true);
+  assert.deepEqual(calls[1].args, ['trust-settings-export', '-d', path.join(SIGNING_DIR, 'admin-trust-settings-export.plist')]);
+  assert.equal(calls.find(call => call.args[0] === 'add-trusted-cert').options.sudo, true);
+  assert.deepEqual(calls[2].args, ['verify-cert', '-c', certificatePath, '-p', 'codeSign', '-N', '-L']);
+  assert.equal(calls[2].options.sudo, undefined);
+  assert.ok(logs.some(line => line.includes('deny')) && logs.some(line => line.includes('verify-cert')));
+});
+
+test('状态证据不足（无 deny 或存在 allow）直接失败且不做实际验证', () => {
+  for (const policies of [[], [{ policy: 'ssl', result: 3 }], [{ policy: 'codeSign', result: 1 }], [{ policy: 'codeSign', result: 3 }, { policy: 'codeSign', result: 2 }], [{ policy: 'codeSign', result: 3 }, { policy: 'ssl', result: 4 }]]) {
+    const { run, calls } = spyRun();
+    const result = runCleanupStage('revoke-trust', {
+      env: HOSTED, run, exists: () => true, log: () => {}, parseTrustSettings: () => policies,
+    });
+    assert.equal(result.ok, false, JSON.stringify(policies));
+    assert.equal(calls.length, 2, '状态证据失败后不再跑 verify-cert');
+  }
+});
+
+test('verify-cert 仍信任/超时/其它错误都不接受为撤销成功', () => {
+  const cases = [
+    [{ ok: true, detail: '', timedOut: false, status: 0, stdout: '', stderr: '' }, '仍信任'],
+    [{ ok: false, detail: 'ETIMEDOUT', timedOut: true, status: null, stdout: '', stderr: '' }, '超时'],
+    [{ ok: false, detail: 'ENOENT', timedOut: false, status: null, stdout: '', stderr: '' }, '工具缺失'],
+    [{ ok: false, detail: 'CSSMERR_TP_CERT_TRUST', timedOut: false, status: null, stdout: '', stderr: '' }, '未确认退出状态不能只凭输出放行'],
+    [{ ok: false, detail: 'exit 64', timedOut: false, status: 64, stdout: 'usage error', stderr: '' }, '参数错误'],
+  ];
+  for (const [verifyOutcome, label] of cases) {
+    const { run } = spyRun([{ ok: true }, { ok: true }, verifyOutcome]);
+    const result = runCleanupStage('revoke-trust', {
+      env: HOSTED, run, exists: () => true, log: () => {},
+      parseTrustSettings: () => [{ policy: 'codeSign', result: 3 }],
+    });
+    assert.equal(result.ok, false, label);
+  }
+});
+
+test('revoke-trust 幂等：deny 覆盖可重复执行且每次双证据', () => {
+  const revokeOnce = () => runCleanupStage('revoke-trust', {
+    env: HOSTED,
+    run: (() => {
+      let verifyCalled = 0;
+      return (command, args) => {
+        if (args[0] === 'verify-cert') {
+          verifyCalled += 1;
+          return { ok: false, detail: 'CSSMERR_TP_CERT_TRUST', timedOut: false, status: 1, stdout: 'CSSMERR_TP_CERT_TRUST', stderr: '' };
+        }
+        return { ok: true, detail: '', timedOut: false, status: 0, stdout: '', stderr: '' };
+      };
+    })(),
+    exists: () => true,
+    log: () => {},
+    parseTrustSettings: () => [{ policy: 'codeSign', result: 3 }],
+  });
+  assert.deepEqual(revokeOnce(), { ok: true, failures: 0 });
+  assert.deepEqual(revokeOnce(), { ok: true, failures: 0 });
+});
+
+test('钥匙串缺失不能当作管理员域信任已撤销', () => {
+  const { run, calls } = spyRun();
+  const result = runCleanupStage('revoke-trust', { env: HOSTED, run, exists: () => false });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 0);
 });
 
 test('钥匙串不存在（导入早失败）跳过且不算失败；存在则删除', () => {
@@ -92,7 +168,7 @@ test('钥匙串不存在（导入早失败）跳过且不算失败；存在则�
 
 test('执行器抛异常被隔离为阶段失败，不冒泡', () => {
   const boom = () => { throw new Error('executor exploded'); };
-  const revoked = runCleanupStage('revoke-trust', { env: HOSTED, run: boom, log: () => {} });
+  const revoked = runCleanupStage('revoke-trust', { env: HOSTED, run: boom, exists: () => true, log: () => {} });
   assert.equal(revoked.ok, false);
   const deleted = runCleanupStage('delete-keychain', { env: HOSTED, run: boom, exists: () => true, log: () => {} });
   assert.equal(deleted.ok, false);
@@ -185,4 +261,106 @@ test('正常命令经 watchdog 包装返回成功', { skip: PYTHON ? false : '�
   const run = watchdogRun({ pythonPath: PYTHON });
   const result = run(process.execPath, ['-e', 'process.exit(0)'], { timeoutMs: 5000 });
   assert.equal(result.ok, true);
+});
+
+// ── deny 撤销的双证据支撑 ────────────────────────────────────────────────
+
+test('verify-cert 信任拒绝分类：信任错误命中，其它错误不命中', () => {
+  assert.equal(isExpectedTrustDenial({ stderr: 'Cert Verify Result: CSSMERR_TP_CERT_TRUST' }), true);
+  assert.equal(isExpectedTrustDenial({ detail: 'CSSMERR_TP_NOT_TRUSTED' }), true);
+  assert.equal(isExpectedTrustDenial({ stdout: 'denied by trust settings' }), true);
+  assert.equal(isExpectedTrustDenial({ detail: 'ENOENT' }), false);
+  assert.equal(isExpectedTrustDenial({ stdout: 'usage error', detail: 'exit 64' }), false);
+  assert.equal(isExpectedTrustDenial({}), false);
+});
+
+test('信任设置读取器只提取目标证书的 policy/result（真实 plist）', { skip: PYTHON ? false : '需要可用的 python3' }, () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hemi-trust-'));
+  try {
+    const plistPath = path.join(dir, 'settings.plist');
+    const sha1 = 'a'.repeat(40);
+    const generator = [
+      'import plistlib',
+      `data = {'trustVersion': 1, 'trustList': {'${sha1.toUpperCase()}': {'trustSettings': [{'kSecTrustSettingsPolicyName': 'codesigning', 'kSecTrustSettingsResult': 3}], 'issuerName': b'public-certificate-data'},`,
+      `        'ffff': {'trustSettings': [{'kSecTrustSettingsPolicyName': 'ssl', 'kSecTrustSettingsResult': 1}]}}}`,
+      `open(r'${plistPath}', 'wb').write(plistlib.dumps(data))`,
+    ].join('\n');
+    const gen = spawnSync(PYTHON, ['-c', generator], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(gen.status, 0, gen.stderr);
+    assert.deepEqual(
+      parseAdminTrustPolicies({ pythonPath: PYTHON, plistPath, sha1 }),
+      [{ policy: 'codeSign', result: 3 }],
+      '只输出目标 SHA1 的记录，且深入嵌套收集 policy 条目',
+    );
+    assert.deepEqual(parseAdminTrustPolicies({ pythonPath: PYTHON, plistPath, sha1: 'b'.repeat(40) }), [], '目标证书无记录时返回空数组');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── 无私钥 preflight（注入执行器，不触碰本机 security）──────────────────
+
+test('preflight：授予→撤销→幂等全链路，finally 始终清理', () => {
+  const outcomes = Array.from({ length: 7 }, () => ({
+    ok: true, detail: '', timedOut: false, status: 0, stdout: '', stderr: '',
+  }));
+  const { run, calls } = spyRun(outcomes);
+  const revokes = [];
+  const cleanups = [];
+  const logs = [];
+  const result = runTrustRevocationPreflight({
+    env: HOSTED, run,
+    revokeStage: log => { revokes.push(log); return { ok: true, failures: 0 }; },
+    cleanupStage: stage => { cleanups.push(stage); return { ok: true, failures: 0 }; },
+    parseTrustSettings: () => [{ policy: 'codeSign', result: 1 }],
+    log: line => logs.push(line),
+  });
+  assert.deepEqual(result, { ok: true, failures: 0 });
+  assert.equal(revokes.length, 2, '生产 revoke 调用两次（含幂等验证）');
+  assert.deepEqual(cleanups, ['delete-keychain', 'remove-directory']);
+  assert.deepEqual(calls.map(call => call.args[0]), ['create-keychain', 'set-keychain-settings', 'unlock-keychain', 'unlock-keychain', 'add-trusted-cert', 'verify-cert', 'trust-settings-export']);
+  assert.equal(calls[0].args[2], 'fake-public-probe', 'keychain 密码是公开占位符');
+  assert.equal(calls.find(call => call.args[0] === 'add-trusted-cert').options.sudo, true);
+  assert.ok(logs.some(line => line.includes('PASS: 重复 revoke-trust 幂等成功')));
+});
+
+test('preflight：revoke 失败计失败但仍执行清理', () => {
+  const { run } = spyRun();
+  const cleanups = [];
+  const result = runTrustRevocationPreflight({
+    env: HOSTED, run,
+    revokeStage: () => ({ ok: false, failures: 1 }),
+    cleanupStage: stage => { cleanups.push(stage); return { ok: true, failures: 0 }; },
+    parseTrustSettings: () => [],
+    log: () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(cleanups, ['delete-keychain', 'remove-directory']);
+});
+
+test('preflight：非托管环境拒绝且零副作用', () => {
+  const { run, calls } = spyRun();
+  const result = runTrustRevocationPreflight({ env: {}, run, log: () => {} });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 0);
+});
+
+// ── preflight workflow 接线（静态，LF/CRLF 无关）────────────────────────
+
+test('preflight workflow：无 secrets、只读权限、手动触发、无发布', () => {
+  const raw = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../.github/workflows/macos-signing-preflight.yml'), 'utf8');
+  for (const lineEnding of ['\n', '\r\n']) {
+    const text = raw.replace(/\r?\n/g, lineEnding);
+    assert.match(text, /workflow_dispatch:/, `手动触发（${lineEnding}）`);
+    assert.match(text, /permissions:\s*?\n\s*contents: read/, `只读权限（${lineEnding}）`);
+    assert.match(text, /runs-on: macos-15/, `托管 runner（${lineEnding}）`);
+    assert.match(text, /node-version: 22/, `Node 22（${lineEnding}）`);
+    assert.match(text, /node scripts\/verify-macos-trust-revocation\.mjs/, `preflight 入口（${lineEnding}）`);
+    assert.match(text, /cleanup-macos-signing\.mjs delete-keychain/, `兜底清理 keychain（${lineEnding}）`);
+    assert.match(text, /cleanup-macos-signing\.mjs remove-directory/, `兜底清理目录（${lineEnding}）`);
+    assert.ok(!/secrets\./.test(text), `不引用任何 secrets（${lineEnding}）`);
+    assert.ok(!/npm ci/.test(text), `不装依赖（${lineEnding}）`);
+    assert.ok(!/electron-builder/.test(text), `不打包（${lineEnding}）`);
+    assert.ok(!/gh release|git push|--draft/.test(text), `不发布不推 tag（${lineEnding}）`);
+  }
 });

@@ -106,9 +106,12 @@ jobs:
           cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
 
       # 三个独立的有界清理阶段：各自 if: always() + step 上限，单阶段失败会
-      # 阻止发布但不阻断其余清理。脚本先校验运行上下文（仅 GitHub 托管
-      # runner、目录必须严格等于 RUNNER_TEMP/hemi-build-signing），否则零
-      # 副作用拒绝；外部命令经 python3 watchdog 到点 SIGKILL，真硬截止。
+      # 阻止发布但不阻断其余清理；入口校验 hosted+显式临时目录，外部命令经
+      # python3 watchdog 到点 SIGKILL。
+      # macOS 14.7.5+/15 GHA 上 remove-trusted-cert 会无限挂（runner-images#12116、
+      # rustls-native-certs#179），撤销改为同证书 codeSign 规则显式 deny 覆盖，
+      # 要求管理员域状态与普通用户 verify-cert 双证据；deny 记录留在一次性
+      # runner，不是恢复原始基线。keychain 不存在（导入早失败）时跳过。
       - name: 撤销 CI 管理员域签名信任
         if: always()
         timeout-minutes: 3
