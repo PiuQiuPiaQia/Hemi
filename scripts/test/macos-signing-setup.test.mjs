@@ -62,15 +62,24 @@ test('setup 脚本的管理员域由 policy helper 判定', () => {
   assert.ok(!/security',\s*\['add-trusted-cert/.test(source), '信任命令必须统一经 helper 构造');
 });
 
-test('release workflow 清理：always 撤销、错误可见、后续清理不跳过', () => {
-  const workflow = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../.github/workflows/release.yml'), 'utf8');
-  const cleanup = /- name: 清理临时签名钥匙串与信任设置[\s\S]*?(?=\n      - name:)/.exec(workflow)?.[0] ?? '';
-  assert.match(cleanup, /if: always\(\)/);
-  assert.match(cleanup, /if ! sudo -n security remove-trusted-cert -d build\/macos-signing\.cer; then\n\s+echo "::error::[^"]*"\n\s+cleanup_status=1\n\s+fi/, '信任撤销失败必须输出 ::error:: 并计入状态');
-  assert.match(cleanup, /security delete-keychain "\$HEMI_MAC_SIGNING_DIR\/hemi-signing\.keychain-db" \|\| cleanup_status=1/, '钥匙串删除失败仍计入状态');
-  assert.match(cleanup, /rm -rf "\$HEMI_MAC_SIGNING_DIR" \|\| cleanup_status=1/, '私密目录清理失败仍计入状态');
-  assert.match(cleanup, /exit \$cleanup_status/, '清理步骤以累计状态收口');
-  assert.ok(cleanup.indexOf('remove-trusted-cert') < cleanup.indexOf('delete-keychain') && cleanup.indexOf('delete-keychain') < cleanup.indexOf('rm -rf'), '撤销失败后仍继续钥匙串与目录清理');
-  assert.ok(!/remove-trusted-cert[^\n]*\|\| true/.test(cleanup), '不得用 || true 吞掉信任撤销结果');
-  assert.ok(!/^\s*security remove-trusted-cert build\/macos-signing\.cer/m.test(cleanup), '不应清理未使用的用户域信任');
+test('release workflow 三个独立有界清理阶段，LF/CRLF checkout 均成立', () => {
+  const raw = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../.github/workflows/release.yml'), 'utf8');
+  const expect = (text, lineEnding) => {
+    const stepOf = marker => {
+      const at = text.indexOf(marker);
+      assert.ok(at >= 0, `缺失清理阶段 ${marker}（${lineEnding}）`);
+      const start = text.lastIndexOf('\n      - name:', at);
+      const end = text.indexOf('\n      - name:', at);
+      return text.slice(start + 1, end === -1 ? undefined : end);
+    };
+    for (const stage of ['revoke-trust', 'delete-keychain', 'remove-directory']) {
+      const step = stepOf(`node scripts/cleanup-macos-signing.mjs ${stage}`);
+      assert.match(step, /if: always\(\)/, `${stage} 必须始终执行（${lineEnding}）`);
+      assert.match(step, /timeout-minutes: 3/, `${stage} 必须有 step 上限（${lineEnding}）`);
+      assert.match(step, /HEMI_MAC_SIGNING_DIR: \$\{\{ runner\.temp \}\}\/hemi-build-signing/, `${stage} 必须显式传目录（${lineEnding}）`);
+    }
+    assert.ok(!/remove-trusted-cert/.test(text), `内联 security 命令必须全部移入脚本（${lineEnding}）`);
+  };
+  expect(raw.replace(/\r?\n/g, '\n'), 'LF');
+  expect(raw.replace(/\r?\n/g, '\r\n'), 'CRLF');
 });

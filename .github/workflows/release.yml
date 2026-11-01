@@ -105,22 +105,30 @@ jobs:
           node scripts/verify-distribution-licenses.mjs release/mac-arm64/Hemi.app release/licenses-macos.json
           cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
 
-      # 仅 GitHub 托管 runner 的 --ci 在管理员域注册信任（本地/self-hosted 走
-      # 用户域），无论成败都要撤销。撤销失败必须可见并计入退出码，但不阻断
-      # 钥匙串与私密目录清理；各步骤独立容错，最后统一上报累计状态。
-      - name: 清理临时签名钥匙串与信任设置
+      # 三个独立的有界清理阶段：各自 if: always() + step 上限，单阶段失败会
+      # 阻止发布但不阻断其余清理。脚本先校验运行上下文（仅 GitHub 托管
+      # runner、目录必须严格等于 RUNNER_TEMP/hemi-build-signing），否则零
+      # 副作用拒绝；外部命令经 python3 watchdog 到点 SIGKILL，真硬截止。
+      - name: 撤销 CI 管理员域签名信任
         if: always()
+        timeout-minutes: 3
         env:
           HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
-        run: |
-          cleanup_status=0
-          if ! sudo -n security remove-trusted-cert -d build/macos-signing.cer; then
-            echo "::error::撤销管理员域信任失败（导入在建立信任前失败时可无信任可撤；成功发布路径必须撤销成功）"
-            cleanup_status=1
-          fi
-          security delete-keychain "$HEMI_MAC_SIGNING_DIR/hemi-signing.keychain-db" || cleanup_status=1
-          rm -rf "$HEMI_MAC_SIGNING_DIR" || cleanup_status=1
-          exit $cleanup_status
+        run: node scripts/cleanup-macos-signing.mjs revoke-trust
+
+      - name: 删除临时签名钥匙串
+        if: always()
+        timeout-minutes: 3
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: node scripts/cleanup-macos-signing.mjs delete-keychain
+
+      - name: 删除临时签名身份目录
+        if: always()
+        timeout-minutes: 3
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: node scripts/cleanup-macos-signing.mjs remove-directory
 
       - name: 建 macOS release 并上挂资产
         env:
