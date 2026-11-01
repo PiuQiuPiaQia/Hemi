@@ -1,11 +1,19 @@
-New API 站点登录导入新增首屏加载动画；本版起 macOS 与 Windows 统一版本号、同一发布页同时交付。
+本地技能导入、更严格的工作流技能检查、子任务交接与后台任务修复；产品官网与宣传视频上线。
 
-- 模型设置 → 添加供应商 → New API 站点登录：打开站点后先显示「正在加载站点页面…」加载动画，页面就绪后再显示站点内容，首次加载不再白屏等待；恢复未完成的导入时同样生效。
-- 发布节奏调整：自 0.2.43 起 macOS 与 Windows 共用同一版本号、同时发布（此前 macOS 最新为 0.2.39、Windows 为 0.2.42）；两端「检查更新」将始终拿到同一版本。
+- 技能中心支持扫描本机常用 Agent 技能目录并批量导入：覆盖 ~/.agents、~/.claude、~/.codex、~/.cursor、~/.gemini、~/.config/opencode 及已登记本机工作区下的技能目录；本机导入默认创建软链接并实时跟随源目录更新，移除导入不会删除原目录。
+- Bot 技能中心同样支持扫描本机技能并跨机传输导入，远端无需暴露本机路径。
+- 工作流运行前严格检查所需技能：失效的本地软链接技能会明确报错提示，不再静默降级为普通节点；备份与恢复不跟随符号链接，技能源目录不会被误归档。
+- 子任务结构化交接：统一派单、受理、补充指令与结果回传的校验协议，宿主事实与模型声明分开核对。
+- 修复后台任务按目标取消与归属：取消不再误伤无关工作，委派事件与任务历史归属更准确。
+- 产品官网上线，双语 README 改版并加入功能宣传视频。
 
 ---
 
-The New API site sign-in import now shows a first-paint loading indicator; starting with this version, macOS and Windows ship together under one version number on a single release page.
+Local skill imports, stricter workflow skill checks, subagent handoff and background-task fixes, plus a new product site with a promo video.
 
-- Settings → Models & routing → Add provider → New API site sign-in: after opening a site, a "loading site page" spinner is shown until the page is ready, replacing the blank wait on first load. Resuming an interrupted import gets the same treatment.
-- Release cadence change: from 0.2.43 on, macOS and Windows share one version number and release simultaneously (previously macOS sat at 0.2.39 while Windows was at 0.2.42); check-for-updates on both platforms now always resolves to the same version.
+- The skill center can scan common local agent skill directories and batch-import them: ~/.agents, ~/.claude, ~/.codex, ~/.cursor, ~/.gemini, ~/.config/opencode and registered local workspaces. Local imports default to managed symlinks that follow the source in real time; removing an import never deletes the original folder.
+- The Bot skill center supports the same local scan and cross-host transfer import without exposing local paths to the remote host.
+- Workflows verify required skills up front: an unavailable symlinked skill now fails with a clear message instead of silently degrading. Backups no longer follow symbolic links, so skill sources are never accidentally archived.
+- Subagent handoffs now use a validated structured protocol for dispatch, acceptance, follow-up instructions and results, keeping host facts separate from model claims.
+- Fixed background-task cancellation and ownership: cancelling by goal no longer stops unrelated work, and delegation events map to the right task history.
+- New simplified product website; bilingual READMEs now lead with the feature promo video.
