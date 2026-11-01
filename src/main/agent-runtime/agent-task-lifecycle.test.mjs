@@ -37,7 +37,9 @@ async function fixture(t, scenario, policy = {}) {
   const workspace = path.join(root, 'workspace'), dataDir = path.join(root, 'data');
   await fs.mkdir(workspace);
   // gate.cjs: writes proof, waits for the release file, then exits 0 (no dangling sockets).
-  await fs.writeFile(path.join(workspace, 'gate.cjs'), "const fs=require('fs');fs.writeFileSync('proof.txt','WORK_DONE');const t=setInterval(()=>{if(fs.existsSync('release')){clearInterval(t);console.log('DONE');process.exit(0)}},20);");
+  // Let stdout drain before natural exit; process.exit() can truncate the
+  // terminal fact on asynchronous pipes, especially under parallel CI load.
+  await fs.writeFile(path.join(workspace, 'gate.cjs'), "const fs=require('fs');fs.writeFileSync('proof.txt','WORK_DONE');const t=setInterval(()=>{if(fs.existsSync('release')){clearInterval(t);console.log('DONE')}},20);");
   let runtime, agent, ctx, cid, mainCalls = 0, childCalls = 0, childAttempts = 0, checks = 0, stopCalls = 0, outcome, running;
   const requests = [], errors = [];const terminal=Promise.withResolvers();let eventSeq=0;
   const exists = name => fs.stat(path.join(workspace, name)).then(() => true, () => false);
