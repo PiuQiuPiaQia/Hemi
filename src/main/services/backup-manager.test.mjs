@@ -137,8 +137,12 @@ test('restore: prepare gives preview, apply swaps data with safety copy, cancel 
   await mgr.saveSettings({target:{kind:'local',dir:target}});
   await mgr.runBackup();
   const setName=fs.readdirSync(target).find(n=>n.startsWith(BACKUP_DIR_PREFIX));
-  // 备份后修改本地数据
-  fs.writeFileSync(path.join(home,'pi-memory/MEMORY.md'),'changed-after-backup');
+  // Explicitly make the backup newer: crossing a real clock-second boundary
+  // would otherwise correctly keep the freshly changed local file.
+  const memoryFile=path.join(home,'pi-memory/MEMORY.md');
+  const older=new Date(fs.statSync(memoryFile).mtimeMs-5000);
+  fs.writeFileSync(memoryFile,'changed-after-backup');
+  fs.utimesSync(memoryFile,older,older);
   const prep=await mgr.prepareRestore(setName);
   assert.equal(prep.ok,true);
   assert.ok(prep.preview.memoryFiles>=1);

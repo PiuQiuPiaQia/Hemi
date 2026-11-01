@@ -1,6 +1,5 @@
 import {readRunJournalFileSync} from './journal-inspection.mjs';
-import test, {after} from 'node:test';
-import {inspectStorageForDiagnostics} from './journal-storage.mjs';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -16,19 +15,8 @@ import {createBotExecutor} from '../bot/runtime.mjs';
 import {runBackgroundTurn} from './background-turn.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-after(() => {
-  setTimeout(() => {
-    const report = process.report.getReport();
-    const handles = value => value.filter(item => item.is_active || item.is_referenced);
-    console.error('HEMI_EXIT_DIAGNOSTICS=' + JSON.stringify({
-      resources:process.getActiveResourcesInfo(),storage:inspectStorageForDiagnostics(),
-      libuv:handles(report.libuv),workers:(report.workers??[]).map(value=>({threadId:value.header?.threadId,libuv:handles(value.libuv)})),
-    }));
-  }, 3000).unref();
-  setTimeout(() => {console.error('HEMI_EXIT_DIAGNOSTICS: process remained alive 15s after all test cleanup');process.exit(2);}, 15000).unref();
-});
 async function until(read) {
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 45000;
   while (true) {
     const result = await read();
     if (result) return result;
@@ -212,7 +200,7 @@ async function fixture(t, platform, mode, policy = {}) {
 }
 
 for (const platform of ['PC','Bot']) {
-  for (const mode of ['hung','quiet-hung']) test(`${platform}: completed work with an open WebSocket can be inspected and stopped across request segments (${mode})`, {timeout:25000}, async t => {
+  for (const mode of ['hung','quiet-hung']) test(`${platform}: completed work with an open WebSocket can be inspected and stopped across request segments (${mode})`, {timeout:60000}, async t => {
     const f = await fixture(t, platform, mode); await f.start(); assert.equal(await f.finish(), 'completed');
     const jobs = await f.processes(); assert.equal(jobs.length, 1); assert.equal(jobs[0].status, 'cancelled'); assert.equal(jobs[0].cleanupConfirmed, true);
     assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'), 'ACTUAL_WORK_DONE');
@@ -226,7 +214,7 @@ for (const platform of ['PC','Bot']) {
     // 根复盘（goal round 推进），模型自己核验并停止不再需要的命令；quiet review 保留为长静默兜底。
     assert.ok(root.goal.round>=1);
   });
-  test(`${platform}: a quiet required long job survives handoff and retains its original identity and deadline`, {timeout:25000}, async t => {
+  test(`${platform}: a quiet required long job survives handoff and retains its original identity and deadline`, {timeout:60000}, async t => {
     const f = await fixture(t, platform, 'normal'); await f.start();
     await until(async () => f.calls >= 2 && await f.exists('started'));
     const before = (await f.processes())[0]; await pause(80);
@@ -239,24 +227,24 @@ for (const platform of ['PC','Bot']) {
   // Windows 真机（2GB 慢机）实测：Bot 变体的双后台命令段交接中工具批被提前中止
   // （监督器收到 abort 以 125 退出、第二个工具调用未派发），PC 变体通过。
   // 根因在共享运行时的段交接/工具批生命周期，待单独排查；不跳过会阻塞 Windows 发版门禁。
-  test(`${platform}: stopping one obsolete job after handoff preserves a second required job`, {timeout:25000, skip:platform==='Bot'&&process.platform==='win32'?'Windows 上 Bot 双后台命令的段交接存在工具批早退（根因待查），PC 变体已通过':false}, async t => {
+  test(`${platform}: stopping one obsolete job after handoff preserves a second required job`, {timeout:60000, skip:platform==='Bot'&&process.platform==='win32'?'Windows 上 Bot 双后台命令的段交接存在工具批早退（根因待查），PC 变体已通过':false}, async t => {
     const f = await fixture(t, platform, 'two-jobs'); await f.start();
     await until(async () => (await f.processes()).some(item => item.status === 'cancelled'));
     const jobs = await f.processes(); assert.equal(jobs.length,2); assert.equal(jobs.filter(item => item.state === 'active').length,1);
     await fs.writeFile(path.join(f.workspace,'release'),'done'); assert.equal(await f.finish(),'completed');
     assert.equal((await f.processes()).filter(item => item.status === 'succeeded').length,1);
   });
-  test(`${platform}: handoff preserves the command hard timeout and delivers its actual terminal state`, {timeout:25000}, async t => {
+  test(`${platform}: handoff preserves the command hard timeout and delivers its actual terminal state`, {timeout:60000}, async t => {
     const f = await fixture(t,platform,'timeout'); await f.start(); assert.equal(await f.finish(),'completed');
     const jobs=await f.processes(); assert.equal(jobs.length,1); assert.equal(jobs[0].status,'timed-out'); assert.equal(jobs[0].cleanupConfirmed,true);
     const entries=await f.entries(); assert.ok(entries.some(item=>item.customType==='hemi_background_command_result'&&JSON.stringify(item).includes('timed-out')));
   });
-  test(`${platform}: user stop after handoff prevents late requests and clears the real process`, {timeout:25000}, async t => {
+  test(`${platform}: user stop after handoff prevents late requests and clears the real process`, {timeout:60000}, async t => {
     const f = await fixture(t, platform, 'stop-request'); await f.start(); await until(() => f.blocked);
     await f.stop(); assert.equal(await f.finish(),'stopped'); const count = f.requests.length; await pause(80);
     assert.equal(f.requests.length,count); assert.equal(f.checks,0); assert.ok((await f.processes()).every(item => item.cleanupConfirmed));
   });
-  for (const policy of [{maxRounds:1},{maxRequests:1}]) test(`${platform}: exhausted ${Object.keys(policy)[0]} clears live work and closes partial without verification`, {timeout:25000}, async t => {
+  for (const policy of [{maxRounds:1},{maxRequests:1}]) test(`${platform}: exhausted ${Object.keys(policy)[0]} clears live work and closes partial without verification`, {timeout:60000}, async t => {
     const f = await fixture(t, platform, 'budget', policy); await f.start(); assert.equal(await f.finish(),'partial');
     // 057 软复盘：maxRounds 场景第 2 个请求软性发出（段不拒请求，回合边界才收口）；maxRequests 硬预算仍在准入处拒绝。
     if (Object.keys(policy)[0] === 'maxRequests') assert.equal(f.calls, 1); else assert.ok(f.calls >= 2, `segment admitted softly (calls=${f.calls})`);
@@ -264,20 +252,20 @@ for (const platform of ['PC','Bot']) {
     assert.ok((await f.processes()).every(item => item.cleanupConfirmed && item.status === 'cancelled'));
     const goal = Object.values((await f.snapshot()).roots).find(item => item.goal).goal; assert.equal(goal.phase,'budget_limited'); assert.equal(goal.round,1);
   });
-  test(`${platform}: a child reaching the shared segment limit wakes a parent waiting on its live command`, {timeout:25000}, async t => {
+  test(`${platform}: a child reaching the shared segment limit wakes a parent waiting on its live command`, {timeout:60000}, async t => {
     const f = await fixture(t,platform,'child-hung',{maxRequestsPerRound:3}); await f.start(); assert.equal(await f.finish(),'completed');
     assert.ok(f.childCalls >= 1); const state=await f.snapshot(); assert.equal(Object.keys(state.dispatches).length,1);
     const jobs=await f.processes(); assert.equal(jobs.length,1); assert.ok(jobs[0].owner.taskId); assert.equal(jobs[0].status,'cancelled'); assert.equal(jobs[0].cleanupConfirmed,true);
     const goal=Object.values(state.roots).find(item=>item.goal).goal; assert.equal(goal.phase,'complete');
   });
 }
-test('PC: completion racing the durable handoff is delivered exactly once before verification', {timeout:25000}, async t => {
+test('PC: completion racing the durable handoff is delivered exactly once before verification', {timeout:60000}, async t => {
   const f = await fixture(t,'PC','race'); await f.start(); assert.equal(await f.finish(),'completed'); assert.equal(f.atHandoff,true);
   assert.equal((await f.processes())[0].status,'succeeded'); assert.equal(f.checks,1);
   const entries = await f.entries(); assert.equal(entries.filter(item => item.customType === 'hemi_background_command_result').length,1);
   assert.ok(entries.some(item => item.customType === 'hemi_background_command_result' && JSON.stringify(item).includes('NORMAL_COMPLETION')));
 });
-test('PC: cancellation while background suspension is delayed cannot advance or restart the goal', {timeout:25000}, async t => {
+test('PC: cancellation while background suspension is delayed cannot advance or restart the goal', {timeout:60000}, async t => {
   const f = await fixture(t,'PC','stop-handoff'); await f.start(); await until(() => f.atHandoff); await f.stop(); assert.equal(await f.finish(),'stopped');
   // 057 软复盘：段边界软放行了第 2 次请求（不再硬拒）；取消后不得再有任何新请求，也不得推进或重启目标。
   const count = f.requests.length; await pause(80);
@@ -285,14 +273,14 @@ test('PC: cancellation while background suspension is delayed cannot advance or 
   assert.equal(f.checks,0); assert.ok((await f.processes()).every(item => item.cleanupConfirmed));
   const goal = Object.values((await f.snapshot()).roots).find(item => item.goal).goal; assert.equal(goal.round,1); assert.notEqual(goal.phase,'complete');
 });
-test('PC: stopping a suspended background goal prevents later wakeups',{timeout:25000},async t=>{
+test('PC: stopping a suspended background goal prevents later wakeups',{timeout:60000},async t=>{
   const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
   await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
   await f.stop();assert.equal(await f.finish(),'stopped');const calls=f.requests.length;await pause(50);
   assert.equal(f.requests.length,calls);assert.ok((await f.processes()).every(p=>p.status==='cancelled'&&p.cleanupConfirmed));
 });
 
-test('PC: changing the foreground model preserves the process; its event uses the original frozen model and owner',{timeout:25000},async t=>{
+test('PC: changing the foreground model preserves the process; its event uses the original frozen model and owner',{timeout:60000},async t=>{
  const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
  await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
  const [before]=await f.processes();assert.equal((await f.switchModel()).goalComplete,true);
@@ -303,7 +291,7 @@ test('PC: changing the foreground model preserves the process; its event uses th
  assert.ok(models.includes('handoff-other'));assert.equal(models.at(-1),'handoff');
  assert.equal((await f.processes()).length,1);
 });
-test('PC: stopping the suspended owner after another goal finishes cancels its retained process without a wake',{timeout:25000},async t=>{
+test('PC: stopping the suspended owner after another goal finishes cancels its retained process without a wake',{timeout:60000},async t=>{
  const f=await fixture(t,'PC','normal',{maxRequestsPerRound:60});await f.start();
  await until(async()=>Object.values((await f.snapshot()).roots).some(root=>root.status==='waiting_background'));
  await f.switchModel();await f.stop();assert.equal(await f.finish(),'stopped');

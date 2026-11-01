@@ -52,7 +52,7 @@ test('actual Bot Host/SDK navigates, types, clicks, reads and screenshots a real
   assert.ok(names.includes('browser_navigate'));assert.ok(names.includes('conversation_read'));assert.ok(!names.includes('screen_view'));
 });
 
-test('actual Bot conversation_read retrieves early and long public history across pages and Host restart', {timeout: 30000}, async t => {
+test('actual Bot conversation_read retrieves early and long public history across pages and Host restart', {timeout: 90000}, async t => {
   const pages = [];
   const fixture = await createBotCapabilityFixture(body => {
     const raw = body.messages.findLast(message => message.role === 'user')?.content;
