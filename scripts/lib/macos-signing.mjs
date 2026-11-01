@@ -20,6 +20,30 @@ export function signingCommand(command, args, { input, secrets = [] } = {}) {
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
 }
 
+// Admin-domain trust is reserved for one-shot GitHub-hosted runners: --ci
+// alone also runs locally from verify-macos-signing.mjs, where the user
+// trust domain (with its GUI authentication dialog) is the intended
+// behavior. Self-hosted runners keep the user domain as well.
+export function usesAdminTrustDomain({ ci = false, env = process.env } = {}) {
+  return Boolean(ci) && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted';
+}
+
+// Updating the user trust domain needs the GUI trust agent of a logged-in
+// session and blocks until timeout on headless CI runners. The GitHub-hosted
+// CI context therefore registers admin-domain trust once through passwordless
+// sudo; local runs keep trusting in the current user's domain. Pure parameter
+// helper: never executes anything and never touches keychain contents.
+export function addTrustedCertInvocation({ keychain, certificate, admin = false } = {}) {
+  if (!keychain) throw new Error('add-trusted-cert requires a target keychain.');
+  if (!certificate) throw new Error('add-trusted-cert requires a certificate file.');
+  const args = admin
+    ? ['add-trusted-cert', '-d', '-r', 'trustRoot', '-p', 'codeSign', '-k', keychain, certificate]
+    : ['add-trusted-cert', '-r', 'trustRoot', '-p', 'codeSign', '-k', keychain, certificate];
+  return admin
+    ? { admin: true, command: 'sudo', args: ['-n', '/usr/bin/security', ...args] }
+    : { admin: false, command: '/usr/bin/security', args };
+}
+
 export function signingCertificate() {
   if (!existsSync(certificatePath)) throw new Error('Missing public signing certificate. Run npm run signing:mac:setup -- --create once.');
   return new X509Certificate(readFileSync(certificatePath));

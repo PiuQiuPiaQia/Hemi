@@ -30,7 +30,7 @@ Hemi 使用固定的自签名 Code Signing 证书，无需 Apple Developer Progr
 
 在已有身份的本机运行 `npm run signing:mac:setup -- --upload-secrets`，通过 gh 的标准输入设置 Hemi 仓库的两个 Actions secrets：`HEMI_MAC_SIGNING_P12`、`HEMI_MAC_SIGNING_PASSWORD`。命令不打印密钥或密码，也不提交、打标签或发布版本。
 
-macOS 发布 job 使用 `--ci` 导入同一身份到 runner 临时目录。CI 禁止生成证书，缺少 secrets 或不匹配公开证书就失败。签名完成后检查包体，并清理临时钥匙串与私密文件。Windows 构建流程不受此身份配置影响。
+macOS 发布 job 使用 `--ci` 导入同一身份到 runner 临时目录。CI 禁止生成证书，缺少 secrets 或不匹配公开证书就失败。改写用户信任域需要 GUI 认证代理，无头会话会阻塞到超时，因此只有 `--ci` 且明确处于 GitHub Actions 托管 runner（`GITHUB_ACTIONS=true` 且 `RUNNER_ENVIRONMENT=github-hosted`）时，才通过免密 `sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k <临时钥匙串>` 在管理员域一次性信任该证书。本地运行（包括 `npm run verify:mac-signing` 本地调用 `--ci` 的场景）与 self-hosted runner 仍在当前用户信任域内信任，不触发 sudo。发布 job 无论成败都会清理临时钥匙串与私密文件，并撤销这份管理员域信任（`sudo -n security remove-trusted-cert -d`）：撤销失败会输出 `::error::` 并使清理步骤失败，但钥匙串删除与私密目录清理仍会继续；若导入在建立信任之前就已失败，可无信任可撤，报错如实保留。Windows 构建流程不受此身份配置影响。
 
 自签名证书没有苹果 TeamIdentifier，因此保持现有 HTTP 下载、SHA-512 核验与退出换包流程；不切换到 Squirrel。见 [更新签名分流](macos-updater-signing.md)。
 

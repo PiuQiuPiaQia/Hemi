@@ -3,7 +3,7 @@ import { randomBytes, X509Certificate } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { certificatePath, prepareMacSigning, signingCommand, signingDirectory, signingFingerprint, signingName } from './lib/macos-signing.mjs';
+import { addTrustedCertInvocation, certificatePath, prepareMacSigning, signingCommand, signingDirectory, signingFingerprint, signingName, usesAdminTrustDomain } from './lib/macos-signing.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Run this setup on macOS.');
 const args = new Set(process.argv.slice(2));
@@ -70,9 +70,21 @@ try {
   if (!validIdentities.includes(signingFingerprint())) {
     const identities = signingCommand('/usr/bin/security', ['find-identity', '-p', 'codesigning', keychain]);
     if (!identities.includes(signingFingerprint())) signingCommand('/usr/bin/security', ['import', p12Path, '-k', keychain, '-P', password, '-T', '/usr/bin/codesign'], { secrets });
-    // Trust only this certificate for code signing in the current user's domain.
+    // Trust only this certificate for code signing. Local runs trust it in
+    // the current user's domain (verify-macos-signing.mjs also runs --ci
+    // locally); only the one-shot GitHub-hosted runner context lacks the
+    // GUI trust agent and its user-domain update blocks until timeout, so
+    // it registers admin-domain trust via passwordless sudo instead.
     const importedIdentities = signingCommand('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning', keychain]);
-    if (!importedIdentities.includes(signingFingerprint())) signingCommand('/usr/bin/security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'codeSign', '-k', keychain, trustCert], { secrets });
+    if (!importedIdentities.includes(signingFingerprint())) {
+      const trust = addTrustedCertInvocation({ keychain, certificate: trustCert, admin: usesAdminTrustDomain({ ci: args.has('--ci'), env: process.env }) });
+      if (trust.admin) {
+        // Keychain unlock state is per securityd session; unlock once for the
+        // root session so the sudoed trust write does not need interaction.
+        signingCommand('sudo', ['-n', '/usr/bin/security', 'unlock-keychain', '-p', keychainPassword, keychain], { secrets });
+      }
+      signingCommand(trust.command, trust.args, { secrets });
+    }
   }
   signingCommand('/usr/bin/security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', keychainPassword, keychain], { secrets });
   // codesign still needs the dedicated keychain in the search list, even when
