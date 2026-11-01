@@ -15,9 +15,10 @@ node outputs/hemi-site-simple/tools/serve.mjs 4320
 ## 内容维护
 
 - 页面与样式：`index.html`、`styles.css`。
-- `media/promo.mp4`：已验收成片；源码和音乐许可见 `../hemi-feature-story/video/`。
+- 播放器与直接下载链接使用 OSS：`https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4`。公开 HTTPS 读取，支持 Range；发布网站时无需打包本地 MP4。
+- `media/promo.mp4`：保留的已验收本地成片；源码和音乐许可见 `../hemi-feature-story/video/`。
 - `media/poster.jpg`、`media/icon.svg`：封面与品牌图标。
-- 更新视频或封面后，同步更新 HTML 中媒体 URL 的版本参数，避免缓存旧内容。
+- 更新视频时优先使用新的版本文件名，并同步修改 HTML 的播放和下载链接；更新封面时同步更新版本参数，避免缓存旧内容。
 - QA 截图、临时文件、历史导出和备份不纳入版本控制。
 
 页面不显示制作版本、音乐版本、时长角注或内部检查说明。产品功能说明保留 SSH/Bot 在线条件、记忆隔离和工作流 Beta 等必要边界。
