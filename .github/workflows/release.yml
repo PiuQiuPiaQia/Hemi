@@ -4,8 +4,8 @@
 # 前置（repo Settings → Secrets and variables → Actions）：
 # - GITHUB_TOKEN：内置，无需配置（contents:write 权限已在下方声明）。
 # - 应用内更新走公开 Release 下载直链，无需内置 token。
-# - macOS 默认 ad-hoc 签名，确保资源封印完整。Developer ID 发布需覆盖
-#   build.mac.identity 并配置证书与公证凭据。
+# - macOS 使用固定自签名证书（无需付费账号）。Actions secrets 中保存同一份
+#   HEMI_MAC_SIGNING_P12 / HEMI_MAC_SIGNING_PASSWORD，缺失或身份不符就停止发布。
 name: Release
 
 on:
@@ -60,6 +60,18 @@ jobs:
 
       - run: npm ci
 
+      - name: 导入固定 macOS 签名身份
+        env:
+          HEMI_MAC_SIGNING_P12: ${{ secrets.HEMI_MAC_SIGNING_P12 }}
+          HEMI_MAC_SIGNING_PASSWORD: ${{ secrets.HEMI_MAC_SIGNING_PASSWORD }}
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: |
+          node scripts/setup-macos-signing.mjs --ci
+          echo "HEMI_MAC_SIGNING_DIR=$HEMI_MAC_SIGNING_DIR" >> "$GITHUB_ENV"
+
+      - name: 验证跨构建签名身份
+        run: npm run verify:mac-signing
+
       - name: 原生依赖许可与对应源码
         run: node scripts/verify-release-materials.mjs
 
@@ -89,8 +101,18 @@ jobs:
           GARBAGE=$(find release/mac-arm64/Hemi.app -name '._*' | wc -l | tr -d ' ')
           test "$GARBAGE" = "0"
           codesign --verify --deep --strict release/mac-arm64/Hemi.app
+          node --input-type=module -e "import { verifyMacSignature } from './scripts/lib/macos-signing.mjs'; verifyMacSignature('release/mac-arm64/Hemi.app');"
           node scripts/verify-distribution-licenses.mjs release/mac-arm64/Hemi.app release/licenses-macos.json
           cp third-party/uiohook-napi-1.5.5-source.tar.gz release/
+
+      - name: 清理临时签名钥匙串
+        if: always()
+        env:
+          HEMI_MAC_SIGNING_DIR: ${{ runner.temp }}/hemi-build-signing
+        run: |
+          security remove-trusted-cert build/macos-signing.cer || true
+          security delete-keychain "$HEMI_MAC_SIGNING_DIR/hemi-signing.keychain-db" || true
+          rm -rf "$HEMI_MAC_SIGNING_DIR"
 
       - name: 建 macOS release 并上挂资产
         env:

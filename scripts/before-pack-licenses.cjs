@@ -7,6 +7,12 @@ const { spawn, execFileSync } = require('node:child_process');
 const { Arch } = require('builder-util');
 
 module.exports = async function beforePack(context) {
+  if (context.electronPlatformName === 'darwin') {
+    const { pathToFileURL } = require('node:url');
+    const { prepareMacSigning } = await import(pathToFileURL(path.join(__dirname, 'lib/macos-signing.mjs')).href);
+    const signing = prepareMacSigning();
+    context.packager.platformSpecificBuildOptions.identity = signing.fingerprint;
+  }
   execFileSync(process.execPath, [path.join(__dirname, 'verify-release-materials.mjs')], { stdio: 'inherit' });
   const electronRoot = path.dirname(require.resolve('electron/package.json'));
   const version = require(path.join(electronRoot, 'package.json')).version;

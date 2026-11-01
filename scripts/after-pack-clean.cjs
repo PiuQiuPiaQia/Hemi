@@ -34,3 +34,5 @@ module.exports = async function afterPack(context) {
   const removed = await clean(appPath);
   console.log(`[after-pack-clean] removed ${removed} AppleDouble files`);
 };
+
+module.exports.cleanAppleDouble = clean;

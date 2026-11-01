@@ -25,6 +25,8 @@
     "postinstall": "node scripts/clean-appledouble.mjs",
     "pack": "npm run build && electron-builder --dir --publish never",
     "dist:mac": "npm run build && electron-builder --publish never",
+    "signing:mac:setup": "node scripts/setup-macos-signing.mjs",
+    "verify:mac-signing": "node scripts/verify-macos-signing.mjs",
     "prebuild": "node scripts/generate-appearance.mjs && node scripts/build-bot-runtime.mjs",
     "prebuild:renderer": "node scripts/generate-appearance.mjs",
     "predev": "node scripts/generate-appearance.mjs && npm run build:sdk",
@@ -108,6 +110,7 @@
     "asar": false,
     "beforePack": "scripts/before-pack-licenses.cjs",
     "afterPack": "scripts/after-pack-clean.cjs",
+    "afterSign": "scripts/after-sign-macos.cjs",
     "directories": {
       "output": "release"
     },
@@ -155,7 +158,10 @@
       }
     ],
     "mac": {
-      "identity": "-",
+      "identity": "Hemi Self-Signed",
+      "forceCodeSigning": true,
+      "sign": "scripts/sign-macos.cjs",
+      "timestamp": "none",
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [

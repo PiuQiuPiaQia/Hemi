@@ -7,10 +7,12 @@ Hemi 在更新器初始化时确定安装方式：
 | 当前应用 | 下载及安装 |
 | --- | --- |
 | macOS Developer ID 证书 | 保留原生 Squirrel 更新流程 |
-| macOS ad-hoc／未签名实例 | 设置 `autoInstallOnAppQuit=false`，保留库的 HTTP 下载与 SHA-512 校验；点击重启安装后由 Hemi 退出换包并重启 |
+| macOS 固定自签名证书／ad-hoc／未签名实例 | 设置 `autoInstallOnAppQuit=false`，保留库的 HTTP 下载与 SHA-512 校验；点击重启安装后由 Hemi 退出换包并重启 |
 | Windows | 保留 NSIS 原生更新流程 |
 
 `codesign -dv --verbose=2` 的身份信息写入标准错误，探测读取 stdout 和 stderr，成功退出后再识别 TeamIdentifier。默认不把缺失的 stdout 当作 ad-hoc 身份。
+
+固定自签名证书没有苹果 TeamIdentifier，现有探测仍返回 `ad-hoc` 安装分类（这里表示非苹果签名的换包分支），不表示包本身仍为临时签名。实际包体由打包钩子验证固定证书及其 DR，见 [固定自签名身份](macos-signing.md)。
 
 安装使用下载完成事件绑定的文件与版本，不再按缓存文件名字典序猜测安装包。换包前再次流式核验 SHA-512、包内版本和 `codesign --verify --deep --strict`。新包需要通过自身资源封印检查，无须匹配旧版 ad-hoc 二进制的 cdhash。失败不会退出或启动换包脚本；替换失败保留原有回滚路径。
 
