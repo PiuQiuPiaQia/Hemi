@@ -60,6 +60,15 @@ const baseUrl=`http://127.0.0.1:${server.address().port}/v1`;
 const wait=async(fn,label)=>{const end=Date.now()+30000;while(Date.now()<end){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,40));}throw new Error(`Timeout: ${label}`);};
 const flow=()=>page.evaluate(id=>window.hemiVoice.flowGetSnapshot(id),cid);
 const check=name=>{report.checks.push(name);console.log(`PASS ${mode}: ${name}`);};
+const checkReturnMark=async(entry,label)=>{
+  const icon=entry.locator('.h56-delegation-return-mark');await icon.waitFor();
+  assert.equal(await icon.getAttribute('aria-label'),label);
+  const style=await icon.evaluate(el=>{const s=getComputedStyle(el);return {width:s.width,height:s.height,shrink:s.flexShrink,color:s.color};});
+  assert.equal(style.width,'12px');assert.equal(style.height,'12px');assert.equal(style.shrink,'0');
+  assert.equal(style.color,await entry.locator('.h56-delegation-meta').evaluate(el=>getComputedStyle(el).color));
+  assert.equal(await entry.locator('.h56-delegation-fail').count(),0);
+  check(`${label} marker stays 12px and neutral`);
+};
 try {
   if(mode==='dev'){
     const {createServer}=await import('vite');vite=await createServer({configFile:path.resolve('vite.config.ts'),cacheDir:path.join(userData,'vite-cache'),logLevel:'error',server:{host:'127.0.0.1',port:0}});await vite.listen();process.env.VITE_DEV_SERVER_URL=vite.resolvedUrls.local[0];
@@ -77,7 +86,8 @@ try {
   const original=Object.values(waiting.runs)[0].runId;
   assert.equal(Object.values(waiting.runs)[0].outcome,'awaiting-background');
   assert.equal(Object.keys(waiting.tasks).length,1);
-  await page.locator('.h56-delegation[data-state="handoff"]').waitFor();
+  const handoffEntry=page.locator('.h56-delegation[data-state="handoff"]');await handoffEntry.waitFor();
+  await checkReturnMark(handoffEntry,'已交接');
   const record=await page.evaluate(id=>window.hemiVoice.openConversation(id),cid);
   assert.ok(record.turns.some(t=>t.author==='hemi'&&t.text.includes('任务已交接到后台')));
   assert.doesNotMatch(JSON.stringify(record.turns),/没有生成内容，请再说一次/);
@@ -92,6 +102,7 @@ try {
   assert.notEqual(anchor.item.runId,original);assert.equal(done.runs[anchor.item.runId].rootRunId,original);
   assert.equal(fs.readFileSync(path.join(workspace,'proof.txt'),'utf8'),'REAL_CHILD_PROOF');
   const entry=page.locator('.h56-delegation[data-state="returned"]').filter({hasText:'续跑核对文件'});await entry.waitFor();
+  await checkReturnMark(entry,'已返回');
   await entry.getByRole('button').first().click();
   const processView=page.getByLabel('执行过程',{exact:true});await processView.waitFor();
   await processView.getByText('CHILD_CHECK_DONE',{exact:true}).waitFor();

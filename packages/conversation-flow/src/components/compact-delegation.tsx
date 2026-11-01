@@ -131,7 +131,10 @@ export function CompactDelegation({
             ) : failed ? (
               <X className="h56-delegation-fail" aria-label="没有完成" />
             ) : returned ? (
-              <ArrowRight aria-label={DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome]} />
+              <ArrowRight
+                className="h56-delegation-return-mark"
+                aria-label={DELEGATION_OUTCOME_TEXT[snap.outcome as TaskOutcome]}
+              />
             ) : (
               <Check className="h56-delegation-done" aria-label="已完成" />
             )

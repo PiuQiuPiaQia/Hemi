@@ -203,7 +203,8 @@ html.kb-nav .h56-route-gear:focus-visible {
   color: var(--body);
 }
 
-.compact-shell .h56-delegation-done {
+.compact-shell .h56-delegation-done,
+.compact-shell .h56-delegation-return-mark {
   flex: none;
   width: 12px;
   height: 12px;
