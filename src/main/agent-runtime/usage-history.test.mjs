@@ -274,6 +274,7 @@ test('真实 runtime 装配：createAgentRuntime.usageHistory 投影临时 journ
   const deps = { userDataDir: dir, getProfiles: () => ({}), resolveCapabilities: () => ({}), getAccessService: () => ({}), log: { info() {}, warn() {}, error() {} } };
   const runtime = await createAgentRuntime(deps);
   t.after(() => { try { runtime.disposeAll?.(); } catch { /* 测试结束清理 */ } });
+  await runtime.usageHistory({}); // 先等待启动恢复，再注入用于投影的运行事实。
   // 经 runtime 暴露的真实 journal 事实接口写入（不经过被测投影）；旧式带 query 的 url 模拟历史数据。
   const ownerA = { conversationId: 'conv-A', rootRunId: 'ra', generation: 0 };
   await runtime.journal.beginRoot(ownerA);
