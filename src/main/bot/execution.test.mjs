@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 // Production Host -> shared runtime -> installed SDK -> real HTTP and POSIX tools.
 import test from 'node:test';
@@ -99,9 +100,7 @@ test('background shell does not block same-workspace file tools or commands, and
   const completion=f.requests.filter(body=>JSON.stringify(body.messages).includes('［后台命令完成'));
   assert.equal(completion.length,1,'the background result resumes the owning goal exactly once');
   assert.match(JSON.stringify(completion[0].messages),/A_DONE/);
-  const state=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8').catch(async()=>{
-    const files=await fs.readdir(path.join(f.root,'data/runtime-v2'));throw Error('journal files: '+files.join(','));
-  }));
+  const state=readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
   assert.doesNotMatch(JSON.stringify(state),/SYNTHETIC_ONLY/);
   assert.ok(Object.values(state.observations).filter(observation=>observation.tool==='bash').every(observation=>observation.resource===null));
 });
@@ -122,7 +121,7 @@ test('explicit same-file writes still wait and a stopped waiter never executes a
   assert.equal(await fs.access(target).then(()=>true,()=>false),false);
   await f.send(next,'WRITE_SHARED_FILE');await f.done(next);
   assert.equal(await fs.readFile(target,'utf8'),'native write completed');
-  const journal=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
   const writes=Object.values(journal.observations).filter(observation=>observation.tool==='write');
   assert.equal(writes.filter(observation=>observation.owner.conversationId===cancelled).length,0,'the cancelled waiter never begins a write');
   assert.equal(writes.filter(observation=>observation.owner.conversationId===next).length,1,'a later writer executes normally after release');

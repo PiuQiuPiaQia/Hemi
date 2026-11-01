@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import http from 'node:http';import {randomUUID} from 'node:crypto';
 import {createBotHost} from './host.mjs';import {createBotExecutor} from './runtime.mjs';import {GOAL_CHECK_SYSTEM} from '../agent-runtime/goal-driver.mjs';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
@@ -38,7 +39,7 @@ async function fixture(t){
 }
 for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a later goal preserves earlier background commands`,{timeout:30000},async t=>{
  const f=await fixture(t);
- const snapshot=async()=>JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+ const snapshot=async()=>readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
  await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'original',text:'启动两个后台命令并等待真实结果。'}}});
  const initial=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&s.backgroundJobs.length===2?s:null;});
  const originalRun=Object.keys(initial.runs)[0],before=initial.backgroundJobs;

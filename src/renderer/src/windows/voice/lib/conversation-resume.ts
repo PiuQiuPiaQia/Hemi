@@ -10,16 +10,16 @@ export function createConversationResume(storage: ResumeStorage) {
       storage.setItem(RESUME_KEY, key);
     },
     async restore<T>(bridge: {
-      getLastConversation(): Promise<T | null>;
-      openConversation(id: string): Promise<T>;
+      getLastConversation(options?:{windowed?:boolean}): Promise<T | null>;
+      openConversation(id: string,options?:{windowed?:boolean}): Promise<T>;
     }): Promise<T | null> {
       const key = storage.getItem(RESUME_KEY);
       if (key === DRAFT_NEW_KEY) return null;
       if (key && /^conv-[a-z0-9-]+$/.test(key)) {
-        try { return await bridge.openConversation(key); }
+        try { return await bridge.openConversation(key,{windowed:true}); }
         catch { /* 已删除或损坏的目标回落到最近可用会话。 */ }
       }
-      return bridge.getLastConversation();
+      return bridge.getLastConversation({windowed:true});
     },
   };
 }

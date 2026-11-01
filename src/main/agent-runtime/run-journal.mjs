@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
-import path from 'node:path';
+import { createJournalStorage } from './journal-storage.mjs';
+import { createJournalDraft, editJournalRecord as edit, applyJournalChanges, JOURNAL_TABLES } from './journal-draft.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { readTaskHandoff } from '../../shared/task-handoff.mjs';
 import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
@@ -55,36 +55,32 @@ export const dispatchIdentity = ({ conversationId, rootRunId, generation = 0, se
 };
 
 /** 同一原子提交保存终态与 outbox；磁盘损坏绝不按空状态继续。 */
-export function createRunJournal({ dir }) {
-  const file = path.join(dir, 'run-journal.json');
+export function createRunJournal({ dir, storage = createJournalStorage(dir) }) {
   let state, tail = Promise.resolve(), pendingWrite = false;
-  const retry = createPersistenceRetry(() => transaction(s => s));
+  let retainedChanges = {};
+  const retry = createPersistenceRetry(() => transaction(() => undefined));
   const watchers = new Set();
-  const ready = (async () => {
-    await mkdir(dir, { recursive: true });
-    try { state = JSON.parse(await readFile(file, 'utf8')); }
-    catch (error) { if (error.code !== 'ENOENT') throw new Error(`运行事实库读取失败：${error.message}`); state = initial(); }
-    state.observations ??= {};
-    state.processes ??= {};
-    if (state.version !== 2 || ['roots','inbox','dispatches','tasks','requests','observations','processes'].some(key => !state[key] || typeof state[key] !== 'object' || Array.isArray(state[key]))) throw new Error('运行事实库版本或结构损坏');
-  })();
+  const ready = storage.load().then(value => { state = value; });
   const transaction = (operation, { retainOnFailure = false } = {}) => {
     const run = tail.then(async () => {
       await ready;
-      const next = structuredClone(state), result = operation(next);
-      const tmp = `${file}.${randomUUID()}.tmp`;
+      const { draft, changes } = createJournalDraft(state);
+      const result = operation(draft);
+      const commit = {};
+      for (const table of JOURNAL_TABLES) if (retainedChanges[table] || changes[table]) commit[table] = { ...retainedChanges[table], ...changes[table] };
       try {
-        await writeFile(tmp, JSON.stringify(next), { mode: 0o600 });
-        await rename(tmp, file);
+        if (Object.keys(commit).length) await storage.commit(commit);
       } catch (error) {
-        await unlink(tmp).catch(() => {});
-        // A confirmed end remains an execution fence even when storage fails.
-        // Admissions still roll back and may not execute until their write succeeds.
-        if (retainOnFailure) { state = next; pendingWrite = true; for (const watch of watchers) watch(); }
+        // Confirmed endings fence new execution even when persistence fails.
+        // Failed admissions never enter memory or the retry queue.
+        if (retainOnFailure) {
+          applyJournalChanges(state, changes); retainedChanges = commit; pendingWrite = true;
+          for (const watch of watchers) watch();
+        }
         if (pendingWrite) retry.schedule();
         throw error;
       }
-      state = next; pendingWrite = false; retry.reset();
+      applyJournalChanges(state, changes); retainedChanges = {}; pendingWrite = false; retry.reset();
       for (const watch of watchers) watch();
       return structuredClone(result);
     });
@@ -93,7 +89,18 @@ export function createRunJournal({ dir }) {
   const read = async fn => { await ready; await tail; return structuredClone(fn(state)); };
   return {
     ready: () => ready,
-    snapshot: () => read(s => s),
+    snapshot: (options) => read(s => {
+      if (!options) return s;
+      const selected = initial();
+      for (const table of options.tables ?? JOURNAL_TABLES) {
+        if (!JOURNAL_TABLES.includes(table)) throw new Error('运行事实库查询表无效');
+        selected[table] = Object.fromEntries(Object.entries(s[table]).filter(([id, row]) =>
+          (!options.ids || options.ids.includes(id)) && (!options.conversationId || row.owner?.conversationId === options.conversationId)
+          && (!options.rootRunId || row.owner?.rootRunId === options.rootRunId)));
+      }
+      return selected;
+    }),
+    project: projector => read(projector),
     root: owner => read(s => s.roots[owner.rootRunId] ?? null),
     /** 057 根调度等待后代必要工作：等 rootRunId+generation 树内全部进程到达终态且清理确认（R-04）。 */
     async waitForProcesses(owner, {signal} = {}) {
@@ -148,7 +155,7 @@ export function createRunJournal({ dir }) {
       });
     },
     beginRoot: (owner, facts = {}) => transaction(s => {
-      const old = s.roots[owner.rootRunId];
+      const old = edit(s, 'roots', owner.rootRunId);
       if (old) {
         if (JSON.stringify(old.owner) !== JSON.stringify(owner) || terminal.has(old.status)) throw new Error('根目标已失效或终结，不得重新执行');
         if (old.status === 'awaiting_user') throw new Error('目标正在等待用户答复，不能自行恢复');
@@ -163,14 +170,14 @@ export function createRunJournal({ dir }) {
       return s.roots[owner.rootRunId] = { owner, status: 'running', createdAt: Date.now(), ...facts };
     }),
     suspendRoot: owner => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || (root.kind && root.kind !== 'workflow')) throw new Error('工作流根目标已失效，不能挂起');
       root.kind = 'workflow';
       root.status = 'waiting';
       return root;
     }),
     suspendGoal: owner => transaction(s => {
-      const root=s.roots[owner.rootRunId];
+      const root=edit(s, 'roots', owner.rootRunId);
       if(!owns(root,owner)||terminal.has(root.status)||root.goal?.phase!=='active'||hasUnconfirmedWork(pendingGoalWork(s,owner)))throw new Error('目标尚未到达后台交接边界');
       root.status='waiting_background';root.goal.phase='waiting_background';root.suspendedAt=Date.now();
       return root.goal;
@@ -184,7 +191,7 @@ export function createRunJournal({ dir }) {
     backgroundYieldReady: owner => read(s=>!hasUnconfirmedWork(pendingGoalWork(s,owner))),
     rootForFlow: (conversationId,runId) => read(s=>s.roots[runId]?.owner.conversationId===conversationId?runId:Object.values(s.roots).find(root=>root.owner.conversationId===conversationId&&root.eventRunIds?.includes(runId))?.owner.rootRunId??runId),
     resumeBackgroundGoal: (owner,{flowRunId}={}) => transaction(s => {
-      const root=s.roots[owner.rootRunId];
+      const root=edit(s, 'roots', owner.rootRunId);
       if(!owns(root,owner)||root.status!=='waiting_background'||root.goal?.phase!=='waiting_background')throw new Error('后台目标已停止或已恢复');
       if(hasUnconfirmedWork(pendingGoalWork(s,owner)))throw Object.assign(new Error('后台命令清理未确认，已阻止后续执行'),{code:'cleanup-unconfirmed'});
       root.status='running';root.goal.phase='active';
@@ -192,10 +199,10 @@ export function createRunJournal({ dir }) {
       return advanceGoalRound(s,root);
     }),
     beginGoal: (owner, objective, policy, continuation = null) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || owner.taskId) throw new Error('目标归属已失效');
       if (!root.goal && continuation) {
-        const previous = s.roots[continuation.rootRunId];
+        const previous = edit(s, 'roots', continuation.rootRunId);
         if (!previous || previous.owner.conversationId !== owner.conversationId || previous.owner.generation !== owner.generation
           || previous.status !== 'awaiting_user' || previous.goal?.phase !== 'awaiting_user' || !continuation.inputId || typeof continuation.answer !== 'string') throw new Error('等待答复的目标已变化，不能续接');
         const used = goalRequests(s,previous);
@@ -210,7 +217,7 @@ export function createRunJournal({ dir }) {
       return root.goal;
     }),
     checkGoal: owner => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || !root.goal || root.goal.phase !== 'active') throw new Error('目标不能校验');
       const work=pendingGoalWork(s, owner);
       // 正常后台进程交给目标检查判断依赖；在途前台动作和清理未知仍拒绝完成。
@@ -219,7 +226,7 @@ export function createRunJournal({ dir }) {
       return root.goal;
     }),
     recordGoalCheck: (owner, verdict) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || root.goal?.phase !== 'checking') throw new Error('目标校验已失效');
       root.goal.verifications.push({ ...verdict, round: root.goal.round, at: Date.now() });
       root.goal.phase = verdict.status === 'complete' ? 'complete' : verdict.status === 'blocked' ? 'blocked' : verdict.status === 'awaiting_user' ? 'awaiting_user' : 'active';
@@ -227,7 +234,7 @@ export function createRunJournal({ dir }) {
       return root.goal;
     }),
     recordGoalVerificationAttempt: (owner, result) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || root.goal?.phase !== 'checking') throw new Error('目标校验已失效');
       const requests = Object.values(s.requests).filter(item => item.owner.rootRunId === owner.rootRunId
         && item.purpose === GOAL_VERIFICATION_PURPOSE && item.goalRound === root.goal.round);
@@ -239,14 +246,14 @@ export function createRunJournal({ dir }) {
         finishReason:result.finishReason, responseChars:result.responseChars, responseHash:result.responseHash, responseShape:result.responseShape, at:Date.now()});
     }),
     continueGoal: owner => transaction(s => {
-      const root = s.roots[owner.rootRunId], goal = root?.goal;
+      const root = edit(s, 'roots', owner.rootRunId), goal = root?.goal;
       if (!owns(root, owner) || terminal.has(root.status) || (goal?.phase !== 'active' || goal.verifications.at(-1)?.status !== 'continue' || goal.verifications.at(-1)?.round !== goal.round)) throw new Error('目标已停止或缺少续跑校验，不能续跑');
       return advanceGoalRound(s, root);
     }),
     // A segment handoff is not a completion verdict. Already accepted background work keeps its owner.
     checkpointGoal: (owner, {signal} = {}) => transaction(s => {
       signal?.throwIfAborted();
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || owner.taskId || root.kind === 'auxiliary' || terminal.has(root.status)
         || root.goal?.phase !== 'active') throw new Error('目标已停止，不能交接');
       // 057 软复盘：交接依据从硬触顶标志改为「段预算已在回合边界耗尽」；硬预算路径由 advanceGoalRound 收口。
@@ -262,7 +269,7 @@ export function createRunJournal({ dir }) {
       return {goal:root.goal, work};
     }),
     endGoal: (owner, phase, reason) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || !root.goal) throw new Error('目标归属已失效');
       // A late verifier must never turn a cancelled/interrupted goal into success.
       if (root.goal.phase !== 'complete') Object.assign(root.goal, {phase, reason, endedAt: Date.now()});
@@ -270,7 +277,7 @@ export function createRunJournal({ dir }) {
     }),
     finishRoot: (owner, status, reason = null) => transaction(s => {
       if (!terminal.has(status) && !['awaiting_user','waiting_background'].includes(status)) throw new Error('根目标终态无效');
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!root || JSON.stringify(root.owner) !== JSON.stringify(owner)) throw new Error('根目标身份已失效');
       if (terminal.has(root.status)) return root;
       if(status==='waiting_background'){
@@ -288,7 +295,7 @@ export function createRunJournal({ dir }) {
       }
       if (root.goal && status !== 'completed' && !['blocked','budget_limited','no_progress','failed'].includes(root.goal.phase)) Object.assign(root.goal, {phase: status === 'cancelled' ? 'cancelled' : 'interrupted', reason});
       root.status = status; root.reason = reason ?? (status === 'blocked' ? root.goal.reason : null); root.terminalAt = Date.now();
-      if (status !== 'completed') for (const item of Object.values(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') item.state = 'obsolete';
+      if (status !== 'completed') for (const [id, item] of Object.entries(s.inbox)) if (item.owner.rootRunId === owner.rootRunId && item.state !== 'consumed') edit(s, 'inbox', id).state = 'obsolete';
       return root;
     }, { retainOnFailure: true }),
     reserveDispatch: (key, facts) => transaction(s => {
@@ -304,7 +311,7 @@ export function createRunJournal({ dir }) {
       s.dispatches[key] = record; return { existing: false, ...record };
     }),
     recordReceipt: (key, receipt) => transaction(s => {
-      const record = s.dispatches[key]; if (!record) throw new Error('派单锚点不存在');
+      const record = edit(s, 'dispatches', key); if (!record) throw new Error('派单锚点不存在');
       if (record.taskId && receipt.ok && receipt.taskId && receipt.taskId !== record.taskId) throw new Error('派单回执的任务身份不匹配');
       record.receipt = receipt; record.state = record.result || receipt.ok === false ? 'terminal' : 'accepted'; return record;
     }),
@@ -319,7 +326,7 @@ export function createRunJournal({ dir }) {
         return s.tasks[key];
       }
       const record = { owner, result, terminalAt: Date.now() }; s.tasks[key] = record;
-      if (dispatchKey && s.dispatches[dispatchKey]) Object.assign(s.dispatches[dispatchKey], { result, state: 'terminal' });
+      if (dispatchKey && s.dispatches[dispatchKey]) Object.assign(edit(s, 'dispatches', dispatchKey), { result, state: 'terminal' });
       // 057 统一 accepted：所有已受理派单的结算事实都写入 inbox，不再由 background/stopRequested
       // 决定是否产生事件；根目标失效时事件标 obsolete（结果仍可查，不唤醒模型）。
       const eventId = `complete:${key}`;
@@ -351,7 +358,7 @@ export function createRunJournal({ dir }) {
       });
     },
     consume: (ids, entryId) => transaction(s => {
-      for (const id of ids) if (s.inbox[id]?.state === 'pending') Object.assign(s.inbox[id], { state: 'consumed', injectedEntryId: entryId, consumedAt: Date.now() });
+      for (const id of ids) if (s.inbox[id]?.state === 'pending') Object.assign(edit(s, 'inbox', id), { state: 'consumed', injectedEntryId: entryId, consumedAt: Date.now() });
       return ids;
     }),
     observationStart: record => transaction(s => {
@@ -363,7 +370,7 @@ export function createRunJournal({ dir }) {
       return { existing: false, ...next };
     }),
     observationEnd: (id, result) => transaction(s => {
-      const record = s.observations[id]; if (!record) throw new Error('工具观察身份不存在');
+      const record = edit(s, 'observations', id); if (!record) throw new Error('工具观察身份不存在');
       return Object.assign(record, result, { phase: 'finished', endedAt: Date.now() });
     }),
     processStart: (record) => transaction(s => {
@@ -375,19 +382,19 @@ export function createRunJournal({ dir }) {
     }),
     processEnd: (id, result) => transaction(s => {
       if (!s.processes[id]) throw new Error('命令进程身份不存在');
-      return Object.assign(s.processes[id], result, {endedAt:Date.now()});
+      return Object.assign(edit(s, 'processes', id), result, {endedAt:Date.now()});
     }),
     processBackground: id => transaction(s => {
-      const record = s.processes[id];
+      const record = edit(s, 'processes', id);
       if (!record) throw new Error('命令进程身份不存在');
       record.background = true;
       return record;
     }),
     requestStart: (owner, request, limit) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || suspended(root)) throw new Error('根目标已停止或挂起，禁止新请求');
       const sourceRootId = root.sourceRootRunId ?? owner.rootRunId;
-      const source = s.roots[sourceRootId];
+      const source = edit(s, 'roots', sourceRootId);
       if (root.kind === 'auxiliary' && source && ['cancelled','failed','blocked','interrupted','continued','awaiting_user'].includes(source.status)) throw new Error('所属目标已停止或等待答复，禁止辅助请求');
       if (s.requests[request.requestId]) throw new Error('重复请求身份');
       if (request.purpose === BUDGET_SUMMARY_PURPOSE) {
@@ -425,46 +432,47 @@ export function createRunJournal({ dir }) {
       return result;
     }),
     beginBudgetSummary: owner => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || owner.taskId || root.kind === 'auxiliary' || terminal.has(root.status) || suspended(root) || !root.requestLimitReached) throw new Error('根目标已停止或未触顶，不能总结');
       if (root.budgetSummary) return { existing: true, ...root.budgetSummary };
       root.budgetSummary = { state: 'preparing', startedAt: Date.now() };
       return { existing: false, ...root.budgetSummary };
     }),
     finishBudgetSummary: (owner, result) => transaction(s => {
-      const root = s.roots[owner.rootRunId];
+      const root = edit(s, 'roots', owner.rootRunId);
       if (!owns(root, owner) || terminal.has(root.status) || !root.budgetSummary) throw new Error('总结归属已失效');
       if (['complete','fallback'].includes(root.budgetSummary.state)) return root.budgetSummary;
       Object.assign(root.budgetSummary, result, { state: result.fallback ? 'fallback' : 'complete', endedAt: Date.now() });
       return root.budgetSummary;
     }),
     requestResponse: (requestId, response) => transaction(s => {
-      const request = s.requests[requestId]; if (!request) throw new Error('请求身份不存在');
+      const request = edit(s, 'requests', requestId); if (!request) throw new Error('请求身份不存在');
       return Object.assign(request, response, { responseAt: Date.now() });
     }),
     requestRecovery: (requestId, recovery) => transaction(s => {
-      const request = s.requests[requestId]; if (!request) throw new Error('请求身份不存在');
+      const request = edit(s, 'requests', requestId); if (!request) throw new Error('请求身份不存在');
       return Object.assign(request, { recovery });
     }),
     requestEnd: (requestId, result) => transaction(s => {
       if (!s.requests[requestId]) throw new Error('请求身份不存在');
-      return Object.assign(s.requests[requestId], result, { endedAt: Date.now() });
+      return Object.assign(edit(s, 'requests', requestId), result, { endedAt: Date.now() });
     }),
     recover: () => transaction(s => {
       // Background processes are not replayable after a host restart.
-      for(const root of Object.values(s.roots))if(root.status==='waiting_background'){
+      for(const [id, value] of Object.entries(s.roots))if(value.status==='waiting_background'){
+        const root = edit(s, 'roots', id);
         Object.assign(root,{status:'interrupted',reason:'进程重启；不会自动重放后台任务',terminalAt:Date.now()});
         if(root.goal)root.goal.phase='interrupted';
       }
-      for (const root of Object.values(s.roots)) if (root.goal && !terminal.has(root.status) && !suspended(root)) Object.assign(root.goal, {phase: 'interrupted', reason: '进程重启；等待用户核对后继续'});
-      for (const root of Object.values(s.roots)) if (!terminal.has(root.status) && !suspended(root)) Object.assign(root, { status: 'interrupted', reason: '进程重启；不会自动重放副作用', terminalAt: Date.now() });
-      for (const dispatch of Object.values(s.dispatches)) if (!['terminal','interrupted'].includes(dispatch.state)) Object.assign(dispatch, {state:'interrupted', interruptionReason:'进程重启；受理不代表完成，不自动重投'});
-      for (const observation of Object.values(s.observations)) if (observation.phase === 'started') Object.assign(observation, {phase:'unknown', interruptionReason:'进程重启，工具是否生效需要核对'});
-      for (const request of Object.values(s.requests)) if (!request.endedAt) Object.assign(request, {coverage:'unknown', interruptionReason:'进程重启，实际用量未确认'});
-      for (const event of Object.values(s.inbox)) if (event.state !== 'consumed') event.state = 'obsolete';
+      for (const [id, root] of Object.entries(s.roots)) if (root.goal && !terminal.has(root.status) && !suspended(root)) Object.assign(edit(s, 'roots', id).goal, {phase: 'interrupted', reason: '进程重启；等待用户核对后继续'});
+      for (const [id, root] of Object.entries(s.roots)) if (!terminal.has(root.status) && !suspended(root)) Object.assign(edit(s, 'roots', id), { status: 'interrupted', reason: '进程重启；不会自动重放副作用', terminalAt: Date.now() });
+      for (const [id, dispatch] of Object.entries(s.dispatches)) if (!['terminal','interrupted'].includes(dispatch.state)) Object.assign(edit(s, 'dispatches', id), {state:'interrupted', interruptionReason:'进程重启；受理不代表完成，不自动重投'});
+      for (const [id, observation] of Object.entries(s.observations)) if (observation.phase === 'started') Object.assign(edit(s, 'observations', id), {phase:'unknown', interruptionReason:'进程重启，工具是否生效需要核对'});
+      for (const [id, request] of Object.entries(s.requests)) if (!request.endedAt) Object.assign(edit(s, 'requests', id), {coverage:'unknown', interruptionReason:'进程重启，实际用量未确认'});
+      for (const [id, event] of Object.entries(s.inbox)) if (event.state !== 'consumed') edit(s, 'inbox', id).state = 'obsolete';
       return { recovered: true };
     }),
-    async flush() { await tail; if (pendingWrite) await transaction(s => s); },
+    async flush() { await tail; if (pendingWrite) await transaction(() => undefined); },
     dispose: () => retry.dispose(),
   };
 }

@@ -3,9 +3,11 @@
 // → manifest.json。不加密（2026-10-31 裁决），凭据类数据由范围过滤硬排除。
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import {createGzip,createGunzip} from 'node:zlib';
 import {pipeline} from 'node:stream/promises';
+import {exportRunJournal} from '../agent-runtime/journal-storage.mjs';
 
 export const BACKUP_SCHEMA_VERSION=1;
 export const BACKUP_KIND='hemi-backup';
@@ -147,6 +149,10 @@ async function writeTarEntries(gzip,entries,userDataDir){
 
 // 历史调用方可能仍传 tier 入参，此处一律忽略：后端只创建轻量范围，manifest 恒记 light。
 export async function createBackup({userDataDir,outDir,chunkBytes=DEFAULT_CHUNK_BYTES,now=new Date(),appVersion=null}){
+  // Export one consistent SQLite read transaction through the existing portable
+  // JSON backup format. Never copy a live database file mid-transaction.
+  const journalDir=path.join(userDataDir,'runtime-v2');
+  if(fs.existsSync(path.join(journalDir,'run-journal.sqlite')))await exportRunJournal(journalDir);
   const entries=collectEntries(userDataDir);
   if(!entries.some(e=>e.type==='file'))throw new Error('备份范围内没有任何文件，已取消（数据目录异常？）');
   const pad2=n=>String(n).padStart(2,'0');
@@ -312,6 +318,14 @@ async function filesIdentical(a,b){
 export async function decideRestoreAction({stagingAbs,localAbs,rel,localRoot}){
   // 预览也不能穿过目标软链去比较外部源内容。
   if(localRoot&&hasLinkedAncestor(localRoot,rel))return 'takeBackup';
+  if(rel==='runtime-v2/run-journal.json'&&fs.existsSync(path.join(path.dirname(localAbs),'run-journal.sqlite'))){
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hemi-journal-compare-'));
+    const snapshot=path.join(dir,'run-journal.json');
+    try{
+      await exportRunJournal(path.dirname(localAbs),snapshot);
+      return await decideRestoreAction({stagingAbs,localAbs:snapshot,rel});
+    }finally{await fs.promises.rm(dir,{recursive:true,force:true});}
+  }
   const local=lstatIfPresent(localAbs);
   if(isAtomicRestoreRel(rel))return local?'takeBackup':'new'; // 配套域：本地存在即整组让位，不做内容/mtime 比较
   if(!local)return 'new';
@@ -362,6 +376,10 @@ export async function mergeRestore({stagingDir,userDataDir,safeCopyRoot}){
     countAction(stats,action);
     if(action==='identical')return; // 内容相同：跳过，双方原样保留
     if(action==='keepLocal'){moveIntoSafeCopy(stagingAbs,rel,safeCopyRoot);return;} // 本地较新：备份版进安全副本
+    if(rel==='runtime-v2/run-journal.json'){
+      const sqlite=path.join(path.dirname(targetAbs),'run-journal.sqlite');
+      if(lstatIfPresent(sqlite))moveIntoSafeCopy(sqlite,'runtime-v2/run-journal.sqlite',safeCopyRoot);
+    }
     if(action==='takeBackup'&&lstatIfPresent(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot); // 备份胜出：本地旧版进安全副本
     fs.mkdirSync(path.dirname(targetAbs),{recursive:true});
     fs.renameSync(stagingAbs,targetAbs);

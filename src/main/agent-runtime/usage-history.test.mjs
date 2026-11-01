@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from './journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -51,7 +52,7 @@ test('真实 SSE：URL 脱敏落盘、TTFT 从首个有效输出起算、token/r
   const answer = await stream.result();
   assert.equal(answer.stopReason, 'stop');
 
-  const raw = await readFile(path.join(dir, 'run-journal.json'), 'utf8');
+  const raw = JSON.stringify(readRunJournalFileSync(path.join(dir, 'run-journal.json')));
   assert.equal(raw.includes('DO_NOT_PERSIST'), false, 'apiKey 不得落盘');
   const row = Object.values(JSON.parse(raw).requests)[0];
   assert.equal(row.url, `http://127.0.0.1:${port}/v1/chat/completions`, '只保留协议+主机+路径');

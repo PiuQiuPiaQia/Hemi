@@ -85,6 +85,9 @@ export function VirtualTranscript({
     },
     [onPinnedChange],
   );
+  useEffect(() => {
+    history?.follow?.(following && !editingId && retained.length === 0);
+  }, [history?.follow, following, editingId, retained.length]);
   const intent = useTranscriptViewport(viewport, {
     history,
     historyHeight: () => body.current?.parentElement?.querySelector('.h24-history-load')?.clientHeight ?? 0,
@@ -113,7 +116,7 @@ export function VirtualTranscript({
     directDomUpdates: true,
     directDomUpdatesMode: "position",
     useFlushSync: true,
-    useAnimationFrameWithResizeObserver: false,
+    useAnimationFrameWithResizeObserver: true,
     getScrollElement: () => viewport,
     getItemKey: getKey,
     estimateSize: () => 220,

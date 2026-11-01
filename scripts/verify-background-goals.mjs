@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Real renderer / preload / IPC / runtime / Pi SDK / shell / HTTP service.
 // Only model replies are synthetic; each invocation owns a fresh user-data directory.
 import assert from 'node:assert/strict';
@@ -24,7 +25,7 @@ fs.writeFileSync(path.join(workspace,'build.cjs'),`const fs=require('node:fs');f
 fs.writeFileSync(path.join(workspace,'current.cjs'),`require('node:fs').writeFileSync(process.argv[2],'STARTED');setInterval(()=>{},1000);`);
 const report={mode,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),workingTree:true,node:process.version,platform:`${process.platform}/${process.arch}`,checks:[],errors:[]};
 const counts=new Map(),verifications=new Map(),held=new Map();let app,page,vite,serviceId;
-const journal=()=>JSON.parse(fs.readFileSync(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
+const journal=()=>readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
 const reply=(res,body,content,tool)=>{
   if(res.destroyed)return;
   res.writeHead(200,{'content-type':'text/event-stream'});

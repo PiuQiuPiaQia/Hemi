@@ -145,6 +145,7 @@ export function getConversationTurnsRaw(conversationId) {
 
 // ---- 048 D7：会话用量账本（对话侧主进程记录；任务侧经提供方合并查询） ----
 let usageApi = null;
+const usageNotifications = new Map();
 let usageTaskProvider = null;
 
 /**
@@ -161,8 +162,15 @@ export function setUsageTaskProvider(fn) {
  * 丢弃一条不致命——下一次会追上。
  */
 export function recordConversationUsage(conversationId, record) {
-  if (!conversationId || !record) return false;
-  const ok = usageApi ? usageApi.record(conversationId, record) : false;
+  if(!conversationId||!record)return false;
+  const ok=usageApi?.recordOne(conversationId,record)??false;
+  if(ok)usageApi?.notify(conversationId);
+  return ok;
+}
+
+export async function recordConversationUsages(conversationId, records) {
+  if (!conversationId || !records.length) return false;
+  const ok = usageApi ? await usageApi.record(conversationId, records) : false;
   if (ok) usageApi?.notify(conversationId);
   return ok;
 }
@@ -319,7 +327,21 @@ export function registerConversationIpc() {
   }));
 
 
-  ipcMain.handle(IPC.conversation.last, () => restoreTaskResults(store.lastSession()));
+  function presentationSession(session, windowed) {
+    if(!windowed||!session||session.corrupt)return session;
+    // Flow owns the complete presentation payload, including migrated legacy
+    // fields. Do not retain a second full archive in the renderer.
+    getConversationFlowService().controllerFor(session.id);
+    // Select presentation metadata explicitly: legacy or future archive fields
+    // can also contain full histories (for example predecessorAgentSession).
+    return {
+      id: session.id, title: session.title,
+      createdAt: session.createdAt, updatedAt: session.updatedAt, turns: [],
+      profileId: session.profileId ?? null, workspaceId: session.workspaceId ?? null,
+      ...(session.cutKeys ? {cutKeys: session.cutKeys} : {}),
+    };
+  }
+  ipcMain.handle(IPC.conversation.last, (_event, options) => presentationSession(restoreTaskResults(store.lastSession()), options?.windowed));
 
   ipcMain.handle(IPC.conversation.save, (_event, payload) => {
     const turns = repairTaskTurns(payload?.turns, {
@@ -371,17 +393,23 @@ export function registerConversationIpc() {
   // 048 D7：会话用量账本——对话侧记录随会话档案；任务执行（终态档案＋在途）
   // 经 task.ipc 注册的提供方合并，每次完成推送 usage:changed。
   usageApi = {
-    record: (conversationId, record) => store.appendUsageRecord(conversationId, record),
+    record: (conversationId, records) => store.appendUsageRecordsAsync(conversationId, records),
+    recordOne: (conversationId, record) => store.appendUsageRecord(conversationId, record),
     notify: (conversationId) => {
-      for (const win of [...BrowserWindow.getAllWindows()]) {
-        if (!win || win.isDestroyed()) continue;
-        win.webContents.send(IPC.usage.changed, { conversationId });
-      }
+      if(usageNotifications.has(conversationId))return;
+      const timer=setTimeout(()=>{
+        usageNotifications.delete(conversationId);
+        for (const win of [...BrowserWindow.getAllWindows()]) {
+          if (!win || win.isDestroyed()) continue;
+          win.webContents.send(IPC.usage.changed, { conversationId });
+        }
+      },32);
+      timer.unref?.();usageNotifications.set(conversationId,timer);
     },
   };
   ipcMain.handle(IPC.usage.getLedger, async (_event, payload) => {
     const conversationId = typeof payload === 'string' ? payload : String(payload?.conversationId ?? '');
-    const session = conversationId ? store.getSession(conversationId) : null;
+    const session = conversationId ? await store.readFields(conversationId,['usageLedger']) : null;
     let taskRows = [];
     try {
       taskRows = conversationId && usageTaskProvider ? usageTaskProvider(conversationId) : [];
@@ -410,14 +438,14 @@ export function registerConversationIpc() {
       }
     },
   };
-  ipcMain.handle(IPC.contextUsage.getSnapshot, (_event, payload) => {
+  ipcMain.handle(IPC.contextUsage.getSnapshot, async (_event, payload) => {
     const conversationId = typeof payload === 'string' ? payload : String(payload?.conversationId ?? '');
     let snapshot = null;
     if (conversationId) {
       try { snapshot = getAgentRuntime().contextUsageFor(conversationId); }
       catch (error) { log.warn(`上下文容量读取失败（不阻断对话）：${error.message}`); }
       if (!snapshot) {
-        const archived = store.getSession(conversationId)?.contextUsage;
+        const archived = (await store.readFields(conversationId,['contextUsage']))?.contextUsage;
         if (archived && Number(archived.contextWindow) > 0) snapshot = archived;
       }
     }
@@ -437,7 +465,7 @@ export function registerConversationIpc() {
       if (result.ok) broadcastChanged({ kind: 'reorder' });
       else log.warn(`会话打开后排序失败：${result.storageError}`);
     }
-    return session;
+    return presentationSession(session, payload?.windowed);
   });
 
   ipcMain.handle(IPC.conversation.markRead, (_event, payload) => {

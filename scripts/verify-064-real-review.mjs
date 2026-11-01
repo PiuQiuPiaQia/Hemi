@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 独立进程只读恢复真实模型任务，点击同一成果；请求账本前后对账，不发送新模型请求。
 import { app, Menu } from 'electron';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -20,7 +21,7 @@ const evidence={rendererUrl:null,checks:[],screenshots:[],errors:[]};
 const exec=code=>state.mainWindow.webContents.executeJavaScript(code),js=JSON.stringify;
 const check=(name,ok)=>{evidence.checks.push({name,pass:!!ok});assert.ok(ok,name);};
 const wait=async(fn,label)=>{const deadline=Date.now()+20000;while(Date.now()<deadline){if(await fn())return;await sleep(100);}throw Error(label);};
-const journal=()=>readFile(path.join(ud,'runtime-v2/run-journal.json'),'utf8').then(JSON.parse);
+const journal=()=>readRunJournalFileSync(path.join(ud,'runtime-v2/run-journal.json'));
 async function shot(name,width=1440){state.mainWindow.setMinimumSize(300,400);state.mainWindow.setContentSize(width,900);state.mainWindow.show();await sleep(600);const file=path.join(output,`064-${variant}-${name}-${width}.png`);await writeFile(file,(await state.mainWindow.webContents.capturePage()).toPNG());evidence.screenshots.push(file);check(`${name}-${width} 不溢出`,await exec('document.documentElement.scrollWidth<=innerWidth'));}
 app.whenReady().then(async()=>{try{
  const countBefore=Object.keys((await journal()).requests).length;

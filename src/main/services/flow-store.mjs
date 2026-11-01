@@ -5,10 +5,9 @@
  * flow 写入不会用旧 turns 覆盖别人刚保存的字段（反向由 conversation-store
  * 保存时保留 flow 字段配合）。S3 统一写入链后此模块收敛进共用入口。
  *
- * 生产 IO 是同步实现且整个「读→写→改名」在一个同步临界段内完成——await 的
- * 微任务间隙会让 conversation-store 的同步保存插进来，随后 rename 用旧读覆盖
- * 掉它（真机实录：selfrun 档案 turns＋agentSession 丢失）。注入的异步 fsOps
- * （测试）走带 await 的同构路径，语义一致、时序由调用方保证。
+ * 生产路径在工作线程读取、解析、准备临时文件；主线程只在无 await 的短临界段
+ * 比对文件指纹并 rename。同步档案写入若穿插进来，旧准备结果会被丢弃并按新档
+ * 重算，不能覆盖刚保存的 turns／agentSession。测试仍可注入异步 fsOps。
  *
  * 写失败：变更留在待写队列，退避补存或随下一次 update／flush 重试；不回滚内存事实。
  * 崩溃只恢复最近原子提交快照；drop 先排空写链（迟到写入不复活）。
@@ -17,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { retryingRenameSync } from '../lib/rename-retry.mjs';
 import { createPersistenceRetry } from '../lib/persistence-retry.mjs';
+import {updateJsonRecord} from '../lib/atomic-json-store.mjs';
 
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -86,7 +86,7 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
 
   function enqueueWrite(conversationId) {
     const tail = chains.get(conversationId) ?? Promise.resolve();
-    const next = tail.catch(() => {}).then(() => (injected ? drainOnceAsync(conversationId) : drainOnceSync(conversationId)));
+    const next = tail.catch(() => {}).then(() => (injected ? drainOnceAsync(conversationId) : drainPrepared(conversationId)));
     chains.set(conversationId, next);
     return next;
   }
@@ -106,28 +106,19 @@ export function createFlowStore({ dir, fsOps = null, log = null } = {}) {
     return next;
   }
 
-  /** 生产路径：同步临界段（读→写→改名），主线程上与 conversation-store 的同步保存互斥。 */
-  function drainOnceSync(conversationId) {
-    const queue = pendingApplies.get(conversationId);
-    if (!queue || queue.length === 0) return undefined;
-    const record = applyQueue(conversationId, queue, readCurrentSync(conversationId));
-    const target = sessionPath(conversationId);
-    tmpSeq += 1;
-    const tmp = `${target}.flowtmp-${process.pid}-${tmpSeq}`;
-    try {
-      io.mkdir(dir);
-      io.writeFile(tmp, JSON.stringify(record, null, 2));
-      io.rename(tmp, target);
-      pendingApplies.delete(conversationId);
-      failures.delete(conversationId);
-      retries.get(conversationId)?.reset();
-      return undefined;
-    } catch (error) {
-      try { io.unlink(tmp); } catch { /* 已被 rename 或本就不在 */ }
-      failures.set(conversationId, error);
-      retryFor(conversationId).schedule();
-      log?.warn?.(`flow-store 写入失败（${conversationId}）：${error?.message ?? error}`);
-      return Promise.reject(error);
+  async function drainPrepared(conversationId) {
+    const pending=pendingApplies.get(conversationId);
+    if(!pending?.length)return;
+    const batch=pending.slice();
+    try{
+      await updateJsonRecord(sessionPath(conversationId),record=>applyQueue(conversationId,batch,record??{id:conversationId}));
+      pending.splice(0,batch.length);
+      if(!pending.length)pendingApplies.delete(conversationId);
+      failures.delete(conversationId);retries.get(conversationId)?.reset();
+    }catch(error){
+      failures.set(conversationId,error);retryFor(conversationId).schedule();
+      log?.warn?.(`flow-store 写入失败（${conversationId}）：${error?.message??error}`);
+      throw error;
     }
   }
 

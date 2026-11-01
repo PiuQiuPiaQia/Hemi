@@ -31,6 +31,7 @@ import { getComposerAttachments } from './composer.ipc.mjs';
 import { assembleTurnEnvelope } from '../composer/turn-envelope.mjs';
 import {
   recordConversationUsage,
+  recordConversationUsages,
   persistConversationTurns,
   persistConversationInput,
   applyConversationCut,
@@ -281,7 +282,7 @@ export function getAgentRuntime() {
  * 事件唤醒回合（后台子 agent 完成）收口：先在流控制器占事件槽（队列续排被它挡住），
  * 回答 → 落档＋turnState 广播（announce 标记，渲染层据此播报）＋语音来源时经口压一句。
  */
-function handleEventTurn(conversationId, result, meta) {
+async function handleEventTurn(conversationId, result, meta) {
   const controller = flowService?.controllerFor(conversationId) ?? null;
   const eventRunId = `event-run-${++eventTurnSeq}`;
   controller?.applyFact({ type: 'run-preparing', runId: eventRunId, source: 'event', inputIds: [], at: Date.now() });
@@ -305,7 +306,7 @@ function handleEventTurn(conversationId, result, meta) {
   const responseId = `reply-${randomUUID()}`;
   const createdAt = Date.now();
   conversationTurns.update(runToken, { kind: 'text', text });
-  recordUsages(conversationId, ctx, (result?.usages ?? []).filter(Boolean).map((detail) => ({ model: ctx?.config?.model ?? null, detail })));
+  await recordUsages(conversationId, ctx, (result?.usages ?? []).filter(Boolean).map((detail) => ({ model: ctx?.config?.model ?? null, detail })));
   const finish = (payload) => {
     if (!conversationTurns.current(runToken)) return;
     const saved = persistConversationTurns(conversationId, [{ id: responseId, runId: eventRunId, createdAt, author: 'hemi', text }]);
@@ -338,21 +339,21 @@ function handleEventTurn(conversationId, result, meta) {
 const lastTurnCtx = new Map();
 
 /** 主 agent 每次物理模型调用的用量记账（048 D7）。 */
-function recordUsages(conversationId, ctx, usages) {
+async function recordUsages(conversationId, ctx, usages) {
   if (!conversationId || !ctx) return;
-  for (const call of usages) {
-    if (!call?.detail) continue;
+  const records = usages.filter(call => call?.detail).map(call => {
     const fallbackActive = Boolean(ctx.fallback && call.model === ctx.fallback.model);
     const identity = fallbackActive ? ctx.fallback : ctx.config;
-    recordConversationUsage(conversationId, {
+    return {
       source: fallbackActive ? 'fallback' : 'chat',
       modelKey: identity?.modelKey ?? call.model ?? '未知模型',
       modelName: identity?.name ?? '',
       requestedModel: identity?.model ?? call.model ?? '',
       ...call.detail,
       at: Date.now(),
-    });
-  }
+    };
+  });
+  await recordConversationUsages(conversationId, records);
 }
 
 // ================================================================ 057 S2：runtime 适配层
@@ -380,7 +381,7 @@ async function executeBackgroundTurn(conversationId,{runId,background,controller
         workspace:eventContext?.workspace}));},
       saveReply:async value=>{
         const text=String(value.lastText??value.texts?.join('\n\n')??'').trim();
-        recordUsages(conversationId,eventContext,calls);
+        await recordUsages(conversationId,eventContext,calls);
         if(text){const saved=persistConversationTurns(conversationId,[{id:`reply-${randomUUID()}`,runId,createdAt:Date.now(),author:'hemi',text}]);
           if(!saved.ok)throw new Error('后台结果回答保存失败');}
       },
@@ -1007,7 +1008,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         // 056：多轮工具往返中途的文字（「我先看看」）也是回答的一部分——全部按序拼接。
         const replyText = agentReplyText(run);
         if (!run.texts.some(text => text.trim())) streamEvent({kind:'text',text:replyText,phase:'final_answer',phaseSource:'contract'});
-        recordUsages(conversationId, ctx, calls);
+        await recordUsages(conversationId, ctx, calls);
         const total = calls.reduce((acc, call) => {
           acc.input += call.detail.input; acc.output += call.detail.output;
           acc.cacheRead += call.detail.cacheRead; acc.cacheWrite += call.detail.cacheWrite;

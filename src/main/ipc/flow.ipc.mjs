@@ -10,6 +10,7 @@ import { getConversationFlowService } from '../services/conversation-flow-servic
 import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
 import { getProfiles } from '../lib/profiles-holder.mjs';
 import { getWorkspaceService } from './workspace.ipc.mjs';
+import {flowReplyText} from '../../../packages/conversation-flow/src/core/flow-window.mjs';
 
 export function registerFlowIpc() {
   const service = getConversationFlowService();
@@ -43,8 +44,11 @@ export function registerFlowIpc() {
   ipcMain.handle(IPC.flow.getSnapshot, (_event, payload) => {
     const conversationId = String(payload?.conversationId ?? '');
     if (!conversationId) return null;
-    return service.controllerFor(conversationId).getSnapshot();
+    return service.viewFor(conversationId, payload?.viewId);
   });
+  ipcMain.handle(IPC.flow.getHistory, (_event, payload) => service.historyFor(String(payload?.conversationId ?? ''), {before:payload?.before,generation:payload?.generation}));
+  ipcMain.handle(IPC.flow.releaseView,(_event,payload)=>service.releaseView(String(payload?.conversationId??''),payload?.viewId));
+  ipcMain.handle(IPC.flow.getReply,(_event,payload)=>flowReplyText(service.controllerFor(String(payload?.conversationId??'')).getSnapshot(),payload));
 
   return service;
 }

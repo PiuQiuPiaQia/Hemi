@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Real renderer -> preload/IPC/controller -> shared runtime -> Pi -> real shell/WebSocket.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -25,7 +26,7 @@ let app, page, vite;
 const counts = new Map(), held = new Map();
 const ws = new WebSocketServer({host:'127.0.0.1',port:0}); await new Promise(resolve => ws.on('listening',resolve));
 await fs.writeFile(path.join(workspace,'work.cjs'), `const fs=require('fs');const ws=new WebSocket('ws://127.0.0.1:${ws.address().port}');ws.onopen=()=>{fs.writeFileSync(process.argv[2],'WORK_DONE');console.log('WORK_DONE_WITH_OPEN_WS')};`);
-const journal = async () => JSON.parse(await fs.readFile(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
+const journal = async () => readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
 const wait = async (read,label,timeout=60000) => {
   const end = Date.now()+timeout;
   while (Date.now()<end) {const value=await read();if(value)return value;await new Promise(resolve=>setTimeout(resolve,25));}

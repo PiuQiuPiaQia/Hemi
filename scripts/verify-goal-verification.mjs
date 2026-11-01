@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Real renderer -> preload/IPC/controller -> shared runtime/Pi/HTTP/files.
 // Only the model service is synthetic. Run with --dev and without it.
 import assert from 'node:assert/strict';
@@ -67,7 +68,7 @@ const wait=async(read,label)=>{
 };
 const input=()=>page.locator('textarea.text-composer-input');
 const flow=id=>page.evaluate(id=>window.hemiVoice.flowGetSnapshot(id),id);
-const journal=()=>JSON.parse(fs.readFileSync(path.join(root,'runtime-v2/run-journal.json'),'utf8'));
+const journal=()=>readRunJournalFileSync(path.join(root,'runtime-v2/run-journal.json'));
 async function launch(){
   app=await _electron.launch({executablePath:electronPath,args:['.'],env:{...process.env,HEMI_USER_DATA_DIR:root,HEMI_TEST_MIC_GRANT:'1',
     HEMI_LLM_API_KEY:'SYNTHETIC_ONLY',HEMI_LLM_BASE_URL:baseUrl,HEMI_LLM_MODEL:'verifier-ui'}});

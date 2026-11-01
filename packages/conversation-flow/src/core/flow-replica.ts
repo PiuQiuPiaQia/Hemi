@@ -165,6 +165,6 @@ export function createFlowReplica({ fetchSnapshot, publish, conversationId, onCo
       controller?.abort(); fetching = null;
       return refresh();
     },
-    dispose() { disposed = true; buffered = []; controller?.abort(); if (retry) clearTimeout(retry); retry = null; },
+    dispose() { disposed = true; current = null; fetching = null; buffered = []; controller?.abort(); if (retry) clearTimeout(retry); retry = null; },
   };
 }

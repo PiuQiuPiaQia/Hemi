@@ -103,7 +103,7 @@ test('terminal persistence failure still releases the runtime slot and browser p
   const f=await fixture(t),{ctx,client}=await f.obtain('storage-failure','storage-root');
   const owner={conversationId:ctx.conversationId,rootRunId:ctx.runId,generation:ctx.generation};
   await f.runtime.journal.beginRoot(owner);
-  const file=path.join(ctx.workspace.dir,'data/runtime-v2/run-journal.json'),backup=file+'.last-good';
+  const file=path.join(ctx.workspace.dir,'data/runtime-v2/run-journal.sqlite'),backup=file+'.last-good';
   await fs.rename(file,backup);await fs.mkdir(file);
   try {
     await assert.rejects(f.runtime.completeConversation(ctx.conversationId,'failed','write failed',ctx.runId));

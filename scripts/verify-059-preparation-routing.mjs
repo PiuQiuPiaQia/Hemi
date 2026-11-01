@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 生产 preload IPC → 主 agent → 准备卡工具/工作流 → flow/档案。只替换外部 provider。
 // HEMI_SMOKE_TEST=1 npx electron scripts/verify-059-preparation-routing.mjs
 // HEMI059_PREP_REAL=1 使用本机默认组的真实模型（不跑可控慢工具停止场景）。
@@ -216,7 +217,7 @@ app.whenReady().then(async () => {
       check('停止后普通输入正常完成', (await settled(next)).runs[next.runId].outcome === 'completed');
       check('下一普通消息没有重放旧工具', !(await snapshot()).timeline.some(item => item.runId === next.runId && item.parts?.some(part => part.kind === 'tool')));
     }
-    const journal = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'runtime-v2/run-journal.json'), 'utf8'));
+    const journal = readRunJournalFileSync(path.join(app.getPath('userData'), 'runtime-v2/run-journal.json'));
     check('整个链路没有补参辅助模型请求', Object.values(journal.requests).every(request => request.purpose !== 'workflow-preparation'));
     check('renderer 使用真实入口', /file:|http:\/\/127.0.0.1:5173/.test(win.webContents.getURL()));
     check('renderer 无运行错误', rendererErrors.length === 0);

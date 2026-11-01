@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
 // Actual Host/controller/SDK and real OS processes; only model responses are fixtures.
 import test from 'node:test';
@@ -70,7 +71,7 @@ for(const stopping of [false,true])test(`owned launch ${stopping?'stop':'exit'} 
   assert.equal(final.pending.length,0);
   assert.equal(final.timeline.filter(item=>item.kind==='user'&&item.id==='queued').length,1);
   assert.equal(new Set(Object.keys(final.runs)).size,2);
-  const journal=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
   assert.ok(Object.values(journal.processes).every(process=>process.state==='finished'&&process.cleanupConfirmed));
   assert.equal(await fs.readFile(f.late,'utf8').catch(()=>null),null);
   assert.equal(f.requests.filter(body=>JSON.stringify(body.messages).includes('［后台命令完成')&&!JSON.stringify(body.messages.filter(message=>message.role==='user').at(-1)).includes('QUEUED_NEXT')).length,0,'explicit job_output consumes the result without a second notification');
@@ -91,7 +92,7 @@ for(const promote of [false,true])test(`escaped POSIX output holder ${promote?'d
   assert.equal(final.runs[runId].outcome,'failed');assert.equal(final.queuePaused,true);
   assert.equal(final.pending[0].inputId,'queued');
   assert.equal(final.timeline.filter(item=>item.kind==='user'&&item.id==='queued').length,0);
-  const journal=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
   assert.ok(Object.values(journal.processes).some(process=>process.state==='unknown'&&!process.cleanupConfirmed));
 });
 
@@ -105,6 +106,6 @@ test('an asynchronous cleanup failure wakes no model, fails the event turn and p
  assert.equal(final.backgroundJobs.length,1,'unknown cleanup remains visible independently of the failed foreground turn');
  assert.equal(final.backgroundJobs[0].cleanupConfirmed,false);assert.ok(final.backgroundJobs[0].endedAt);
  assert.equal(f.requests.filter(body=>body.tools?.length).length,count,'unsafe cleanup cannot start a continuation model');
- const state=JSON.parse(await fs.readFile(path.join(f.root,'data/runtime-v2/run-journal.json'),'utf8'));
+ const state=readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
  assert.ok(Object.values(state.processes).some(process=>process.state==='unknown'&&!process.cleanupConfirmed));
 });

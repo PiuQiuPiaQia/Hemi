@@ -3,7 +3,8 @@ import type {FlowChangeView,FlowCommandResult,FlowSnapshotView,FlowHistoryPage} 
 
 /** IPC is a port: both local PC and PC Bot use this same baseline/receipt contract. */
 export interface ConversationBridgePort {
-  flowGetSnapshot(id:string):Promise<FlowSnapshotView|null>;
+  flowGetSnapshot(id:string,viewId?:string):Promise<FlowSnapshotView|null>;
+  flowReleaseView?(id:string,viewId:string):Promise<unknown>;
   flowGetHistory?(id:string,cursor:{before:number;generation:number}):Promise<FlowHistoryPage>;
   flowCommand(id:string,command:Record<string,unknown>,operation?:{requestId:string;generation:number|null}):Promise<FlowCommandResult>;
   flowLookupOperation?(id:string,requestId:string):Promise<FlowCommandResult|null>;
@@ -11,10 +12,11 @@ export interface ConversationBridgePort {
   onFlowDisconnected?(receive:()=>void):()=>void;
 }
 export function createBridgeConversationTransport(bridge:ConversationBridgePort,id:string,prepareCommand?:ConversationTransport['prepareCommand']):ConversationTransport {
+  const viewId=crypto.randomUUID();
   return {
     prepareCommand,
     ...(bridge.flowGetHistory?{fetchHistory:(_scope,cursor)=>bridge.flowGetHistory!(id,cursor)}:{}),
-    fetchSnapshot:()=>bridge.flowGetSnapshot(id),
+    fetchSnapshot:()=>bridge.flowGetSnapshot(id,viewId),
     subscribe:(_scope,receive,offline,online)=>{
       let closed=false,baseline=false;
       const release=bridge.onFlowChanged(event=>{
@@ -23,12 +25,12 @@ export function createBridgeConversationTransport(bridge:ConversationBridgePort,
         receive(event.change);
       });
       const disconnect=offline?bridge.onFlowDisconnected?.(offline):undefined;
-      void bridge.flowGetSnapshot(id).then(snapshot=>{
+      void bridge.flowGetSnapshot(id,viewId).then(snapshot=>{
         if(closed)return;
         if(!baseline&&snapshot)receive({kind:'snapshot',snapshot});
         online?.();
       }).catch(()=>{if(!closed)offline?.();});
-      return()=>{closed=true;release();disconnect?.();};
+      return()=>{closed=true;release();disconnect?.();void bridge.flowReleaseView?.(id,viewId).catch(()=>{});};
     },
     lookupOperation:(_scope,requestId)=>bridge.flowLookupOperation?.(id,requestId)??Promise.resolve(null),
     command:({command,requestId,generation})=>bridge.flowCommand(id,command,{requestId,generation}),

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from './journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -42,7 +43,7 @@ async function fixture(t, platform, mode, policy = {}) {
   const settle=async result=>{outcome=goalRunOutcome(result,{cancelled:ctx?.cancelled});await runtime.completeConversation(cid,outcome,null,ctx.runId);if(!result.waitingForBackground)terminal.resolve(result);return result;};
   const exists = name => fs.stat(path.join(workspace, name)).then(() => true, () => false);
   const snapshot = async () => runtime ? runtime.journal.snapshot() : until(async () => {
-    try {return JSON.parse(await fs.readFile(path.join(dataDir, 'runtime-v2/run-journal.json'), 'utf8'));}
+    try {return readRunJournalFileSync(path.join(dataDir, 'runtime-v2/run-journal.json'));}
     catch (error) {if (error.code !== 'ENOENT') throw error; return null;}
   });
   const processes = async () => Object.values((await snapshot()).processes);

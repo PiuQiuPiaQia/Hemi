@@ -160,7 +160,7 @@ export function createAgentRuntime({
       if(job.status==='cancelled'){
         const pending=backgroundGoals.get(job.owner.rootRunId);
         if(pending&&!commandSessions(job.owner.conversationId).some(source=>source.hasTreeCommands?.(job.owner))){
-          const jobs=Object.values((await journal.snapshot()).processes).filter(p=>p.background&&p.owner.rootRunId===job.owner.rootRunId&&p.owner.generation===job.owner.generation);
+          const jobs=Object.values((await journal.snapshot({tables:['processes'],rootRunId:job.owner.rootRunId})).processes).filter(p=>p.background&&p.owner.rootRunId===job.owner.rootRunId&&p.owner.generation===job.owner.generation);
           if(jobs.every(p=>p.status==='cancelled')){
             backgroundGoals.delete(job.owner.rootRunId);
             await journal.finishRoot(job.owner,'cancelled','后台命令已停止');
@@ -197,7 +197,7 @@ export function createAgentRuntime({
   const auxiliaryJobs = new Map();
   async function auxiliaryCall({ config, conversationId, sourceRootRunId = null, purpose, ...options }) {
     await journalReady;
-    const state = await journal.snapshot();
+    const state = await journal.snapshot({tables:['roots'],conversationId});
     const source = sourceRootRunId ? state.roots[sourceRootRunId] : Object.values(state.roots).filter(root => root.kind !== 'auxiliary' && root.owner.conversationId === conversationId).at(-1);
     const owner = { conversationId, rootRunId: `aux-${randomUUID()}`, generation: source?.owner.generation ?? 0 };
     const snapshot = await freezeModelPolicy({ store: getProfiles(), modelKey: config.modelKey, fixedConfig: config, budgets: source?.policySnapshot?.budgets });
@@ -228,7 +228,7 @@ export function createAgentRuntime({
       await session.ready();const result=await session.prompt(prompt);
       if(result.aborted||result.modelError)throw new Error(result.modelError ?? '辅助作业已停止');
       await journal.finishRoot(ownerOf(ctx),'completed');
-      const requests=Object.values((await journal.snapshot()).requests).filter(row=>row.owner.rootRunId===ctx.runId);
+      const requests=Object.values((await journal.snapshot({tables:['requests'],rootRunId:ctx.runId})).requests).filter(row=>row.owner.rootRunId===ctx.runId);
       return {...result,modelCalls:requests.map(row=>({modelKey:row.actualModel.modelKey,model:row.actualModel.model,at:row.startedAt,input:row.tokenUsage?.uncachedInput??0,output:row.tokenUsage?.output??0,cacheRead:row.tokenUsage?.cacheRead??0,cacheWrite:row.tokenUsage?.cacheWrite??0,missing:row.coverage==='complete'?0:1}))};
     } catch(error){await journal.finishRoot(ownerOf(ctx),ctx.cancelled?'cancelled':'failed',error.message);throw error;}
     finally {signal?.removeEventListener('abort',abort);session.dispose();}
@@ -491,7 +491,7 @@ export function createAgentRuntime({
     }));
     agent.on('settled', (result) => {
       const meta = entry.pendingEvents.shift() ?? null;
-      onEventTurn?.(conversationId, result, meta);
+      void Promise.resolve(onEventTurn?.(conversationId, result, meta)).catch(error=>log?.warn?.(`事件回答处理失败：${error.message}`));
       void persist(conversationId);
     });
     agents.set(conversationId, entry);
@@ -726,7 +726,7 @@ export function createAgentRuntime({
           entry.agent.setActivityPhase('verifying');
           return verifyGoalCompletion({execution:{...executionFor(ctx, ctx.modelPlan), actualCandidate:entry.actualCandidate}, objective, evidence, signal:controller.signal, onCall:call=>onGoalVerification?.(conversationId,call)});
         },
-        evidence: async () => goalEvidence((await entry.agent.exportEntries())?.entries ?? [], await journal.snapshot(), owner),
+        evidence: async () => {const entries=(await entry.agent.exportEntries())?.entries??[];return journal.project(state=>goalEvidence(entries,state,owner));},
         persist: () => entry.agent.checkpointExecution(),
         backgroundPending:()=>commandSessions(conversationId).some(session=>session.hasTreeCommands?.(owner)||session.hasTreeCommandResults?.(owner)),
         cleanup: async () => {
@@ -890,7 +890,7 @@ export function createAgentRuntime({
           }
           await Promise.all(owned.filter(task => !task.finalized).map(task => task.running ?? task.terminalWait));
           if (ctx.cancelled) throw new DOMException('任务已停止', 'AbortError');
-          const state = await journal.snapshot();
+          const state = await journal.snapshot({tables:['observations'],rootRunId:owner.rootRunId});
           const observations = Object.values(state.observations).filter(item => item.owner.rootRunId === owner.rootRunId);
           // 仅取本轮已通过工具边界投影的历史文本，不从 outputRef 旁路读取未经复核的原始结果。
           const toolResults = ((await agent.exportEntries())?.entries ?? []).slice(startEntryCount)
@@ -937,7 +937,7 @@ export function createAgentRuntime({
     await journalReady;
     rootRunId=await journal.rootForFlow(conversationId,rootRunId);
     const normalized = status === 'stopped' ? 'cancelled' : status === 'awaiting-user' ? 'awaiting_user' : status === 'awaiting-background' ? 'waiting_background' : status;
-    let root = (await journal.snapshot()).roots[rootRunId];
+    let root = await journal.root({rootRunId});
     if (root?.owner.conversationId !== conversationId) return;
     try {
       // 已完成进程的结果保存可能与校验响应同时到达；收口前保存这些事实，不等待活进程。
@@ -967,19 +967,19 @@ export function createAgentRuntime({
 
   async function suspendWorkflow(conversationId, rootRunId) {
     await journalReady;
-    const root = (await journal.snapshot()).roots[rootRunId];
+    const root = await journal.root({rootRunId});
     if (root?.owner.conversationId === conversationId) await journal.suspendRoot(root.owner);
   }
 
   async function usageRecordsFor(conversationId) {
     await journalReady;
-    return usageRecordsFromJournal(await journal.snapshot(), conversationId);
+    return journal.project(state => usageRecordsFromJournal(state, conversationId));
   }
 
   /** 使用记录页：全局跨会话请求历史（筛选影响统计，分页只切 records；口径见 usage-history.mjs）。 */
   async function usageHistory(options = {}) {
     await journalReady;
-    return projectUsageHistory(await journal.snapshot(), options);
+    return journal.project(state => projectUsageHistory(state, options));
   }
 
   function get(conversationId) {
@@ -1053,7 +1053,7 @@ export function createAgentRuntime({
     runId=await journal.rootForFlow(conversationId,runId);
     // A delayed stop cannot abort a newer root in the same conversation.
     if (entry?.activeRootRunId && entry.ctx.runId !== runId) throw new Error('当前运行已变化');
-    const root=(await journal.snapshot()).roots[runId];
+    const root=await journal.root({rootRunId:runId});
     if(root?.owner.conversationId!==conversationId)return;
     const pending=backgroundGoals.get(runId);
     if(pending?.ctx.conversationId===conversationId){

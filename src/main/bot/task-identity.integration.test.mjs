@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -59,7 +60,7 @@ test('real Bot restart gives new child tasks durable identities and preserves ol
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   };
-  const journal = async () => JSON.parse(await fs.readFile(path.join(dataDir, 'runtime-v2/run-journal.json'), 'utf8'));
+  const journal = async () => readRunJournalFileSync(path.join(dataDir, 'runtime-v2/run-journal.json'));
   await send();
   const before = await journal();
   assert.equal(Object.keys(before.tasks).length, 1);

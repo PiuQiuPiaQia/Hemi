@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 070：真实模型、实际文档任务、生产用量账本截图；不生成或改写 usage。
 // 仅复制加密模型配置、onboarding 与待审文档到独立 /tmp/hemi-070-real-*。
 // HEMI_USER_DATA_DIR=<隔离目录> HEMI_SMOKE_TEST=1 HEMI_070_USAGE_RUN=1 \
@@ -63,7 +64,7 @@ app.whenReady().then(async () => {
     let progress = '', completed = false;
     while (Date.now() < deadline) {
       await sleep(1500);
-      const journal = await readFile(path.join(dataDir, 'runtime-v2/run-journal.json'), 'utf8').then(JSON.parse).catch(() => null);
+      const journal = await readRunJournalFileSync(path.join(dataDir, 'runtime-v2/run-journal.json')).catch(() => null);
       if (!journal) continue;
       const roots = Object.values(journal.roots);
       const next = JSON.stringify({ requests: Object.keys(journal.requests).length, completedRoots: roots.filter(r=>r.status==='completed').length, roots: roots.length, terminalTasks: Object.keys(journal.tasks).length });

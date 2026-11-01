@@ -385,9 +385,13 @@ export function DesktopConversationFlow(props: Props) {
       },
     [bridge, scope],
   );
+  const messageCache=useMemo(()=>new WeakMap<TranscriptItem,{models:unknown;presentations:unknown;queryKey:string;value:MessageView}>(),[]);
   const messages = useMemo<MessageView[]>(
     () =>
-      props.messages.map((item) => ({
+      props.messages.map((item) => {
+        const cached=messageCache.get(item);
+        if(cached&&cached.models===props.models&&cached.presentations===presentations&&cached.queryKey===queryKey)return cached.value;
+        const value:MessageView={
         ...messageViewFromTranscript(item),
         parts: item.parts?.map((part) =>
           part.type === "workflow-card"
@@ -414,8 +418,10 @@ export function DesktopConversationFlow(props: Props) {
                 }
               : part,
         ),
-      })),
-    [props.messages, props.models, presentations, queryKey],
+      };
+      messageCache.set(item,{models:props.models,presentations,queryKey,value});return value;
+      }),
+    [props.messages, props.models, presentations, queryKey,messageCache],
   );
   return (
     <div ref={container} className="contents desktop-conversation-flow">

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Real desktop IPC → runtime → Pi SDK → bridge → Chrome extension, with a local
 // scripted model and synthetic manual-verification page. Never uses personal data.
 import assert from 'node:assert/strict';
@@ -126,7 +127,7 @@ async function finish(item,marker) {
   const run=Object.values(done.runs).at(-1);
   check(`${marker}: 用户回复续接原目标`,run.continuationOf===item.runId&&run.outcome==='completed');
   check(`${marker}: 恢复操作只读原页面，没有重新导航`,navigations.get(marker)===1);
-  const journal=JSON.parse(await fs.readFile(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
   const extract=Object.values(journal.observations).find(o=>o.owner.rootRunId===run.runId&&o.tool==='browser_extract');
   check(`${marker}: 原页面读取已实际执行`,Boolean(extract));
   await wait(()=>original.isClosed(),'completed page reclaimed');

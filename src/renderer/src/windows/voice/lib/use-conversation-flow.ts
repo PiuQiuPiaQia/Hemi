@@ -11,7 +11,8 @@ export function getLocalConversationClient(conversationId:string) {
   const previous=localClients.get(conversationId);
   if(previous&&!previous.isDisposed())return previous;
   const client=createConversation({scope:{environmentId:'desktop-local',conversationId},storage:{operations:conversationOperationStorage},
-    transport:createBridgeConversationTransport(window.hemiVoice,conversationId)});
+    transport:createBridgeConversationTransport(window.hemiVoice,conversationId),
+    onDispose:()=>{if(localClients.get(conversationId)===client)localClients.delete(conversationId);}});
   localClients.set(conversationId,client);return client;
 }
 export async function sendLocalConversationCommand(conversationId:string,command:Record<string,unknown>,submissionToken?:string) {

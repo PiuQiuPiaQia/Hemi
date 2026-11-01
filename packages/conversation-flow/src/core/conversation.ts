@@ -48,10 +48,10 @@ export interface ConversationClientState {
   error: string;
   /** Offline history is optional; cache failures never block conversation operations. */
   cacheNotice?: string;
-  history?: {hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number}};
+  history?: {hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number};follow?(value:boolean):void};
 }
 
-export function createConversation({ scope, transport, storage, lifecycle, makeId = () => crypto.randomUUID(), requestTimeoutMs = 15000, pollIntervalMs = transport.subscribe ? 0 : 2000 }: {
+export function createConversation({ scope, transport, storage, lifecycle, makeId = () => crypto.randomUUID(), requestTimeoutMs = 15000, pollIntervalMs = transport.subscribe ? 0 : 2000, onDispose }: {
   scope: ConversationIdentity;
   transport: ConversationTransport;
   storage?: { drafts?: ConversationDraftStorage; operations?: ConversationOperationStorage; snapshots?: ConversationSnapshotStorage };
@@ -59,6 +59,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   makeId?: () => string;
   requestTimeoutMs?: number;
   pollIntervalMs?: number;
+  onDispose?: () => void;
 }) {
   const identity = Object.freeze({ ...scope });
   const draft = createComposerDraft();
@@ -87,9 +88,10 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   let authorityEpoch: string | undefined;
   let historyRead: AbortController | null = null;
   function cancelHistory() {historyRead?.abort(); historyRead = null; history.endRead();}
+  function followHistory(value: boolean) { if (history.follow(value)) publishHistory(); }
   function publishHistory(error = state.history?.error ?? '', target = state.history?.target) {
     const snapshot = history.snapshot;
-    update({snapshot, history: {hasMore: Boolean(transport.fetchHistory && (snapshot?.history?.start ?? 0) > 0), loading: Boolean(historyRead), error, target, continuation: Boolean(snapshot?.history?.continuation), gap: snapshot?.history?.gap ? {beforeId: snapshot.history.gap.beforeId, remaining: snapshot.history.gap.end - snapshot.history.gap.start} : undefined}});
+    update({snapshot, history: {follow: followHistory, hasMore: Boolean(transport.fetchHistory && (snapshot?.history?.start ?? 0) > 0), loading: Boolean(historyRead), error, target, continuation: Boolean(snapshot?.history?.continuation), gap: snapshot?.history?.gap ? {beforeId: snapshot.history.gap.beforeId, remaining: snapshot.history.gap.end - snapshot.history.gap.start} : undefined}});
   }
   function show(head: FlowSnapshotView) {
     const changed = !history.snapshot || history.snapshot.generation !== head.generation;
@@ -420,6 +422,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
     if (catchup) clearTimeout(catchup); catchup = null;
     cancelHistory();
     controllers.forEach(controller => controller.abort()); listeners.clear();
+    history.reset(); state = {...state, snapshot:null}; onDispose?.();
   };
   return {
     scope: identity, draft, start, dispose,

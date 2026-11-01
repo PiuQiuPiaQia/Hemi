@@ -83,6 +83,9 @@ export const IPC = {
     command: 'flow:command',
     lookupOperation:'flow:lookup-operation',
     getSnapshot: 'flow:get-snapshot',
+    getHistory: 'flow:get-history',
+    releaseView: 'flow:release-view',
+    getReply: 'flow:get-reply',
     changed: 'flow:changed',
     /** S3-2d：编辑回卷——档案剪除（cutKeys＋主 agent 作废）＋flow 时间线裁剪。 */
     rewind: 'flow:rewind',

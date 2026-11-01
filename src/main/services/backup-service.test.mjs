@@ -7,6 +7,25 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {collectEntries,createBackup,readManifest,extractBackup,mergeRestore,estimateMerge,listLocalBackups,BACKUP_DIR_PREFIX} from './backup-service.mjs';
+import {createRunJournal} from '../agent-runtime/run-journal.mjs';
+
+test('SQLite facts export consistently and restoring portable JSON preserves the replaced DB in the safe copy',async t=>{
+  const root=tmpDir();t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const user=path.join(root,'user'),dir=path.join(user,'runtime-v2'),staging=path.join(root,'staging'),safe=path.join(root,'safe');
+  const owner={conversationId:'c',rootRunId:'r',generation:1},journal=createRunJournal({dir});t.after(()=>journal.dispose());
+  await journal.beginRoot(owner);
+  const backup=await createBackup({userDataDir:user,outDir:path.join(root,'backups')});
+  await extractBackup({backupDir:backup.backupDir,stagingDir:staging});
+  const json=path.join(staging,'runtime-v2/run-journal.json');
+  assert.equal(JSON.parse(fs.readFileSync(json,'utf8')).roots.r.status,'running');
+  await journal.finishRoot(owner,'failed','newer local fact');
+  const future=new Date(Date.now()+10000);fs.utimesSync(json,future,future);
+  await mergeRestore({stagingDir:staging,userDataDir:user,safeCopyRoot:safe});
+  assert.ok(fs.existsSync(path.join(safe,'runtime-v2/run-journal.sqlite')));
+  const restored=createRunJournal({dir});t.after(()=>restored.dispose());
+  assert.equal((await restored.root(owner)).status,'running');
+  await restored.recover();assert.equal((await restored.root(owner)).status,'interrupted');
+});
 
 function tmpDir(){return fs.mkdtempSync(path.join(os.tmpdir(),'hemi-backup-'));}
 function seedUserData(dir){

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Real renderer → preload → IPC → runtime → Pi → shell; only model HTTP is scripted.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -121,7 +122,7 @@ try {
   assert.equal(restored.timeline.filter(i=>i.kind==='user').length,1);
   assert.equal(Object.keys(restored.tasks).length,2);assert.equal(restored.backgroundJobs.length,0);
   assert.equal(childCalls.get('background'),3);assert.equal(childCalls.get('review'),2);
-  const journal=JSON.parse(fs.readFileSync(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
   const results=Object.values(journal.tasks).map(t=>t.result.handoff);
   assert.equal(results.length,2);assert.ok(results.every(h=>h.version===1&&h.submission.status==='submitted'));
   assert.ok(results.every(h=>h.owner.rootRunId===original));

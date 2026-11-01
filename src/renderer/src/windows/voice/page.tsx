@@ -227,7 +227,8 @@ export default function Home() {
     setInterimText(text);
   }, []);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const { snapshot: flowSnapshot } = useConversationFlow(conversationId);
+  const conversationFlow = useConversationFlow(conversationId);
+  const { snapshot: flowSnapshot } = conversationFlow;
   const flowSnapshotRef = useRef(flowSnapshot);
   flowSnapshotRef.current = flowSnapshot;
   const [archivePayload, setArchivePayload] = useState<{ conversationId: string | null; turns: TranscriptItem[] }>({ conversationId: null, turns: [] });
@@ -2777,7 +2778,7 @@ export default function Home() {
       // 024：只有实际切到别的会话才清草稿；重复打开当前会话不误清。
       const switching = conversationIdRef.current !== id;
       if (!switching && !navigationTargetRef.current) {
-        await window.hemiVoice.openConversation(id, { activate: true }).catch(() => {});
+        await window.hemiVoice.openConversation(id, { activate: true, windowed:true }).catch(() => {});
         return;
       }
       const navigation = ++navigationSeqRef.current;
@@ -2788,7 +2789,7 @@ export default function Home() {
       setTurnPhase('idle');
       logChain(`切换会话 → ${id}`);
       try {
-        const session = await window.hemiVoice.openConversation(id, { activate: true });
+        const session = await window.hemiVoice.openConversation(id, { activate: true, windowed:true });
         if (navigation !== navigationSeqRef.current) return;
         // 只复位界面；旧会话请求留在宿主继续运行。
         stopTtsPlayback();
@@ -3774,6 +3775,7 @@ export default function Home() {
             && !task.activity?.phase.startsWith('waiting-'))
         }
         interimText={speechPreviewText}
+        flowHistory={conversationFlow.history?{...conversationFlow.history,gap:conversationFlow.history.gap?{...conversationFlow.history.gap,load:()=>void conversationFlow.client.loadHistory('gap')}:undefined,load:()=>void conversationFlow.client.loadHistory()}:undefined}
         transcripts={transcripts}
         conversationLoading={Boolean(conversationId && flowSnapshot?.conversationId !== conversationId)}
         timelineNotice={projection.leftoverTurns ? '此会话的时间线记录不完整，当前按原始记录顺序展示。' : undefined}

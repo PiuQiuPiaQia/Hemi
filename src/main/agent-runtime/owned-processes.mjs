@@ -50,7 +50,7 @@ async function recoverProcess(record) {
 
 /** 逐条核实并回收旧命令。单条未知状态不阻止其他会话，事实库故障仍向上报错。 */
 export async function recoverOwnedProcesses(journal, {log} = {}) {
-  const records = Object.values((await journal.snapshot()).processes ?? {}).filter(item=>['active','unknown'].includes(item.state));
+  const records = Object.values((await journal.snapshot({tables:['processes']})).processes ?? {}).filter(item=>['active','unknown'].includes(item.state));
   for (const record of records) {
     let result;
     try { result = await recoverProcess(record); }

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Actual renderer -> IPC -> runtime -> filesystem. No credentials or installed data.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -81,7 +82,7 @@ try {
     }),'conversation identity');
     const before=await flow(cid),runId=before.activeRunId;
     const queued=await command(cid,{type:'send',input:{text:'QUEUED_MUST_NOT_REPLAY'}});assert.equal(queued.disposition,'queued');
-    const file=path.join(profile,'runtime-v2/conversations',cid+'.json'),journal=path.join(profile,'runtime-v2/run-journal.json');
+    const file=path.join(profile,'runtime-v2/conversations',cid+'.json'),journal=path.join(profile,'runtime-v2/run-journal.sqlite');
     for(const target of [file,journal]){await fs.rename(target,target+'.last-good');await fs.mkdir(target);}
     const count=requests.length;
     const {res,body}=held;held=null;answer(res,body,'当前生成结束。');
@@ -96,7 +97,7 @@ try {
     check('renderer shows the storage failure without an active retry or streaming cursor');
     for(const target of [journal,file]){await fs.rm(target,{recursive:true});await fs.rename(target+'.last-good',target);}
     await wait(async()=>{
-      const saved=JSON.parse(await fs.readFile(file,'utf8')),state=JSON.parse(await fs.readFile(journal,'utf8'));
+      const saved=JSON.parse(await fs.readFile(file,'utf8')),state=readRunJournalFileSync(journal);
       return saved.flow?.phase==='idle'&&saved.flow.runs[runId]?.outcome==='failed'&&state.roots[runId]?.status==='failed';
     },'both stores retry pending terminal state');
     assert.equal(requests.length,count,'state recovery must not repeat model calls');

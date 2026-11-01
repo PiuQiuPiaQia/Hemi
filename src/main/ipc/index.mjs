@@ -10,7 +10,7 @@ import { registerConversationIpc } from './conversation.ipc.mjs';
 import { registerExecutorIpc } from './executor.ipc.mjs';
 import { registerFloatingIpc } from './floating.ipc.mjs';
 import { registerFlowIpc } from './flow.ipc.mjs';
-import { initConversationFlowService } from '../services/conversation-flow-service.mjs';
+import { initConversationFlowService, getConversationFlowService } from '../services/conversation-flow-service.mjs';
 import { createTurnNotifier } from '../services/turn-notifier.mjs';
 import { notifyViaAppleScript } from '../services/system-notification.mjs';
 import { showMainWindow } from '../windows/main-window.mjs';
@@ -42,7 +42,6 @@ import { getBrowserBridgeService } from '../services/browser-bridge-service.mjs'
 import { browserBridgeStatePathFor } from '../agent/permission-state.mjs';
 import { getInteractiveResourceCoordinator } from '../workflows/interactive-resource-coordinator.mjs';
 import { initWorkflowService } from '../workflows/workflow-service.mjs';
-import { getConversationFlowService } from '../services/conversation-flow-service.mjs';
 import { getProfiles } from '../lib/profiles-holder.mjs';
 import { freezeWorkflowModel } from '../workflows/workflow-model-plan.mjs';
 import { loadRoles } from '../agent/agent-roles.mjs';
@@ -118,7 +117,7 @@ export async function registerAllIpcHandlers() {
     },
     broadcast: (conversationId, change) => {
       if (!state.mainWindow || state.mainWindow.isDestroyed()) return;
-      state.mainWindow.webContents.send(IPC.flow.changed, { conversationId, change });
+      state.mainWindow.webContents.send(IPC.flow.changed, { conversationId, change:getConversationFlowService().projectChange(conversationId, change) });
     },
   });
   registerLlmIpc();

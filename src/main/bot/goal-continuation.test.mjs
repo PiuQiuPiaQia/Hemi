@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -61,7 +62,7 @@ async function fixture(t, mode, goalPolicy={}) {
   const {id}=await call('session.create');
   const send=(inputId='goal-input')=>call('flow.command',{id,command:{type:'send',input:{inputId,text:'写入 proof.txt，内容为 goal proof'}}});
   const flow=()=>call('flow.snapshot',{id});
-  const journal=async()=>JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
+  const journal=async()=>readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json'));
   return {host,call,id,send,flow,journal,root,workspace,requests,get checks(){return checks;},release:()=>releaseCheck?.(),async restart(){await host.close();host=await createBotHost(hostOptions);}};
 }
 

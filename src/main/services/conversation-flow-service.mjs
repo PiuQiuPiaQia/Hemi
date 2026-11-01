@@ -16,6 +16,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { recoverConversationFlow } from './conversation-recovery.mjs';
 import { repairConversationFlowHistory } from './conversation-migration.mjs';
+import {createFlowWindowProjector, flowHistoryPage} from '../../../packages/conversation-flow/src/core/flow-window.mjs';
+import {applyFlowChange} from '../../shared/conversation-flow.mjs';
 
 let instance = null;
 
@@ -24,10 +26,57 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
   const store = createFlowStore({ dir, log });
   const controllers = new Map();
   const statusReaders = new Map();
+  const views = new Map();
+  const viewOwners = new Map();
+  let reclaiming = false;
+  const canReclaim = controller => {
+    const s=controller.getSnapshot();
+    return s.phase==='idle'&&!s.activeRunId&&!s.awaitingUser&&!s.pending.length
+      &&!(s.pendingReports??[]).length
+      &&Object.values(s.runs??{}).at(-1)?.outcome!=='awaiting-background'
+      &&!(s.backgroundJobs??[]).some(job=>job.endedAt==null||job.cleanupConfirmed===false)
+      &&!Object.values(s.tasks??{}).some(task=>task.phase&&task.phase!=='terminal'&&!task.outcome);
+  };
+  function reclaimIdle() {
+    if(reclaiming||controllers.size<=8)return;
+    reclaiming=true;
+    void (async()=>{
+      try{
+        for(const [id,controller] of controllers){
+          if(controllers.size<=8)break;
+          if(viewOwners.get(id)?.size||!canReclaim(controller))continue;
+          await store.flush(id);
+          if(controllers.get(id)!==controller||viewOwners.get(id)?.size||!canReclaim(controller))continue;
+          controllers.delete(id);statusReaders.delete(id);views.delete(id);
+        }
+      }catch(error){log?.warn?.(`闲置会话暂未回收：${error.message}`);}
+      finally{reclaiming=false;}
+    })();
+  }
   let runtimeFactory = typeof initialFactory === 'function' ? initialFactory : null;
 
   instance = {
     store,
+    viewFor(id, viewId) {
+      const controller = this.controllerFor(id);
+      if(typeof viewId==='string'&&viewId.length<=128){const owners=viewOwners.get(id)??new Set();owners.add(viewId);viewOwners.set(id,owners);}
+      const project = createFlowWindowProjector(applyFlowChange, () => controller.getSnapshot());
+      const reset = project({type:'reset',snapshot:{detail:{id,flow:controller.getSnapshot()}}});
+      // Only the selected local conversation consumes a view. Execution stays in controllers.
+      views.set(id, project);
+      return reset.snapshot.detail.flow;
+    },
+    releaseView(id,viewId) {
+      const owners=viewOwners.get(id);owners?.delete(viewId);
+      if(!owners?.size){viewOwners.delete(id);views.delete(id);reclaimIdle();}
+      return {ok:true};
+    },
+    historyFor(id, cursor) { return flowHistoryPage(this.controllerFor(id).getSnapshot(), cursor); },
+    projectChange(id, change) {
+      const project = views.get(id);
+      if (!project) return {...change, ...(change.kind === 'patch' ? {changes:[]} : {})};
+      return {...project({type:'flow',id,change}).change, conversationStatus:change.conversationStatus};
+    },
     operations:createConversationOperationJournal({dir:path.join(dir,'..','conversation-operations')}),
     submitChat:null,
 
@@ -112,9 +161,12 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
           } catch (error) {
             log?.warn?.(`flow:changed 广播失败（${key}）：${error?.message ?? error}`);
           }
+          if(controller.getSnapshot().phase==='idle')reclaimIdle();
         });
         controllers.set(key, controller);
       }
+      controllers.delete(key); controllers.set(key,controller);
+      reclaimIdle();
       return controller;
     },
 
@@ -136,6 +188,8 @@ export function initConversationFlowService({ dir, broadcast = null, onUnreadCha
       await store.drop(key).catch(() => {});
       controllers.delete(key);
       statusReaders.delete(key);
+      views.delete(key);
+      viewOwners.delete(key);
     },
 
     async dropAll() {

@@ -77,10 +77,12 @@ function ConversationFlowBody({
     if (state?.history?.hasMore) setHistoryVisible(true);
   }, [state?.history?.hasMore]);
   const virtual = useRef<VirtualTranscriptHandle>(null);
+  const itemCache = useMemo(() => new WeakMap<MessageView, ReturnType<typeof transcript>>(), []);
   const items = useMemo(
     () =>
-      messages.map((message) =>
-        transcript({
+      messages.map((message) => {
+        const cached=itemCache.get(message);if(cached)return cached;
+        const value=transcript({
           ...message,
           parts: message.parts?.map((part) =>
             [
@@ -97,9 +99,10 @@ function ConversationFlowBody({
                   text: "此内容类型暂不支持，请更新对话组件。",
                 },
           ),
-        }),
-      ),
-    [messages],
+        });
+        itemCache.set(message,value);return value;
+      }),
+    [messages, itemCache],
   );
   const taskSnaps = useMemo(() => {
     const tasks: Record<string, TaskStateSnapshot> = {};
@@ -308,7 +311,7 @@ function ConversationFlowBody({
             lead={lead}
             taskTitle={taskSnaps[entry.taskId]?.taskText}
           />
-          {copy ? <ReplyCopyActions text={copy} /> : null}
+          {copy ? <ReplyCopyActions text={copy} runId={item.flow?.runId} /> : null}
         </div>
       );
     const view = messageById.get(item.id)!;
@@ -453,7 +456,7 @@ function ConversationFlowBody({
             retryBlocked={state?.retryBlocked || (state?.busy || busy ? '当前运行尚未结束。' : undefined)}
           />
         )}
-        {copy ? <ReplyCopyActions text={copy} /> : null}
+        {copy ? <ReplyCopyActions text={copy} runId={item.flow?.runId} /> : null}
       </div>
     );
   };

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Actual PC renderer -> preload/IPC/controller -> shared Pi runtime -> HTTP/files.
 // Only model responses are synthetic. Every run owns a fresh HEMI_USER_DATA_DIR.
 import assert from 'node:assert/strict';
@@ -88,7 +89,7 @@ const wait = async (predicate,label,timeout=45000) => {
 };
 const check = name => { report.checks.push(name); console.log(`PASS ${mode}: ${name}`); };
 const flow = cid => page.evaluate(cid => window.hemiVoice.flowGetSnapshot(cid),cid);
-const journal = () => JSON.parse(fs.readFileSync(path.join(userData,'runtime-v2/run-journal.json'),'utf8'));
+const journal = () => readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
 const input = () => page.locator('textarea.text-composer-input');
 async function launch() {
   app = await _electron.launch({executablePath:electronPath,args:['.'],env:{...process.env,HEMI_USER_DATA_DIR:userData,HEMI_TEST_MIC_GRANT:'1',HEMI_LLM_API_KEY:'SYNTHETIC_ONLY',HEMI_LLM_BASE_URL:baseUrl,HEMI_LLM_MODEL:'pc-goals'}});

@@ -102,7 +102,7 @@ export function StageBriefsItem({
 }
 
 /** 复制整轮正文，沿用剪贴板桥、成功图标和失败提示。 */
-export function ReplyCopyActions({ text }: { text: string }) {
+export function ReplyCopyActions({ text,runId }: { text: string;runId?:string }) {
   const { runtime } = useFlow();
   const { copy, toastNode } = useClipboardCopy();
   const [copied, setCopied] = useState(false);
@@ -124,7 +124,7 @@ export function ReplyCopyActions({ text }: { text: string }) {
           aria-label={copied ? "已复制" : "复制完整回答"}
           title={copied ? "已复制" : "复制完整回答"}
           data-copied={copied ? "true" : undefined}
-          onClick={() => void copy(text).then(setCopied)}
+          onClick={() => void copy(text,undefined,runId).then(setCopied)}
         >
           {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
         </button>

@@ -391,8 +391,11 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   flowCommand: (conversationId, command,operation) =>
     ipcRenderer.invoke('flow:command', { conversationId, command,operation }),
   flowLookupOperation:(conversationId,requestId)=>ipcRenderer.invoke('flow:lookup-operation',{conversationId,requestId}),
-  flowGetSnapshot: (conversationId) =>
-    ipcRenderer.invoke('flow:get-snapshot', { conversationId }),
+  flowGetHistory: (conversationId, cursor) => ipcRenderer.invoke('flow:get-history', { conversationId, ...cursor }),
+  flowGetSnapshot: (conversationId, viewId) =>
+    ipcRenderer.invoke('flow:get-snapshot', { conversationId, viewId }),
+  flowReleaseView: (conversationId,viewId) => ipcRenderer.invoke('flow:release-view',{conversationId,viewId}),
+  flowGetReply: (conversationId,runId,generation) => ipcRenderer.invoke('flow:get-reply',{conversationId,runId,generation}),
   flowRewind: (payload) => ipcRenderer.invoke('flow:rewind', payload),
   flowSaveMetadata: (payload) => ipcRenderer.invoke('flow:save-metadata', payload),
   onFlowChanged: (callback) => {
@@ -428,12 +431,12 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   getDraft: (conversationId) => ipcRenderer.invoke('drafts:get', { conversationId }),
   removeDraft: (conversationId) => ipcRenderer.invoke('drafts:remove', { conversationId }),
   // 015 会话：最近 / 保存（防抖全量）/ 列表 / 打开 / 删除。
-  getLastConversation: () => ipcRenderer.invoke('conversation:last'),
+  getLastConversation: (options) => ipcRenderer.invoke('conversation:last', {windowed:options?.windowed===true}),
   saveConversation: (payload) => ipcRenderer.invoke('conversation:save', payload),
   listConversations: () => ipcRenderer.invoke('conversation:list'),
   // 018 原版契约：open/remove 的载荷是 { id } 对象（曾一度漂移成裸字符串，
   // 主进程取 payload.id 得 undefined → 所有会话「找不到」，2026-09-21 实录）。
-  openConversation: (id, options) => ipcRenderer.invoke('conversation:open', { id, activate: options?.activate === true }),
+  openConversation: (id, options) => ipcRenderer.invoke('conversation:open', { id, activate: options?.activate === true, windowed:options?.windowed===true }),
   markConversationRead: (id, expectedUnreadAt) => ipcRenderer.invoke('conversation:mark-read', { id, expectedUnreadAt }),
   removeConversation: (id) => ipcRenderer.invoke('conversation:remove', { id }),
   // 024 侧栏：双击重命名（空标题回退派生）与拖拽排序（全量 id 序）。

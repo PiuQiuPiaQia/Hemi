@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // Production Electron renderer -> IPC -> Pi SDK -> real shell -> completion -> renderer.
 // Only the external model and native folder picker are controlled. No personal data is copied.
 import assert from 'node:assert/strict';
@@ -316,7 +317,7 @@ try {
   assert.equal(fs.existsSync(path.join(userData,'restart-late')),false);
   check('真实进程崩溃重启：运行/工具/列表/磁盘一致中断，队列保留暂停，没有重放或假运行');
   assert.deepEqual(errors, []);
-  const journal = JSON.parse(fs.readFileSync(path.join(userData, 'runtime-v2/run-journal.json'), 'utf8'));
+  const journal = readRunJournalFileSync(path.join(userData, 'runtime-v2/run-journal.json'));
   assert.ok(Object.values(journal.processes).every(process => !['active', 'unknown'].includes(process.state)));
   check('Renderer 无运行错误，所有受控命令已确认退出');
 } catch (error) {

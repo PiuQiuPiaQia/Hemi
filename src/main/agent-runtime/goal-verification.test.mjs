@@ -67,7 +67,7 @@ for(const api of ['openai-completions','anthropic-messages']) {
     assert.equal(root.goal.phase,'checking');assert.equal(attempt.valid,false);assert.equal(attempt.bypassed,true);
     assert.equal(attempt.responseHash,createHash('sha256').update('SENSITIVE_PROVIDER_TEXT').digest('hex'));
     assert.equal(attempt.responseShape,'other');
-    assert.ok(!(await readFile(path.join(f.dir,'run-journal.json'),'utf8')).includes('SENSITIVE_PROVIDER_TEXT'));
+    assert.ok(!(await readFile(path.join(f.dir,'run-journal.sqlite'),'utf8')).includes('SENSITIVE_PROVIDER_TEXT'));
     await f.journal.recordGoalCheck(f.owner,verdict);await f.journal.finishRoot(f.owner,'completed');
     assert.equal((await f.journal.root(f.owner)).status,'completed');
     assert.equal(Object.values((await f.journal.snapshot()).requests).length,1);

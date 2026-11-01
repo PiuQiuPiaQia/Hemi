@@ -62,6 +62,10 @@ export function createDesktopFlowHost(
         typeof bridge?.openConversationDeliverable === "function",
     },
     copyText: async ({ text }) => result(await bridge.copyText(text)),
+    ...(!options.remote&&bridge.flowGetReply?{readReply:async ({runId}:{runId:string},{scope,signal}:import('@hemi/conversation-flow').HostContext)=>{
+      const text=await bridge.flowGetReply!(conversationId,runId,Number(scope.generation));
+      return signal.aborted?{ok:false as const,error:{code:'cancelled' as const,message:'操作已取消'}}:{ok:true as const,value:text};
+    }}:{}),
     openLink: async ({ url }) =>
       (await bridge.openLink(url))
         ? { ok: true, value: undefined }

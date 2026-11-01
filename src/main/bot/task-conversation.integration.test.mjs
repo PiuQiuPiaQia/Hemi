@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -78,7 +79,7 @@ test('real SDK child stream, actual file tools and restart preserve a separate t
   assert.equal(messages[1].parts[2].calls[0].output, 'CHILD_TOOL_PROOF');
   assert.equal(messages[1].parts[2].calls[0].state, 'done');
   assert.equal(messages[2].text, 'CHILD_DONE');
-  const journal=JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
+  const journal=readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json'));
   const handoff=journal.tasks[task.taskId].result.handoff;
   assert.equal(handoff.submission.status,'submitted');assert.equal(handoff.owner.taskId,task.taskId);
   assert.equal(handoff.submission.data.verification[0].status,'passed');
@@ -87,6 +88,6 @@ test('real SDK child stream, actual file tools and restart preserve a separate t
   const restored = await call('flow.snapshot', { id });
   assert.equal(Object.values(restored.tasks)[0].outcome, 'returned');
   assert.deepEqual(Object.values(restored.tasks)[0].conversation, task.conversation);
-  const saved=JSON.parse(await fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8'));
+  const saved=readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json'));
   assert.deepEqual(saved.tasks[task.taskId].result.handoff,handoff);
 });

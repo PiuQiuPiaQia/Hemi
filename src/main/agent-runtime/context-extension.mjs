@@ -21,7 +21,7 @@ export function contextExtension({ getExecution, sourceFor, validateSource }) {
         if (!execution || execution.cancelled?.() || execution.fatalError) return { isError: true, content: [{ type: 'text', text: execution?.fatalError ?? '执行归属已失效' }] };
         try {
           if (String(args.taskId).startsWith('conv-')) throw new Error('这是会话 ID，请使用 conversation_read({ conversationId: "' + args.taskId + '" }) 读取历史；task_read 只读子任务报告');
-          const state = await execution.journal.snapshot();
+          const state = await execution.journal.snapshot({tables:['tasks'],ids:[args.taskId]});
           const task = state.tasks[args.taskId];
           if (!task || task.owner.conversationId !== execution.owner.conversationId) throw new Error('任务不属于当前对话或报告不可用');
           if (!task.result.reportRef) throw new Error('任务没有可读取的完整报告');

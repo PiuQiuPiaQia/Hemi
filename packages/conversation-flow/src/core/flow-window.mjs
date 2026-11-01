@@ -16,6 +16,15 @@ function viewFor(snapshot, timeline, start, total) {
     permissions:Object.fromEntries(Object.entries(snapshot.permissions ?? {}).filter(([,value])=>value.status==='pending'||runs.has(value.runId)||!value.status)),
     history:{start,total}};
 }
+/** Release unrelated terminal metadata together with evicted presentation rows. */
+export function retainFlowRows(snapshot, timeline, history = snapshot.history) {
+  return {...viewFor(snapshot, timeline, history?.start ?? 0, history?.total ?? timeline.length), ...(history ? {history} : {})};
+}
+export function flowReplyText(snapshot, {runId,generation}) {
+  if(generation!==snapshot.generation||!snapshot.runs[runId])throw new Error('回答版本已变化，请重新打开后复制。');
+  return snapshot.timeline.filter(item=>item.kind==='assistant'&&item.runId===runId)
+    .flatMap(item=>item.parts.filter(part=>part.kind==='text').map(part=>String(part.content??''))).filter(text=>text.trim()).join('\n\n');
+}
 // Row count is a target; bytes and a 100-row ceiling bound oversized QA groups.
 // Normal pages begin with a question. A larger group explicitly continues across pages.
 function rangeView(snapshot, end, limit, maxBytes, offset = 0, total = snapshot.timeline.length) {

@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 064 产品边界验证。Node 父进程只提供外部模型端点、观察文件和启动/重启真实 Electron。
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -100,7 +101,7 @@ async function crashAt(kind) {
  child.stdout.on('data',x=>log.push(x));child.stderr.on('data',x=>log.push(x));
  try{
   await wait(async()=>{
-   const j=await readFile(path.join(dir,'runtime-v2/run-journal.json'),'utf8').then(JSON.parse);
+   const j=await readRunJournalFileSync(path.join(dir,'runtime-v2/run-journal.json'));
    if(kind==='before')return crashHeld.has(kind);
    if(kind==='effect')return await readFile(file('crash-effect-count'),'utf8').catch(()=>false)&&Object.values(j.processes).some(p=>p.owner.conversationId==='conv-edge-crash-effect'&&p.state==='active');
    const events=Object.values(j.inbox).filter(e=>e.owner.conversationId===`conv-edge-crash-${kind}`&&e.state==='pending');
@@ -110,14 +111,14 @@ async function crashAt(kind) {
   check(`实际在 ${kind} 窗口终止宿主`,true);
  }finally{if(!child.killed)child.kill('SIGKILL');await writeFile(path.join(out,`064-crash-${kind}.log`),Buffer.concat(log));}
  await phase(`recover-${kind}`);
- const j=JSON.parse(await readFile(path.join(dir,'runtime-v2/run-journal.json'),'utf8'));
+ const j=readRunJournalFileSync(path.join(dir,'runtime-v2/run-journal.json'));
  const roots=Object.values(j.roots).filter(r=>r.owner.conversationId===`conv-edge-crash-${kind}`&&r.kind!=='auxiliary');
  check(`${kind} 旧目标中断、新目标完成且不自动续跑`,roots.length===2&&roots[0].status==='interrupted'&&roots[1].status==='completed');
  check(`${kind} 无未消费的旧完成通知`,Object.values(j.inbox).filter(e=>e.owner.conversationId===`conv-edge-crash-${kind}`).every(e=>e.state==='obsolete'));
 }
 try{
  await phase('first');
- const journal=()=>readFile(path.join(dir,'runtime-v2/run-journal.json'),'utf8').then(JSON.parse);
+ const journal=()=>readRunJournalFileSync(path.join(dir,'runtime-v2/run-journal.json'));
  const first=Object.values((await journal()).tasks).find(t=>t.owner.conversationId==='conv-edge-resume');sessionRef=first.result.sessionRef;
  check('首次子会话完成且实际写入',first.result.outcome==='complete'&&await readFile(file('resume.txt'),'utf8')==='HEMI_064_FIRST');
  if(suite==='boundaries'){

@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { moduleUnderTest } from './compile.mjs';
 const { createConversation, createComposerDraft, createDraftPersistence, createFlowReplica, createConversationPresenter, createConversationTranscriptPresenter, projectConversationQueue } = await moduleUnderTest('../src/core.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+test('dispose releases authority and presentation payloads and calls the cache release hook once',async()=>{
+  let released=0;
+  const f=fixture({client:{onDispose(){released++;}}});await f.client.start();
+  assert.ok(f.client.getSnapshot().snapshot);f.client.dispose();f.client.dispose();
+  assert.equal(f.client.getSnapshot().snapshot,null);assert.equal(released,1);
+});
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const scope = { environmentId: 'test-bot', conversationId: 'same' };
 

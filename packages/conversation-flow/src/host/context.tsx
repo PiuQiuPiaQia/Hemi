@@ -137,11 +137,17 @@ export function useClipboardCopy() {
   const { runtime } = useFlow();
   const [toast, setToast] = useTransientMessage<{ok: boolean; text: string}>();
   const copy = useCallback(
-    async (text: string, label = "已复制") => {
+    async (text: string, label = "已复制", runId?:string) => {
       const result: FlowResult<void> = runtime.can("copyText")
-        ? await runtime.invoke((context) =>
-            runtime.host!.copyText!({ text }, context),
-          )
+        ? await runtime.invoke(async (context) => {
+            if(runId&&runtime.host?.readReply){
+              const full=await runtime.host.readReply({runId},context);
+              if(!full.ok)return full;
+              text=full.value;
+            }
+            if(context.signal.aborted)return failure('cancelled','操作已取消');
+            return runtime.host!.copyText!({ text }, context);
+          })
         : failure("unsupported", "当前环境未提供复制");
       if (!runtime.disposed)
         setToast({

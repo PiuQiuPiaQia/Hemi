@@ -14,7 +14,7 @@
 - 备份产物是**单次快照归档**（manifest＋分卷文件），不做数据目录的实时同步。
 - 首个云端目标：坚果云 WebDAV（服务器 `https://dav.jianguoyun.com/dav/`，账号＋第三方应用密码）；同时支持「本地文件夹」目标，覆盖 iCloud Drive/OneDrive 等同步目录用户。
 - ~~**凭据一律不进备份（硬约束）**~~（已被上条 2026-11 裁决取代）：`secrets/`、`provider-logins/`、`remote-passwords.json`、`runtime-v2/oauth-credentials.json`、`doubao-asr.json` 现均随轻量档备份并可在新机解密。
-- 备份时机选**会话空闲**（无进行中回合）做文件级快照；runtime-v2 全部为文件存储（非 SQLite），无需停写。
+- 备份时机选**会话空闲**（无进行中回合）做快照。运行事实库使用 SQLite 增量存储，打包前通过一致读事务导出 `run-journal.json`，不直接复制正在使用的数据库；其他档案仍按文件备份。恢复 JSON 胜出时，旧数据库进入本地安全副本，重启后由 JSON 重新导入。详见[运行时性能优化](../technical/runtime-performance.md)。
 
 ### 1.2 本期范围
 

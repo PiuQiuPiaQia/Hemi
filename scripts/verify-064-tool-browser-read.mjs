@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 064：真实 renderer → IPC → 生产 SDK/工具/桥 → 隔离 Chrome 扩展。
 // 仅模型端点、目标网页与复制扩展的桥端口是可控边界；不替换内部服务。
 import assert from 'node:assert/strict';
@@ -132,7 +133,7 @@ const submit = async marker => {
 };
 const settle = marker => waitFor(() => evalJs(`document.body.innerText.includes(${JSON.stringify(marker+'_ANSWER')})&&!document.querySelector('.text-composer-send.is-stop,.text-composer-stop')`), '收口 '+marker);
 const resultFor = marker => requests.flatMap(b => b.messages ?? []).filter(m => m.role === 'tool' && String(m.tool_call_id).includes(marker)).at(-1);
-const journal = () => JSON.parse(fs.readFileSync(path.join(userData,'runtime-v2/run-journal.json')));
+const journal = () => readRunJournalFileSync(path.join(userData,'runtime-v2/run-journal.json'));
 try {
   await start();
   // 配置走真实设置 IPC，让宿主加密测试凭据，再正常重启读取配置。

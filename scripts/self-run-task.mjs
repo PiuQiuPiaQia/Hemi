@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../src/main/agent-runtime/journal-inspection.mjs';
 // 023 真机自驱动验收 harness：隔离 userData 起真实应用，从 ASR 定稿的同一入口
 // （IPC.llm.chat）注入一句话，真实跑完 主 agent（056：自己动手或派子 agent）→
 // 门控确认卡 → 回答 的全链路。主 agent 与子 agent 的确认卡都自动应答（授权卡＝
@@ -286,7 +287,7 @@ app.whenReady().then(async () => {
     const journalFile = path.join(app.getPath('userData'), 'runtime-v2/run-journal.json');
     let consumedCompletions = 0, completionEvents = [];
     if (backgroundCount) {
-      const journal = JSON.parse(fs.readFileSync(journalFile, 'utf8'));
+      const journal = readRunJournalFileSync(journalFile);
       const taskIds = new Set(tasks.filter(t => t.background).map(t => t.taskId));
       completionEvents = Object.values(journal.inbox).filter(event => taskIds.has(event.taskId));
       consumedCompletions = completionEvents.filter(event => event.state === 'consumed').length;

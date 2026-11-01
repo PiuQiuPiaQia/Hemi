@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from './journal-inspection.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile, rename, mkdir, readdir } from 'node:fs/promises';
@@ -54,11 +55,11 @@ test('a cleanup failure racing a positive verdict cannot commit a completed goal
 test('terminal write failure retains its execution fence and retries only state after storage recovery', async t => {
   const {journal,dir}=await fixture(t);t.after(()=>journal.dispose());
   await journal.beginRoot(owner);
-  const file=path.join(dir,'run-journal.json'),backup=file+'.last-good';
+  const file=path.join(dir,'run-journal.sqlite'),backup=file+'.last-good';
   await rename(file,backup);await mkdir(file);
   await assert.rejects(journal.finishRoot(owner,'failed','storage failure'));
   assert.equal((await journal.root(owner)).status,'failed','confirmed end survives failed persistence in memory');
-  assert.equal(JSON.parse(await readFile(backup,'utf8')).roots.r.status,'running','failed commit does not replace the last good file');
+  assert.equal(readRunJournalFileSync(backup).roots.r.status,'running','failed commit does not replace the last good file');
   await assert.rejects(journal.requestStart(owner,{requestId:'replayed'},10),/停止/);
   const next={...owner,rootRunId:'explicit-new-task'};
   await assert.rejects(journal.beginRoot(next));
@@ -66,11 +67,11 @@ test('terminal write failure retains its execution fence and retries only state 
   assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[]);
   await rm(file,{recursive:true});await rename(backup,file);
   const deadline=Date.now()+3000;
-  while(JSON.parse(await readFile(file,'utf8')).roots.r.status!=='failed') {
+  while(readRunJournalFileSync(file).roots.r.status!=='failed') {
     assert.ok(Date.now()<deadline,'pending terminal state should be retried without new work');
     await new Promise(resolve=>setTimeout(resolve,30));
   }
-  const saved=JSON.parse(await readFile(file,'utf8'));
+  const saved=readRunJournalFileSync(file);
   assert.deepEqual(saved.requests,{});
   assert.equal(saved.roots[next.rootRunId],undefined);
   await journal.beginRoot(next);
@@ -181,7 +182,7 @@ test('069 总结在途重启保留已消耗事实，不重新发出；正常任�
   await assert.rejects(restored.requestStart(owner, { ...summary, requestId: 'again' }, 1), /停止/);
 });
 test('损坏事实库不按空库继续',async t=>{
-  const {dir}=await fixture(t);await writeFile(path.join(dir,'run-journal.json'),'broken');
+  const {dir}=await fixture(t);await writeFile(path.join(dir,'run-journal.sqlite'),'broken');
   const journal=createRunJournal({dir});await assert.rejects(journal.ready(),/读取失败/);
 });
 

@@ -2517,8 +2517,10 @@ export type HemiVoiceBridge = {
   ) => Promise<FlowCommandResult>;
   flowLookupOperation?: (conversationId: string, requestId: string) => Promise<FlowCommandResult | null>;
   onFlowDisconnected?: (receive: () => void) => () => void;
+  flowReleaseView?: (conversationId:string,viewId:string)=>Promise<unknown>;
+  flowGetReply?: (conversationId:string,runId:string,generation:number)=>Promise<string>;
   flowGetHistory?: (conversationId:string,cursor:{before:number;generation:number})=>Promise<import('@hemi/conversation-flow/core').FlowHistoryPage>;
-  flowGetSnapshot: (conversationId: string) => Promise<FlowSnapshotView | null>;
+  flowGetSnapshot: (conversationId: string,viewId?:string) => Promise<FlowSnapshotView | null>;
   /** 059 工作流：列表／定义只读＋两入口受理（渲染层零 store 访问）。 */
   workflowApplications: () => Promise<Array<{name:string;applicationRef:string}>>;
   workflowRemove: (workflowId:string) => Promise<{removed:boolean}>;
@@ -2707,7 +2709,7 @@ export type HemiVoiceBridge = {
   } | null>;
   removeDraft: (conversationId: string) => Promise<{ ok: boolean }>;
   /** 015 会话：最近 / 保存（防抖全量）/ 列表 / 打开 / 删除。 */
-  getLastConversation: () => Promise<ConversationSession | null>;
+  getLastConversation: (options?: {windowed?:boolean}) => Promise<ConversationSession | null>;
   saveConversation: (
     payload: {
       id: string;
@@ -2724,7 +2726,7 @@ export type HemiVoiceBridge = {
   ) => Promise<{ ok: boolean; unchanged?: boolean; storageError?: string }>;
   listConversations: () => Promise<ConversationList>;
   /** activate 仅在用户点击打开时按真实更新时间重排；启动恢复和只读加载不重排。 */
-  openConversation: (id: string, options?: { activate?: boolean }) => Promise<ConversationSession>;
+  openConversation: (id: string, options?: { activate?: boolean;windowed?:boolean }) => Promise<ConversationSession>;
   markConversationRead: (id: string, expectedUnreadAt: number) => Promise<{ ok: boolean; unreadAt: number | null; unchanged?: boolean }>;
   removeConversation: (id: string) => Promise<{ ok: boolean }>;
   setConversationPinned: (id: string, pinned: boolean) => Promise<{ ok: boolean; session?: ConversationSummary; storageError?: string }>;

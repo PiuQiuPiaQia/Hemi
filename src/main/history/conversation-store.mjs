@@ -25,6 +25,8 @@ import { firstReply, titleSource } from './conversation-title.mjs';
 import { noteActivity } from '../lib/perf.mjs';
 import { conversationStatus } from '../../shared/conversation-status.mjs';
 import { isNativeSessionReference } from '../agent-runtime/session-reference.mjs';
+import {updateJsonRecord} from '../lib/atomic-json-store.mjs';
+import {readJsonFields} from '../agent-runtime/journal-storage.mjs';
 
 // 057 S3-2d：v2＝flow 快照随档（骨架；turns 仍是载荷/档案层）。旧档启动时一次性
 // 迁移（备份原档后写 v2，幂等）；缺 flow 的旧档由流服务打开时现场引导兜底。
@@ -851,13 +853,27 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
    * 损坏返回 false（如新会话首回合档案未落——记录丢一条不致命，下一次会追上）。
    * 不动 updatedAt（账本追加不是「最近对话」语义）。
    */
-  function appendUsageRecord(id, record) {
+  function appendUsageRecord(id, record) { return appendUsageRecords(id, [record]); }
+
+  async function appendUsageRecordsAsync(id, records) {
+    const sessionId=String(id??'');
+    try{
+      await updateJsonRecord(sessionPath(sessionId),existing=>{
+        if(!existing||!Array.isArray(existing.turns))throw new Error('找不到有效会话档案');
+        return {...existing,usageLedger:sanitizeUsageRecords([...(existing.usageLedger??[]),...records])};
+      });
+      invalidateListIndex(sessionId);
+      return true;
+    }catch(error){log?.warn?.(`[conversation] 用量记录写入失败（${sessionId}）：${error.message}`);return false;}
+  }
+
+  function appendUsageRecords(id, records) {
     const sessionId = String(id ?? '');
     const existing = readSessionFile(sessionId);
     if (!existing || existing.corrupt) return false;
     const next = {
       ...existing,
-      usageLedger: sanitizeUsageRecords([...(existing.usageLedger ?? []), record]),
+      usageLedger: sanitizeUsageRecords([...(existing.usageLedger ?? []), ...records]),
     };
     try {
       writeFile(next);
@@ -1156,6 +1172,9 @@ export function createConversationStore({ dir, log = null, maxSessions = MAX_SES
     autoTitleCandidate,
     setAutoTitle,
     appendUsageRecord,
+    appendUsageRecords,
+    appendUsageRecordsAsync,
+    readFields: (id,fields) => readJsonFields(sessionPath(id),fields),
     saveContextUsage,
   };
 }

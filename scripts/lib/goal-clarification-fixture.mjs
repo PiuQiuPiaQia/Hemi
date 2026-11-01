@@ -1,3 +1,4 @@
+import {readRunJournalFileSync} from '../../src/main/agent-runtime/journal-inspection.mjs';
 // Actual Host/SDK/files; only the model HTTP boundary is synthetic.
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -39,7 +40,7 @@ export async function createClarificationFixture({verificationFailsAfterAnswer=f
  const {id}=await call('session.create');
  return {root,dataDir,workspace,id,requests,call,get host(){return host;},get seedCalls(){return seedCalls;},
   send:(text,inputId=randomUUID())=>call('flow.command',{id,command:{type:'send',input:{inputId,text}}}),
-  flow:()=>call('flow.snapshot',{id}),journal:()=>fs.readFile(path.join(dataDir,'runtime-v2/run-journal.json'),'utf8').then(JSON.parse),
+  flow:()=>call('flow.snapshot',{id}),journal:()=>readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json')),
   async restart(){await host.close();await start();},
   async close(){await host.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});},
  };

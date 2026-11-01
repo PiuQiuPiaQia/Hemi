@@ -4,6 +4,25 @@ import {moduleUnderTest} from './compile.mjs';
 const {createConversation,projectFlowWindow,flowHistoryPage}=await moduleUnderTest('../src/core.ts');
 const row=i=>({kind:'user',id:'u'+i,runId:'r'+i,text:'Question '+i,inputSource:'text',attachmentIds:[],acceptedAt:1,deliveredAt:1});
 const full=(length,revision=1,generation=1)=>({schemaVersion:1,conversationId:'history',revision,generation,phase:'idle',activeRunId:null,queuePaused:false,pending:[],timeline:Array.from({length},(_,i)=>row(i)),runs:{},tasks:{},artifacts:{},permissions:{},pendingReports:[]});
+test('following the live end releases backfilled QA and their terminal metadata; reading keeps it until then',async t=>{
+  const f=await fixture(t);await f.client.loadHistory();
+  assert.equal(f.client.getSnapshot().snapshot.timeline.length,64);
+  f.head(200,2);assert.ok(f.client.getSnapshot().snapshot.timeline.some(item=>item.id==='u36'));
+  f.client.getSnapshot().history.follow(true);
+  let state=f.client.getSnapshot();assert.equal(state.snapshot.timeline.length,32);assert.equal(state.snapshot.history.start,168);
+  assert.equal(state.snapshot.history.gap,undefined);assert.equal(state.history.hasMore,true);
+  await f.client.loadHistory();state=f.client.getSnapshot();assert.equal(state.snapshot.timeline[0].id,'u136');
+});
+test('backwards paging bounds retained QA and exposes evicted middle history as a reloadable gap',async t=>{
+  const f=await fixture(t);f.head(1000,2);
+  for(let i=0;i<20;i++)await f.client.loadHistory();
+  const state=f.client.getSnapshot();
+  assert.ok(state.snapshot.timeline.length<=256);assert.equal(state.snapshot.timeline[0].id,'u328');
+  assert.equal(state.snapshot.timeline.at(-1).id,'u999');assert.ok(state.history.gap.remaining>0);
+  const remaining=state.history.gap.remaining;await f.client.loadHistory('gap');
+  assert.ok(f.client.getSnapshot().history.gap.remaining<remaining);
+  f.client.getSnapshot().history.follow(true);assert.equal(f.client.getSnapshot().snapshot.timeline.length,32);
+});
 async function fixture(t) {
   let source=full(100),receive,offline,online,read,reads=0;
   const client=createConversation({scope:{environmentId:'test',conversationId:'history'},transport:{
@@ -23,7 +42,9 @@ test('discontinuous heads retain the reading segment and expose one user-driven 
   let iterations=0;
   while(f.client.getSnapshot().history.gap){assert.ok(iterations++<10);await f.client.loadHistory('gap');}
   state=f.client.getSnapshot();assert.deepEqual(state.snapshot.timeline.map(item=>item.id),Array.from({length:296},(_,i)=>'u'+(i+4)));
-  await f.client.loadHistory();assert.equal(f.client.getSnapshot().history.hasMore,false);assert.equal(f.client.getSnapshot().snapshot.timeline.length,300);
+  await f.client.loadHistory();assert.equal(f.client.getSnapshot().history.hasMore,false);assert.ok(f.client.getSnapshot().snapshot.timeline.length<=256);
+  while(f.client.getSnapshot().history.gap)await f.client.loadHistory('gap');
+  assert.equal(f.client.getSnapshot().snapshot.timeline.length,300,'explicit gap reads can still recover all archived rows');
 });
 test('late history responses cannot cross generation or Host authority fences',async t=>{
   const f=await fixture(t);let resolve,signal;

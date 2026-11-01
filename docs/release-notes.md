@@ -1,4 +1,9 @@
-macOS 改用固定签名身份，并更新官网与 README 展示。
+优化任务输出和长会话性能，并完善 macOS 固定签名与发布流程。
+
+- 将运行记录改为后台增量写入，批量保存模型用量，减少任务持续输出和多任务运行时的主进程阻塞。
+- 长会话按需加载历史 QA；回到最新消息后释放已回载的旧内容，切换会话时回收展示缓存和闲置控制器。历史记录完整保留，可以继续向上翻阅。
+- 减少旧消息重复转换，合并虚拟列表测量；复制完整回答时按需读取全文，避免分页后只复制当前片段，并保留草稿、编辑与文本选择保护。
+- 兼容旧运行记录的自动导入和备份恢复，保留存储失败后的输出与暂停状态，恢复保存时不自动重放已完成操作或排队输入。
 
 - macOS 打包复用同一份固定自签名证书，增加跨构建身份与包体签名校验；签名身份缺失或不匹配时停止打包，不静默降级为临时签名。
 - 调整原生代码签名和 exFAT 打包处理，避免给图片、字体等资源写入多余的签名属性；必要时在系统临时目录签名，再清理伴生文件并验证包体。
@@ -13,7 +18,12 @@ macOS 改用固定签名身份，并更新官网与 README 展示。
 
 ---
 
-A stable macOS signing identity, plus updated website and README presentation.
+Smoother task output and long conversations, plus improvements to stable macOS signing and release handling.
+
+- Moved runtime-record writes to incremental background storage and batched model-usage saves, reducing main-process blocking during continuous output and concurrent tasks.
+- Long conversations load earlier Q&A on demand. Returning to the latest messages releases backfilled presentation data, and switching conversations releases view caches and idle controllers. Saved history remains available when scrolling back.
+- Reduced repeated conversion of older messages and batched virtual-list measurements. Copying a complete answer retrieves its full text on demand, avoiding truncation by the visible window while preserving drafts, editing, and text selections.
+- Retained automatic import of legacy runtime records and portable backup/restore support. Storage failures preserve output and paused state; saving after recovery does not automatically replay completed operations or queued input.
 
 - macOS packages reuse one pinned self-signed certificate, with cross-build identity and packaged-signature checks. Missing or mismatched signing identities stop packaging rather than silently falling back to ad-hoc signing.
 - Refined native-code signing and exFAT packaging to avoid detached signature attributes on images, fonts, and other resources. When needed, signing is staged on a native filesystem before copying back and verifying the package.

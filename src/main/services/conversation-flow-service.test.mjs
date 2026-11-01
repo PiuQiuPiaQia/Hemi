@@ -184,3 +184,18 @@ test('root-only restart recovery is durably saved without a task archive, unread
     assert.equal(saved.flow.timeline[0].parts[0].status,'stopped');assert.equal(service.getStatus(id),null);
   }finally{await service.dropAll();__resetConversationFlowServiceForTests();fs.rmSync(dir,{recursive:true,force:true});}
 });
+test('idle controllers are reclaimed while a visible view and running work stay pinned',async()=>{
+  __resetConversationFlowServiceForTests();
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hemi-flow-reclaim-'));
+  const service=initConversationFlowService({dir,runtimeFactory:()=>({async start(){return{};},async stop(){return{ok:true};}})});
+  try{
+    service.viewFor('conv-visible','reader');
+    const running=service.controllerFor('conv-running');running.applyFact({type:'run-preparing',runId:'live',source:'user',inputIds:[],at:1});
+    for(let i=0;i<14;i++)service.controllerFor('conv-idle-'+i);
+    await service.store.flushAll();
+    const deadline=Date.now()+2000;
+    while(service.has('conv-idle-0')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,10));
+    assert.equal(service.has('conv-visible'),true);assert.equal(service.has('conv-running'),true);assert.equal(service.has('conv-idle-0'),false);
+    service.releaseView('conv-visible','reader');
+  }finally{await service.dropAll();__resetConversationFlowServiceForTests();fs.rmSync(dir,{recursive:true,force:true});}
+});
