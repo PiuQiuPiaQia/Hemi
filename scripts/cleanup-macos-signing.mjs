@@ -210,7 +210,7 @@ export function parseAdminTrustPolicies({ spawn = spawnSync, pythonPath = '/usr/
 // kSecTrustSettingsResult: 1=trustRoot 2=trustAsRoot 3=deny。verify-cert 被信任
 // 设置拒绝时输出 CSSMERR_TP_CERT_TRUST（即 not trusted，命名反直觉）。
 export function isExpectedTrustDenial(result = {}) {
-  return /CSSMERR_TP_CERT_TRUST|CSSMERR_TP_NOT_TRUSTED|denied by trust settings|TRUST[ _]?DENIED/i.test(`${result.stdout ?? ''}${result.stderr ?? ''}${result.detail ?? ''}`);
+  return /CSSMERR_TP_CERT_TRUST|CSSMERR_TP_NOT_TRUSTED|\bkSecTrustResultDeny\b|denied by trust settings|TRUST[ _]?DENIED/i.test(`${result.stdout ?? ''}${result.stderr ?? ''}${result.detail ?? ''}`);
 }
 
 export function runCleanupStage(stage, {

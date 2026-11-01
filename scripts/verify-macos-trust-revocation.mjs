@@ -50,8 +50,9 @@ export function runTrustRevocationPreflight({
     check('导出授予后的管理员信任设置',
       run('/usr/bin/security', ['trust-settings-export', '-d', plistBefore]).ok);
     const before = parseTrustSettings({ plistPath: plistBefore, sha1 });
+    // macOS 的 trustRoot 默认结果可省略；此前同一普通用户验证成功提供实际信任证据。
     check('授予后管理员域存在 codeSign allow 记录',
-      before.some(p => p.policy === 'codeSign' && (p.result === 1 || p.result === 2)), JSON.stringify(before));
+      granted.ok && before.some(p => p.policy === 'codeSign' && (p.result == null || p.result === 1 || p.result === 2)), JSON.stringify(before));
     check('生产 revoke-trust 阶段成功（deny 覆盖 + 状态/实际双证据）', revokeStage(log).ok);
     check('重复 revoke-trust 幂等成功', revokeStage(log).ok);
   } finally {

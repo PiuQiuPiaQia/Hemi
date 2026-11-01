@@ -269,6 +269,8 @@ test('verify-cert 信任拒绝分类：信任错误命中，其它错误不命�
   assert.equal(isExpectedTrustDenial({ stderr: 'Cert Verify Result: CSSMERR_TP_CERT_TRUST' }), true);
   assert.equal(isExpectedTrustDenial({ detail: 'CSSMERR_TP_NOT_TRUSTED' }), true);
   assert.equal(isExpectedTrustDenial({ stdout: 'denied by trust settings' }), true);
+  assert.equal(isExpectedTrustDenial({ stderr: 'SecTrustEvaluate result: kSecTrustResultDeny' }), true);
+  assert.equal(isExpectedTrustDenial({ stderr: 'SecTrustEvaluate result: kSecTrustResultRecoverableTrustFailure' }), false);
   assert.equal(isExpectedTrustDenial({ detail: 'ENOENT' }), false);
   assert.equal(isExpectedTrustDenial({ stdout: 'usage error', detail: 'exit 64' }), false);
   assert.equal(isExpectedTrustDenial({}), false);
@@ -312,7 +314,7 @@ test('preflight：授予→撤销→幂等全链路，finally 始终清理', () 
     env: HOSTED, run,
     revokeStage: log => { revokes.push(log); return { ok: true, failures: 0 }; },
     cleanupStage: stage => { cleanups.push(stage); return { ok: true, failures: 0 }; },
-    parseTrustSettings: () => [{ policy: 'codeSign', result: 1 }],
+    parseTrustSettings: () => [{ policy: 'codeSign', result: null }],
     log: line => logs.push(line),
   });
   assert.deepEqual(result, { ok: true, failures: 0 });
