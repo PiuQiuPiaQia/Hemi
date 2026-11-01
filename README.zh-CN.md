@@ -8,9 +8,9 @@
 
 ## 看看它能做什么
 
-[![Hemi 功能介绍视频封面](docs/media/hemi-promo-poster.jpg)](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)
+https://github.com/user-attachments/assets/0bf5a0a1-dee3-4e93-b9f2-1bbdf6a5ac66
 
-**[观看功能介绍视频](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)**
+<sub>[下载原片](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)</sub>
 
 ## 它能帮你做的
 

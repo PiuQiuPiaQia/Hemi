@@ -4,7 +4,8 @@ Provenance notes for the README promo video and its poster cover. The product RE
 
 ## Video
 
-- Watch: <https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4>
+- Embedded natively in both READMEs as a GitHub video attachment: <https://github.com/user-attachments/assets/0bf5a0a1-dee3-4e93-b9f2-1bbdf6a5ac66> — uploaded from this exact file (sha256 `9d5d64e3cb89555cafc6055ef24761f35df95a467d51b6d64f25c0afbde81b50`), hosted as an attachment of a closed media-only issue (#1); no media is added to the repository.
+- OSS mirror and download fallback: <https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4>
 - Produced by the Hemi project as a product introduction (Remotion project under `outputs/hemi-feature-story/video`, rendered as `out/hemi-features-final.mp4`). It is a staged demo, not a screen recording of a real session.
 - Remote pages and account data shown on screen are fictional, for demonstration only — not measured results.
 - The workflow segment shows how a workflow is configured, not an execution.

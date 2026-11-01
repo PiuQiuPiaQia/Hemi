@@ -8,9 +8,9 @@ English · [简体中文](README.zh-CN.md)
 
 ## See it in action
 
-[![Hemi feature overview video poster](docs/media/hemi-promo-poster.jpg)](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)
+https://github.com/user-attachments/assets/0bf5a0a1-dee3-4e93-b9f2-1bbdf6a5ac66
 
-**[Watch the feature overview](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)**
+<sub>[Download the original video](https://hemi-agent.oss-cn-beijing.aliyuncs.com/hemi-features-final.mp4)</sub>
 
 ## What it can do
 
