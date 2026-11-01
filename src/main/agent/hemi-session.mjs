@@ -1295,7 +1295,10 @@ export function createHemiSession({
   function close(reason = 'session-end') {
     if (closePromise) return closePromise;
     closePromise = (async () => {
-      if (disposed) { await commands.abort(); await browserCleanup; return; }
+      // 已释放会话重复关闭仍要回收托管命令，但 scope 的 quarantine 是已登记过
+      // 的一次终局不确定——复抛会卡死同会话下一个任务的重建（command-isolation
+      // 回归：v0.2.43 通过、044 起失败）。与 dispose() 的吞错口径一致。
+      if (disposed) { await commands.abort().catch((error) => log?.warn?.(`[${label}] ${error.message}`)); await browserCleanup; return; }
       try {
       await (ensurePromise ?? Promise.resolve()).catch(() => {});
       if (busy || waitingForBackground) await abort();
