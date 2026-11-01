@@ -17,9 +17,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:sdk
-      - name: Background handoff with exit diagnostics
+      - name: Browser lifecycle and SQLite failure recovery
         timeout-minutes: 3
-        run: node --test src/main/agent-runtime/background-handoff.test.mjs
+        run: node --test --test-timeout=45000 src/main/agent-runtime/browser-goal-lifecycle.test.mjs
   minimal:
     if: contains(github.event.head_commit.message, 'minimal probe')
     runs-on: windows-latest
