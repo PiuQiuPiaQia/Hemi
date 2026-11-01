@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import {readFileSync} from 'node:fs';
+import { readFileSync, rmSync, mkdirSync, rmdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -586,4 +586,90 @@ test('crashed background run restores one authoritative idle state for detail, c
   assert.equal(detail.flow.pending[0].text,'keep queued input');assert.equal(f.calls.length,0);
   const disk=JSON.parse(await fs.readFile(path.join(f.root,'data/state.json'),'utf8'));
   assert.deepEqual(disk.sessions[session.id].flow,detail.flow);
+});
+
+function trackHostUncaught(t) {
+  const seen = { exceptions: [], rejections: [] };
+  const onException = (error) => seen.exceptions.push(error);
+  const onRejection = (error) => seen.rejections.push(error);
+  process.on('uncaughtException', onException);
+  process.on('unhandledRejection', onRejection);
+  t.after(() => {
+    process.off('uncaughtException', onException);
+    process.off('unhandledRejection', onRejection);
+  });
+  return seen;
+}
+
+test('失败的去抖后台保存不再以未捕获异常击穿进程：失败不推 revision、不发通知，恢复后真实变更正常落盘', async t => {
+  const f = await fixture(t);
+  const session = await f.req('session.create');
+  // send 会启动 runJob 并排程 120ms 的 laterSave 去抖保存（executor 挂起中）。
+  await f.req('flow.command', { id: session.id, command: { type: 'send', input: { inputId: 'later-save-input', text: 'first' } } });
+  await tick();
+  const stateFile = path.join(f.root, 'data/state.json');
+  const original = JSON.parse(readFileSync(stateFile, 'utf8'));
+  const baseline = original.revision;
+  const notifications = [];
+  const unsubscribe = f.host.subscribe((revision) => notifications.push(revision));
+  const seen = trackHostUncaught(t);
+  // 让随后的保存提交必然失败（rename 目标变成目录），去抖 timer 携带失败路径触发。
+  rmSync(stateFile);
+  mkdirSync(stateFile);
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.deepEqual(seen.exceptions, [], 'the debounced save must not raise uncaught exceptions');
+  assert.deepEqual(seen.rejections, [], 'the debounced save must not leave unhandled rejections');
+  assert.ok(
+    notifications.every((revision) => revision <= baseline),
+    'the failed pass neither bumps the revision nor sends a success notification',
+  );
+  // 恢复目标并触发一次真实状态变更：核对新字段写入与 revision 增长。
+  rmdirSync(stateFile);
+  writeFileSync(stateFile, JSON.stringify(original));
+  await f.req('session.pin', { id: session.id, pinned: true });
+  const recovered = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.equal(recovered.sessions[session.id].pinned, true, 'the real change is durably written after recovery');
+  assert.ok(recovered.revision > baseline, 'revision grew past the failed save');
+  assert.ok(
+    recovered.revision <= baseline + 4,
+    'the failed pass consumed no revision (no phantom +1 between baseline and the new commits)',
+  );
+  assert.equal(notifications.at(-1), recovered.revision, 'notifications stay in lockstep with committed revisions');
+  unsubscribe();
+});
+
+test('close 时最终保存失败必须拒绝，不伪造保存成功', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-bot-close-fail-')));
+  const host = await createBotHost({
+    dataDir: path.join(root, 'data'),
+    defaultDir: path.join(root, 'workspace'),
+    executorFactory: () => ({ run: async () => {}, stop: async () => ({ stopped: true }), decide: () => true, close: async () => {} }),
+    validateModel: async () => {},
+    allowLoopbackModels: true,
+  });
+  t.after(async () => {
+    try { await host.close(); } catch {}
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const info = await host.request('handshake');
+  const req = (method, p = {}) =>
+    host.request(method, { instanceId: info.instanceId, requestId: 'op-' + randomUUID(), ...p });
+  await req('model.sync', { models: [{
+    modelKey: 'provider/model',
+    providerId: 'provider',
+    name: 'Fixture',
+    model: 'fake',
+    api: 'openai-completions',
+    baseUrl: 'http://127.0.0.1:12345/v1',
+    apiKey: 'TEST-SECRET',
+  }] });
+  await req('session.create');
+  const stateFile = path.join(root, 'data/state.json');
+  const original = readFileSync(stateFile);
+  rmSync(stateFile);
+  mkdirSync(stateFile);
+  await assert.rejects(() => host.close(), (error) =>
+    ['EISDIR', 'EPERM', 'ENOTEMPTY'].includes(error.code), 'close must reject when the final save fails');
+  rmdirSync(stateFile);
+  writeFileSync(stateFile, original);
 });

@@ -38,6 +38,7 @@ import {
   syncModelConfig,
   modelConfigRevision,
 } from './storage.mjs';
+import { createBackgroundSaver } from './background-save.mjs';
 import { cloudDirectory, listCloudDirectories } from './directories.mjs';
 import { createBotExecutor, validateCloudModel } from './runtime.mjs';
 import { modelEndpoint } from './models.mjs';
@@ -181,18 +182,49 @@ export async function createBotHost({
     void next.finally(() => { if (commandTails.get(id) === next) commandTails.delete(id); }).catch(() => {});
     return next;
   };
-  const save = (catalogChanged = true) => {
-    state.revision++;
-    atomicJson(stateFile, state);
-    for (const fn of listeners) fn(state.revision);
+  const notifySave = (revision, catalogChanged) => {
+    for (const fn of listeners) {
+      try { fn(revision); }
+      // A failing listener is a notification problem, not a disk problem: it
+      // must neither abort the committed save nor look like one to the saver.
+      catch (error) { console.error('[bot] state.json 已落盘，但保存通知监听器失败：', error); }
+    }
     if (catalogChanged) events.publish({ type: 'catalog' });
+  };
+  // A successful return still means "durably written": the candidate revision
+  // is written first and only adopted in memory after the commit succeeded.
+  const saver = createBackgroundSaver({
+    attempt: () => {
+      const candidate = state.revision + 1;
+      atomicJson(stateFile, { ...state, revision: candidate });
+      return candidate;
+    },
+    retryAttempt: () => {
+      const candidate = state.revision + 1;
+      // Re-serializes the latest state, never an old snapshot; a single rename
+      // keeps this pass short instead of re-entering the 3s blocking budget.
+      atomicJson(stateFile, { ...state, revision: candidate }, { commit: (from, to) => fs.renameSync(from, to) });
+      return candidate;
+    },
+    committed: (candidate) => {
+      state.revision = candidate;
+      notifySave(candidate, false);
+    },
+  });
+  const save = (catalogChanged = true) => {
+    const candidate = state.revision + 1;
+    atomicJson(stateFile, { ...state, revision: candidate });
+    state.revision = candidate;
+    // Supersedes any background retry pass still holding an older state.
+    saver.noteCommitted();
+    notifySave(candidate, catalogChanged);
   };
   const laterSave = () => {
     if (closed) return;
     if (!flushTimer)
       flushTimer = setTimeout(() => {
         flushTimer = null;
-        save(false);
+        saver.save();
       }, 120);
   };
   const oauth = await createBotOAuth({ dataDir, validateModel, saveModels(providerId, configs) {
@@ -1742,6 +1774,10 @@ export async function createBotHost({
       closed = true;
       clearTimeout(flushTimer);
       clearInterval(leaseTimer);
+      // Stop the background saver before any awaited cleanup: if gateway or
+      // executor teardown rejects, a closed Host must not keep committing or
+      // notifying in the background. The final synchronous save stays below.
+      saver.close();
       events.close();
       await gateway.close();
       const running = [...jobs.values()].map(job => job.settled.promise);
@@ -1749,6 +1785,8 @@ export async function createBotHost({
       finally {await capabilities.close();}
       for (const c of controllers.values()) await c.close();
       await Promise.all(running);
+      // Final synchronous commit; a failure here must reject close, never
+      // fake success (the saver itself was already stopped above).
       save();
     },
   };

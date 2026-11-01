@@ -6,6 +6,7 @@
 - 子任务结构化交接：统一派单、受理、补充指令与结果回传的校验协议，宿主事实与模型声明分开核对。
 - 修复后台任务按目标取消与归属：取消不再误伤无关工作，委派事件与任务历史归属更准确。
 - 修复已释放会话再次关闭时，旧的清理错误影响后续任务重建的问题。
+- 改进 Windows Bot 后台保存：状态文件临时被占用时让出事件循环并有界重试；失败保留原数据并报告错误，保存版本仅在落盘成功后推进。
 - 更新精简官网源码，双语 README 改版并加入功能宣传视频。
 
 ---
@@ -18,4 +19,5 @@ Local skill imports, stricter workflow skill checks, subagent handoff and backgr
 - Subagent handoffs now use a validated structured protocol for dispatch, acceptance, follow-up instructions and results, keeping host facts separate from model claims.
 - Fixed background-task cancellation and ownership: cancelling by goal no longer stops unrelated work, and delegation events map to the right task history.
 - Fixed repeated closure of a disposed session resurfacing an earlier cleanup error and blocking the next task's session setup.
+- Improved Windows Bot background saves with bounded, event-loop-yielding retries for transient state-file contention. Failed writes preserve existing data and report errors; revisions advance only after a successful commit.
 - Added simplified product website source; bilingual READMEs now lead with the feature promo video.

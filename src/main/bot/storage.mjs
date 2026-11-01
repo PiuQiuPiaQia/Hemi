@@ -3,7 +3,12 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { retryingRenameSync } from '../lib/rename-retry.mjs';
 
-const replaceJson = retryingRenameSync((from, to) => fs.renameSync(from, to));
+const renameSyncCommit = (from, to) => fs.renameSync(from, to);
+const replaceJson = retryingRenameSync(renameSyncCommit);
+// Default commit policy per platform. Tests and the background saver may
+// inject a narrower strategy; every other caller keeps this one.
+const defaultCommit =
+  process.platform === 'win32' ? (from, to) => replaceJson(from, to) : renameSyncCommit;
 
 export const BOT_PROTOCOL = 1;
 export const BOT_VERSION = '1.0.0';
@@ -24,7 +29,7 @@ export function readJson(file, fallback) {
     throw new Error('Bot 数据无法读取，请保留原数据并检查磁盘或备份。');
   }
 }
-export function atomicJson(file, data) {
+export function atomicJson(file, data, { commit = defaultCommit } = {}) {
   privateDirectory(path.dirname(file));
   const tmp = `${file}.${randomUUID()}.tmp`;
   const fd = fs.openSync(tmp, 'wx', 0o600);
@@ -35,8 +40,7 @@ export function atomicJson(file, data) {
     } finally {
       fs.closeSync(fd);
     }
-    if (process.platform === 'win32') replaceJson(tmp, file);
-    else fs.renameSync(tmp, file);
+    commit(tmp, file);
   } finally {
     // A failed commit must retain the old destination and its original error.
     try { fs.rmSync(tmp, { force: true }); } catch {}

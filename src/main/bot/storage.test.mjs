@@ -19,6 +19,23 @@ test('atomicJson preserves serialization errors and cleans its uncommitted tempo
   assert.deepEqual(fs.readdirSync(root), ['state.json']);
 });
 
+test('atomicJson honors an injected commit and keeps destination retention plus temp cleanup', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-json-commit-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const file = path.join(root, 'state.json');
+  atomicJson(file, {generation: 'old'});
+  const seen = [];
+  atomicJson(file, {generation: 'new'}, {commit: (from, to) => {
+    seen.push([from, to]);
+    fs.renameSync(from, to);
+  }});
+  assert.equal(seen.length, 1, 'the injected commit performs exactly one swap');
+  assert.match(seen[0][0], /state\.json\..+\.tmp$/, 'the injected commit receives the temp file');
+  assert.equal(seen[0][1], file, 'the injected commit receives the destination');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {generation: 'new'});
+  assert.deepEqual(fs.readdirSync(root), ['state.json'], 'no orphan temp after an injected commit');
+});
+
 async function lockedTarget(t, holdMs) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hemi-json-lock-'));
   const file = path.join(root, 'state.json');
