@@ -37,7 +37,7 @@ async function fixture(t, platform, mode, policy = {}) {
   await fs.writeFile(path.join(workspace, 'hung.cjs'), `const fs=require('fs');const ws=new WebSocket(${JSON.stringify(wsUrl)});ws.onopen=()=>{fs.writeFileSync('proof.txt','ACTUAL_WORK_DONE');console.log('WORK_DONE_WITH_OPEN_WS')};`);
   await fs.writeFile(path.join(workspace, 'normal.cjs'), "const fs=require('fs');fs.writeFileSync('started','yes');const tick=setInterval(()=>{if(fs.existsSync('release')){clearInterval(tick);fs.writeFileSync('proof.txt','NORMAL_WORK_DONE');console.log('NORMAL_COMPLETION')}},20);");
   let runtime, host, agent, ctx, cid, mainCalls = 0, childCalls = 0, checks = 0, outcome, running;
-  let blockedResponse, atHandoff = false, releaseHandoff;
+  let blockedResponse, atHandoff = false, releaseHandoff, disposing = false;
   const requests = [], errors = [], activities = [];
   const terminal=Promise.withResolvers();let eventSeq=0;
   const settle=async result=>{outcome=goalRunOutcome(result,{cancelled:ctx?.cancelled});await runtime.completeConversation(cid,outcome,null,ctx.runId);if(!result.waitingForBackground)terminal.resolve(result);return result;};
@@ -127,15 +127,22 @@ async function fixture(t, platform, mode, policy = {}) {
       await runtime.completeConversation(cid,goalRunOutcome(result),null,nextCtx.runId);return result;
     };
     if (mode === 'race' || mode === 'stop-handoff') {
-      // 057 软复盘：段交接在回合边界发生，命令完成不再由旧的请求触顶点触发；
-      // 这两种场景改用定时释放命令，让完成事实与回合边界复盘各自独立到达。
+      // Release at the actual handoff boundary. A wall-clock timer can finish
+      // the process before a slower runner reaches suspension, missing the race.
       const checkpoint = runtime.journal.suspendGoal;
       runtime.journal.suspendGoal = async (...args) => {
         atHandoff = true;
-        if (mode !== 'race') await new Promise(resolve => { releaseHandoff = resolve; });
+        if (mode === 'race') {
+          await fs.writeFile(path.join(workspace, 'release'), 'done');
+          await until(async () => {
+            const jobs = await processes();
+            return jobs.length > 0 && jobs.every(job => job.state === 'finished' && job.cleanupConfirmed);
+          });
+        } else if (!disposing && !ctx.cancelled) {
+          await new Promise(resolve => { releaseHandoff = resolve; });
+        }
         return checkpoint(...args);
       };
-      setTimeout(() => { void fs.writeFile(path.join(workspace, 'release'), 'done').catch(() => {}); }, 200);
     }
   } else {
     host = await createBotHost({dataDir, defaultDir:workspace, goalPolicy, allowLoopbackModels:true, validateModel:async () => {},
@@ -146,6 +153,7 @@ async function fixture(t, platform, mode, policy = {}) {
     cid = (await call('session.create')).id;
   }
   t.after(async () => {
+    disposing = true;
     releaseHandoff?.(); blockedResponse?.destroy();
     if (runtime) { await runtime.stopRoot(cid, ctx.runId).catch(() => {}); await runtime.close(); }
     await host?.close();
@@ -257,7 +265,7 @@ test('PC: completion racing the durable handoff is delivered exactly once before
   const entries = await f.entries(); assert.equal(entries.filter(item => item.customType === 'hemi_background_command_result').length,1);
   assert.ok(entries.some(item => item.customType === 'hemi_background_command_result' && JSON.stringify(item).includes('NORMAL_COMPLETION')));
 });
-test('PC: cancellation while checkpoint persistence is delayed cannot advance or restart the goal', {timeout:25000}, async t => {
+test('PC: cancellation while background suspension is delayed cannot advance or restart the goal', {timeout:25000}, async t => {
   const f = await fixture(t,'PC','stop-handoff'); await f.start(); await until(() => f.atHandoff); await f.stop(); assert.equal(await f.finish(),'stopped');
   // 057 软复盘：段边界软放行了第 2 次请求（不再硬拒）；取消后不得再有任何新请求，也不得推进或重启目标。
   const count = f.requests.length; await pause(80);
