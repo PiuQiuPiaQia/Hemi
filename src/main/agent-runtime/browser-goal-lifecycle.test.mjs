@@ -40,8 +40,11 @@ async function fixture(t) {
     },
     loadArchiveAgent:() => null,loadArchiveTurns:() => [],saveArchiveAgent:() => true});
   t.after(async () => {
-    await runtime.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    await fs.rm(dir,{recursive:true,force:true});
+    try { await runtime.close(); }
+    finally {
+      server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+      await fs.rm(dir,{recursive:true,force:true});
+    }
   });
   async function obtain(conversationId = 'browser-goal', runId = 'initial', continuationOf = null) {
     const ctx = {conversationId,runId,continuationOf,generation:1,policySnapshot,modelPlan,config,inputSource:'text',
@@ -102,7 +105,9 @@ test('等待用户的会话不会被其它会话的 LRU 淘汰关闭', {timeout:
 test('terminal persistence failure still releases the runtime slot and browser pages', {timeout:15000}, async t => {
   const f=await fixture(t),{ctx,client}=await f.obtain('storage-failure','storage-root');
   const owner={conversationId:ctx.conversationId,rootRunId:ctx.runId,generation:ctx.generation};
-  await f.runtime.journal.beginRoot(owner);
+  // Production admission waits for initial recovery before creating a root.
+  // Inject failure after that boundary, rather than racing startup recovery.
+  await f.runtime.prepareExecution(ctx);
   const file=path.join(ctx.workspace.dir,'data/runtime-v2/run-journal.sqlite'),backup=file+'.last-good';
   await fs.rename(file,backup);await fs.mkdir(file);
   try {
