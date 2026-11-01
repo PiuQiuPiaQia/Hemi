@@ -17,9 +17,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:sdk
-      - name: Pipe drain and browser lifecycle under load
+      - name: Ten-conversation admission and background wake
         timeout-minutes: 3
-        run: node --test --test-timeout=180000 src/main/agent-runtime/agent-task-lifecycle.test.mjs src/main/agent-runtime/browser-goal-lifecycle.test.mjs src/main/agent-runtime/background-handoff.test.mjs src/main/bot/capabilities.integration.test.mjs src/main/services/backup-manager.test.mjs
+        run: node --test --test-name-pattern="concurrent accepted|accepted background command finishes" src/main/bot/execution.test.mjs src/main/bot/goal-continuation.test.mjs
   minimal:
     if: contains(github.event.head_commit.message, 'minimal probe')
     runs-on: windows-latest

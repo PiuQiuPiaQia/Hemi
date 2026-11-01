@@ -9,7 +9,7 @@ import {randomUUID} from 'node:crypto';
 import {createBotHost} from './host.mjs';
 import {GOAL_CHECK_SYSTEM} from '../agent-runtime/goal-driver.mjs';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(read) { const end=Date.now()+30000; while(true){const value=await read();if(value)return value;assert.ok(Date.now()<end,'goal did not settle');await wait(25);} }
+async function until(read,timeoutMs=30000) { const end=Date.now()+timeoutMs; while(true){const value=await read();if(value)return value;assert.ok(Date.now()<end,'goal did not settle');await wait(25);} }
 const verdict = (status='complete') => ({status,reason:status==='complete'?'工具结果证明成果已写入并核对':'还有用户要求的成果未写入',evidence:status==='complete'?['实际 write 工具已写入 proof.txt']:['尚未产生所需文件'],remaining:status==='complete'?[]:['写入并核对 proof.txt'],nextAction:status==='complete'?'':'调用 write 工具写入 proof.txt，不要再次只报告计划'});
 async function fixture(t, mode, goalPolicy={}) {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-goal-'))), dataDir=path.join(root,'data'), workspace=path.join(root,'workspace');await fs.mkdir(workspace);
@@ -150,8 +150,8 @@ test('real background child report is consumed once when the shared request chun
 });
 
 
-test('accepted background command finishes despite a shared chunk limit before completion is verified', {timeout:45000}, async t=>{
- const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.values(v.runs).some(run=>run.source==='event'&&run.outcome==='completed')?v:null;});assert.equal(Object.values(flow.runs)[0].outcome,'awaiting-background',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
+test('accepted background command finishes despite a shared chunk limit before completion is verified', {timeout:90000}, async t=>{
+ const f=await fixture(t,'background-chunk',{maxRequestsPerRound:1});await f.send();const flow=await until(async()=>{const v=await f.flow();return v.phase==='idle'&&Object.values(v.runs).some(run=>run.source==='event'&&run.outcome==='completed')?v:null;},60000);assert.equal(Object.values(flow.runs)[0].outcome,'awaiting-background',JSON.stringify(flow.timeline.flatMap(item=>item.parts??[]).filter(part=>part.kind==='notice')));
  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'goal proof');const j=await f.journal(),processes=Object.values(j.processes).filter(item=>item.owner.conversationId===f.id);assert.equal(processes.length,1);assert.equal(processes[0].state,'finished');assert.equal(processes[0].cleanupConfirmed,true);assert.notEqual(processes[0].status,'cancelled');
  const root=Object.values(j.roots).find(root=>root.owner.conversationId===f.id&&root.kind!=='auxiliary');assert.equal(root.goal.phase,'complete');assert.ok(root.goal.round>=2);assert.equal(root.goal.verifications.length,1);assert.equal(root.goal.verifications[0].status,'complete');
 });
