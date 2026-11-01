@@ -2320,6 +2320,7 @@
         "node_modules/lucide-react/dist/esm/icons/arrow-down-to-line.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-down.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-left.mjs",
+        "node_modules/lucide-react/dist/esm/icons/arrow-right.mjs",
         "node_modules/lucide-react/dist/esm/icons/arrow-up.mjs",
         "node_modules/lucide-react/dist/esm/icons/at-sign.mjs",
         "node_modules/lucide-react/dist/esm/icons/audio-lines.mjs",
