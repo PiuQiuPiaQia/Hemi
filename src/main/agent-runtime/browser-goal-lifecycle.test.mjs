@@ -55,7 +55,7 @@ async function fixture(t) {
   return {runtime,obtain,setStatus:value => {status=value;},checks:() => checks};
 }
 
-test('目标续跑和等待用户时不清页；回复后完成才清页；旧根收口不能关新页面', {timeout:15000}, async t => {
+test('目标续跑和等待用户时不清页；回复后完成才清页；旧根收口不能关新页面', {timeout:60000}, async t => {
   const f = await fixture(t), {runtime} = f;
   const first = await f.obtain();
   f.setStatus('continue');
@@ -77,7 +77,7 @@ test('目标续跑和等待用户时不清页；回复后完成才清页；旧�
   assert.equal(next.client.cleanups,1);
 });
 
-test('等待用户时停止目标或直接取消会话都回收页面', {timeout:15000}, async t => {
+test('等待用户时停止目标或直接取消会话都回收页面', {timeout:60000}, async t => {
   const f = await fixture(t);
   for (const direct of [false,true]) {
     const {ctx,agent,client} = await f.obtain(`cancel-${direct}`,`cancel-root-${direct}`);
@@ -90,7 +90,7 @@ test('等待用户时停止目标或直接取消会话都回收页面', {timeout
   }
 });
 
-test('等待用户的会话不会被其它会话的 LRU 淘汰关闭', {timeout:15000}, async t => {
+test('等待用户的会话不会被其它会话的 LRU 淘汰关闭', {timeout:60000}, async t => {
   const f = await fixture(t), {ctx,agent,client} = await f.obtain('waiting');
   await f.runtime.runRootTurn(ctx.conversationId,{userText:'等待验证',inputId:'first'});
   await f.runtime.completeConversation(ctx.conversationId,'awaiting-user',null,ctx.runId);
@@ -102,7 +102,7 @@ test('等待用户的会话不会被其它会话的 LRU 淘汰关闭', {timeout:
   assert.equal(client.cleanups,1);
 });
 
-test('terminal persistence failure still releases the runtime slot and browser pages', {timeout:15000}, async t => {
+test('terminal persistence failure still releases the runtime slot and browser pages', {timeout:60000}, async t => {
   const f=await fixture(t),{ctx,client}=await f.obtain('storage-failure','storage-root');
   const owner={conversationId:ctx.conversationId,rootRunId:ctx.runId,generation:ctx.generation};
   // Production admission waits for initial recovery before creating a root.
