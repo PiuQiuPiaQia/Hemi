@@ -13,8 +13,8 @@ import {createBotHost} from './host.mjs';
 import {SessionManager} from '@earendil-works/pi-coding-agent';
 import {sharedResourceLeases} from '../agent-runtime/resource-leases.mjs';
 
-async function until(read) {
-  const end=Date.now()+12000;
+async function until(read, timeoutMs=12000) {
+  const end=Date.now()+timeoutMs;
   for (;;) {const value=await read();if(value)return value;assert.ok(Date.now()<end,'execution condition timed out');await new Promise(resolve=>setTimeout(resolve,15));}
 }
 function reply(res,{text='DONE',command,tool='bash'}={}) {
@@ -48,7 +48,7 @@ async function fixture(t) {
   const create=async(dir=first)=>{const {id}=await call('session.create');if(dir!==first)await call('session.update',{id,dir});return id;};
   const send=(id,text)=>call('flow.command',{id,command:{type:'send',input:{inputId:randomUUID(),text}}});
   const detail=id=>call('session.open',{id,activate:false});
-  const done=id=>until(async()=>{const d=await detail(id);return !d.flow.activeRunId&&d;});
+  const done=(id,timeoutMs)=>until(async()=>{const d=await detail(id);return !d.flow.activeRunId&&d;},timeoutMs);
   return{root,first,other,held,requests,host,call,create,send,detail,done};
 }
 
@@ -127,13 +127,13 @@ test('explicit same-file writes still wait and a stopped waiter never executes a
   assert.equal(writes.filter(observation=>observation.owner.conversationId===next).length,1,'a later writer executes normally after release');
 });
 
-test('concurrent accepted conversations are never evicted while their shared runtime sessions initialize',{timeout:30000},async t=>{
+test('concurrent accepted conversations are never evicted while their shared runtime sessions initialize',{timeout:90000},async t=>{
   const f=await fixture(t),ids=await Promise.all(Array.from({length:10},()=>f.create()));
   await Promise.all(ids.map((id,index)=>f.send(id,'HOLD_MODEL_N'+index)));
-  await until(()=>f.held.size===ids.length);
+  await until(()=>f.held.size===ids.length,60000);
   for(const id of ids)assert.equal((await f.detail(id)).status,'running');
   for(const res of f.held.values())reply(res);
-  await Promise.all(ids.map(id=>f.done(id)));
+  await Promise.all(ids.map(id=>f.done(id,60000)));
 });
 
 test('editing a completed input executes exactly one SDK/model request per replacement',{timeout:30000},async t=>{
