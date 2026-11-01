@@ -229,6 +229,8 @@ export function createHemiSession({
   desktopClient = null,
   nativeMemory = false,
   skills = [],
+  /** 仅显式依赖（如 Skill 工作流节点）；普通会话技能依然可选。 */
+  requiredSkills = [],
   loadContextFiles = false,
   accessId = null,
   interactiveOwner = null,
@@ -778,8 +780,20 @@ export function createHemiSession({
     const build = (async () => {
       await accessReady;
       const sessionCwd = remoteInfo ? ensureRemoteCwdPlaceholder(agentDir) : cwd;
+      // 本地 symlink 只租用路径，正文在此重新观测，不能把排队时的 revision 当固定版本。
       const prepared = prepareSkills(skills);
       reportSkillDiagnostics(log, prepared.diagnostics);
+      const missingSkills = requiredSkills.filter(required => !prepared.items.some(item =>
+        item.name === required.name && (!required.id || item.id === required.id)
+        && (!required.path || item.path === required.path)));
+      if (missingSkills.length) {
+        const reasons = missingSkills.map(required => {
+          const diagnostic = prepared.diagnostics.find(item =>
+            required.id ? item.skillId === required.id : item.name === required.name);
+          return `${required.name}（${diagnostic?.message ?? '必需技能未装配'}）`;
+        });
+        throw new AgentSessionError('dependency-unavailable', `Skill 依赖不可用：${reasons.join('；')}`);
+      }
       const resourceLoader = new DefaultResourceLoader({
         cwd: sessionCwd,
         agentDir,

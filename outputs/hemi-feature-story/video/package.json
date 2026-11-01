@@ -1,0 +1,13 @@
+{
+  "name": "hemi-feature-story",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "render": "remotion render src/index.ts HemiFeatures out/hemi-features-final.mp4 --audio-codec=aac --audio-bitrate=192k",
+    "render:nobgm": "remotion render src/index.ts HemiFeatures out/hemi-features.mp4 --props=props-nobgm.json --muted",
+    "render:reel": "remotion render src/index.ts HemiReel public/reel/reel.mp4 --muted"
+  },
+  "dependencies": { "@remotion/cli": "4.0.484", "react": "19.2.7", "react-dom": "19.2.7", "remotion": "4.0.484" },
+  "devDependencies": { "@types/react": "19.2.17", "typescript": "6.0.3" }
+}

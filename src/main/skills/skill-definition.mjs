@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createSyntheticSourceInfo, parseFrontmatter } from '@earendil-works/pi-coding-agent';
 
@@ -29,6 +29,7 @@ export function prepareSkills(candidates, { diagnostics = [] } = {}) {
   for (const candidate of candidates) {
     const filePath = path.join(candidate.path, 'SKILL.md');
     try {
+      if (candidate.importMode === 'symlink' && !lstatSync(filePath).isFile()) throw new Error('SKILL.md 必须是普通文件，不能是软链');
       const content = readFileSync(filePath, 'utf8');
       const metadata = parseSkillMetadata(content);
       if (candidate.source === 'library' && candidate.name !== metadata.name) throw new Error('Skill name 与安装登记不一致');
@@ -39,7 +40,10 @@ export function prepareSkills(candidates, { diagnostics = [] } = {}) {
           source: 'hemi', scope: candidate.source === 'project' ? 'project' : 'user', baseDir: candidate.path,
         }),
       };
-      items.push({ ...candidate, ...metadata, revision: createHash('sha256').update(content).digest('hex'), skill });
+      // revision 仅为本次观测到的 SKILL.md 摘要，不是整个 live 目录的不可变版本。
+      items.push({ ...candidate, ...metadata,
+        ...(candidate.importMode === 'symlink' ? { sha256: null, version: '随源更新' } : {}),
+        revision: createHash('sha256').update(content).digest('hex'), skill });
     } catch (error) {
       diagnostics.push({ type: 'warning', path: filePath, skillId: candidate.id, name: candidate.name,
         source: candidate.source, message: String(error.message ?? error).split('\n')[0] });

@@ -1,0 +1,393 @@
+/* 导入本地技能弹窗：基于 Dialog 基件（h37-dialog-popup），只用 tokens.css 变量。
+   结构：标题行 / 筛选行 / 可滚动清单 / 底栏（状态 + 操作）。清单区高度固定，
+   扫描中、空结果、出错时弹窗不跳动；≤600 随基件变为底部弹层。 */
+
+.h37-dialog-popup.h71-import[data-slot='dialog-content'] {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: min(40rem, calc(100vw - var(--sp-32)));
+  max-width: none;
+  max-height: min(42rem, calc(100dvh - var(--sp-48)));
+  padding: 0;
+  overflow: hidden;
+}
+
+.h71-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-20) var(--sp-16) var(--sp-12) var(--sp-20);
+}
+
+.h71-head-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.h37-dialog-popup .h71-head .h37-dialog-title {
+  padding-right: 0;
+}
+
+.h71-icon-btn {
+  flex: none;
+  color: var(--muted);
+}
+
+.h71-icon-btn svg[data-spin='true'] {
+  animation: hemi-spin 0.9s linear infinite;
+}
+
+.h71-import-hint {
+  margin: 0;
+  padding: 0 var(--sp-20) var(--sp-12);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.h71-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  padding: 0 var(--sp-20) var(--sp-12);
+  border-bottom: 1px solid var(--line);
+}
+
+.h71-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.h71-all {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-13);
+  color: var(--body);
+}
+
+.h71-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.h71-body {
+  display: flex;
+  flex-direction: column;
+  height: min(26rem, calc(100dvh - 15rem));
+  min-height: 10rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* —— 清单 —— */
+.h71-list {
+  margin: 0;
+  padding: var(--sp-6) var(--sp-8);
+  list-style: none;
+  transition: opacity var(--dur-2) linear;
+}
+
+.h71-list[data-stale='true'] {
+  opacity: 0.6;
+}
+
+.h71-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-12);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-md);
+  transition: background-color var(--dur-2) linear;
+}
+
+.h71-row .h71-check {
+  margin-top: var(--sp-2);
+}
+
+.h71-row:hover:not([data-installed='true']) {
+  background: var(--bg-hover);
+}
+
+.h71-row[data-checked='true'] {
+  background: var(--accent-soft);
+}
+
+html.kb-nav .h71-row:has(.h71-check:focus-visible),
+html.kb-nav .h71-all:has(.h71-check:focus-visible) {
+  box-shadow: var(--focus-ring-inset);
+}
+
+.h71-all {
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: var(--r-sm);
+}
+
+.h71-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.h71-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.h71-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--ink);
+}
+
+.h71-row-head .h37-badge {
+  flex: none;
+}
+
+.h71-sources {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h71-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--body);
+}
+
+.h71-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h71-row[data-installed='true'] .h71-name,
+.h71-row[data-installed='true'] .h71-desc {
+  color: var(--muted);
+}
+
+.h71-row-error {
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+/* —— 扫描骨架：快于 300ms 的扫描不闪骨架 —— */
+.h71-list-loading {
+  opacity: 0;
+  animation: hemi-fade var(--dur-3) linear 300ms forwards;
+}
+
+.h71-list-loading .h71-row {
+  align-items: center;
+}
+
+.h71-list-loading .h71-row-text {
+  gap: var(--sp-8);
+}
+
+.h71-sk-check {
+  width: 16px;
+  height: 16px;
+}
+
+.h71-sk-name {
+  width: 32%;
+}
+
+.h71-sk-path {
+  width: 56%;
+}
+
+/* —— 空结果 / 失败 —— */
+.h71-state {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-8);
+  padding: var(--sp-24) var(--sp-32);
+  text-align: center;
+  font-size: var(--fs-13);
+  line-height: 1.55;
+  color: var(--body);
+}
+
+.h71-state p {
+  margin: 0;
+  max-width: 28rem;
+}
+
+.h71-state .h71-state-sub {
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+/* —— 未能读取的位置（折叠） —— */
+.h71-warnings {
+  margin: auto var(--sp-20) var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.h71-warnings summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) 0;
+  list-style: none;
+}
+
+.h71-warnings summary::-webkit-details-marker {
+  display: none;
+}
+
+.h71-warnings summary svg {
+  width: 14px;
+  height: 14px;
+  color: var(--warn);
+}
+
+.h71-warnings ul {
+  margin: 0;
+  padding: 0 0 0 var(--sp-20);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* —— 底栏 —— */
+.h71-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-16);
+  padding: var(--sp-12) var(--sp-20);
+  border-top: 1px solid var(--line);
+}
+
+.h71-status {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.h71-status[data-tone='ok'] {
+  color: var(--accent-text);
+}
+
+.h71-status[data-tone='warn'] {
+  color: var(--warn);
+}
+
+.h71-status[data-tone='danger'] {
+  color: var(--danger);
+}
+
+.h71-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h71-icon-btn svg[data-spin='true'] {
+    animation: none;
+  }
+}
+
+/* ≤600：Dialog 基件改为底部弹层，这里把高度交给内容、底栏按钮铺满 */
+@media (max-width: 600px) {
+  .h37-dialog-popup.h71-import[data-slot='dialog-content'] {
+    width: 100%;
+    max-height: 92dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .h71-head {
+    padding: var(--sp-16) var(--sp-12) var(--sp-12) var(--sp-16);
+  }
+
+  .h71-import-hint {
+    padding: 0 var(--sp-16) var(--sp-12);
+  }
+
+  .h71-tools {
+    gap: var(--sp-12);
+    padding: 0 var(--sp-16) var(--sp-12);
+  }
+
+  .h71-body {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 12rem;
+  }
+
+  .h71-list {
+    padding: var(--sp-4);
+  }
+
+  .h71-row-head {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .h71-sources {
+    flex-basis: 100%;
+    order: 3;
+    margin-left: 0;
+  }
+
+  .h71-foot {
+    padding: var(--sp-12) var(--sp-16);
+  }
+
+  .h71-status {
+    flex-basis: 100%;
+  }
+
+  .h71-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .h71-actions .h37-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

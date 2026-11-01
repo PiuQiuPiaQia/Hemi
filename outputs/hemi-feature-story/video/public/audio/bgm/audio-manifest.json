@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "fs:788347",
+      "title": "Calm Background Music",
+      "author": "MrCatfishing",
+      "duration_seconds": 86.9398,
+      "preview_url": "https://cdn.freesound.org/previews/788/788347_16890479-hq.mp3",
+      "downloads": 732,
+      "page_url": "https://freesound.org/people/MrCatfishing/sounds/788347/",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/",
+      "license": "CC0-1.0",
+      "description": "This short, calm, and simple piece is digitally composed but has a rounded sound of nylon guitar and piano combined.",
+      "rating": 4.8,
+      "rating_count": 37,
+      "provider": "freesound",
+      "file": "fs-788347.mp3",
+      "sha256": "4571d3231a85253e7e1da7452bdcb2a337c3bebb0eeade1f6c2bfa847a9710d0",
+      "download_url": "https://cdn.freesound.org/previews/788/788347_16890479-hq.mp3",
+      "download_kind": "mp3-preview-hq",
+      "is_preview": true,
+      "downloaded_at": "2026-11-01T05:36:02.862327+00:00",
+      "license_checked_at": "2026-11-01T05:36:02.862338+00:00",
+      "changes": [],
+      "analysis": {
+        "codec": "mp3",
+        "sample_rate": 48000,
+        "channels": 2,
+        "duration_seconds": 86.93975,
+        "sample_peak_dbfs": -1.313,
+        "rms_dbfs": -18.515,
+        "energy_window_seconds": 0.01,
+        "energy_peak_seconds": 10.195,
+        "active_start_seconds": 0.1,
+        "active_end_seconds": 84.48,
+        "activity_threshold_db_below_peak_rms": -40
+      }
+    }
+  ]
+}

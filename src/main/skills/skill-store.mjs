@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  lstat, mkdir, readFile, readdir, rename, rm, writeFile,
+  lstat, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile,
 } from 'node:fs/promises';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSkillMetadata, prepareSkills } from './skill-definition.mjs';
@@ -39,7 +39,7 @@ const isExecutableBytes = (bytes) => EXECUTABLE_MAGIC.some(
   (magic) => magic.length <= bytes.length && magic.every((byte, index) => bytes[index] === byte),
 );
 
-/** 034 SkillsMP 来源与内置/本地共用同一套文件边界（github-source 在下载前预检大小与数量）。 */
+/** 034 SkillsMP、内置、本地复制/远传共用文件边界；可信本机 symlink 不走载荷限制。 */
 export const SKILL_LIMITS = {
   maxFile: MAX_FILE, maxTotal: MAX_TOTAL, maxFiles: MAX_FILES,
 };
@@ -160,8 +160,14 @@ function validStoredIndex(value) {
   if (value?.schema !== 1 || !Array.isArray(value.installed) || value.installed.length > 200) failure('格式不受支持');
   const ids = new Set();
   for (const item of value.installed) {
+    const linked = item?.importMode === 'symlink';
+    if (linked && (item.origin !== 'local' || item.sha256 !== null
+      || !/^[a-f0-9-]{36}$/.test(item.linkId ?? '')
+      || typeof item.sourcePath !== 'string' || !path.isAbsolute(item.sourcePath) || item.sourcePath.includes('\0')
+      || item.files?.length !== 1 || item.files[0] !== 'SKILL.md')) failure('本地链接登记无效');
+    if (item?.importMode !== undefined && !['symlink', 'copy'].includes(item.importMode)) failure('导入方式无效');
     if (!/^(market:[a-z0-9][a-z0-9-]{0,63}|local:[a-f0-9-]{36}|skillsmp:[a-z0-9][a-z0-9-]{0,191})$/.test(item?.id ?? '')
-      || ids.has(item.id) || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '')
+      || ids.has(item.id) || (!linked && !/^[a-f0-9]{64}$/.test(item.sha256 ?? ''))
       || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(item.name ?? '')
       || !['market', 'local', 'skillsmp'].includes(item.origin)
       || typeof item.enabled !== 'boolean' || !Array.isArray(item.files)
@@ -231,7 +237,7 @@ async function localFiles(sourceDir, relative = '') {
   return out;
 }
 
-/** 主进程唯一 Skill 状态源。mutate 串行化安装/启停/移除，任务快照同步冻结。 */
+/** 远传/显式复制通道：继续执行包体、路径及可执行内容限制。 */
 export async function readSkillDirectory(sourceDir) {
   if (typeof sourceDir !== 'string' || !path.isAbsolute(sourceDir) || !(await lstat(sourceDir)).isDirectory()) failure('请选择有效的 Skill 文件夹');
   const files = await localFiles(sourceDir);validateFiles(files);return files;
@@ -272,12 +278,33 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     serial = result.catch(() => {});
     return result;
   };
-  const directoryOf = (entry) => path.join(root, 'versions', entry.id.replace(':', '_'), entry.sha256);
+  // 链接使用独立登记代号而非内容摘要；lease 只保留受管链接，不冻结或复制源目录。
+  const directoryOf = (entry) => path.join(root, 'versions', entry.id.replace(':', '_'),
+    entry.importMode === 'symlink' ? `link-${entry.linkId}` : entry.sha256);
+  const pathKey = (value) => process.platform === 'win32'
+    ? path.toNamespacedPath(path.resolve(value)).toLowerCase() : path.resolve(value);
+  const linkedMetadata = (entry) => {
+    const dir = directoryOf(entry);
+    if (!lstatSync(dir).isSymbolicLink()
+      || pathKey(path.resolve(path.dirname(dir), readlinkSync(dir))) !== pathKey(entry.sourcePath)
+      || !statSync(dir).isDirectory()) failure('本地技能链接或源目录已失效，请重新导入');
+    const file = path.join(dir, 'SKILL.md');
+    if (!lstatSync(file).isFile()) failure('SKILL.md 必须是普通文件，不能是软链');
+    const metadata = metadataOf(readFileSync(file));
+    if (metadata.name !== entry.name) failure('Skill name 与安装登记不一致，请重新导入');
+    return metadata;
+  };
+  const sourceStatus = (entry) => {
+    if (entry.importMode !== 'symlink') return {};
+    try { linkedMetadata(entry); return { sourceAvailable: true }; }
+    catch (error) { return { sourceAvailable: false, sourceError: `本地技能源不可用：${error.message}` }; }
+  };
   const viewOf = (entry) => ({
     id: entry.id, name: entry.name, title: entry.title ?? entry.name, description: entry.description,
     version: entry.version, sha256: entry.sha256, origin: entry.origin,
     author: entry.author, enabled: entry.enabled, files: [...entry.files],
     sourcePath: entry.sourcePath ?? null,
+    ...(entry.origin === 'local' ? { importMode: entry.importMode ?? 'copy', ...sourceStatus(entry) } : {}),
     github: entry.github ?? null,
     updateAvailable: entry.origin === 'market'
       ? Boolean(catalog.items.find((item) => item.id === entry.marketId && item.sha256 !== entry.sha256))
@@ -304,7 +331,8 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
       if (!(await lstat(ownerDir)).isDirectory()) continue;
       for (const version of await readdir(ownerDir)) {
         const dir = path.join(ownerDir, version);
-        if (!keep.has(dir)) await rm(dir, { recursive: true, force: true });
+        // lstat 不跟随源；Windows junction 也只移除链接本身，绝不递归源目录。
+        if (!keep.has(dir)) await rm(dir, { recursive: !(await lstat(dir)).isSymbolicLink(), force: true });
       }
     }
   }
@@ -315,6 +343,7 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     if (existing) failure(`同名 Skill 已安装：${metadata.name}（来自${ORIGIN_LABELS[existing.origin] ?? existing.origin}${existing.origin === 'skillsmp' ? ` ${existing.github?.repo ?? ''}` : existing.origin === 'local' ? ` ${existing.sourcePath ?? ''}` : ''}）。请先卸载原来源，再添加本来源；不会静默换用。`);
     const entry = {
       id, origin, marketId, version, author, sourcePath, github,
+      ...(origin === 'local' ? { importMode: 'copy' } : {}),
       sha256: sha, name: metadata.name, title: metadata.title, description: metadata.description,
       enabled: index.installed.find((item) => item.id === id)?.enabled ?? true,
       files: files.map((file) => file.path),
@@ -355,10 +384,40 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     await pruneInternal().catch((error) => log?.warn?.(`Skill 旧版本清理失败：${error.message}`));
     return viewOf(entry);
   }
+  async function publishLink(sourcePath, metadata, id) {
+    if (storageError) failure(storageError);
+    const existing = conflict(metadata.name, id);
+    if (existing) failure(`同名 Skill 已安装：${metadata.name}。请先卸载原来源，再添加本来源；不会静默换用。`);
+    const entry = {
+      id, origin: 'local', importMode: 'symlink', linkId: randomUUID(), sourcePath,
+      version: '随源更新', author: '本地', sha256: null,
+      ...metadata, enabled: index.installed.find(item => item.id === id)?.enabled ?? true,
+      // 仅登记入口，不遍历或假装持有整棵源目录的文件清单。
+      files: ['SKILL.md'],
+    };
+    const dir = directoryOf(entry);
+    await mkdir(path.dirname(dir), { recursive: true });
+    try {
+      await symlink(sourcePath, dir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      failure(`无法创建本地技能软链接（${error.code ?? error.message}）；未复制源文件。可显式选择“复制”后重试`);
+    }
+    try {
+      linkedMetadata(entry);
+      const next = { schema: 1, installed: [...index.installed.filter(item => item.id !== id), entry] };
+      await atomicJson(indexFile, next);
+      index = next;
+    } catch (error) {
+      await rm(dir, { force: true }).catch(() => {});
+      throw error;
+    }
+    await pruneInternal().catch(error => log?.warn?.(`Skill 旧版本清理失败：${error.message}`));
+    return viewOf(entry);
+  }
   return {
     state,
     enabledSummaries() {
-      return index.installed.filter((item) => item.enabled)
+      return index.installed.filter((item) => item.enabled && sourceStatus(item).sourceAvailable !== false)
         .slice(0, 30).map((item) => ({
           id: item.id, name: item.name, title: item.title ?? item.name, description: item.description.slice(0, 160),
         }));
@@ -366,12 +425,21 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     snapshot(skillId = null) {
       const enabled = index.installed.filter((item) => item.enabled);
       if (skillId && !enabled.some((item) => item.id === skillId)) failure('指定的 Skill 未安装或已禁用');
-      const candidates = enabled.map((item) => ({
-        id: item.id, name: item.name, version: item.version, sha256: item.sha256,
-        description: item.description ?? '',
-        path: directoryOf(item), source: 'library',
-      }));
       const diagnostics = storageError ? [{ type: 'warning', source: 'library', path: indexFile, message: storageError }] : [];
+      const candidates = enabled.flatMap((item) => {
+        const status = sourceStatus(item);
+        if (status.sourceAvailable === false) {
+          diagnostics.push({ type: 'warning', source: 'library', path: directoryOf(item),
+            skillId: item.id, name: item.name, message: status.sourceError });
+          return [];
+        }
+        return [{
+          id: item.id, name: item.name, version: item.version, sha256: item.sha256,
+          ...(item.origin === 'local' ? { importMode: item.importMode ?? 'copy' } : {}),
+          description: item.description ?? '',
+          path: directoryOf(item), source: 'library',
+        }];
+      });
       const { items } = prepareSkills(candidates, { diagnostics });
       if (skillId && !items.some(item => item.id === skillId)) {
         const invalid = diagnostics.find(item => item.skillId === skillId);
@@ -444,18 +512,47 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
       return {ok: true, skill: await publish({id: id ?? `local:${randomUUID()}`, origin: 'local',
         version: '本地导入', author: '本地', sha: sha256(bytes), parsed}), state: state()};
     }),
-    importDirectory: (sourceDir) => run(async () => {
-      if (typeof sourceDir !== 'string' || !path.isAbsolute(sourceDir)) failure('请选择有效的 Skill 文件夹');
-      if (!(await lstat(sourceDir)).isDirectory()) failure('导入目标不是文件夹');
-      const files = await localFiles(sourceDir);
-      const bytes = Buffer.from(JSON.stringify({ schema: 1, files }) + '\n');
-      const parsed = parseBundle(bytes);
-      const existing = index.installed.find((item) => item.origin === 'local' && item.sourcePath === sourceDir);
+    importDirectory: (sourceDir, { mode = 'symlink' } = {}) => run(async () => {
+      if (!['symlink', 'copy'].includes(mode)) failure('不支持的本地技能导入方式');
+      if (typeof sourceDir !== 'string' || !path.isAbsolute(sourceDir) || sourceDir.includes('\0')) failure('请选择有效的 Skill 文件夹');
+      // 信任用户明确选择的本机目录；归一目录别名，不递归扫描/编码链接源。
+      const sourcePath = await realpath(sourceDir);
+      if (!(await lstat(sourcePath)).isDirectory()) failure('导入目标不是文件夹');
+      const managedRoot = await realpath(root).catch(() => path.resolve(root));
+      const relative = path.relative(managedRoot, sourcePath);
+      if (!relative || ['versions', 'staging'].some(dir => relative === dir || relative.startsWith(`${dir}${path.sep}`))) {
+        failure('不能从 Hemi 受管技能目录导入，请选择原始源目录');
+      }
+      let existing = index.installed.find((item) => item.origin === 'local'
+        && (item.sourcePath === sourcePath || item.sourcePath === sourceDir));
+      // 旧副本曾保存原始路径（例如 macOS /var 别名）；只用于识别同源，不迁移旧副本。
+      if (!existing) {
+        for (const item of index.installed.filter(item => item.origin === 'local' && item.sourcePath)) {
+          if (await realpath(item.sourcePath).catch(() => null) === sourcePath) { existing = item; break; }
+        }
+      }
       const id = existing?.id ?? `local:${randomUUID()}`;
-      return { ok: true, skill: await publish({
-        id, origin: 'local', version: '本地导入', author: '本地',
-        sourcePath: sourceDir, sha: sha256(bytes), parsed,
-      }), state: state() };
+      if (mode === 'symlink') {
+        const file = path.join(sourcePath, 'SKILL.md');
+        const info = await lstat(file).catch(error => {
+          if (error.code === 'ENOENT') failure('缺少 SKILL.md');
+          throw error;
+        });
+        if (!info.isFile()) failure('SKILL.md 必须是普通文件，不能是软链');
+        const metadata = metadataOf(await readFile(file));
+        return { ok: true, skill: await publishLink(sourcePath, metadata, id), state: state() };
+      }
+      try {
+        const files = await localFiles(sourcePath);
+        const bytes = Buffer.from(JSON.stringify({ schema: 1, files }) + '\n');
+        const parsed = parseBundle(bytes);
+        return { ok: true, skill: await publish({
+          id, origin: 'local', version: '本地导入', author: '本地',
+          sourcePath, sha: sha256(bytes), parsed,
+        }), state: state() };
+      } catch (error) {
+        failure(`复制导入失败：${error.message}`);
+      }
     }),
     /** 034 SkillsMP：固定提交快照落地。expectedSha256 是用户预览确认过的 bundle 摘要，不符即拒绝。 */
     installFromSnapshot: ({
@@ -498,6 +595,7 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
     readSkill: async (id) => {
       const entry = index.installed.find((item) => item.id === id);
       if (!entry) failure('Skill 不存在');
+      if (entry.importMode === 'symlink') linkedMetadata(entry);
       const file = path.join(directoryOf(entry), 'SKILL.md');
       if (!(await lstat(file)).isFile()) failure('Skill 原文文件已失效');
       return (await readFile(file, 'utf8')).slice(0, MAX_FILE);
@@ -506,7 +604,8 @@ export function createSkillStore({ root, fetchImpl = fetch, catalogUrl = OFFICIA
       const entry = index.installed.find((item) => item.id === id);
       if (!entry) failure('Skill 不存在');
       const dir = directoryOf(entry);
-      if (!lstatSync(dir).isDirectory()) failure('Skill 目录已失效');
+      if (entry.importMode === 'symlink') linkedMetadata(entry);
+      else if (!lstatSync(dir).isDirectory()) failure('Skill 目录已失效');
       return dir;
     },
     prune: () => run(pruneInternal),

@@ -604,6 +604,13 @@ export function createAgentRuntime({
   /** 工作流使用同一套主／子 agent 装配与确认环，节点会话独立释放，不进入对话 LRU。 */
   async function openWorkflowNode({ nodeSpec, executionOwner, invocation, skills = [], bridge = null, bridgeUrl = null, applicationRef = null, signal, onModelCall,onTrace }) {
     signal?.throwIfAborted();
+    // Skill 节点的显式依赖必须穿过异步初始化窗口，不能在最终装配时被当作可选项跳过。
+    const requiredSkills = nodeSpec.nodeType === 'hemi-skill'
+      ? (nodeSpec.nodeData?.skillRefs ?? []).map(ref => {
+          const selected = skills.find(item => item.name === ref.name);
+          return { name: ref.name, ...(selected ? { id: selected.id, path: selected.path } : {}) };
+        })
+      : [];
     const plan = await hydrateWorkflowModel(invocation.run.modelPlan, getProfiles());
     const workspace = invocation.run.workspace ?? getWorkspaceService()?.resolve('default');
     const placement = await resolvePlacement(workspace, { log });
@@ -632,7 +639,7 @@ export function createAgentRuntime({
 
         extraExtensions:[{name:'workflow-control',factory:pi=>pi.registerTool({name:'workflow_wait',label:'等待用户操作',description:'需要用户登录或补充必要信息时暂停节点，等待用户点击继续。',parameters:{type:'object',properties:{message:{type:'string'}},required:['message']},async execute(_id,args){waitingReason=String(args.message);queueMicrotask(()=>{void main.requestHandoff();});return {content:[{type:'text',text:'已暂停，等待用户操作'}]};}})}],
         features: caps.features, extensionConfig: caps.extensionConfig,
-        browserBridge: bridge, skills,
+        browserBridge: bridge, skills, requiredSkills,
         interactiveOwner: executionOwner.workflowRunId,
         accessId: `wf-${executionOwner.workflowRunId}-${executionOwner.attemptId}`,
         grantScopeId: conversationGrantScope(invocation.conversationId), accessService: accessService(),

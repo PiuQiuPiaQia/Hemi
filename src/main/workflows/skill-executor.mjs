@@ -7,6 +7,20 @@
  * dependency-unavailable（不静默降级为普通执行）。
  */
 
+import { prepareSkills } from '../skills/skill-definition.mjs';
+
+/** 排队/重启后只重新观测 live 入口，不复制目录；失效依赖不能静默变成普通节点。 */
+export function observeLiveSkillItems(items = []) {
+  return items.map(item => {
+    if (item.importMode !== 'symlink') return item;
+    const observed = prepareSkills([item]);
+    if (observed.items.length) return observed.items[0];
+    const error = new Error(`本地软链接技能不可用：${item.name}：${observed.diagnostics[0]?.message ?? '源失效'}`);
+    error.code = 'dependency-unavailable';
+    throw error;
+  });
+}
+
 /**
  * 校验 Skill 引用可满足（纯函数，不触 IO）。
  * @param {object} params
@@ -29,9 +43,12 @@ export function resolveSkillRefs({ refs, available, diagnostics = [] }) {
       missing.push({ name: ref.name, reason: invalid ? `${invalid.message}；${invalid.path}` : '未安装或已禁用' });
       continue;
     }
-    // 版本声明时比对；skill-store 本地导入 version='本地导入'（非 semver），只有声明
-    // 了具体 semver 且两端都可解析时才比对，否则按名匹配（版本可核对性由 snapshot
-    // 的 sha256 受控目录承担）。
+    // 软链是 live 引用，不能满足固定版本声明；按名引用才允许随源更新。
+    if (hit.importMode === 'symlink' && ref.version && ref.version !== '随源更新') {
+      missing.push({ name: ref.name, reason: '本地软链接随源更新，无法保证固定版本；请改用复制或按名引用' });
+      continue;
+    }
+    // 旧本地副本仍按原规则匹配；market/副本的 sha256 受控目录可核对版本。
     if (ref.version && hit.version && /^\d+\.\d+\.\d+$/.test(ref.version) && /^\d+\.\d+\.\d+$/.test(hit.version) && hit.version !== ref.version) {
       missing.push({ name: ref.name, reason: `版本不符：需要 ${ref.version}，安装的是 ${hit.version}` });
       continue;

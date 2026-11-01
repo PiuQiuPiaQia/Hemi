@@ -40,7 +40,10 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   platform: process.platform,
   getSkillState: () => ipcRenderer.invoke('skills:state'),
   refreshSkillCatalog: () => ipcRenderer.invoke('skills:refresh'),
-  importLocalSkill: () => ipcRenderer.invoke('skills:import-local'),
+  importLocalSkill: (options) => ipcRenderer.invoke('skills:import-local', { mode: options?.mode }),
+  // 本地 agent 技能扫描＋批量导入（只接受最近一次扫描返回的 path，主进程把关）。
+  scanLocalSkills: () => ipcRenderer.invoke('skills:scan-local'),
+  importLocalSkills: (paths, options) => ipcRenderer.invoke('skills:import-local-batch', { paths: Array.isArray(paths) ? paths.map(String) : [], mode: options?.mode }),
   installMarketSkill: (id) => ipcRenderer.invoke('skills:install', { id }),
   setSkillEnabled: (id, enabled) => ipcRenderer.invoke('skills:set-enabled', { id, enabled }),
   removeSkill: (id) => ipcRenderer.invoke('skills:remove', { id }),

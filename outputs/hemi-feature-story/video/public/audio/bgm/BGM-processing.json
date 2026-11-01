@@ -1,0 +1,52 @@
+{
+  "source": {
+    "id": "fs:788347",
+    "title": "Calm Background Music",
+    "author": "MrCatfishing",
+    "page": "https://freesound.org/people/MrCatfishing/sounds/788347/",
+    "license": "CC0-1.0",
+    "file": "fs-788347.mp3",
+    "sha256": "4571d3231a85253e7e1da7452bdcb2a337c3bebb0eeade1f6c2bfa847a9710d0",
+    "kind": "Freesound HQ MP3 preview; not an original lossless recording"
+  },
+  "prepared_file": "gentle-piano-guitar.wav",
+  "prepared_sha256": "089a9dcedcf5be7b183139e616750fddb672fba258cb94c3920aecde16c494bb",
+  "changes": [
+    "Trim source to 0–65 seconds",
+    "Two-pass linear loudness normalization to -24 LUFS, TP ceiling -3 dBTP",
+    "Decode to 48 kHz stereo PCM for rendering; this does not recover source lossless quality"
+  ],
+  "loudnorm_first_pass": {
+    "input_i": "-15.93",
+    "input_tp": "-1.28",
+    "input_lra": "6.30",
+    "input_thresh": "-26.01",
+    "output_i": "-24.67",
+    "output_tp": "-9.57",
+    "output_lra": "5.30",
+    "output_thresh": "-34.70",
+    "normalization_type": "dynamic",
+    "target_offset": "0.67"
+  },
+  "normalizer": "loudnorm=I=-24:TP=-3:LRA=9:measured_I=-15.93:measured_TP=-1.28:measured_LRA=6.30:measured_thresh=-26.01:offset=0.67:linear=true:print_format=json",
+  "prepared_media": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "pcm_s16le",
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    ],
+    "format": {
+      "duration": "65.000000"
+    }
+  },
+  "timeline_fades": {
+    "fade_in_seconds": 1.5,
+    "fade_out_seconds": 4.0,
+    "implemented_in": "src/Main.tsx BGM volume function"
+  },
+  "audition": "Metadata and objective measurements checked; not listened to by this assistant"
+}

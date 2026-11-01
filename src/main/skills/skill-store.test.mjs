@@ -57,29 +57,29 @@ test('内置三项真实包可离线安装，启停持久化，卸载不删本�
     const source = path.join(root, 'original');
     await mkdir(source);
     await writeFile(path.join(source, 'SKILL.md'), '---\nname: local-demo\ndescription: 本地演示技能\n---\n\n# 用法\n');
-    const local = await reopened.importDirectory(source);
+    const local = await reopened.importDirectory(source, { mode: 'copy' });
     assert.equal(local.skill.origin, 'local');
     await reopened.remove(local.skill.id);
     assert.equal(existsSync(path.join(source, 'SKILL.md')), true);
   });
 });
 
-test('非法源、重名和链接拒绝，已有版本保持可用', async () => {
+test('显式复制拒绝非法源、重名和链接，已有版本保持可用', async () => {
   await withStore(async (store, root) => {
     await store.installMarket('source-check');
     const source = path.join(root, 'bad');
     await mkdir(source);
-    await assert.rejects(() => store.importDirectory(source), /缺少 SKILL.md/);
+    await assert.rejects(() => store.importDirectory(source, { mode: 'copy' }), /缺少 SKILL.md/);
     await writeFile(path.join(source, 'SKILL.md'), '---\nname: source-check\ndescription: 重名技能\n---\n');
-    await assert.rejects(() => store.importDirectory(source), /同名 Skill/);
+    await assert.rejects(() => store.importDirectory(source, { mode: 'copy' }), /同名 Skill/);
     await writeFile(path.join(source, 'SKILL.md'), '---\nname: local-test\n---\n');
-    await assert.rejects(() => store.importDirectory(source), /description/);
+    await assert.rejects(() => store.importDirectory(source, { mode: 'copy' }), /description/);
     await writeFile(path.join(source, 'SKILL.md'), '---\nname: local-test\ndescription: 有效描述\n---\n');
     await writeFile(path.join(source, 'engine.dylib'), Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x00, 0x00, 0x00, 0x01]));
-    await assert.rejects(() => store.importDirectory(source), /可执行内容/);
+    await assert.rejects(() => store.importDirectory(source, { mode: 'copy' }), /可执行内容/);
     await rm(path.join(source, 'engine.dylib'));
     await symlink(path.join(source, 'SKILL.md'), path.join(source, 'link.md'));
-    await assert.rejects(() => store.importDirectory(source), /符号链接/);
+    await assert.rejects(() => store.importDirectory(source, { mode: 'copy' }), /符号链接/);
     assert.equal(store.state().installed.length, 1);
   });
 });

@@ -16,6 +16,10 @@ export const IPC = {
     state: 'skills:state',
     refresh: 'skills:refresh',
     importLocal: 'skills:import-local',
+    /** 本地 agent 技能扫描（用户级常见目录＋本机工作区项目根；不扫全盘）。 */
+    scanLocal: 'skills:scan-local',
+    /** 批量导入扫描候选（仅接受最近一次扫描返回的 path；逐项失败聚合）。 */
+    importLocalBatch: 'skills:import-local-batch',
     install: 'skills:install',
     setEnabled: 'skills:set-enabled',
     remove: 'skills:remove',

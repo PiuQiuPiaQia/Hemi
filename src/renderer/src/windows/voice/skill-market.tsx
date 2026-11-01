@@ -9,9 +9,10 @@ import type {
   InstalledSkill, SkillMarketItem, SkillMarketState, SkillsmpPreview, SkillsmpSkill, SkillsmpUpdateResponse,
 } from '@/shared/types';
 import type { HemiVoiceBridge } from '@shared/protocol';
+import { LocalSkillImportDialog } from './local-skill-import-dialog';
 import './skill-market.css';
 
-export type SkillMarketApi = Pick<HemiVoiceBridge, 'getSkillState' | 'refreshSkillCatalog' | 'importLocalSkill' | 'installMarketSkill' | 'setSkillEnabled' | 'removeSkill' | 'readSkill' | 'revealSkill' | 'searchSkillsMp' | 'previewSkillsMp' | 'installSkillsMp' | 'checkSkillsMpUpdate'>;
+export type SkillMarketApi = Pick<HemiVoiceBridge, 'getSkillState' | 'refreshSkillCatalog' | 'importLocalSkill' | 'scanLocalSkills' | 'importLocalSkills' | 'installMarketSkill' | 'setSkillEnabled' | 'removeSkill' | 'readSkill' | 'revealSkill' | 'searchSkillsMp' | 'previewSkillsMp' | 'installSkillsMp' | 'checkSkillsMpUpdate'>;
 
 type Tab = 'discover' | 'builtin' | 'installed';
 type Selected =
@@ -28,6 +29,11 @@ const ORIGIN_LABELS: Record<InstalledSkill['origin'], string> = {
   local: '本地导入',
   skillsmp: 'SkillsMP 市场',
 };
+
+const isUnavailableLink = (item: InstalledSkill) => item.importMode === 'symlink' && item.sourceAvailable === false;
+const sourceLabel = (item: InstalledSkill) => item.origin === 'local'
+  ? item.importMode === 'symlink' ? '本地软链接' : item.importMode === 'copy' ? '本地副本' : ORIGIN_LABELS.local
+  : ORIGIN_LABELS[item.origin];
 
 /** 037：返回钮标注「回到哪一页」（分段控件的完整名称）。 */
 const TAB_LABELS: Record<Tab, string> = {
@@ -344,6 +350,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
   const [error, setError] = useState('');
   const [sourceText, setSourceText] = useState('');
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>(null);
   const [topbarSlot, setTopbarSlot] = useState<HTMLElement | null>(null);
   const lastQuery = useRef('');
@@ -683,7 +690,8 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
         title="导入本地技能"
         aria-label="导入本地技能"
         disabled={Boolean(busy)}
-        onClick={() => void act('导入本地技能', () => api.importLocalSkill())}
+        aria-haspopup="dialog"
+        onClick={() => setImportOpen(true)}
       >
         <Plus aria-hidden="true" /><span className="h34-import-label">导入本地技能</span>
       </button>
@@ -708,7 +716,9 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
     </>
   );
   const enabledBadge = (item: InstalledSkill) => (
-    <span className="h37-badge" data-tone={item.enabled ? 'ok' : undefined}>{item.enabled ? '已启用' : '已停用'}</span>
+    <span className="h37-badge" data-tone={isUnavailableLink(item) ? 'danger' : item.enabled ? 'ok' : undefined}>
+      {isUnavailableLink(item) ? '链接失效' : item.enabled ? '已启用' : '已停用'}
+    </span>
   );
   const sourceFold = (id: string) => (
     <SourceFold text={sourceText} loading={busy === '读取原文'} onOpen={() => void openSource(id)} />
@@ -742,7 +752,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
   const installedBody = (item: InstalledSkill) => (
     <>
       <DetailHero
-        tag={`${ORIGIN_LABELS[item.origin]} · 已安装`}
+        tag={`${sourceLabel(item)} · 已安装`}
         title={item.title}
         badge={enabledBadge(item)}
         description={item.description}
@@ -757,7 +767,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
       <section className="h37-section">
         <div className="h37-section-head">
           <h3>来源</h3>
-          <span className="h37-count">{ORIGIN_LABELS[item.origin]}</span>
+          <span className="h37-count">{sourceLabel(item)}</span>
           {item.origin === 'skillsmp' && item.github ? (
             <button type="button" className="h37-btn h37-btn-ghost h37-btn-sm h37-aside" disabled={updateCheck?.checking === true || Boolean(busy)} onClick={() => void runUpdateCheck(item)}>
               {updateSpinner ? <span className="h37-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />} {updateCheck?.checking === true ? '正在检查…' : '检查更新'}
@@ -781,6 +791,16 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
             </>
           )}
         </dl>
+        {item.importMode === 'symlink' ? (
+          isUnavailableLink(item) ? (
+            <div className="h37-note h34-error" data-tone="danger" role="alert">
+              <ShieldAlert aria-hidden="true" />
+              <span>{item.sourceError || '原目录不可用。'} 请恢复原路径，或卸载后重新导入；卸载不会删除原目录。</span>
+            </div>
+          ) : (
+            <p className="h34-footnote">软链接实时引用原目录，改动会同步，移动或删除后会失效。备份只保存链接登记，不包含原目录文件。</p>
+          )
+        ) : null}
         {updateNote(item)}
       </section>
       <FileSection title="包含文件" count={`${item.files.length} 个`} files={item.files.map((file) => ({ path: file }))} />
@@ -1040,10 +1060,12 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
               added={item.enabled}
               name={item.title}
               description={item.description}
-              badge={<span className="h37-badge" data-tone={item.enabled ? 'ok' : undefined}>{item.enabled ? '已启用' : '已停用'}</span>}
+              badge={enabledBadge(item)}
               meta={(
                 <>
-                  <span>{ORIGIN_LABELS[item.origin]}</span>
+                  <span>{sourceLabel(item)}</span>
+                  {item.importMode === 'symlink' ? <span className="h34-mono break-all" title={item.sourcePath ?? undefined}>{item.sourcePath}</span> : null}
+                  {isUnavailableLink(item) && item.sourceError ? <span className="break-all" title={item.sourceError}>{item.sourceError}</span> : null}
                   {item.github ? <span className="h34-mono">{item.github.repo}@{item.version}</span> : item.origin === 'market' ? <span>v{item.version}</span> : null}
                 </>
               )}
@@ -1052,7 +1074,7 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           ))}
         </div>
       ) : state ? <div className="h34-empty">{term ? '没有找到匹配的技能。' : '还没有安装技能。去技能市场找一个，或导入本地文件夹。'}</div> : null}
-      <p className="h34-footnote"><ShieldCheck aria-hidden="true" /><span>停用后新任务不再使用；在途任务仍用受理时的版本。卸载不删除本地导入的原始文件夹。</span></p>
+      <p className="h34-footnote"><ShieldCheck aria-hidden="true" /><span>停用后新任务不再使用；软链接实时引用原目录，在途任务也可能受原目录改动影响。卸载不会删除原目录。</span></p>
     </section>
   );
 
@@ -1094,7 +1116,9 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
         <div className="h37-scrim h34-confirm-backdrop" role="presentation">
           <div className="h37-dialog h34-confirm" role="dialog" aria-modal="true" aria-labelledby="h34-confirm-title">
             <h3 id="h34-confirm-title">卸载这个技能？</h3>
-            <p>新任务将无法使用它。在途任务仍使用受理时的版本；本地导入的原文件夹不会被删除。</p>
+            <p>{state?.installed.find((item) => item.id === confirmRemove)?.importMode === 'symlink'
+              ? '只移除 Hemi 中的软链接，不会删除原目录。新任务将无法使用它；在途任务仍可能受原目录改动影响。'
+              : '新任务将无法使用它。本地导入的原目录不会被删除。'}</p>
             <div className="h37-dialog-foot">
               <button type="button" className="h37-btn h37-btn-secondary" onClick={() => setConfirmRemove(null)}>取消</button>
               <button type="button" className="h37-btn h37-btn-danger-solid" onClick={() => { const id = confirmRemove; setConfirmRemove(null); setSelected(null); void act('卸载技能', () => api.removeSkill(id)); }}>确认卸载</button>
@@ -1102,6 +1126,17 @@ export function SkillMarket({ onBack, pendingApproval = false, demo = '', api = 
           </div>
         </div>
       ) : null}
+      <LocalSkillImportDialog
+        open={importOpen}
+        api={api}
+        remote={remote}
+        onState={setState}
+        onClose={(imported) => {
+          setImportOpen(false);
+          // 导入过技能就落到「已安装」，用户能马上看到结果。
+          if (imported && tab !== 'installed') switchTab('installed');
+        }}
+      />
       <button type="button" className="sr-only" onClick={onBack}>返回对话</button>
     </MarketRoot>
   );

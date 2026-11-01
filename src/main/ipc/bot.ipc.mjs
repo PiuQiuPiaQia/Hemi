@@ -1,5 +1,6 @@
 import { app, ipcMain, BrowserWindow, dialog, shell } from 'electron';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createBotDesktopService } from '../bot/desktop-service.mjs';
 import { createSshRunner } from '../remote/ssh-runner.mjs';
@@ -12,9 +13,24 @@ import { stopDuplexHost } from './audio.ipc.mjs';
 import { stopAsrForBot } from './asr.ipc.mjs';
 import { publishUiState } from './ui.ipc.mjs';
 import { closeActiveTtsPlayback } from './tts.ipc.mjs';
-import {readSkillDirectory} from '../skills/skill-store.mjs';
+import { readSkillDirectory } from '../skills/skill-store.mjs';
+import { createLocalSkillScanner } from '../skills/local-agent-skills.mjs';
+import { getWorkspaceService } from './workspace.ipc.mjs';
 let service = null;
 export const getBotService = () => service;
+
+/** Bot 设置页的本地 agent 技能扫描/批量导入：扫描与读文件都在本机（与
+ *  skills.import-local 的「本机选目录→读文件→远传」同一信任边界），仍走
+ *  skills.import 把文件传给 Bot 主机，Bot 主机侧无需新方法。 */
+function localWorkspaceDirs() {
+  const workspaceService = getWorkspaceService();
+  if (!workspaceService) return [];
+  const workspaceState = workspaceService.getState();
+  return [workspaceState.default, ...workspaceState.projects]
+    .filter((view) => view && !view.host && view.status === 'ok' && typeof view.dir === 'string')
+    .map((view) => ({ dir: view.dir, name: view.name }));
+}
+
 export function registerBotIpc({onConversationResult=()=>{}}={}) {
   const remote = getRemoteService(),
     archivePath = path.join(app.getAppPath(), 'build/hemi-bot-runtime.tgz');
@@ -52,6 +68,19 @@ export function registerBotIpc({onConversationResult=()=>{}}={}) {
     if (!state.mainWindow || event.sender !== state.mainWindow.webContents)
       throw new Error('Bot 仅允许主窗口操作');
   };
+  // Bot 设置页的扫描/批量导入网关：installed 名单来自 Bot 主机技能库（metadata 同名命中），
+  // 导入＝本机 readSkillDirectory 校验读文件 + skills.import 远传（远端不接触本机路径）。
+  const botLocalSkillScanner = createLocalSkillScanner({
+    home: () => os.homedir(),
+    listWorkspaceDirs: localWorkspaceDirs,
+    getInstalled: async () => {
+      const identity = service.getState().binding?.instanceId;
+      if (!identity) return [];
+      const hostState = await service.command('skills.state');
+      return Array.isArray(hostState?.installed) ? hostState.installed : [];
+    },
+    importOne: async (dir) => service.command('skills.import', { files: await readSkillDirectory(dir) }),
+  });
   const handle = (channel, fn) =>
     ipcMain.handle(channel, async (event, payload) => {
       mainOnly(event);
@@ -69,13 +98,29 @@ export function registerBotIpc({onConversationResult=()=>{}}={}) {
     service.candidatesDirectory(p.candidateId, p.path),
   );
   handle('bot:command', async (p) => {
-    if (p.method === 'skills.import-local') {
+    const requireBoundIdentity = () => {
       const identity = service.getState().binding?.instanceId;
       if (!identity || p.params?.expectedInstanceId !== identity) throw new Error('Bot 连接已变化，请重新打开技能中心。');
+      return identity;
+    };
+    if (p.method === 'skills.scan-local') {
+      requireBoundIdentity();
+      return botLocalSkillScanner.scan();
+    }
+    if (p.method === 'skills.import-local-batch') {
+      requireBoundIdentity();
+      if (p.params?.mode != null && p.params.mode !== 'copy') throw Object.assign(new Error('Bot 跨机器导入仅支持复制文件，不支持本机软链接'), { code: 'unsupported' });
+      return botLocalSkillScanner.import(Array.isArray(p.params?.paths) ? p.params.paths.map(String) : [], { mode: 'copy' });
+    }
+    if (p.method === 'skills.import-local') {
+      requireBoundIdentity();
+      if (p.params?.mode != null && p.params.mode !== 'copy') throw Object.assign(new Error('Bot 跨机器导入仅支持复制文件，不支持本机软链接'), { code: 'unsupported' });
       const picked = await dialog.showOpenDialog(state.mainWindow, {title: '选择要导入 Bot 的技能文件夹', properties: ['openDirectory']});
       if (picked.canceled || !picked.filePaths?.length) return {ok: true, cancelled: true};
-      const files = await readSkillDirectory(picked.filePaths[0]);
-      return service.command('skills.import', {...p.params, files});
+      const files = await readSkillDirectory(picked.filePaths[0]).catch(error => {
+        throw Object.assign(new Error(`Bot 复制导入失败：${error.message}`), { code: 'invalid' });
+      });
+      return service.command('skills.import', { ...(p.params?.id ? { id: p.params.id } : {}), files });
     }
     if (p.method !== 'diagnostics.export')
       return service.command(p.method, p.params);

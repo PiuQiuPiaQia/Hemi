@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Hemi</title>
+  <path fill="#4B6152" d="M286 48H738C891 48 976 133 976 286V738C976 891 891 976 738 976H286C133 976 48 891 48 738V286C48 133 133 48 286 48Z"/>
+  <g fill="#FAFAF7">
+    <rect x="272" y="256" width="112" height="512" rx="22"/>
+    <rect x="640" y="256" width="112" height="512" rx="22"/>
+    <path d="M368 474C452 450 572 506 656 482V550C572 574 452 518 368 542Z"/>
+  </g>
+</svg>

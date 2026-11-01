@@ -1,6 +1,6 @@
 import {useCallback, useMemo} from 'react';
 import type {BotMethod, BotState} from '@shared/bot';
-import type {SkillActionResult, SkillMarketState} from '@shared/protocol';
+import type {LocalSkillBatchImportResult, LocalSkillScanResult, SkillActionResult, SkillMarketState} from '@shared/protocol';
 import {SkillMarket, type SkillMarketApi} from '../voice/skill-market';
 
 /** 技能中心：Bot 设置的独立分类（2026-10-30 起，从「电脑与浏览器」页迁出）。
@@ -13,6 +13,10 @@ export function BotSkillsSettings({state}: {state: BotState}) {
     getSkillState: () => command<SkillMarketState>('skills.state'),
     refreshSkillCatalog: () => command<SkillActionResult>('skills.refresh'),
     importLocalSkill: () => command<SkillActionResult>('skills.import-local'),
+    // 本地 agent 技能扫描/批量导入：扫描与读文件在本机做（bot:command 主进程拦截），
+    // 导入仍经 skills.import 远传 Bot 主机，远端不接触本机路径。
+    scanLocalSkills: () => command<LocalSkillScanResult>('skills.scan-local'),
+    importLocalSkills: paths => command<LocalSkillBatchImportResult>('skills.import-local-batch', {paths}),
     installMarketSkill: skillId => command<SkillActionResult>('skills.install', {skillId}),
     setSkillEnabled: (skillId, enabled) => command<SkillActionResult>('skills.set-enabled', {skillId, enabled}),
     removeSkill: skillId => command<SkillActionResult>('skills.remove', {skillId}),

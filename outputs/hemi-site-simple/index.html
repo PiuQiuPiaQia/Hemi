@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hemi · 会动手的桌面 AI 助手</title>
+<meta name="description" content="Hemi 是一款会动手的桌面 AI 助手。用文字或语音交代一件事，它在电脑上把活干完，把结果交到你手里。支持 macOS 与 Windows，MIT 开源。">
+<meta name="theme-color" content="#f9f8f4">
+<link rel="icon" href="media/icon.svg" type="image/svg+xml">
+<meta property="og:title" content="Hemi · 会动手的桌面 AI 助手">
+<meta property="og:description" content="不止帮你想。陪你做到交付。">
+<meta property="og:image" content="media/poster.jpg?v=clean-9d5d64e3">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="bar">
+  <a class="brand" href="#main" aria-label="Hemi 首页">
+    <img src="media/icon.svg" alt="" width="26" height="26">
+    <span>Hemi</span>
+  </a>
+  <a class="bar-link" href="https://github.com/PiuQiuPiaQia/Hemi">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4 1.3-4-2-6-2.5m12 4.5v-3.4a3 3 0 0 0-.8-2.3c2.7-.3 5.5-1.3 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.3 4.3 0 0 0-.1-3.2s-1-.3-3.3 1.3a11.4 11.4 0 0 0-6 0C6.7 2.6 5.7 2.9 5.7 2.9a4.3 4.3 0 0 0-.1 3.2A4.6 4.6 0 0 0 4.3 9.3c0 4.6 2.8 5.7 5.5 6a3 3 0 0 0-.8 2.3V21"/></svg>
+    GitHub
+  </a>
+</header>
+
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-text">
+      <h1 id="hero-title">会动手的<br>桌面 AI 助手</h1>
+      <p class="claim">不止帮你想。陪你做到交付。</p>
+      <p class="lede">用文字或语音交代一件事，Hemi 在你的电脑上把它做完：查资料、改文件、跑命令，最后把结果交到你手里。</p>
+      <div class="actions">
+        <a class="btn btn-ink" href="https://github.com/PiuQiuPiaQia/Hemi/releases/latest">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
+          免费下载
+        </a>
+        <a class="btn btn-line" href="https://github.com/PiuQiuPiaQia/Hemi">在 GitHub 查看</a>
+      </div>
+      <p class="platform">macOS（Apple Silicon）· Windows（x64）· MIT 开源</p>
+    </div>
+
+    <figure class="film">
+      <div class="film-frame">
+        <video controls preload="metadata" playsinline poster="media/poster.jpg?v=clean-9d5d64e3" width="1920" height="1080">
+          <source src="media/promo.mp4?v=clean-9d5d64e3" type="video/mp4">
+          你的浏览器无法播放这段视频，可以<a href="media/promo.mp4?v=clean-9d5d64e3">直接下载</a>。
+        </video>
+      </div>
+    </figure>
+  </section>
+
+  <section class="features" aria-labelledby="features-title">
+    <h2 id="features-title">它能帮你做的</h2>
+    <ol class="list">
+      <li>
+        <h3>用你已有的 AI</h3>
+        <p>登录产品支持的订阅账号，接入 New API 站点，或填写接口地址和 API Key 自定义接入。模型都进同一个列表。</p>
+      </li>
+      <li>
+        <h3>合适的模型做合适的事</h3>
+        <p>主模型和侦察、顾问、执行、设计等角色可以分别配模型，按任务需要协作，兼顾能力和调用成本。</p>
+      </li>
+      <li>
+        <h3>不止在这台电脑上工作</h3>
+        <p>通过 SSH 在远程主机上干活；也可以把任务交给部署在你自己服务器上的 Bot。</p>
+        <p class="note">服务器在线时，Bot 已受理的任务会在你关闭本机或断开后继续推进。普通 SSH 工作需要本机保持连接。</p>
+      </li>
+      <li>
+        <h3>说过一次，下次照做</h3>
+        <p>把偏好写进记忆，之后的对话直接沿用。</p>
+        <p class="note">每台桌面、每个 Bot 各有一份记忆，不会自动跨主机同步。</p>
+      </li>
+      <li>
+        <h3>常做的事存成工作流 <span class="beta">Beta</span></h3>
+        <p>视频剪辑、文案发布、资料整理这类反复做的事，自己建成流程，需要时选中运行，运行前由你确认。</p>
+        <p class="note">流程需要自己创建，目前没有定时触发。</p>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-brand">
+    <img src="media/icon.svg" alt="" width="20" height="20">
+    <span>Hemi · MIT 开源</span>
+  </div>
+  <nav class="foot-links" aria-label="页脚链接">
+    <a href="https://github.com/PiuQiuPiaQia/Hemi/releases/latest">下载</a>
+    <a href="https://github.com/PiuQiuPiaQia/Hemi">源码</a>
+    <a href="https://github.com/PiuQiuPiaQia/Hemi/blob/main/README.zh-CN.md">中文文档</a>
+  </nav>
+</footer>
+</body>
+</html>

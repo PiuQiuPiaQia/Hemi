@@ -1869,13 +1869,19 @@ export type SkillMarketItem = {
   installedId: string | null;
 };
 
+export type LocalSkillImportMode = 'symlink' | 'copy';
+
 export type InstalledSkill = {
   id: string;
   name: string;
   title: string;
   description: string;
   version: string;
-  sha256: string;
+  /** 链接随源更新，不存在不可变的整包摘要。 */
+  sha256: string | null;
+  importMode?: LocalSkillImportMode;
+  sourceAvailable?: boolean;
+  sourceError?: string;
   origin: 'market' | 'local' | 'skillsmp';
   author: string;
   enabled: boolean;
@@ -1971,6 +1977,34 @@ export type SkillActionResult = {
   reason?: string;
   state?: SkillMarketState | null;
   skill?: InstalledSkill;
+};
+
+/** 本地 agent 技能扫描候选（「目录 + SKILL.md」；path 已按 realpath 归一）。 */
+export type LocalSkillCandidate = {
+  path: string;
+  name: string;
+  description: string;
+  /** 发现来源标签（用户级 ~/.claude/skills／项目名/.claude/skills；同 realpath 多来源聚合）。 */
+  sources: string[];
+  /** 已在 Hemi 技能库（metadata 同名——库内全局唯一，或本地来源 sourcePath realpath 相同）。 */
+  installed: boolean;
+};
+
+export type LocalSkillScanResult = {
+  ok: boolean;
+  candidates?: LocalSkillCandidate[];
+  /** 有界诊断（失效软链、目录不可读、frontmatter 无效等；超上限截断）。 */
+  warnings?: string[];
+  reason?: string;
+};
+
+export type LocalSkillBatchImportResult = {
+  /** 全部所选路径导入成功（failed 为空）；部分/全部失败时 ok=false，imported 仍为成功数。 */
+  ok: boolean;
+  imported: number;
+  failed: { path: string; reason: string }[];
+  state?: SkillMarketState;
+  reason?: string;
 };
 
 /** 044 应用内更新状态（设置页「关于与更新」消费；supported=false 见 unsupportedReason）。 */
@@ -2120,7 +2154,11 @@ export type HemiVoiceBridge = {
   platform: string;
   getSkillState: () => Promise<SkillMarketState>;
   refreshSkillCatalog: () => Promise<SkillActionResult>;
-  importLocalSkill: () => Promise<SkillActionResult>;
+  importLocalSkill: (options?: { mode?: LocalSkillImportMode }) => Promise<SkillActionResult>;
+  /** 本地 agent 技能扫描（用户级常见目录＋本机工作区项目根；不扫全盘、不读凭据）。 */
+  scanLocalSkills: () => Promise<LocalSkillScanResult>;
+  /** 批量导入扫描候选（仅接受最近一次扫描返回的 path；逐项失败见 failed）。 */
+  importLocalSkills: (paths: string[], options?: { mode?: LocalSkillImportMode }) => Promise<LocalSkillBatchImportResult>;
   installMarketSkill: (id: string) => Promise<SkillActionResult>;
   setSkillEnabled: (id: string, enabled: boolean) => Promise<SkillActionResult>;
   removeSkill: (id: string) => Promise<SkillActionResult>;

@@ -5,6 +5,7 @@
  *   'start-failed'   会话/扩展初始化失败（宿主归「没能启动」）
  *   'exited'         会话已结束或不可用
  *   'command-failed' 指令未被接受
+ *   'dependency-unavailable' 显式必需的 Skill 在最终装配时不可用
  */
 export class AgentSessionError extends Error {
   constructor(code, message, { cause } = {}) {

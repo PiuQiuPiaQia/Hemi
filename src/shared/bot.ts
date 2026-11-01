@@ -254,7 +254,10 @@ export type BotMethod =
   | 'skills.state'
   | 'skills.refresh'
   | 'skills.import'
+  /** 桌面拦截：仅 copy（默认），拒绝 symlink；远端只接收 skills.import 的文件。 */
   | 'skills.import-local'
+  | 'skills.scan-local'
+  | 'skills.import-local-batch'
   | 'skills.install'
   | 'skills.set-enabled'
   | 'skills.remove'

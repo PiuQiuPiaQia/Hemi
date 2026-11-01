@@ -46,13 +46,27 @@ function resolveBackupDir(outDir,baseName){
   return path.join(outDir,dirName);
 }
 
+function lstatIfPresent(abs){try{return fs.lstatSync(abs);}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')return null;throw error;}}
+// 不跟随任意层级的链接（包含 Windows junction）；外部技能源不属于应用备份。
+function hasLinkedAncestor(root,rel){
+  if(lstatIfPresent(root)?.isSymbolicLink())return true;
+  const parts=rel.split('/');let abs=root;
+  for(const part of parts.slice(0,-1)){abs=path.join(abs,part);if(lstatIfPresent(abs)?.isSymbolicLink())return true;}
+  return false;
+}
+function assertUnlinkedPath(root,rel){
+  if(hasLinkedAncestor(root,rel)||lstatIfPresent(path.join(root,rel))?.isSymbolicLink())throw new Error(`备份/恢复路径含符号链接，已停止：${rel}`);
+}
+
 export function collectEntries(userDataDir){
   const wanted=LIGHT_ENTRIES;
   const entries=new Map();
   const walk=rel=>{
     if(isExcludedRel(rel))return;
     const abs=path.join(userDataDir,rel);
-    let st;try{st=fs.statSync(abs);}catch{return;}
+    if(hasLinkedAncestor(userDataDir,rel))return;
+    let st;try{st=fs.lstatSync(abs);}catch{return;}
+    if(st.isSymbolicLink())return; // 只备份登记，不跟随或归档本地技能源、循环链、断链。
     if(st.isDirectory()){
       entries.set(rel,{rel,type:'dir'});
       for(const e of fs.readdirSync(abs,{withFileTypes:true}))walk(`${rel}/${e.name}`);
@@ -108,6 +122,7 @@ async function writeLongNameEntry(gzip,name){
 }
 async function writeTarEntries(gzip,entries,userDataDir){
   for(const entry of entries){
+    assertUnlinkedPath(userDataDir,entry.rel);
     const header=buildHeader({name:entry.rel,type:entry.type,size:entry.type==='dir'?0:entry.bytes,mtimeMs:entry.mtimeMs??Date.now()});
     if(header.needsLong){await writeLongNameEntry(gzip,entry.rel);const retry=buildHeader({name:'_L',type:entry.type,size:entry.type==='dir'?0:entry.bytes,mtimeMs:entry.mtimeMs??Date.now()});await writeAll(gzip,retry.header);}
     else await writeAll(gzip,header.header);
@@ -294,9 +309,13 @@ async function filesIdentical(a,b){
 /** 单文件处置判定——mergeRestore 与 estimateMerge（预览估计）共用的唯一口径。
  * 返回 'new'（本地无此文件）/ 'identical'（字节相同，跳过）/ 'keepLocal'（本地较新，
  * 保留本地）/ 'takeBackup'（取备份版：备份较新、mtime 持平且内容不同，或凭据配套域）。 */
-export async function decideRestoreAction({stagingAbs,localAbs,rel}){
-  if(isAtomicRestoreRel(rel))return fs.existsSync(localAbs)?'takeBackup':'new'; // 配套域：本地存在即整组让位，不做内容/mtime 比较
-  let local;try{local=fs.statSync(localAbs);}catch{return 'new';}
+export async function decideRestoreAction({stagingAbs,localAbs,rel,localRoot}){
+  // 预览也不能穿过目标软链去比较外部源内容。
+  if(localRoot&&hasLinkedAncestor(localRoot,rel))return 'takeBackup';
+  const local=lstatIfPresent(localAbs);
+  if(isAtomicRestoreRel(rel))return local?'takeBackup':'new'; // 配套域：本地存在即整组让位，不做内容/mtime 比较
+  if(!local)return 'new';
+  if(local.isSymbolicLink())return 'takeBackup';
   if(!local.isFile())return 'takeBackup'; // 本地同名是目录等异类：让备份版落位，本地原件进安全副本
   const staging=fs.statSync(stagingAbs);
   if(await filesIdentical(stagingAbs,localAbs))return 'identical';
@@ -311,6 +330,7 @@ function walkFiles(abs,relPrefix){
   const out=[];
   for(const e of fs.readdirSync(abs,{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:1)){
     const rel=relPrefix?`${relPrefix}/${e.name}`:e.name;
+    if(e.isSymbolicLink())throw new Error(`恢复暂存区不允许符号链接：${rel}`);
     if(e.isDirectory())out.push(...walkFiles(path.join(abs,e.name),rel));else out.push(rel);
   }
   return out;
@@ -319,8 +339,10 @@ function countAction(stats,action){if(action==='new')stats.newFiles+=1;else stat
 // 落选/被替换方进安全副本（保持原相对路径结构，便于事后找回）
 function moveIntoSafeCopy(abs,rel,safeCopyRoot){
   const safeAbs=relToAbs(safeCopyRoot,rel);
+  if(hasLinkedAncestor(safeCopyRoot,rel))throw new Error(`安全副本路径含符号链接：${rel}`);
   fs.mkdirSync(path.dirname(safeAbs),{recursive:true});
-  if(fs.existsSync(safeAbs))fs.rmSync(safeAbs,{recursive:true,force:true}); // 理论不可达（单次恢复内每个 rel 只处理一次），防御让位
+  const prior=lstatIfPresent(safeAbs);
+  if(prior)fs.rmSync(safeAbs,{recursive:!prior.isSymbolicLink(),force:true}); // 理论不可达（单次恢复内每个 rel 只处理一次），防御让位
   fs.renameSync(abs,safeAbs);
 }
 
@@ -330,19 +352,24 @@ function moveIntoSafeCopy(abs,rel,safeCopyRoot){
  * 返回 {applied（处理的顶层条目名）, safeCopyRoot, stats:{newFiles,identical,keepLocal,takeBackup}}。
  */
 export async function mergeRestore({stagingDir,userDataDir,safeCopyRoot}){
+  for(const root of [stagingDir,userDataDir,safeCopyRoot])if(lstatIfPresent(root)?.isSymbolicLink())throw new Error('恢复根目录不能是符号链接');
+  walkFiles(stagingDir,''); // 写入前拒绝非 extractBackup 产生的链接，避免暂存内容读穿。
   fs.mkdirSync(safeCopyRoot,{recursive:true});
   const stats={newFiles:0,identical:0,keepLocal:0,takeBackup:0};
   const mergeFile=async(stagingAbs,targetAbs,rel)=>{
-    const action=await decideRestoreAction({stagingAbs,localAbs:targetAbs,rel});
+    if(hasLinkedAncestor(userDataDir,rel))throw new Error(`恢复目标父目录含符号链接：${rel}`);
+    const action=await decideRestoreAction({stagingAbs,localAbs:targetAbs,rel,localRoot:userDataDir});
     countAction(stats,action);
     if(action==='identical')return; // 内容相同：跳过，双方原样保留
     if(action==='keepLocal'){moveIntoSafeCopy(stagingAbs,rel,safeCopyRoot);return;} // 本地较新：备份版进安全副本
-    if(action==='takeBackup'&&fs.existsSync(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot); // 备份胜出：本地旧版进安全副本
+    if(action==='takeBackup'&&lstatIfPresent(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot); // 备份胜出：本地旧版进安全副本
     fs.mkdirSync(path.dirname(targetAbs),{recursive:true});
     fs.renameSync(stagingAbs,targetAbs);
   };
   const mergeDir=async(stagingAbs,targetAbs,relPrefix)=>{
-    if(fs.existsSync(targetAbs)&&!fs.statSync(targetAbs).isDirectory())moveIntoSafeCopy(targetAbs,relPrefix,safeCopyRoot); // 本地同名是文件：让位后再建目录
+    if(hasLinkedAncestor(userDataDir,relPrefix))throw new Error(`恢复目标父目录含符号链接：${relPrefix}`);
+    const target=lstatIfPresent(targetAbs);
+    if(target&&(target.isSymbolicLink()||!target.isDirectory()))moveIntoSafeCopy(targetAbs,relPrefix,safeCopyRoot); // 只移动链接本身，绝不沿源目录写入
     fs.mkdirSync(targetAbs,{recursive:true});
     for(const e of fs.readdirSync(stagingAbs,{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:1)){
       const rel=`${relPrefix}/${e.name}`;
@@ -358,10 +385,10 @@ export async function mergeRestore({stagingDir,userDataDir,safeCopyRoot}){
     // 计数，再整目录换入——域内本地多出的文件一并进安全副本，不留在合并结果里。
     if(e.isDirectory()&&ATOMIC_RESTORE_TOPS.has(rel)){
       for(const fileRel of walkFiles(stagingAbs,rel)){
-        const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,fileRel),localAbs:relToAbs(userDataDir,fileRel),rel:fileRel});
+        const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,fileRel),localAbs:relToAbs(userDataDir,fileRel),rel:fileRel,localRoot:userDataDir});
         countAction(stats,action);
       }
-      if(fs.existsSync(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot);
+      if(lstatIfPresent(targetAbs))moveIntoSafeCopy(targetAbs,rel,safeCopyRoot);
       fs.renameSync(stagingAbs,targetAbs);
       applied.push(rel);continue;
     }
@@ -378,7 +405,7 @@ export async function mergeRestore({stagingDir,userDataDir,safeCopyRoot}){
 export async function estimateMerge({stagingDir,userDataDir}){
   const stats={newFiles:0,identical:0,conflicts:0};
   for(const rel of walkFiles(stagingDir,'')){
-    const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,rel),localAbs:relToAbs(userDataDir,rel),rel});
+    const action=await decideRestoreAction({stagingAbs:relToAbs(stagingDir,rel),localAbs:relToAbs(userDataDir,rel),rel,localRoot:userDataDir});
     if(action==='new')stats.newFiles+=1;
     else if(action==='identical')stats.identical+=1;
     else stats.conflicts+=1;

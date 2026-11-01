@@ -28,7 +28,7 @@ import { createWorkflowFlowRouter } from "./flow-router.mjs";
 import {
   validateExtraction,
 } from "./preparation-service.mjs";
-import { acquireSkillLease } from "./skill-executor.mjs";
+import { acquireSkillLease, observeLiveSkillItems } from "./skill-executor.mjs";
 import {
   acquireBrowserLease,
   acquireDesktopLease,
@@ -85,7 +85,9 @@ export function initWorkflowService({
       signal?.removeEventListener("abort", cancel);
     }
   };
-  /** Skill 节点：引用校验＋受控租约，再交共享节点 worker（openAgent 收 skills 参数）。 */
+  /** Skill 节点：引用校验＋受控路径租约，再交共享节点 worker。
+   * skillSnapshot 固定选择/副本路径，不固定 symlink 源字节；live 条目 sha256=null，
+   * openAgent 的 prepareSkills 每次重新观测入口正文，资源始终从源按需读取。 */
   const skillWorkerOpenAgent = async (spec) => {
     const { nodeSpec, executionOwner, signal } = spec;
     const frozen = spec.invocation?.run?.skillSnapshot;
@@ -100,7 +102,7 @@ export function initWorkflowService({
         }
       : acquireSkillLease({ refs: nodeSpec.nodeData?.skillRefs, skillService });
     try {
-      const inner = await openAgent({ ...spec, skills: lease.items });
+      const inner = await openAgent({ ...spec, skills: observeLiveSkillItems(lease.items) });
       return {
         agent: inner.agent,
         release: async () => {

@@ -23,7 +23,7 @@ import { projectFlowTimeline } from '@/windows/voice/lib/flow-timeline-view';
 import { WorkflowCard } from '@/windows/voice/workflow-card';
 import { WorkflowParametersDialog } from '@/windows/voice/workflow-parameters-dialog';
 import { SessionUsage } from '@/windows/voice/session-usage-view';
-import type { FlowSnapshotView, UsageRecord, BackupProgressEvent } from '@shared/protocol';
+import type { FlowSnapshotView, UsageRecord, BackupProgressEvent, LocalSkillImportMode } from '@shared/protocol';
 import { ScopePopover } from '@/windows/voice/scope-popover';
 import { AccessAddDialog } from '@/windows/voice/access-add-dialog';
 import { RemoteFolderDialog } from '@/windows/voice/remote-folder-dialog';
@@ -1239,7 +1239,21 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
     mpSearch: null,
   }),
   refreshSkillCatalog: async () => ({ ok: false, reason: 'fixture 离线' }),
-  importLocalSkill: async () => ({ ok: false, cancelled: true }),
+  importLocalSkill: async (_options?: unknown) => ({ ok: false, cancelled: true }),
+  // 本地 agent 技能扫描/批量导入桩：给两条确定候选（一条已装），导入只回执不落状态。
+  scanLocalSkills: async () => ({
+    ok: true,
+    candidates: [
+      { path: '/tmp/hemi-fixture-skills/notes-ext', name: 'notes-ext', description: '把散落笔记整理成结构化摘要的本地技能（fixture）。', sources: ['~/.claude/skills/notes-ext'], installed: false },
+      { path: '/tmp/hemi-fixture-skills/pdf-toolkit', name: 'pdf-toolkit', description: '合并、拆分与加水印的本地 PDF 技能（fixture，已导入过）。', sources: ['~/.codex/skills/pdf-toolkit'], installed: true },
+    ],
+    warnings: [],
+  }),
+  importLocalSkills: async (paths: unknown, _options?: unknown) => ({
+    ok: true,
+    imported: Array.isArray(paths) ? paths.length : 0,
+    failed: [],
+  }),
   installMarketSkill: async () => ({ ok: false, reason: 'fixture 不安装文件' }),
   setSkillEnabled: async () => ({ ok: false, reason: 'fixture 不修改状态' }),
   removeSkill: async () => ({ ok: false, reason: 'fixture 不修改状态' }),
@@ -2089,6 +2103,14 @@ function stubBotBridge() {
       case 'skills.state':
         // 复用技能 fixtures 的桩数据（安装列表＋目录），技能中心页直接可渲染。
         return await stubBridgeMethods.getSkillState();
+      case 'skills.scan-local':
+        // Bot 设置页的本地扫描走 bot:command 拦截；fixtures 给同一份确定候选。
+        return await stubBridgeMethods.scanLocalSkills();
+      case 'skills.import-local-batch': {
+        const input = params as { paths?: unknown; mode?: LocalSkillImportMode };
+        if (input.mode != null && input.mode !== 'copy') return { ok: false, reason: 'Bot 跨机器导入仅支持复制文件，不支持本机软链接' };
+        return await stubBridgeMethods.importLocalSkills(input.paths ?? [], { mode: 'copy' });
+      }
       default:
         return { ok: true };
     }

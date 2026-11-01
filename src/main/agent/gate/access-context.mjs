@@ -53,7 +53,7 @@ export function createAccessContext({
   const storeDir = service.storeDir ?? null;
   const controls = (controlRoots ?? [storeDir, hostAppBundle()]).filter(Boolean);
   const controlExempt = storeDir ? [path.join(storeDir, 'workspace')] : [];
-  // 034 Skill 只读租约：任务受理时冻结的本任务 Skill 版本目录。SKILL.md 的相对资源
+  // 034 Skill 只读路径租约：副本版本目录保持不变；本地 symlink 源是 live，不冻结字节。SKILL.md 的相对资源
   // （references/scripts）按提示词约定从该文件夹读取，但目录在 userData 控制面内——
   // 2026-10-10 会话审计：八字 skill 的全部资源被「控制文件」硬拒＋沙箱 readDirs 不含它，
   // 执行器只能违反 skill 契约自行口算。只豁免租约内的目录（未租约的同级版本照拒），
