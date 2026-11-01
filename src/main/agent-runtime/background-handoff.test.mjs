@@ -1,5 +1,6 @@
 import {readRunJournalFileSync} from './journal-inspection.mjs';
-import test from 'node:test';
+import test, {after} from 'node:test';
+import {inspectStorageForDiagnostics} from './journal-storage.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -15,6 +16,17 @@ import {createBotExecutor} from '../bot/runtime.mjs';
 import {runBackgroundTurn} from './background-turn.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+after(() => {
+  setTimeout(() => {
+    const report = process.report.getReport();
+    const handles = value => value.filter(item => item.is_active || item.is_referenced);
+    console.error('HEMI_EXIT_DIAGNOSTICS=' + JSON.stringify({
+      resources:process.getActiveResourcesInfo(),storage:inspectStorageForDiagnostics(),
+      libuv:handles(report.libuv),workers:(report.workers??[]).map(value=>({threadId:value.header?.threadId,libuv:handles(value.libuv)})),
+    }));
+  }, 3000).unref();
+  setTimeout(() => {console.error('HEMI_EXIT_DIAGNOSTICS: process remained alive 15s after all test cleanup');process.exit(2);}, 15000).unref();
+});
 async function until(read) {
   const deadline = Date.now() + 15000;
   while (true) {

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 let worker, sequence = 0;
 const requests = new Map();
+export function inspectStorageForDiagnostics() { return {threadId:worker?.threadId,pending:[...requests.keys()]}; }
 function request(operation, dir, payload = {}) {
   if (!worker) {
     const active = new Worker(new URL('./journal-storage-worker.mjs', import.meta.url), {execArgv:[]});

@@ -1,0 +1,21 @@
+name: Windows storage lifecycle diagnostic
+on:
+  push:
+    branches: [codex/perf-ci-debug-20261102]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:sdk
+      - name: Background handoff with exit diagnostics
+        timeout-minutes: 3
+        run: node --test src/main/agent-runtime/background-handoff.test.mjs
