@@ -6,14 +6,20 @@ async function until(fn){const deadline=Date.now()+15000;while(true){const v=awa
 const cmd=body=>`"${process.execPath}" -e "${body}"`;
 async function fixture(t){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-job-host-'))),workspace=path.join(root,'workspace'),dataDir=path.join(root,'data');await fs.mkdir(workspace);
+ const trace=(event,value)=>{if(process.env.HEMI_BOT_FIXTURE_TRACE==='1')console.log('[job-fixture]',Date.now(),t.name,event,JSON.stringify(value));};
  const requests=[];let host,releaseFollow;const followGate=new Promise(resolve=>{releaseFollow=resolve;});let followEntered=false;
  const server=http.createServer(async(req,res)=>{
   let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);requests.push(body);const all=JSON.stringify(body.messages),checking=all.includes(GOAL_CHECK_SYSTEM),main=body.tools?.length;
   const toolMessages=body.messages.filter(m=>m.role==='tool').map(m=>({...m,name:m.name??body.messages.flatMap(x=>x.tool_calls??[]).find(c=>c.id===m.tool_call_id)?.function?.name}));
   let content,tools;const latest=body.messages.at(-1)?.content,firstLine=(typeof latest==='string'?latest:latest?.map(part=>part.text??'').join('\n')??'').split('\n')[0];
   const tool=(name,args)=>({index:0,id:randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
+  trace('model-request',{main,checking,firstLine:firstLine.slice(0,160),toolNames:toolMessages.map(m=>m.name)});
   if(checking){
    const facts=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence),live=facts.backgroundJobs.filter(j=>j.status==='running');
+   trace('goal-check',{rootRunId:facts.rootRunId,jobs:facts.backgroundJobs});
+   // Optional bounded network latency reproduces the full-run timing window
+   // through the real SDK HTTP boundary, not by replacing Host scheduling.
+   if(JSON.parse(body.messages.at(-1).content).objective==='INDEPENDENT_AFTER_STOP')await pause(Math.min(5000,Math.max(0,Number(process.env.HEMI_BOT_JOB_GOAL_DELAY_MS)||0)));
    content=JSON.stringify(live.length?{status:'continue',reason:'需要后台命令真实结果',evidence:['已受理命令仍在执行'],remaining:['核对退出结果'],nextAction:'等待已有命令结果',waitForJobs:live.map(j=>j.id)}
     :{status:'complete',reason:'真实后台命令已结束，成果存在，已取消命令没有产生副作用',evidence:['proof.txt 实际写入'],remaining:[],nextAction:''});
   }
@@ -27,15 +33,19 @@ async function fixture(t){
   else if(toolMessages.some(m=>m.name==='job_list')&&!toolMessages.some(m=>m.name==='job_output')){
    const listed=JSON.parse(toolMessages.findLast(m=>m.name==='job_list').content);tools=[tool('job_output',{job_id:listed[0].id,wait_ms:30})];
   }else content=await fs.stat(path.join(workspace,'proof.txt')).catch(()=>null)?'成果已核对完成。':'已核对实际输出，命令仍在运行，继续等待。';
+  trace('model-response',{firstLine:firstLine.slice(0,160),content,tools});
   res.writeHead(200,{'content-type':'text/event-stream'});
   const delta=tools?{role:'assistant',tool_calls:tools.map((x,index)=>({...x,index}))}:{role:'assistant',content};
   for(const [d,f] of [[delta,null],[{},tools?'tool_calls':'stop']])res.write('data: '+JSON.stringify({id:randomUUID(),model:'jobs',choices:[{index:0,delta:d,finish_reason:f}],...(f?{usage:{prompt_tokens:10,completion_tokens:10}}:{})})+'\n\n');res.end('data: [DONE]\n\n');
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const options={dataDir,defaultDir:workspace,executorFactory:o=>createBotExecutor({...o,backgroundQuietReviewMs:500}),allowLoopbackModels:true,validateModel:async()=>{}};
- host=await createBotHost(options);const {instanceId}=await host.request('handshake');const call=(method,p={})=>host.request(method,{instanceId,requestId:randomUUID(),...p});
+ host=await createBotHost(options);const {instanceId}=await host.request('handshake');
+ const call=async(method,p={})=>{const result=await host.request(method,{instanceId,requestId:randomUUID(),...p});if(method==='flow.command')trace('command',{command:p.command,result});return result;};
  t.after(async()=>{await host.close();server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});});
  await call('model.sync',{models:[{modelKey:'test/jobs',providerId:'test',model:'jobs',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});const {id}=await call('session.create');
- return {id,call,root,workspace,requests,releaseFollow,followEntered:()=>followEntered,flow:()=>call('flow.snapshot',{id}),async restart(){await host.close();host=await createBotHost(options);}};
+ let previous;
+ const flow=async()=>{const value=await call('flow.snapshot',{id});const state={phase:value.phase,revision:value.revision,activeRunId:value.activeRunId,pending:value.pending,runs:value.runs,jobs:value.backgroundJobs};const key=JSON.stringify(state);if(key!==previous){previous=key;trace('flow',state);}return value;};
+ return {id,call,root,workspace,requests,releaseFollow,followEntered:()=>followEntered,flow,async restart(){await host.close();host=await createBotHost(options);}};
 }
 for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a later goal preserves earlier background commands`,{timeout:30000},async t=>{
  const f=await fixture(t);

@@ -5,7 +5,7 @@ on:
       mode:
         description: 'Focused capability matrix or the actual full npm test gate'
         type: choice
-        options: [focused, full]
+        options: [focused, full, jobs]
         default: focused
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON(inputs.mode == 'full' && '["full"]' || '["browser","history","all"]') }}
+        scenario: ${{ fromJSON(inputs.mode == 'full' && '["full"]' || inputs.mode == 'jobs' && '["jobs","jobs-delayed"]' || '["browser","history","all"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
