@@ -11,11 +11,17 @@ import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
 import { getProfiles } from '../lib/profiles-holder.mjs';
 import { getWorkspaceService } from './workspace.ipc.mjs';
 import {flowReplyText} from '../../../packages/conversation-flow/src/core/flow-window.mjs';
+import {state} from '../state.mjs';
+import {conversationClosedError} from '../services/conversation-turns.mjs';
 
 export function registerFlowIpc() {
   const service = getConversationFlowService();
 
   ipcMain.handle(IPC.flow.command, async (_event, payload) => {
+    if(state.isQuitting&&payload?.command?.type!=='stop'){
+      const error=conversationClosedError();
+      return {ok:false,code:error.code,message:error.message};
+    }
     const conversationId = String(payload?.conversationId ?? '');
     if (!conversationId) return { ok: false, code: 'invalid', message: '缺少 conversationId' };
     return service.operations.execute(conversationId,payload.operation,payload.command,async()=>{

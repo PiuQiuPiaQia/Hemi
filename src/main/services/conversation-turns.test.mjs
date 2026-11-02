@@ -73,9 +73,11 @@ test('退出取消在途回合，并拒绝被唤醒的待回炉请求', async ()
   const a = turns.begin({ conversationId: 'a', turnId: 1 });
   const waiting = turns.run(() => assert.fail('退出后不能启动模型'), { conversationId: 'a', preempt: false });
   turns.abortAll();
-  await assert.rejects(waiting, /已取消/);
+  await assert.rejects(waiting, {code:'app-closing'});
   assert.equal(a.controller.signal.aborted, true);
   assert.equal(turns.isActive('a'), false);
   assert.equal(turns.getState('a').status, 'cancelled');
-  assert.throws(() => turns.begin({ conversationId: 'a', turnId: 2 }), /已取消/);
+  assert.equal(turns.isClosed(),true);
+  assert.throws(() => turns.begin({ conversationId: 'a', turnId: 2 }), {code:'app-closing'});
+  assert.equal(turns.getState('a').turnId,1,'rejected late input never replaces the original cancelled turn');
 });

@@ -110,6 +110,7 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (state.isQuitting) return;
     // 再次启动时把已有实例的主窗口带到前台，而不是新开一个。
     if (state.mainWindow && !state.mainWindow.isDestroyed()) {
       if (state.mainWindow.isMinimized()) state.mainWindow.restore();
@@ -258,6 +259,7 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', async () => {
+    if (state.isQuitting) return;
     if (!state.mainWindow || state.mainWindow.isDestroyed()) {
       await createMainWindow();
     } else {

@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { reduceTurnParts } from '../../shared/turn-parts.mjs';
 
 const cancelled = () => new Error('回合已取消。');
+export const conversationClosedError = () => Object.assign(
+  new Error('Hemi 正在退出，运行服务已关闭。请完全退出并重新打开 Hemi 后再发送。'),
+  {code:'app-closing'},
+);
 const scopeOf = (id) => id || '';
 
 /** 宿主拥有请求生命周期；导航只订阅状态，同会话才互相让位。 */
@@ -21,7 +25,7 @@ export function createConversationTurns({ onState = () => {}, now = Date.now } =
     waiters.delete(key);
   }
   function reserve(token) {
-    if (closed) throw cancelled();
+    if (closed) throw conversationClosedError();
     const key = scopeOf(token.conversationId);
     slots.get(key)?.controller.abort();
     slots.set(key, token);
@@ -84,7 +88,7 @@ export function createConversationTurns({ onState = () => {}, now = Date.now } =
     }
     const key = scopeOf(conversationId);
     while (!preempt && slots.has(key)) {
-      if (closed) throw cancelled();
+      if (closed) throw conversationClosedError();
       await new Promise((resolve) => {
         const pending = waiters.get(key) ?? new Set();
         pending.add(resolve);
@@ -111,6 +115,7 @@ export function createConversationTurns({ onState = () => {}, now = Date.now } =
   }
   return {
     begin, update, settle, run, cancel, abortAll, current,
+    isClosed: () => closed,
     isActive: (conversationId) => slots.has(scopeOf(conversationId)),
     getState: (conversationId) => structuredClone(states.get(scopeOf(conversationId))?.snapshot ?? null),
   };
