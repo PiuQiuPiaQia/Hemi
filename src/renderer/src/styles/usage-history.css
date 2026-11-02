@@ -247,7 +247,100 @@ html.kb-nav .h37-usage-heatmap-cell:focus-visible {
   padding: 0 var(--sp-4);
 }
 
-/* —— 筛选区 —— */
+/* —— 筛选区：日期和模型作用于下方统计、热力图与列表 —— */
+.h37-usage-date-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+}
+
+.h37-usage-date-presets > .h37-usage-filter-label {
+  padding: 0 var(--sp-8);
+}
+
+.h37-usage-date-presets .h37-usage-toggle-btn {
+  min-height: var(--sp-32);
+  padding: var(--sp-6) var(--sp-12);
+}
+
+.h37-usage-date-presets .h37-usage-toggle-btn[data-active='true'] {
+  background: var(--bg-active);
+  box-shadow: none;
+}
+
+.h37-usage-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.h37-usage-custom-dates {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+}
+
+.h37-usage-date-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.h37-usage-date-field .h37-input {
+  width: 150px;
+  color-scheme: light;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-appearance-mode='dark'] .h37-usage-date-field .h37-input {
+  color-scheme: dark;
+}
+
+.h37-usage-date-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--danger);
+}
+
+.h37-usage-scope,
+.h37-usage-empty-hint {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.h37-usage-heatmap-spacer {
+  width: 12px;
+  height: 12px;
+}
+
+.h37-usage-model-filter {
+  min-width: 0;
+}
+
+.h37-usage-model-filter .h37-settings-select {
+  width: 200px;
+  min-width: 0;
+}
+
+.h37-usage-model-filter select {
+  text-overflow: ellipsis;
+}
+
+.h37-usage-status-filter .h37-settings-select {
+  width: 112px;
+}
+
 .h37-usage-filters {
   display: flex;
   gap: var(--sp-12);
@@ -550,6 +643,33 @@ html[data-appearance-mode='dark'] .h37-usage-error {
 }
 
 /* —— 响应式调整 —— */
+@media (max-width: 480px) {
+  .h37-usage-date-presets {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .h37-usage-date-presets > .h37-usage-filter-label {
+    flex-basis: 100%;
+    padding: 0 0 var(--sp-4);
+  }
+
+  .h37-usage-date-presets .h37-usage-toggle-btn {
+    padding: var(--sp-6) var(--sp-8);
+  }
+
+  .h37-usage-date-field {
+    width: 100%;
+  }
+
+  .h37-usage-date-field .h37-input {
+    flex: 1;
+    width: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .h37-usage-overview {
     grid-template-columns: 1fr;
@@ -566,6 +686,12 @@ html[data-appearance-mode='dark'] .h37-usage-error {
 
   .h37-usage-filter-group {
     justify-content: space-between;
+  }
+
+  .h37-usage-filter-group .h37-settings-select {
+    flex: 1;
+    width: auto;
+    min-width: 0;
   }
 
   .h37-usage-heatmap {

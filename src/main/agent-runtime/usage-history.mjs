@@ -104,20 +104,26 @@ const matchesQuery = (record, needle) => [record.model, record.url, record.proto
 
 /**
  * 全量 journal 快照 → 使用记录页。from/to（毫秒，含端点，按请求开始时间）、
- * query、status 参与筛选并同时影响 total/daily/totals/earliestAt；limit/offset 只切 records。
+ * query、model（实际模型 ID 精确匹配）、status 共同筛选 total/daily/totals/earliestAt；
+ * limit/offset 只切 records。models 来自完整有效历史，不受筛选或分页影响。
  */
 export function projectUsageHistory(state, options = {}) {
-  const { from, to, query, status = 'all', limit = DEFAULT_LIMIT, offset = 0 } = options ?? {};
+  const { from, to, query, model, status = 'all', limit = DEFAULT_LIMIT, offset = 0 } = options ?? {};
   const fromMs = Number.isFinite(from) ? from : null;
   const toMs = Number.isFinite(to) ? to : null;
   const statusFilter = STATUSES.has(status) ? status : null;
+  const modelFilter = typeof model === 'string' && model ? model : null;
   const needle = typeof query === 'string' && query.trim() ? query.trim().toLowerCase() : null;
+  const models = new Set();
   const filtered = [];
   for (const row of Object.values(state?.requests ?? {})) {
+    // requestStart 保证 startedAt；缺失、非数值或超出日期范围的损坏行不进入记录与模型选项。
+    if (!Number.isFinite(row?.startedAt) || Number.isNaN(new Date(row.startedAt).getTime())) continue;
     const record = projectUsageRecord(row);
-    if (record.at === null) continue; // requestStart 保证 startedAt；缺它是损坏行，跳过而不是崩面板。
+    if (typeof record.model === 'string' && record.model.trim()) models.add(record.model);
     if (fromMs !== null && record.at < fromMs) continue;
     if (toMs !== null && record.at > toMs) continue;
+    if (modelFilter && record.model !== modelFilter) continue;
     if (statusFilter && record.status !== statusFilter) continue;
     if (needle && !matchesQuery(record, needle)) continue;
     filtered.push(record);
@@ -141,6 +147,7 @@ export function projectUsageHistory(state, options = {}) {
   const size = Math.min(MAX_LIMIT, Number.isSafeInteger(limit) && limit >= 0 ? limit : DEFAULT_LIMIT);
   return {
     records: filtered.slice(start, start + size),
+    models: [...models].sort(),
     total: filtered.length,
     daily: [...daily.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
     totals,

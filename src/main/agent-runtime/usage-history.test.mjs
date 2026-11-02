@@ -64,6 +64,7 @@ test('真实 SSE：URL 脱敏落盘、TTFT 从首个有效输出起算、token/r
   const reopened = createRunJournal({ dir });
   const page = projectUsageHistory(await reopened.snapshot(), {});
   assert.equal(page.total, 1);
+  assert.deepEqual(page.models, ['test-model']);
   const record = page.records[0];
   assert.equal(record.status, 'success');
   assert.equal(record.conversationId, 'conv-1');
@@ -218,6 +219,7 @@ test('sanitizedUrl 与投影纯函数：脱敏、缺字段、筛选统计与分�
 
   const all = projectUsageHistory(state, {});
   assert.equal(all.total, 5);
+  assert.deepEqual(all.models, ['m-a', 'm-b']);
   assert.deepEqual(all.records.map(r => r.id), ['r4', 'r5', 'r3', 'r2', 'r1'], '按开始时间降序');
   assert.deepEqual(all.daily.map(d => d.date), ['2024-05-01', '2024-05-02', '2024-05-03'], '本地日分桶升序，跨日边界 23:59/00:00');
   assert.equal(all.daily[1].requests, 3);
@@ -241,7 +243,7 @@ test('sanitizedUrl 与投影纯函数：脱敏、缺字段、筛选统计与分�
   assert.equal(projectUsageHistory(state, { query: 'anthropic' }).total, 1);
   assert.equal(projectUsageHistory(state, { query: 'api.example.com' }).total, 4, 'url 为 null 的 r4 不匹配');
   assert.equal(projectUsageHistory(state, { query: 'c2' }).total, 1);
-  assert.deepEqual(projectUsageHistory(state, { query: 'no-such' }), { records: [], total: 0, daily: [], totals: { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, earliestAt: null });
+  assert.deepEqual(projectUsageHistory(state, { query: 'no-such' }), { records: [], models: ['m-a', 'm-b'], total: 0, daily: [], totals: { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, earliestAt: null });
   // 分页只切 records；total/daily/totals/earliestAt 仍是全筛选集。
   const page = projectUsageHistory(state, { limit: 2, offset: 1 });
   assert.deepEqual(page.records.map(r => r.id), ['r5', 'r3']);
@@ -267,6 +269,113 @@ test('sanitizedUrl 与投影纯函数：脱敏、缺字段、筛选统计与分�
   assert.equal(sanitizeErrorText(null), null);
 });
 
+const modelFilterFixture = () => {
+  const from = new Date(2024, 4, 2).getTime();
+  const to = new Date(2024, 4, 3).getTime() - 1;
+  const row = (id, startedAt, model, patch = {}) => ({
+    requestId: id, startedAt, endedAt: startedAt + 1000,
+    owner: { conversationId: 'conv-filter' }, actualModel: { model },
+    tokenUsage: { uncachedInput: 10, output: 5, cacheRead: 2, cacheWrite: 1 }, ...patch,
+  });
+  const state = { requests: {
+    legacy: row('legacy', from - 86400000, 'z-model'),
+    wrongCase: row('wrongCase', from + 3000, 'glm-5'),
+    after: row('after', to + 1, 'GLM-5'),
+    sibling: row('sibling', from + 2000, 'GLM-5-air', { requestedModel: { model: 'GLM-5' } }),
+    end: row('end', to, 'GLM-5'),
+    error: row('error', from + 4000, 'GLM-5', { httpStatus: 500 }),
+    start: row('start', from, 'GLM-5'),
+    running: row('running', from + 5000, 'GLM-5', { endedAt: null }),
+    unmatched: row('unmatched', from + 6000, 'GLM-5', { owner: { conversationId: 'different' } }),
+    before: row('before', from - 1, 'GLM-5'),
+  } };
+  return { state, from, to };
+};
+
+test('model 精确匹配实际 ID（不含前缀或大小写近似）；与日期、搜索、状态取交集并同步统计', () => {
+  const { state, from, to } = modelFilterFixture();
+  const all = projectUsageHistory(state);
+  assert.deepEqual(all.models, ['GLM-5', 'GLM-5-air', 'glm-5', 'z-model'], '模型选项去重，按 ID 稳定排序');
+  const selected = projectUsageHistory(state, { model: 'GLM-5' });
+  assert.deepEqual(selected.records.map(r => r.id), ['after', 'end', 'unmatched', 'running', 'error', 'start', 'before']);
+  assert.equal(selected.total, 7);
+  assert.deepEqual(projectUsageHistory(state, { model: 'GLM-5-air', limit: 1 }).records.map(r => r.id), ['sibling'], '从全历史筛选，不从未筛选的第一页筛');
+  assert.deepEqual(projectUsageHistory(state, { model: 'glm-5' }).records.map(r => r.id), ['wrongCase'], '模型 ID 区分大小写');
+  assert.equal(projectUsageHistory(state, { model: 'GLM-' }).total, 0, 'model 不是子串搜索');
+  assert.equal(projectUsageHistory(state, { query: 'GLM-5' }).total, 9, 'query 仍保持原来的不区分大小写子串搜索');
+  assert.deepEqual(projectUsageHistory(state, { model: '' }), all, '空串表示全部模型');
+  assert.deepEqual(projectUsageHistory(state, { model: undefined }), all, '未指定表示全部模型');
+
+  const filters = { from, to, model: 'GLM-5', query: 'CONV-FILTER', status: 'success' };
+  assert.deepEqual(projectUsageHistory(state, filters), {
+    records: [projectUsageRecord(state.requests.end), projectUsageRecord(state.requests.start)],
+    models: all.models,
+    total: 2,
+    daily: [{ date: '2024-05-02', requests: 2, input: 20, output: 10, cacheRead: 4, cacheWrite: 2 }],
+    totals: { requests: 2, input: 20, output: 10, cacheRead: 4, cacheWrite: 2 },
+    earliestAt: from,
+  }, 'from/to 均含端点，模型/搜索/状态/日期共同影响所有统计');
+  assert.deepEqual(projectUsageHistory(state, { ...filters, status: 'error' }).records.map(r => r.id), ['error']);
+  assert.deepEqual(projectUsageHistory(state, { ...filters, status: 'running' }).records.map(r => r.id), ['running']);
+  assert.equal(projectUsageHistory(state, { ...filters, query: 'GLM-5-air' }).total, 0, '模型选择与搜索不是二选一');
+});
+
+test('模型筛选跨页统计一致；全局 models 独立于日期、状态、搜索、模型选择与分页', () => {
+  const { state, from, to } = modelFilterFixture();
+  const all = projectUsageHistory(state);
+  const filters = { from, to, model: 'GLM-5', query: 'conv-filter' };
+  const complete = projectUsageHistory(state, filters);
+  assert.deepEqual(complete.records.map(r => r.id), ['end', 'running', 'error', 'start']);
+  const collected = [];
+  for (let offset = 0; offset <= complete.total; offset += 1) {
+    const page = projectUsageHistory(state, { ...filters, limit: 1, offset });
+    assert.deepEqual(page, { ...complete, records: complete.records.slice(offset, offset + 1) }, `offset=${offset} 只切 records`);
+    collected.push(...page.records);
+  }
+  assert.deepEqual(collected, complete.records, '遍历所有页无漏项或重复');
+  assert.deepEqual(projectUsageHistory(state, { ...filters, limit: 0 }), { ...complete, records: [] });
+  for (const options of [
+    { from: to + 1 }, { to: from - 1 }, { status: 'error' }, { query: 'no-such' },
+    { model: 'missing-model' }, { ...filters, status: 'success', limit: 0, offset: 100 },
+    { limit: 1, offset: 1000 },
+  ]) {
+    assert.deepEqual(projectUsageHistory(state, options).models, all.models, JSON.stringify(options));
+  }
+  const reversed = { requests: Object.fromEntries(Object.entries(state.requests).reverse()) };
+  assert.deepEqual(projectUsageHistory(reversed).models, all.models, '历史行插入顺序不改变模型排序');
+});
+
+test('空历史、无模型与无有效请求都返回 models；损坏 startedAt 不进入记录或模型选项', () => {
+  const empty = { records: [], models: [], total: 0, daily: [], totals: { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, earliestAt: null };
+  for (const state of [undefined, null, {}, { requests: {} }]) assert.deepEqual(projectUsageHistory(state), empty);
+  const invalid = Object.fromEntries([undefined, null, '1000', NaN, Infinity, -Infinity, 8.64e15 + 1]
+    .map((startedAt, i) => [`bad-${i}`, { requestId: `bad-${i}`, startedAt, actualModel: { model: `invalid-${i}` } }]));
+  invalid.nullRow = null;
+  assert.deepEqual(projectUsageHistory({ requests: invalid }), empty, '损坏日期不能污染全局模型列表');
+
+  const noModels = {
+    empty: { requestId: 'empty', startedAt: 1000, actualModel: { model: '' } },
+    blank: { requestId: 'blank', startedAt: 2000, actualModel: { model: '  ' } },
+    nullModel: { requestId: 'nullModel', startedAt: 3000, actualModel: { model: null } },
+    missingModel: { requestId: 'missingModel', startedAt: 4000, actualModel: {} },
+    missingActual: { requestId: 'missingActual', startedAt: 5000, requestedModel: { model: 'requested-only' } },
+  };
+  const noModelPage = projectUsageHistory({ requests: noModels });
+  assert.deepEqual(noModelPage.models, []);
+  assert.equal(noModelPage.total, 5, '缺模型的有效旧请求仍保留在全部模型中');
+  assert.deepEqual(projectUsageHistory({ requests: noModels }, { model: 'requested-only' }), empty, '只使用 actualModel.model，不取请求的首选模型');
+
+  const mixed = { requests: { ...invalid, ...noModels,
+    z: { requestId: 'z', startedAt: 6000, actualModel: { model: 'z-model' } },
+    a: { requestId: 'a', startedAt: 7000, actualModel: { model: 'GLM-5' } },
+    duplicate: { requestId: 'duplicate', startedAt: 8000, actualModel: { model: 'GLM-5' } },
+  } };
+  const page = projectUsageHistory(mixed);
+  assert.deepEqual(page.models, ['GLM-5', 'z-model']);
+  assert.equal(page.total, 8, '损坏行跳过，无模型行保留，重复模型不合并请求');
+  assert.deepEqual(projectUsageHistory(mixed, { query: 'no-such', limit: 0, offset: 100 }), { ...empty, models: ['GLM-5', 'z-model'] });
+});
+
 test('真实 runtime 装配：createAgentRuntime.usageHistory 投影临时 journal（core→投影同源，含二次脱敏）', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'h-usage-runtime-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -287,6 +396,8 @@ test('真实 runtime 装配：createAgentRuntime.usageHistory 投影临时 journ
 
   const page = await runtime.usageHistory({ query: 'api.example.com' });
   assert.equal(page.total, 1);
+  assert.deepEqual(page.models, ['m', 'old'], 'runtime 查询仍返回被搜索筛选排除的全局模型');
+  assert.deepEqual(await runtime.usageHistory({ query: 'api.example.com', model: 'm' }), page, '真实 runtime 组合模型与搜索筛选');
   assert.equal(page.records[0].id, 'rq1');
   assert.equal(page.records[0].url, 'https://api.example.com/v1/chat', '投影侧 URL 二次脱敏（旧数据去 query）');
   assert.equal(page.records[0].reasoning, 0);
@@ -300,6 +411,9 @@ test('真实 runtime 装配：createAgentRuntime.usageHistory 投影临时 journ
   t.after(() => { try { runtime2.disposeAll?.(); } catch { /* 测试结束清理 */ } });
   const page2 = await runtime2.usageHistory({ status: 'success' });
   assert.equal(page2.total, 1);
+  assert.deepEqual(await runtime2.usageHistory({ status: 'success', model: 'm' }), page2, '重开 runtime 仍支持模型与状态组合');
+  assert.deepEqual(page2.models, ['m', 'old'], '重开 runtime 后全局模型选项仍来自完整历史');
+  assert.equal((await runtime2.usageHistory({ model: 'missing-model' })).total, 0, '真实 runtime 入口透传模型参数');
   assert.equal(page2.records[0].id, 'rq1');
   assert.equal((await runtime2.usageHistory({})).earliestAt, page.records[0].at);
 });
@@ -333,7 +447,8 @@ test('全链路集成：真实 SSE → controlledStream → 磁盘 journal → r
   const { createAgentRuntime } = await import('./core.mjs');
   const runtime = await createAgentRuntime({ userDataDir: dir, getProfiles: () => ({}), resolveCapabilities: () => ({}), getAccessService: () => ({}), log: { info() {}, warn() {}, error() {} } });
   t.after(() => { try { runtime.disposeAll?.(); } catch { /* 测试结束清理 */ } });
-  await runtime.usageHistory({}); // 空查询等待 runtime 启动恢复（journalReady）完成，避免与 recover() 竞态。
+  const initial = await runtime.usageHistory({}); // 空查询等待 runtime 启动恢复（journalReady）完成，避免与 recover() 竞态。
+  assert.deepEqual(initial.models, [], '真实 runtime 的空历史也返回模型选项');
   const configA = { modelKey: 'p/a', providerId: 'p', credentialRef: 'p', model: 'a-model', baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-completions', apiKey: 'K1' };
   const configB = { ...configA, modelKey: 'p/b', model: 'b-model' };
   const owner = { conversationId: 'conv-e2e', rootRunId: 're2e', generation: 0 };
@@ -349,6 +464,7 @@ test('全链路集成：真实 SSE → controlledStream → 磁盘 journal → r
   // runtime.usageHistory 与 IPC usage:get-history 处理器调用的是同一入口。
   const all = await runtime.usageHistory({});
   assert.equal(all.total, 2, '回退两次 HTTP attempt 各一行');
+  assert.deepEqual(all.models, ['a-model', 'b-model'], '全局选项包含主模型与真实回退模型，不取响应载荷的 test 标识');
   const success = all.records[0];
   assert.equal(success.status, 'success');
   assert.equal(success.model, 'b-model', '真实请求模型（回退后的候选）');
@@ -367,6 +483,21 @@ test('全链路集成：真实 SSE → controlledStream → 磁盘 journal → r
   assert.equal(successOnly.total, 1);
   assert.deepEqual(successOnly.totals, { requests: 1, input: 4, output: 2, cacheRead: 0, cacheWrite: 0 }, 'tokens 只由成功 attempt 承担');
   assert.equal((await runtime.usageHistory({ query: 'b-model' })).total, 1);
+  assert.deepEqual(await runtime.usageHistory({ model: 'b-model' }), successOnly, '真实入口精确筛选实际回退模型，统计同源');
+  const filters = { model: 'b-model', from: success.at, to: success.at, query: 'CONV-E2E', status: 'success' };
+  assert.deepEqual(await runtime.usageHistory(filters), successOnly, '真实入口透传模型/含端点日期/搜索/状态组合');
+  assert.deepEqual(await runtime.usageHistory({ ...filters, limit: 0, offset: 1 }), { ...successOnly, records: [] }, '筛选分页不改变完整统计与模型选项');
+  assert.deepEqual(await runtime.usageHistory({ model: 'a-model', status: 'error' }), {
+    records: [failed], models: all.models, total: 1,
+    daily: [{ date: localStamp(failed.at), requests: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }],
+    totals: { requests: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, earliestAt: failed.at,
+  }, '失败 attempt 也可按实际模型选择，零 token 不丢失请求');
+  const noMatch = { records: [], models: all.models, total: 0, daily: [], totals: { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, earliestAt: null };
+  assert.deepEqual(await runtime.usageHistory({ model: 'b' }), noMatch, '真实入口不能用 query 子串代替模型精确匹配');
+  assert.deepEqual(await runtime.usageHistory({ ...filters, status: 'error' }), noMatch, '模型与状态筛选取交集');
+  assert.deepEqual(await runtime.usageHistory({ ...filters, from: success.at + 1 }), noMatch, '日期排空时模型选项仍完整');
+  assert.deepEqual(await runtime.usageHistory({ ...filters, query: 'no-such' }), noMatch, '搜索排空时模型选项仍完整');
+  assert.deepEqual(await runtime.usageHistory({ model: '' }), all, '真实入口空模型参数表示全部');
   const paged = await runtime.usageHistory({ limit: 1, offset: 1 });
   assert.deepEqual(paged.records.map(r => r.model), ['a-model']);
   assert.equal(paged.total, 2);
@@ -391,9 +522,13 @@ test('IPC 边界静态接线：preload getUsageHistory → usage:get-history →
   const here = path.dirname(fileURLToPath(import.meta.url));
   const ipc = await readFile(path.join(here, '../ipc/conversation.ipc.mjs'), 'utf8');
   const preload = await readFile(path.join(here, '../../preload/index.cjs'), 'utf8');
+  const core = await readFile(path.join(here, './core.mjs'), 'utf8');
   const handlerAt = ipc.indexOf('ipcMain.handle(IPC.usage.getHistory');
   const serviceAt = ipc.indexOf('getAgentRuntime().usageHistory(options)');
   assert.ok(handlerAt >= 0 && serviceAt > handlerAt, 'usage:get-history 处理器必须调用 usageHistory 服务入口');
   assert.ok(preload.includes('getUsageHistory:'), 'preload 暴露 getUsageHistory');
   assert.ok(preload.includes("'usage:get-history'"), 'preload 经 usage:get-history 通道');
+  assert.match(preload, /getUsageHistory:\s*\(options\)\s*=>\s*ipcRenderer\.invoke\('usage:get-history', options\)/, 'preload 原样透传 options（含 model）');
+  assert.ok(ipc.includes("const options = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};"), 'IPC 接收完整查询对象，不丢弃 model 字段');
+  assert.match(core, /async function usageHistory\(options = \{\}\)\s*\{\s*await journalReady;\s*return journal\.project\(state => projectUsageHistory\(state, options\)\);/, '真实 runtime 原样将 options 传给投影');
 });

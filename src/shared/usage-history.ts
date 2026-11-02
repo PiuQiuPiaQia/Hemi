@@ -50,6 +50,8 @@ export type UsageHistoryQuery = {
   from?: number;
   to?: number;
   query?: string;
+  /** 实际模型 ID 精确匹配；缺省或空串表示全部模型。 */
+  model?: string;
   status?: 'all' | UsageHistoryStatus;
   limit?: number;
   offset?: number;
@@ -57,6 +59,8 @@ export type UsageHistoryQuery = {
 
 export type UsageHistoryResponse = {
   records: UsageHistoryRecord[];
+  /** 完整有效历史的实际模型 ID，去重排序，不受筛选或分页影响。 */
+  models: string[];
   total: number;
   daily: UsageHistoryDailyStat[];
   totals: UsageHistoryTotals;
