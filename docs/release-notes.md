@@ -1,6 +1,6 @@
 完善文件预览，并修复退出保护、GLM 编程套餐续签与思考强度映射。
 
-- 对话交付物、任务产物与附件统一扩展文档、音频等预览：PDF、Word、Excel、PowerPoint 可查看原文并提取文字；CSV/TSV 支持表格与原文切换，HTML 在受限沙箱中预览并可查看源码，更多配置与代码文件按纯文本显示。
+- 对话交付物、任务产物与附件统一扩展文档、音频等预览：PDF、Word、Excel、PowerPoint 可查看原文并提取文字；CSV 支持表格与原文切换，HTML 在受限沙箱中预览并可查看源码，更多配置与代码文件按纯文本显示。
 - 重启后可从当前会话归档恢复附件来源；原文件移动或删除时明确提示来源不可用。任务远程产物仍需先下载再预览。
 - 应用退出期间拒绝新的输入和会话执行，避免取消后又接受任务；保留未发送的草稿，重新启动后由用户明确发送，不自动重放。
 - GLM 编程套餐跟进 ZCode 3.17.1 请求头，按令牌真实有效期安排提前续签，避免短有效期令牌在每次请求时反复续签或被误判为有效期不足。
@@ -12,7 +12,7 @@
 
 Expanded file previews and fixes for shutdown admission, GLM Coding Plan token renewal, and thinking-level mapping.
 
-- Conversation deliverables, task artifacts, and attachments gain document and audio previews. PDF, Word, Excel, and PowerPoint support original-document viewing and text extraction; CSV/TSV offer table and raw-text views; HTML uses a restricted sandbox with a source toggle. More configuration and code formats display as plain text.
+- Conversation deliverables, task artifacts, and attachments gain document and audio previews. PDF, Word, Excel, and PowerPoint support original-document viewing and text extraction; CSV offer table and raw-text views; HTML uses a restricted sandbox with a source toggle. More configuration and code formats display as plain text.
 - Attachments can recover their source from the current conversation archive after restart. Moved or deleted originals show a source-unavailable message. Remote task artifacts still need to be downloaded before previewing.
 - New input and conversation execution are rejected while the app is quitting, preventing cancelled work from being replaced by a newly accepted task. Unsent drafts are preserved and require an explicit send after restart; no automatic replay.
 - GLM Coding Plan follows ZCode 3.17.1 request headers and schedules renewal from the token's actual lifetime, avoiding repeated renewal on every request or incorrectly rejecting short-lived tokens.

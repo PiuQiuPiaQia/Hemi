@@ -118,8 +118,13 @@ test('closePreviewTab：关非当前项不动正文；关当前项先右后左�
 test('isPreviewableArtifact：只认真实文件产物的受控扩展名', () => {
   assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name: '笔记.md', path: '/x', role: 'main', registeredAt: 0 }), true);
   assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name: '照片.PNG', path: '/x', role: 'main', registeredAt: 0 }), true);
-  assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name: '表格.csv', path: '/x', role: 'main', registeredAt: 0 }), false);
-  assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name: '页面.html', path: '/x', role: 'main', registeredAt: 0 }), false);
+  // 062：文本、表格、HTML、媒体与文档入口已和主进程预览能力对齐。
+  for (const name of ['表格.csv', '页面.html', '配置.json', '代码.ts', '影片.mp4', '音频.mp3', '文档.pdf', '文档.docx', '工作簿.xlsx', '演示.pptx']) {
+    assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name, path: '/x', role: 'main', registeredAt: 0 }), true, name);
+  }
+  for (const name of ['归档.zip', '程序.exe']) {
+    assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name, path: '/x', role: 'main', registeredAt: 0 }), false, name);
+  }
   assert.equal(isPreviewableArtifact({ id: 'a', kind: 'file', name: '无扩展名', path: '/x', role: 'main', registeredAt: 0 }), false);
   // 链接产物与无名文件不提供预览入口（R-01：来源不冒充预览文件）。
   assert.equal(isPreviewableArtifact({ id: 'a', kind: 'link', name: '参考.md', url: 'https://x', registeredAt: 0 }), false);
