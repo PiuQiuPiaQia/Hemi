@@ -25,7 +25,13 @@ export async function freezeModelPolicy({ store, modelKey = null, fixedConfig = 
   const routed = effectiveKey === 'auto';
   if (routed && directory.envOverride) fail('环境变量正在覆盖模型配置，自动路由不可用；移除覆盖后重试');
   const policy = routed ? compileRolePolicy(directory.roleModels) : null;
-  if (routed && !policy) fail('角色路由还没配主 agent 模型');
+  if (routed && !policy) {
+    // 完全没配模型时说「未配置」；有模型但主槽位空着才说路由没配。
+    const anyModel = (directory.providers ?? []).some(provider => (provider.models ?? []).length > 0);
+    fail(anyModel
+      ? '角色路由还没配主 agent 模型'
+      : '未配置模型：先到 设置 → 模型与路由 添加供应商和模型。');
+  }
   const keys = routed ? [...new Set([...policy.main, ...Object.values(policy.roles).flat()])] : [effectiveKey];
   const candidates = {};
   for (const key of keys) {

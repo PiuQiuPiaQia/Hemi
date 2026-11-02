@@ -38,7 +38,13 @@ test('同凭据轮换取新 secret，但 endpoint 变化不改冻结计划；撤
   delete configs['p/main']; await assert.rejects(hydrateCandidate(candidate, store), /撤销/);
 });
 test('未配主模型、失效角色及无效预算明确拒绝', async () => {
-  const { store, directory } = fixture(); delete directory.roleModels;
+  const { store, directory } = fixture();
+  // 完全没配模型（目录为空数组）报「未配置模型」，不误报成路由问题。
+  const noModels = { thinkingLevel: 'default', providers: [] };
+  await assert.rejects(freezeModelPolicy({ store: { list: async () => noModels, resolveStrict: async () => ({ ok: false }) } }), /未配置模型/);
+  // 有模型但主槽位空着＝路由没配主模型。
+  directory.providers = [{ id: 'p', models: [{ id: 'main' }, { id: 'vision' }] }];
+  delete directory.roleModels;
   await assert.rejects(freezeModelPolicy({ store, modelKey: 'auto' }), /没配主/);
   assert.equal(compileRolePolicy({}), null);
   directory.roleModels = { main: 'p/main', fixer: 'gone/model' };
