@@ -1,6 +1,6 @@
 {
   "scope": "JavaScript modules represented in Vite output chunks plus explicit stylesheet inputs imported by globals.css; excludes main-process/native/Electron dependencies",
-  "lockfileSha256": "88c38759832b8336bcb2e6715cfba98441214fba3367e980a131d05adcaa3803",
+  "lockfileSha256": "b94f7f4e359268310b45dca7174783ab1115a3fe559312c85608d68a89214181",
   "components": [
     {
       "name": "@aiden0z/pptx-renderer",
