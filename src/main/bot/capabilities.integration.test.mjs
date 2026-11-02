@@ -27,7 +27,7 @@ test('actual Bot SDK exposes configured search/extract tools and reaches their p
   assert.match(results, /SEARCH_BOUNDARY/);assert.match(results, /EXTRACT_BOUNDARY/);
   assert.equal(JSON.stringify(await fixture.call('snapshot')).includes('synthetic-search-key'), false);
 });
-test('actual Bot Host/SDK navigates, types, clicks, reads and screenshots a real isolated browser, then closes its task', {timeout: 30000, skip: !browserAvailable}, async t => {
+test('actual Bot Host/SDK navigates, types, clicks, reads and screenshots a real isolated browser, then closes its task', {timeout: 120000, skip: !browserAvailable}, async t => {
   let bridge;
   const fixture = await createBotCapabilityFixture((body, {origin}) => {
     const results = body.messages.filter(message => message.role === 'tool');

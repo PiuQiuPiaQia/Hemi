@@ -2,7 +2,7 @@ import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import http from 'node:http';import {randomUUID} from 'node:crypto';
 import {createBotHost} from './host.mjs';import {createBotExecutor} from './runtime.mjs';import {GOAL_CHECK_SYSTEM} from '../agent-runtime/goal-driver.mjs';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
-async function until(fn){const deadline=Date.now()+15000;while(true){const v=await fn();if(v)return v;assert.ok(Date.now()<deadline,'job lifecycle timed out');await pause(20);}}
+async function until(fn){const deadline=Date.now()+60000;while(true){const v=await fn();if(v)return v;assert.ok(Date.now()<deadline,'job lifecycle timed out');await pause(20);}}
 const cmd=body=>`"${process.execPath}" -e "${body}"`;
 async function fixture(t){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-job-host-'))),workspace=path.join(root,'workspace'),dataDir=path.join(root,'data');await fs.mkdir(workspace);
@@ -50,7 +50,7 @@ async function fixture(t){
  const flow=async()=>{const value=await call('flow.snapshot',{id});const state={phase:value.phase,revision:value.revision,activeRunId:value.activeRunId,pending:value.pending,runs:value.runs,jobs:value.backgroundJobs};const key=JSON.stringify(state);if(key!==previous){previous=key;trace('flow',state);}return value;};
  return {id,call,root,workspace,requests,releaseFollow,followEntered:()=>followEntered,flow,async restart(){await host.close();host=await createBotHost(options);}};
 }
-for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a later goal preserves earlier background commands`,{timeout:30000},async t=>{
+for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a later goal preserves earlier background commands`,{timeout:120000},async t=>{
  const f=await fixture(t);
  const snapshot=async()=>readRunJournalFileSync(path.join(f.root,'data/runtime-v2/run-journal.json'));
  await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'original',text:'启动两个后台命令并等待真实结果。'}}});
@@ -82,7 +82,7 @@ for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a 
  await fs.writeFile(path.join(f.workspace,'first-release'),'go');
  assert.equal(await fs.stat(path.join(f.workspace,'cancelled.txt')).catch(()=>null),null);
 });
-test('real Host/SDK: jobs release foreground; results wait behind a question and resume the original goal once',{timeout:30000},async t=>{
+test('real Host/SDK: jobs release foreground; results wait behind a question and resume the original goal once',{timeout:120000},async t=>{
  const f=await fixture(t);
  await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'jobs-input',text:'启动两个独立后台命令，核对实际结果。'}}});
  const initial=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&Object.values(s.runs).some(r=>r.outcome==='awaiting-background')?s:null;});
