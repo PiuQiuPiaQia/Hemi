@@ -37,7 +37,18 @@ export async function createBotCapabilityFixture(respond, {capabilityOptions = {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const options = {dataDir: path.join(root, 'data'), defaultDir: path.join(root, 'workspace'), capabilityOptions, allowLoopbackModels: true, validateModel: async () => {}};
   trace('listening', server.address());
-  let host = await createBotHost(options);trace('host-created');const hello = await host.request('handshake');trace('handshake');
+  let host, closing;
+  const close = () => closing ??= (async () => {
+    trace('close-host');
+    try {await host?.close();}
+    finally {
+      trace('close-server');server.closeAllConnections();
+      await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await fs.rm(root, {recursive: true, force: true});trace('closed');
+    }
+  })();
+  try {
+  host = await createBotHost(options);trace('host-created');const hello = await host.request('handshake');trace('handshake');
   const call = (method, params = {}) => host.request(method, {instanceId: hello.instanceId, requestId: 'request-' + randomUUID(), ...params});
   await call('model.sync', {models: [{modelKey: 'fixture/model', providerId: 'fixture', name: 'Fixture', model: 'fixture', api: 'openai-completions',
     baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'synthetic-only-key', supportsVision: true, thinkingLevel: 'off'}]});
@@ -55,6 +66,11 @@ export async function createBotCapabilityFixture(respond, {capabilityOptions = {
       }, decidePermission ? 120000 : 30000);
     },
     async restart() {trace('restart-close');await host.close();trace('restart-create');host = await createBotHost(options);trace('restarted');},
-    async close() {trace('close-host');await host.close();trace('close-server');server.closeAllConnections();await new Promise(resolve => server.close(resolve));await fs.rm(root, {recursive: true, force: true});trace('closed');},
+    close,
   };
+  } catch (error) {
+    try {await close();}
+    catch (cleanupError) {throw new AggregateError([error, cleanupError], 'Bot fixture initialization and cleanup failed');}
+    throw error;
+  }
 }

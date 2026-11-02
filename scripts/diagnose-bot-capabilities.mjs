@@ -5,7 +5,8 @@ const scenario=process.argv[2] ?? 'all';
 const patterns={browser:'actual Bot Host/SDK navigates',history:'actual Bot conversation_read',all:'.*'};
 if(!Object.hasOwn(patterns,scenario))throw new Error('Unknown probe scenario');
 console.log('BOT_PROBE',JSON.stringify({scenario,node:process.version,platform:process.platform,arch:process.arch}));
-const child=spawn(process.execPath,['--test','--test-reporter=spec',`--test-name-pattern=${patterns[scenario]}`,'src/main/bot/capabilities.integration.test.mjs'],{
+const files=['src/main/bot/capabilities.integration.test.mjs',...(scenario==='all'?['scripts/test/bot-capability-fixture.test.mjs','src/main/bot/runtime.integration.test.mjs']:[])];
+const child=spawn(process.execPath,['--test','--test-reporter=spec',`--test-name-pattern=${patterns[scenario]}`,...files],{
  stdio:'inherit',env:{...process.env,HEMI_BOT_FIXTURE_TRACE:'1',DEBUG:'pw:browser'},detached:process.platform!=='win32',
 });
 let expired=false;

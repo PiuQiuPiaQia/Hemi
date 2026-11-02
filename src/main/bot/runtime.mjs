@@ -86,7 +86,7 @@ export async function validateCloudModel(config, {signal: externalSignal} = {}) 
 /** Cloud host bindings only. Desktop and Bot share the same execution runtime. */
 export function createBotExecutor({dataDir, readEntries, readConversation, saveEntries, onPermission, onDelivery, recordUsage, getModel, attachmentPrompt, flowService, capabilities, desktop = null, goalPolicy, backgroundQuietReviewMs = 60000}) {
   const active = new Map(), generations = new Map(), cancelledBeforeStart = new Set();
-  const access = createPermissionService({dir: dataDir}), ready = access.load();
+  const access = createPermissionService({dir: dataDir});
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
   const profilesFor = ctx => ({
     async list() { return {roleModels: {}, defaultModelId: ctx?.policySnapshot?.fixedKey}; },
@@ -142,6 +142,11 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
       });
     },
   });
+  // Acquire the process-owned runtime before starting asynchronous permission
+  // writes. A rejected second Host must not leave an unowned initialization
+  // racing the caller's cleanup (or an unhandled rejected load).
+  const ready = access.load();
+  void ready.catch(() => {}); // run/close still await and propagate this failure.
   return {
     async run(spec, apply) {
       await ready;
