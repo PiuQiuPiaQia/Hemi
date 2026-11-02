@@ -1308,6 +1308,9 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
     mediaUrl: new URL('./fixtures/preview-video.webm', window.location.href).href,
   }),
   openConversationDeliverable: async () => ({ ok: true, message: 'fixtures 桩：已请求系统打开' }),
+  readConversationDeliverableText: async () => ({
+    ok: true, kind: 'text', markdown: false, text: '（fixtures 桩：文档提取文字示例）',
+  }),
   getUiPreferences: async () => ({
     floatingOrbEnabled: true,
     primarySpeakerEnabled: true,

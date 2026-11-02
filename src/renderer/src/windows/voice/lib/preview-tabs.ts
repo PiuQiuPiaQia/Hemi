@@ -45,6 +45,18 @@ export function previewTabKey(tab: PreviewTabId): string {
 /** 本期支持应用内预览的扩展名（主进程读取侧同名单把关；这里只做入口门槛）。 */
 export const PREVIEWABLE_EXTENSIONS = new Set([
   'md', 'markdown', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+  // 与主进程 PREVIEW_TEXT_EXTENSIONS 同步的文本扩展（读侧单一清单；见
+  // src/main/delivery/register.mjs）＋媒体（hemi-media:// 流）与文档（附件线
+  // 解析器）——三条线读取能力已对齐 062。
+  'json', 'csv', 'log', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env', 'properties',
+  'html', 'htm', 'css', 'scss', 'less', 'vue', 'svelte', 'astro',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
+  'py', 'pyi', 'rb', 'go', 'rs', 'java', 'kt', 'kts', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'php', 'swift', 'm',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'sql', 'lua', 'pl', 'r',
+  'dart', 'scala', 'ex', 'exs', 'erl', 'clj', 'proto', 'graphql', 'tf',
+  'mp4', 'm4v', 'webm', 'mov',
+  'mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'flac', 'opus',
+  'pdf', 'docx', 'xlsx', 'pptx',
 ]);
 
 export function isPreviewableArtifact(artifact: TaskArtifact): boolean {

@@ -5,6 +5,20 @@ import { Readable } from 'node:stream';
 
 export const VIDEO_MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
 
+/** 音频预览与视频共用 hemi-media:// 受控流（Range 请求支持拖动进度）。 */
+export const AUDIO_MIME = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.flac': 'audio/flac',
+  '.opus': 'audio/ogg',
+};
+
+export const MEDIA_MIME = { ...VIDEO_MIME, ...AUDIO_MIME };
+
 /** URL 只带随机令牌，不接受路径；每次范围请求都重新经过原交付的受控解析。 */
 export function createMediaPreviewRegistry() {
   const sources = new Map();

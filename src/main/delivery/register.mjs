@@ -13,6 +13,9 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { conversationMedia, MEDIA_MIME } from '../services/media-preview.mjs';
+import { DOCUMENT_FILE_BYTE_LIMIT, isDocumentFile, parseDocumentBytes, readDocumentBytes } from '../composer/documents.mjs';
+
 import {
   DELIVERY_IMAGE_EXTENSIONS,
   DELIVERY_IMAGE_MAX_BYTES,
@@ -191,11 +194,31 @@ export function createDeliveryImageReader({ history, remoteIo = null }) {
  */
 // 062：名单同时供会话交付物读取（conversation-deliverables.mjs）复用——
 // 「哪些格式能应用内预览」在任务与对话两侧必须是同一份清单。
-export const PREVIEW_TEXT_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
+// 文本预览名单：md/txt 之外纳入常见配置、数据与代码扩展名（纯文本呈现，
+// 不做语法高亮；markdown 渲染只认 .md/.markdown）。二进制嗅探交给上游
+// 读取失败的 utf8 兜底——名单外格式按 unsupported 处理。
+export const PREVIEW_TEXT_EXTENSIONS = new Set([
+  '.md', '.markdown', '.txt',
+  '.json', '.csv', '.log', '.xml', '.yml', '.yaml', '.toml', '.ini', '.conf', '.cfg', '.env', '.properties',
+  '.html', '.htm', '.css', '.scss', '.less', '.vue', '.svelte', '.astro',
+  '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx',
+  '.py', '.pyi', '.rb', '.go', '.rs', '.java', '.kt', '.kts', '.c', '.h', '.cpp', '.hpp', '.cc', '.cs', '.php', '.swift', '.m',
+  '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.sql', '.lua', '.pl', '.r',
+  '.dart', '.scala', '.ex', '.exs', '.erl', '.clj', '.proto', '.graphql', '.tf',
+]);
 const PREVIEW_TEXT_MAX_BYTES = 1024 * 1024;
 
 export function createArtifactPreviewReader({ history, remoteIo = null }) {
-  async function readArtifactPreview(taskId, artifactId) {
+  /** 远端任务文档：SSH 受控读取后进与附件/会话线同一解析管线（20MB 同限）。 */
+  async function readRemoteDocumentBytes(artifact) {
+    if (!remoteIo) throw new Error(`远端文件暂不可读（${artifact.host}）`);
+    const buf = await remoteIo.read({ host: artifact.host, filePath: artifact.path });
+    if (!buf) throw new Error(`远端文件读取失败（${artifact.host}），可稍后重试`);
+    if (buf.length > DOCUMENT_FILE_BYTE_LIMIT) throw new Error('文档附件支持 20MB 内');
+    return { bytes: new Uint8Array(buf), format: path.extname(artifact.path).slice(1).toLowerCase() };
+  }
+
+  async function readArtifactPreview(taskId, artifactId, { textOnly = false } = {}) {
     if (!history) return { ok: false, message: '任务档案不可用' };
     const record = history.getRecord(String(taskId ?? ''));
     if (!record || record.corrupt) return { ok: false, message: '任务记录不存在' };
@@ -206,8 +229,46 @@ export function createArtifactPreviewReader({ history, remoteIo = null }) {
     const ext = path.extname(artifact.path).toLowerCase();
     const isText = PREVIEW_TEXT_EXTENSIONS.has(ext);
     const isImage = DELIVERY_IMAGE_EXTENSIONS.has(ext);
-    if (!isText && !isImage) {
+    const mediaMime = MEDIA_MIME[ext] ?? null;
+    const isDocument = isDocumentFile(artifact.path);
+    if (!isText && !isImage && !mediaMime && !isDocument) {
       return { ok: false, message: '这个格式暂不支持应用内预览' };
+    }
+    // 062 对齐：任务产物媒体走 hemi-media:// 受控流（Range 拖动）；远端媒体
+    // 不经本机文件系统，直接说明（下载后可看）。
+    if (mediaMime) {
+      if (artifact.host) return { ok: false, message: '远端媒体暂不支持直接播放，请下载到本机后查看' };
+      const mediaUrl = conversationMedia.register(() => {
+        const current = history.getRecord(String(taskId ?? ''));
+        const item = (current?.deliverables ?? []).find((entry) => entry?.id === String(artifactId));
+        return !current || current.corrupt || !item?.path || item.host ? null : { path: item.path, mime: MEDIA_MIME[path.extname(item.path).toLowerCase()] };
+      });
+      return {
+        ok: true,
+        kind: mediaMime.startsWith('audio') ? 'audio' : 'video',
+        mediaUrl,
+        name: artifact.name ?? path.basename(artifact.path),
+      };
+    }
+    // 062 对齐：任务产物文档复用附件线解析器（textOnly＝DocumentPreview「提取文字」）。
+    if (isDocument) {
+      try {
+        const source = artifact.host
+          ? await readRemoteDocumentBytes(artifact)
+          : await readDocumentBytes(artifact.path);
+        if (textOnly) {
+          const { text } = await parseDocumentBytes(source.bytes, source.format, { allowEmpty: true });
+          return { ok: true, kind: 'text', markdown: false, text };
+        }
+        if (source.format === 'xlsx') {
+          const { sheets } = await parseDocumentBytes(source.bytes.slice(), source.format, { allowEmpty: true });
+          return { ok: true, kind: 'document', document: { ok: true, format: 'xlsx', sheets } };
+        }
+        if (source.format !== 'pdf') await parseDocumentBytes(source.bytes.slice(), source.format, { allowEmpty: true });
+        return { ok: true, kind: 'document', document: { ok: true, format: source.format, bytes: source.bytes } };
+      } catch (error) {
+        return { ok: false, message: error?.message ?? '文档解析失败，可重试或用系统应用打开' };
+      }
     }
     const maxBytes = isText ? PREVIEW_TEXT_MAX_BYTES : DELIVERY_IMAGE_MAX_BYTES;
     // 049 R-11：远端产物经 SSH 读（预览栏路径带主机，无「用默认应用打开」）。
@@ -215,7 +276,7 @@ export function createArtifactPreviewReader({ history, remoteIo = null }) {
       const buf = remoteIo ? await remoteIo.read({ host: artifact.host, filePath: artifact.path }) : null;
       if (!buf) return { ok: false, message: `远端文件读取失败（${artifact.host}），可稍后重试` };
       if (buf.length > maxBytes) return { ok: false, message: '文件太大，不适合应用内预览' };
-      if (isText) return { ok: true, kind: 'text', markdown: ext !== '.txt', text: buf.toString('utf8') };
+      if (isText) return { ok: true, kind: 'text', markdown: ['.md', '.markdown'].includes(ext), text: buf.toString('utf8') };
       return { ok: true, kind: 'image', dataUrl: `data:${IMAGE_MIME[ext]};base64,${buf.toString('base64')}` };
     }
     try {
@@ -230,7 +291,7 @@ export function createArtifactPreviewReader({ history, remoteIo = null }) {
     try {
       const data = readFileSync(artifact.path);
       if (isText) {
-        return { ok: true, kind: 'text', markdown: ext !== '.txt', text: data.toString('utf8') };
+        return { ok: true, kind: 'text', markdown: ['.md', '.markdown'].includes(ext), text: data.toString('utf8') };
       }
       return {
         ok: true,
@@ -263,7 +324,9 @@ export function createArtifactPreviewOpener({ history, openInBrowser }) {
       return { ok: false, message: `这是服务器 ${artifact.host} 上的文件：请在预览栏查看，或下载到本机后再打开` };
     }
     const ext = path.extname(artifact.path).toLowerCase();
-    if (!PREVIEW_TEXT_EXTENSIONS.has(ext) && !DELIVERY_IMAGE_EXTENSIONS.has(ext)) {
+    // 062 对齐：媒体/文档同样放行——浏览器原生支持 pdf/音视频；Office 格式
+    // 会触发浏览器下载，仍是可用出路（应用内预览是主路径）。
+    if (!PREVIEW_TEXT_EXTENSIONS.has(ext) && !DELIVERY_IMAGE_EXTENSIONS.has(ext) && !MEDIA_MIME[ext] && !isDocumentFile(artifact.path)) {
       return { ok: false, message: '这个格式不支持在浏览器打开' };
     }
     try {

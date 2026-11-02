@@ -23,7 +23,7 @@ import {
 
 import { Markdown } from '@/shared/markdown';
 import type { MessageAttachmentView, TaskActionName, TaskArtifact, TaskStateSnapshot } from '@/shared/types';
-import type { AttachmentDocumentPreview, ConversationDeliverableView } from '@shared/protocol';
+import type { ArtifactPreviewResult, AttachmentDocumentPreview, ConversationDeliverableView } from '@shared/protocol';
 import {
   isPreviewableArtifact,
   previewTabKey,
@@ -35,6 +35,8 @@ import { TaskProcessBody } from './task-process';
 import { WorkflowRunPreview } from './workflow-run-preview';
 import { WorkflowDefinitionPreview } from './workflow-definition-preview';
 const DocumentPreview = lazy(() => import('./document-preview'));
+// CSV 表格视图复用 document-preview.css 的表格样式（h-doc-* 类）。
+import '../../../../shared/components/document-preview.css';
 
 /**
  * 027 R-02/05/06＋028 R-03/04：应用内预览面板（多 Tab）。
@@ -57,7 +59,7 @@ const DocumentPreview = lazy(() => import('./document-preview'));
 
 type PreviewResult = {
   ok: boolean;
-  kind?: 'text' | 'image' | 'video' | 'unsupported' | 'document';
+  kind?: 'text' | 'image' | 'video' | 'audio' | 'unsupported' | 'document';
   document?: AttachmentDocumentPreview;
   mediaUrl?: string;
   markdown?: boolean;
@@ -136,6 +138,121 @@ function VideoPreview({ url, name, onRetry, onOpen }: { url: string; name: strin
       <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm" onClick={onOpen}>用系统应用打开</button>
     </div>
   ) : <video className="h62-preview-video" src={url} controls playsInline preload="metadata" aria-label={name} onError={() => setFailed(true)} />;
+}
+
+/** 062：音频预览——与视频同一 hemi-media:// 受控流（Range 支持拖动进度）。 */
+function AudioPreview({ url, name, onRetry, onOpen }: { url: string; name: string; onRetry: () => void; onOpen: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return failed ? (
+    <div className="h37-note h24-preview-error" data-tone="warn" role="note">
+      <p>音频读取或解码失败，文件可能已移动，或使用了当前不支持的编码。</p>
+      <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm" onClick={onRetry}>重试读取</button>
+      <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm" onClick={onOpen}>用系统应用打开</button>
+    </div>
+  ) : (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, flex: 1, minHeight: 0, padding: 24 }}>
+      <p style={{ margin: 0, fontSize: 13, textAlign: 'center', wordBreak: 'break-all' }}>{name}</p>
+      <audio src={url} controls preload="metadata" aria-label={name} onError={() => setFailed(true)} style={{ width: 'min(480px, 100%)' }} />
+    </div>
+  );
+}
+
+/** CSV/TSV 只读表格（dsh delimited 思路）：浏览器端解析，复用 xlsx 表格视图的
+ * 截断口径（500 行 × 64 列）；引号包裹与分隔符内转义按 RFC 4180 近似处理。 */
+function delimitedColumnName(index: number): string {
+  let name = '';
+  let value = index + 1;
+  while (value > 0) { value -= 1; name = String.fromCharCode(65 + value % 26) + name; value = Math.floor(value / 26); }
+  return name;
+}
+
+function parseDelimited(source: string, delimiter: string): { rows: Array<Array<{ address: string; value: string }>>; truncated: boolean } {
+  const rows: Array<Array<{ address: string; value: string }>> = [];
+  let row: Array<{ address: string; value: string }> = [];
+  let field = '';
+  let quoted = false;
+  const pushField = () => { row.push({ address: `${delimitedColumnName(row.length)}${rows.length + 1}`, value: field }); field = ''; };
+  const text = source.replace(/\r\n?/g, '\n');
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? '';
+    if (quoted) {
+      if (char === '"') { quoted = false; continue; }
+      field += char;
+      continue;
+    }
+    if (char === '"') { quoted = true; continue; }
+    if (char === delimiter) { pushField(); continue; }
+    if (char === '\n') {
+      if (field || row.length) { pushField(); rows.push(row); row = []; }
+      continue;
+    }
+    field += char;
+  }
+  if (field || row.length) { pushField(); rows.push(row); }
+  const maxRows = 500;
+  const truncated = rows.length > maxRows;
+  const visible = rows.slice(0, maxRows).map((cells) => cells.slice(0, 64));
+  return { rows: visible.length ? visible : [[{ address: 'A1', value: '' }]], truncated };
+}
+
+function CsvTable({ text, name, delimiter }: { text: string; name: string; delimiter: string }) {
+  const [source, setSource] = useState(true);
+  const { rows, truncated } = useMemo(() => parseDelimited(text, delimiter), [text, delimiter]);
+  return (
+    <div className="h-doc-spreadsheet" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+      <div className="h-doc-sheet-tabs" role="tablist" aria-label="表格视图" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span role="tab" aria-selected={source}>{name}</span>
+        <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm" onClick={() => setSource(!source)}>{source ? '查看原始文本' : '查看表格'}</button>
+      </div>
+      {source ? (
+        <div className="h-doc-sheet-scroll" role="tabpanel" tabIndex={0}>
+          <table className="h-doc-sheet">
+            <thead><tr><th aria-label="行号" />{rows[0]!.map((_, column) => <th key={column} scope="col">{delimitedColumnName(column)}</th>)}</tr></thead>
+            <tbody>{rows.map((cells, index) => <tr key={index}><th scope="row">{index + 1}</th>{cells.map((cell, column) => <td key={column}>{cell.value}</td>)}</tr>)}</tbody>
+          </table>
+          {truncated ? <p className="h-doc-note">内容过长，表格视图已截断（最多 500 行、每行 64 个单元格）。</p> : null}
+        </div>
+      ) : (
+        <pre className="h24-preview-text" style={{ margin: 0, padding: 16, overflow: 'auto', flex: 1, minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</pre>
+      )}
+    </div>
+  );
+}
+
+/**
+ * HTML 静态渲染：sandbox iframe（不授权脚本）+ CSP 禁外部资源；可切源码视图。
+ *
+ * CSP 不能作 iframe 属性（标准里没有 csp），要在被渲染文档自己的 <head> 里下
+ * meta http-equiv 才生效：无 <head> 的片段套一层骨架，有 <head> 的插在最前，
+ * 只有 <html> 的补 head。
+ */
+function withCsp(html: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:">`;
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (tag) => `${tag}${meta}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (tag) => `${tag}<head>${meta}</head>`);
+  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+}
+
+function HtmlPreview({ text, name }: { text: string; name: string }) {
+  const [rendered, setRendered] = useState(true);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+      <div className="h-doc-sheet-tabs" role="tablist" aria-label="HTML 视图" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span role="tab" aria-selected={rendered}>{name}</span>
+        <button type="button" className="h37-btn h37-btn-secondary h37-btn-sm" onClick={() => setRendered(!rendered)}>{rendered ? '查看源码' : '查看渲染'}</button>
+      </div>
+      {rendered ? (
+        <iframe
+          style={{ width: '100%', flex: 1, minHeight: 0, border: 'none', background: '#fff' }}
+          title={`${name} 网页预览`}
+          sandbox=""
+          srcDoc={withCsp(text)}
+        />
+      ) : (
+        <pre style={{ margin: 0, padding: 16, overflow: 'auto', flex: 1, minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</pre>
+      )}
+    </div>
+  );
 }
 
 export function FilePreviewPanel({
@@ -222,6 +339,26 @@ export function FilePreviewPanel({
     activeTab?.kind === 'deliverable'
       ? deliverableMetaOf?.(activeTab.conversationId, activeTab.artifactId) ?? null
       : null;
+  /** 当前 Tab 的显示名（三种文件来源共用；CSV/HTML 渲染按它分流）。 */
+  const previewFileName = currentAttachment?.name ?? currentDeliverable?.name ?? currentArtifact?.name
+    ?? (activeTab?.kind === 'deliverable' ? activeTab.linkName ?? '' : '');
+
+  /**
+   * 062：文档「提取文字」按 Tab 身份分流——三条线的读取方法同形（都回
+   * ArtifactPreviewResult）。artifact 且 artifactId=null 是任务的可阅读结果，
+   * 不是磁盘文档，直接回不可读。
+   */
+  const readDocumentText = (tab: PreviewTabId | null): Promise<ArtifactPreviewResult> => {
+    if (tab?.kind === 'attachment') return bridge.readAttachmentPreview(tab.conversationId, tab.attachmentId);
+    if (tab?.kind === 'artifact' && tab.artifactId != null) {
+      return bridge.readArtifactPreview(tab.taskId, tab.artifactId, { textOnly: true });
+    }
+    if (tab?.kind === 'deliverable') {
+      return bridge.readConversationDeliverableText?.(tab.conversationId, tab.artifactId, tab.linkPath)
+        ?? Promise.resolve({ ok: false, message: '暂无法读取文档文字' });
+    }
+    return Promise.resolve({ ok: false, message: '暂无法读取文档文字' });
+  };
 
   // ---- 读取缓存（按 Tab key；undefined/null＝读取中，失败可重试） ----
   const [previewContainer,setPreviewContainer]=useState<HTMLDivElement|null>(null);
@@ -895,12 +1032,18 @@ export function FilePreviewPanel({
               </button>
             ) : null}
           </div>
-        ) : activeResult.kind === 'document' && activeResult.document && (activeTab.kind === 'attachment'||activeTab.kind==='deliverable') ? (
+        ) : activeResult.kind === 'document' && activeResult.document ? (
           <Suspense fallback={<LoadingState className="h24-preview-status" description="正在打开文档…"/>}>
-            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? '文档'} readText={() => activeTab.kind==='attachment'?bridge.readAttachmentPreview(activeTab.conversationId, activeTab.attachmentId):bridge.readConversationDeliverableText?.(activeTab.conversationId,activeTab.artifactId,activeTab.linkPath)??Promise.resolve({ok:false,message:'暂无法读取文档文字'})} />
+            <DocumentPreview key={`${previewTabKey(activeTab)}-${loadTicks.current.get(previewTabKey(activeTab))}`} source={activeResult.document} name={currentAttachment?.name ?? currentDeliverable?.name ?? currentArtifact?.name ?? '文档'} readText={() => readDocumentText(activeTab)} />
           </Suspense>
         ) : activeResult.kind === 'video' && activeResult.mediaUrl ? (
           <VideoPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? '预览视频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />
+        ) : activeResult.kind === 'audio' && activeResult.mediaUrl ? (
+          <AudioPreview key={activeResult.mediaUrl} url={activeResult.mediaUrl} name={activeResult.name ?? previewFileName ?? '预览音频'} onRetry={reloadCurrent} onOpen={() => activeTab && openInBrowser(activeTab)} />
+        ) : activeResult.kind === 'text' && /\.(csv|tsv)$/i.test(previewFileName) ? (
+          <CsvTable key={previewTabKey(activeTab)} text={activeResult.text ?? ''} name={previewFileName} delimiter={/\.tsv$/i.test(previewFileName) ? '\t' : ','} />
+        ) : activeResult.kind === 'text' && /\.(html?|xhtml)$/i.test(previewFileName) ? (
+          <HtmlPreview key={previewTabKey(activeTab)} text={activeResult.text ?? ''} name={previewFileName || '页面.html'} />
         ) : (
           <ResourceContent renderMarkdown={text=><Markdown text={text}/>} presentation="panel" name={currentAttachment?.name ?? currentDeliverable?.name ?? currentArtifact?.name ?? '预览图片'} content={isImage ? {kind:'image',url:activeResult.dataUrl??''} : {kind:activeResult.markdown?'markdown':'text',text:activeResult.text??''}}/>
         )}

@@ -14,6 +14,7 @@ import {
   remoteDeliveryDenied,
 } from './register.mjs';
 import { DELIVERY_LIMITS } from './delivery.mjs';
+import { pdfFixture, xlsxFixture } from '../../../scripts/lib/document-fixtures.mjs';
 
 /** 内存档案 fake：记录 appendDeliverable/mergeDeliverableMeta/setDelivery 调用。 */
 function fakeHistory(deliverables = []) {
@@ -246,13 +247,71 @@ test('readArtifactPreview：Markdown/纯文本读为文本，图片读为 data U
   }
 });
 
-test('readArtifactPreview：未支持格式/未登记/档案缺失返回可展示原因', async () => {
+test('readArtifactPreview：媒体产物走 hemi-media:// 流（video/audio），远端拒绝', async () => {
   const home = makeHome();
   try {
-    writeFileSync(path.join(home, 'table.csv'), 'a,b');
+    writeFileSync(path.join(home, 'demo.mp4'), 'video-bytes');
+    writeFileSync(path.join(home, 'voice.mp3'), 'audio-bytes');
     const reader = createArtifactPreviewReader({
       history: fakeHistory([
-        { id: 'art-csv', kind: 'file', path: path.join(home, 'table.csv') },
+        { id: 'art-mp4', kind: 'file', path: path.join(home, 'demo.mp4') },
+        { id: 'art-mp3', kind: 'file', path: path.join(home, 'voice.mp3') },
+        { id: 'art-remote', kind: 'file', path: '/srv/out/remote.mp4', host: 'server-1' },
+      ]),
+    });
+    const video = await reader.readArtifactPreview('task-1', 'art-mp4');
+    assert.equal(video.ok, true);
+    assert.equal(video.kind, 'video');
+    assert.match(video.mediaUrl, /^hemi-media:\/\/preview\//);
+    const audio = await reader.readArtifactPreview('task-1', 'art-mp3');
+    assert.equal(audio.ok, true);
+    assert.equal(audio.kind, 'audio');
+    assert.match(audio.mediaUrl, /^hemi-media:\/\/preview\//);
+    const remote = await reader.readArtifactPreview('task-1', 'art-remote');
+    assert.equal(remote.ok, false);
+    assert.match(remote.message, /远端媒体暂不支持直接播放/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('readArtifactPreview：文档产物（pdf/xlsx）进 document 预览，textOnly 提取文字', async () => {
+  const home = makeHome();
+  try {
+    writeFileSync(path.join(home, '报告.pdf'), pdfFixture());
+    writeFileSync(path.join(home, '表.xlsx'), xlsxFixture());
+    const reader = createArtifactPreviewReader({
+      history: fakeHistory([
+        { id: 'art-pdf', kind: 'file', path: path.join(home, '报告.pdf') },
+        { id: 'art-xlsx', kind: 'file', path: path.join(home, '表.xlsx') },
+      ]),
+    });
+    const pdf = await reader.readArtifactPreview('task-1', 'art-pdf');
+    assert.equal(pdf.ok, true);
+    assert.equal(pdf.kind, 'document');
+    assert.equal(pdf.document.format, 'pdf');
+    assert.ok(pdf.document.bytes.length > 0);
+    const pdfText = await reader.readArtifactPreview('task-1', 'art-pdf', { textOnly: true });
+    assert.equal(pdfText.ok, true);
+    assert.equal(pdfText.kind, 'text');
+    assert.equal(pdfText.markdown, false);
+    assert.match(pdfText.text, /HEMI_PDF/);
+    const xlsx = await reader.readArtifactPreview('task-1', 'art-xlsx');
+    assert.equal(xlsx.ok, true);
+    assert.equal(xlsx.kind, 'document');
+    assert.equal(xlsx.document.format, 'xlsx');
+    assert.equal(xlsx.document.sheets[0].name, '预算');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('readArtifactPreview：未支持格式/未登记/档案缺失返回可展示原因', async () => {  const home = makeHome();
+  try {
+    writeFileSync(path.join(home, 'archive.zip'), 'PK');
+    const reader = createArtifactPreviewReader({
+      history: fakeHistory([
+        { id: 'art-csv', kind: 'file', path: path.join(home, 'archive.zip') },
       ]),
     });
     const csv = await reader.readArtifactPreview('task-1', 'art-csv');

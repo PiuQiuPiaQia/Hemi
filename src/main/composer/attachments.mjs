@@ -119,6 +119,11 @@ export function createAttachmentStore({
   makeThumbnail = null,
   resolveImageAnswer = null,
   openInBrowser = null,
+  /**
+   * 重启后的文件类附件回退：({conversationId, attachmentId}) => 档案里冻结的
+   * 附件视图 | null。由主进程注入（读会话档案），不信任渲染层送来的路径。
+   */
+  archivedAttachment = null,
   log = null,
 } = {}) {
   let seq = 0;
@@ -338,15 +343,80 @@ export function createAttachmentStore({
   }
 
   /**
+   * 重启后的文件类附件回退：按会话档案里冻结的视图（attachmentId → originPath）
+   * 重建登记记录。边界上不信任调用方——路径只从档案取（渲染层送来的路径一律
+   * 不用于这里），再校验：绝对路径、普通文件（realpath 后仍是文件，符号链接按
+   * 解析后的真实路径判定）、扩展名在预览支持的范围内。
+   *
+   * 返回 null＝档案里没有这个附件（按 unknown 如实返回）；返回 {missing}＝档案
+   * 有登记但原文件已不在原位置（给源失效文案，而不是「附件不存在」）。
+   */
+  function archivedFallbackRecord({ conversationId, attachmentId }) {
+    if (typeof archivedAttachment !== 'function') return null;
+    let view = null;
+    try {
+      view = archivedAttachment({ conversationId: String(conversationId ?? ''), attachmentId: String(attachmentId ?? '') });
+    } catch (error) {
+      log?.warn(`附件档案回退查询失败（${attachmentId}）：${error.message}`);
+      return null;
+    }
+    if (!view || typeof view !== 'object') return null;
+    const raw = String(view.originPath ?? '').trim();
+    if (!raw || !path.isAbsolute(raw)) return null;
+    let resolved = '';
+    try {
+      resolved = realpathSync(raw);
+      if (!statSync(resolved).isFile()) return null;
+    } catch {
+      return { missing: true, name: String(view.name ?? path.basename(raw)) };
+    }
+    const name = String(view.name ?? path.basename(resolved));
+    const kind = guessAttachmentKind(resolved) ?? guessAttachmentKind(name);
+    if (!kind) return null;
+    return {
+      record: {
+        attachmentId: String(attachmentId ?? ''),
+        conversationId: String(conversationId ?? ''),
+        status: 'ready',
+        registeredAt: Number(view.registeredAt) || 0,
+        kind,
+        source: view.source === 'drop' ? 'drop' : 'picker',
+        name,
+        originPath: resolved,
+        sizeBytes: Number(view.sizeBytes) || 0,
+      },
+    };
+  }
+
+  /** 受控寻址的唯一入口：内存登记 → 粘贴暂存回退 → 会话档案回退。 */
+  function resolveOwned({ conversationId, attachmentId, stagedPath = null }) {
+    const owned = ownedRecord(conversationId, attachmentId);
+    if (owned.record) return owned;
+    if (owned.error?.code !== 'unknown') return owned;
+    const staged = stagedFallbackRecord(stagedPath);
+    if (staged) return { record: staged };
+    const archived = archivedFallbackRecord({ conversationId, attachmentId });
+    if (!archived) return owned;
+    if (archived.missing) {
+      return {
+        error: {
+          ok: false,
+          code: 'source-missing',
+          message: `「${archived.name}」的原文件不在登记时的位置，可能已被移动或删除`,
+        },
+      };
+    }
+    return { record: archived.record };
+  }
+
+  /**
    * 受控预览读取：与 027 成果预览同一结果形状（{ok, kind, markdown?, text?,
-   * dataUrl?, message?}），渲染层复用现有文本／图片渲染器。
+   * dataUrl?, message?}），渲染层复用现成文本／图片渲染器。
    */
   function readPreview({ conversationId, attachmentId, stagedPath }) {
-    const owned = ownedRecord(conversationId, attachmentId);
-    const record =
-      owned.record ??
-      (owned.error?.code === 'unknown' ? stagedFallbackRecord(stagedPath) : null);
-    if (!record) return owned.error;
+    const owned = resolveOwned({ conversationId, attachmentId, stagedPath });
+    if (owned.error) return owned.error;
+    const record = owned.record;
     if (isDocumentFile(record.originPath)) return readDocumentPreview(record);
     try {
       const buffer = readFileSync(record.originPath);
@@ -389,7 +459,7 @@ export function createAttachmentStore({
 
   /** Visual preview bytes are transient and can only be read by registered identity. */
   async function readDocumentSource({ conversationId, attachmentId }) {
-    const owned = ownedRecord(conversationId, attachmentId);
+    const owned = resolveOwned({ conversationId, attachmentId });
     if (owned.error) return owned.error;
     const record = owned.record;
     if (!isDocumentFile(record.originPath)) return { ok: false, message: '这个附件不是文档' };
@@ -408,7 +478,7 @@ export function createAttachmentStore({
 
   /** 工具栏路径点击：受控打开原文件（粘贴图片没有原文件，明确说明）。 */
   async function openSource({ conversationId, attachmentId }) {
-    const owned = ownedRecord(conversationId, attachmentId);
+    const owned = resolveOwned({ conversationId, attachmentId });
     if (owned.error) return owned.error;
     const record = owned.record;
     if (record.source === 'paste') {
@@ -439,7 +509,9 @@ export function createAttachmentStore({
     const ask = String(question ?? '').trim() || '请描述这份资料里的内容';
     const blocks = [];
     for (const id of ids) {
-      const owned = ownedRecord(scope, id);
+      // 重试/续跑可能发生在重启之后：同样允许按会话档案回退，避免「附件缺失」
+      // 把重试回合的资料整段吞掉。
+      const owned = resolveOwned({ conversationId: scope, attachmentId: id });
       if (owned.error) {
         blocks.push({ header: `来源：附件（${owned.error.message}）`, text: '' });
         continue;

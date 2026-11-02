@@ -444,6 +444,8 @@ export const IPC = {
     openPreviewFile: 'delivery:open-preview-file',
     /** 062：会话交付物受控读取（按 conversationId+artifactId 从 flow 解析；link＝Markdown 本地链接线索，主进程重新受控解析）。 */
     readConversationDeliverable: 'delivery:read-conversation-deliverable',
+    /** 062：会话交付文档「提取文字」（与附件线同一提取器；DocumentPreview 文字模式）。 */
+    readConversationDeliverableText: 'delivery:read-conversation-deliverable-text',
     /** 062：会话交付物受控打开（预览栏路径点击；范围外格式走系统应用）。 */
     openConversationDeliverable: 'delivery:open-conversation-deliverable',
     listConversationDeliverableApplications: 'delivery:list-conversation-deliverable-applications',

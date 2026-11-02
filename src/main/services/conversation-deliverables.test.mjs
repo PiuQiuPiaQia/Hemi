@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { applyFlowFact, createFlowSnapshot } from '../../shared/conversation-flow.mjs';
+import { docxFixture, pdfFixture, xlsxFixture } from '../../../scripts/lib/document-fixtures.mjs';
 import {
   conversationArtifactId,
   createConversationDeliverableIo,
@@ -221,6 +222,86 @@ test('readConversationDeliverable：文本/图片/范围外格式/失效文件',
   const missing = await ioWithFlow.readConversationDeliverable('c1', mdId);
   assert.equal(missing.ok, false);
   assert.match(missing.message, /不在原位置/);
+}));
+
+test('readConversationDeliverable：交付文档（pdf/xlsx/docx）进 document 预览；代码与数据文件按纯文本', () => withTempWorkspace(async ({ home, workspace }) => {
+  const controller = makeController();
+  const runId = seedRun(controller);
+  const flowService = { has: () => true, controllerFor: () => controller };
+  const io = makeIo({ home, workspace, flowService });
+
+  const pdf = path.join(workspace, '报告.pdf');
+  writeFileSync(pdf, pdfFixture());
+  const xlsx = path.join(workspace, '表.xlsx');
+  writeFileSync(xlsx, xlsxFixture());
+  const docx = path.join(workspace, '说明.docx');
+  writeFileSync(docx, docxFixture());
+  const py = path.join(workspace, '脚本.py');
+  writeFileSync(py, 'print("hi")  # 注释');
+  const csv = path.join(workspace, 'table.csv');
+  writeFileSync(csv, 'a,b');
+
+  const pdfId = registerConversationDeliverable({ controller, runId, file: { path: pdf }, home }).artifactId;
+  const xlsxId = registerConversationDeliverable({ controller, runId, file: { path: xlsx }, home }).artifactId;
+  const docxId = registerConversationDeliverable({ controller, runId, file: { path: docx }, home }).artifactId;
+  const pyId = registerConversationDeliverable({ controller, runId, file: { path: py }, home }).artifactId;
+  const csvId = registerConversationDeliverable({ controller, runId, file: { path: csv }, home }).artifactId;
+
+  const pdfRead = await io.readConversationDeliverable('c1', pdfId);
+  assert.equal(pdfRead.ok, true);
+  assert.equal(pdfRead.kind, 'document');
+  assert.equal(pdfRead.document.format, 'pdf');
+  assert.ok(pdfRead.document.bytes.length > 0);
+
+  const pdfText = await io.readConversationDeliverableText('c1', pdfId);
+  assert.equal(pdfText.ok, true);
+  assert.equal(pdfText.kind, 'text');
+  assert.equal(pdfText.markdown, false);
+  assert.match(pdfText.text, /HEMI_PDF/);
+
+  const xlsxRead = await io.readConversationDeliverable('c1', xlsxId);
+  assert.equal(xlsxRead.ok, true);
+  assert.equal(xlsxRead.kind, 'document');
+  assert.equal(xlsxRead.document.format, 'xlsx');
+  assert.equal(xlsxRead.document.sheets[0].name, '预算');
+
+  const docxRead = await io.readConversationDeliverable('c1', docxId);
+  assert.equal(docxRead.ok, true);
+  assert.equal(docxRead.kind, 'document');
+  assert.equal(docxRead.document.format, 'docx');
+  assert.ok(docxRead.document.bytes.length > 0);
+
+  const pyRead = await io.readConversationDeliverable('c1', pyId);
+  assert.equal(pyRead.ok, true);
+  assert.equal(pyRead.kind, 'text');
+  assert.equal(pyRead.markdown, false);
+  assert.match(pyRead.text, /print\("hi"\)/);
+
+  const csvRead = await io.readConversationDeliverable('c1', csvId);
+  assert.equal(csvRead.ok, true);
+  assert.equal(csvRead.kind, 'text');
+  assert.equal(csvRead.markdown, false);
+
+  const notDoc = await io.readConversationDeliverableText('c1', pyId);
+  assert.equal(notDoc.ok, false);
+  assert.match(notDoc.message, /不是文档/);
+}));
+
+test('readConversationDeliverable：音频走 hemi-media:// 受控流，远端拒绝', () => withTempWorkspace(async ({ home, workspace }) => {
+  const controller = makeController();
+  const runId = seedRun(controller);
+  const flowService = { has: () => true, controllerFor: () => controller };
+  const io = makeIo({ home, workspace, flowService });
+
+  const mp3 = path.join(workspace, '旁白.mp3');
+  writeFileSync(mp3, 'audio-bytes');
+  const mp3Id = registerConversationDeliverable({ controller, runId, file: { path: mp3 }, home }).artifactId;
+
+  const audio = await io.readConversationDeliverable('c1', mp3Id);
+  assert.equal(audio.ok, true);
+  assert.equal(audio.kind, 'audio');
+  assert.match(audio.mediaUrl, /^hemi-media:\/\/preview\//);
+  assert.equal(audio.name, '旁白.mp3');
 }));
 
 test('resolveConversationLink：工作区相对/中文空格/不存在/网页链接拒绝/file:// 前缀', () => withTempWorkspace(async ({ home, workspace }) => {

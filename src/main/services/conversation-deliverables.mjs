@@ -12,7 +12,13 @@
 import { readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { conversationMedia, VIDEO_MIME } from './media-preview.mjs';
+import { conversationMedia, MEDIA_MIME, VIDEO_MIME } from './media-preview.mjs';
+import {
+  DOCUMENT_FILE_BYTE_LIMIT,
+  isDocumentFile,
+  parseDocumentBytes,
+  readDocumentBytes,
+} from '../composer/documents.mjs';
 
 import {
   DELIVERY_IMAGE_EXTENSIONS,
@@ -53,7 +59,9 @@ export function previewKindOf(filePath) {
   const ext = extOf(filePath);
   if (PREVIEW_TEXT_EXTENSIONS.has(ext)) return 'text';
   if (DELIVERY_IMAGE_EXTENSIONS.has(ext)) return 'image';
+  if (isDocumentFile(filePath)) return 'document';
   if (VIDEO_MIME[ext]) return 'video';
+  if (MEDIA_MIME[ext]) return 'audio';
   return 'unsupported';
 }
 
@@ -278,13 +286,32 @@ export function createConversationDeliverableIo({
     const artifact = found.artifact;
     const kind = previewKindOf(artifact.path);
 
-    if (kind === 'video') {
-      if (artifact.host) return { ok: false, message: '远端视频暂不支持直接播放，请下载到本机后查看' };
+    if (kind === 'video' || kind === 'audio') {
+      if (artifact.host) return { ok: false, message: `远端${kind === 'video' ? '视频' : '音频'}暂不支持直接播放，请下载到本机后查看` };
       const mediaUrl = conversationMedia.register(() => {
         const current = artifactOf(conversationId, artifactId, linkPath);
-        return current.error || current.artifact?.host ? null : { path: current.artifact.path, mime: VIDEO_MIME[extOf(current.artifact.path)] };
+        return current.error || current.artifact?.host ? null : { path: current.artifact.path, mime: MEDIA_MIME[extOf(current.artifact.path)] };
       });
-      return { ok: true, kind: 'video', mediaUrl, name: artifact.name, path: artifact.path };
+      return { ok: true, kind, mediaUrl, name: artifact.name, path: artifact.path };
+    }
+
+    if (kind === 'document') {
+      // 062：交付文档复用附件线的解析管线（pdf 回原始字节给前端 pdf.js；
+      // docx/pptx 先校验可解析再回字节；xlsx 回 sheets 表格投影）。「提取文字」
+      // 按钮走 readConversationDeliverableText，同一提取器。
+      try {
+        const source = artifact.host
+          ? await readRemoteDocumentBytes(artifact)
+          : await readDocumentBytes(artifact.path);
+        if (source.format === 'xlsx') {
+          const { sheets } = await parseDocumentBytes(source.bytes.slice(), source.format, { allowEmpty: true });
+          return { ok: true, kind: 'document', document: { ok: true, format: 'xlsx', sheets }, name: artifact.name, path: artifact.path };
+        }
+        if (source.format !== 'pdf') await parseDocumentBytes(source.bytes.slice(), source.format, { allowEmpty: true });
+        return { ok: true, kind: 'document', document: { ok: true, format: source.format, bytes: source.bytes }, name: artifact.name, path: artifact.path };
+      } catch (error) {
+        return { ok: false, message: error?.message ?? '文档解析失败，可重试或用系统应用打开' };
+      }
     }
 
     if (artifact.host) {
@@ -318,13 +345,39 @@ export function createConversationDeliverableIo({
       const data = typeof source === 'number' ? readFileSync(artifact.path) : source;
       if (data.length > maxBytes) return { ok: false, message: '文件太大，不适合应用内预览' };
       if (kind === 'text') {
-        return { ok: true, kind: 'text', markdown: extOf(artifact.path) !== '.txt', text: data.toString('utf8'), name: artifact.name, path: artifact.path, size };
+        return { ok: true, kind: 'text', markdown: ['.md', '.markdown'].includes(extOf(artifact.path)), text: data.toString('utf8'), name: artifact.name, path: artifact.path, size };
       }
       const ext = extOf(artifact.path);
       return { ok: true, kind: 'image', dataUrl: `data:${IMAGE_MIME[ext]};base64,${data.toString('base64')}`, name: artifact.name, path: artifact.path, size };
     } catch (error) {
       if (error?.code === 'ENOENT') return { ok: false, message: '文件不在原位置，可能已被移动或删除' };
       return { ok: false, message: '文件读取失败，可重试或用系统应用打开' };
+    }
+  }
+
+  /** 远端交付文档：SSH 受控读取后进同一解析管线（20MB 与附件线同限）。 */
+  async function readRemoteDocumentBytes(artifact) {
+    if (!remoteIo) throw new Error(`远端文件暂不可读（${artifact.host}）`);
+    const buf = await remoteIo.read({ host: artifact.host, filePath: artifact.path });
+    if (!buf) throw new Error(`远端文件读取失败（${artifact.host}），可稍后重试`);
+    if (buf.length > DOCUMENT_FILE_BYTE_LIMIT) throw new Error('文档附件支持 20MB 内');
+    return { bytes: new Uint8Array(buf), format: extOf(artifact.path).slice(1) };
+  }
+
+  /** 062：交付文档「提取文字」（DocumentPreview 文字模式；与附件线同一提取器）。 */
+  async function readConversationDeliverableText(conversationId, artifactId, linkPath = null) {
+    const found = artifactOf(conversationId, artifactId, linkPath);
+    if (found.error) return { ok: false, message: found.error };
+    const artifact = found.artifact;
+    if (!isDocumentFile(artifact.path)) return { ok: false, message: '这个文件不是文档' };
+    try {
+      const source = artifact.host
+        ? await readRemoteDocumentBytes(artifact)
+        : await readDocumentBytes(artifact.path);
+      const { text } = await parseDocumentBytes(source.bytes, source.format, { allowEmpty: true });
+      return { ok: true, kind: 'text', markdown: false, text };
+    } catch (error) {
+      return { ok: false, message: error?.message ?? '文档文字提取失败' };
     }
   }
 
@@ -354,7 +407,7 @@ export function createConversationDeliverableIo({
       return fileActions.perform(intent, artifact.path, applicationId);
     }
     if (intent === 'system') return openPath ? openPath(artifact.path) : { ok: false, message: '系统打开通道不可用' };
-    if (['unsupported', 'video'].includes(previewKindOf(artifact.path)) && openPath) {
+    if (['unsupported', 'video', 'audio', 'document'].includes(previewKindOf(artifact.path)) && openPath) {
       return openPath(artifact.path);
     }
     if (!openInBrowser) return { ok: false, message: '打开通道不可用' };
@@ -417,5 +470,5 @@ export function createConversationDeliverableIo({
     };
   }
 
-  return { readConversationDeliverable, openConversationDeliverable, listConversationDeliverableApplications, resolveConversationLink };
+  return { readConversationDeliverable, readConversationDeliverableText, openConversationDeliverable, listConversationDeliverableApplications, resolveConversationLink };
 }

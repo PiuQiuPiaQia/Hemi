@@ -16,7 +16,7 @@ import { freezeModelPolicy, resolveModelPlan, hydrateModelPlan } from '../agent-
 import { freezeAcceptedInput } from '../agent-runtime/freeze-input.mjs';
 import { goalRunOutcome } from '../agent-runtime/goal-driver.mjs';
 import {runBackgroundTurn} from '../agent-runtime/background-turn.mjs';
-import { createConversationTurns } from '../services/conversation-turns.mjs';
+import { createConversationTurns, conversationClosedError } from '../services/conversation-turns.mjs';
 import { finalizeTurnParts, hasNonTextParts } from '../../shared/turn-parts.mjs';
 import { buildTurnContextBlock, buildWorkspaceTurnBlock } from '../services/text-model.mjs';
 import { summarizeForSpeech } from '../services/mouth.mjs';
@@ -1106,6 +1106,12 @@ export function registerLlmIpc() {
       String(payload?.artifactId ?? ''),
       typeof payload?.linkPath === 'string' && payload.linkPath ? payload.linkPath : null,
     ));
+  ipcMain.handle(IPC.delivery.readConversationDeliverableText, (_event, payload) =>
+    getConversationDeliverableIo().readConversationDeliverableText(
+      String(payload?.conversationId ?? ''),
+      String(payload?.artifactId ?? ''),
+      typeof payload?.linkPath === 'string' && payload.linkPath ? payload.linkPath : null,
+    ));
   ipcMain.handle(IPC.delivery.openConversationDeliverable, (_event, payload) =>
     getConversationDeliverableIo().openConversationDeliverable(
       String(payload?.conversationId ?? ''),
@@ -1262,6 +1268,11 @@ export function registerLlmIpc() {
   });
 
   const submitChat = async (payload, { waitForResult = false } = {}) => {
+    if (state.isQuitting || conversationTurns.isClosed()) {
+      const error=conversationClosedError();
+      if(waitForResult)throw error;
+      return {ok:false,code:error.code,message:error.message};
+    }
     const conversationId = typeof payload?.conversationId === 'string' && payload.conversationId ? payload.conversationId : null;
     if (!conversationId) throw new Error('缺少会话身份。');
     const archived = ensureConversationArchive({ id: conversationId, profileId: payload?.profileId, workspaceId: payload?.workspaceId });

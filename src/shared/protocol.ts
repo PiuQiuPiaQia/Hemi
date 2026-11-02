@@ -1161,13 +1161,17 @@ export type ComposerAttachmentResult = {
   attachments?: MessageAttachmentView[];
 };
 
-/** 026/028：预览受控读取的统一结果形状（成果与附件共用；code 见附件错误码）。 */
+/** 026/028：预览受控读取的统一结果形状（成果与附件共用；code 见附件错误码）。
+ * 062 对齐：任务产物预览可出媒体（hemi-media:// 受控流）与文档（附件线解析器）。 */
 export type ArtifactPreviewResult = {
   ok: boolean;
-  kind?: 'text' | 'image';
+  kind?: 'text' | 'image' | 'video' | 'audio' | 'document';
   markdown?: boolean;
   text?: string;
   dataUrl?: string;
+  mediaUrl?: string;
+  name?: string;
+  document?: AttachmentDocumentPreview;
   message?: string;
   code?: string;
 };
@@ -1789,7 +1793,7 @@ export type ConversationDeliverableView = {
   path: string;
   host?: string | null;
   description?: string;
-  previewKind?: 'text' | 'image' | 'video' | 'unsupported';
+  previewKind?: 'text' | 'image' | 'video' | 'audio' | 'document' | 'unsupported';
   size?: number | null;
   producerRunId?: string | null;
   taskId?: string | null;
@@ -1801,7 +1805,7 @@ export type ConversationDeliverableView = {
 /** 062：会话交付物受控读取结果（unsupported＝文件信息＋系统打开，不冒充预览成功）。 */
 export type ConversationDeliverableReadResult = {
   ok: boolean;
-  kind?: 'text' | 'image' | 'video' | 'unsupported' | 'document';
+  kind?: 'text' | 'image' | 'video' | 'audio' | 'unsupported' | 'document';
   document?: AttachmentDocumentPreview;
   mediaUrl?: string;
   markdown?: boolean;
@@ -2650,18 +2654,13 @@ export type HemiVoiceBridge = {
     taskId: string,
     artifactId: string,
   ) => Promise<{ ok: boolean; dataUrl?: string; message?: string }>;
-  /** 026：应用内文件预览的受控读取（Markdown/纯文本/图片；按档案寻址）。 */
+  /** 026：应用内文件预览的受控读取（文本/图片/媒体/文档；按档案寻址）。
+   * textOnly＝文档产物「提取文字」（DocumentPreview 文字模式）。 */
   readArtifactPreview: (
     taskId: string,
     artifactId: string,
-  ) => Promise<{
-    ok: boolean;
-    kind?: 'text' | 'image';
-    markdown?: boolean;
-    text?: string;
-    dataUrl?: string;
-    message?: string;
-  }>;
+    options?: { textOnly?: boolean },
+  ) => Promise<ArtifactPreviewResult>;
   /** 027 R-02：预览面板路径点击——受控在浏览器打开已登记文件（主进程寻址）。 */
   openArtifactPreviewFile: (
     taskId: string,

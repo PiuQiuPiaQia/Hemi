@@ -19,7 +19,7 @@ import { answerAboutImage } from '../services/vision-model.mjs';
 import { state } from '../state.mjs';
 import { collectSkills } from '../agent-runtime/index.mjs';
 import { skillDiagnosticsMessage } from '../skills/skill-definition.mjs';
-import { getConversationMetadata, getConversationTaskHistory, listConversationSessions } from './conversation.ipc.mjs';
+import { getConversationMetadata, getConversationTaskHistory, getConversationTurnsRaw, listConversationSessions } from './conversation.ipc.mjs';
 import { getWorkContext } from './context.ipc.mjs';
 import { getSkillService } from './skills.ipc.mjs';
 import { getWorkspaceService } from './workspace.ipc.mjs';
@@ -176,6 +176,19 @@ export function registerComposerIpc() {
       });
     },
     openInBrowser,
+    // 重启后登记表为空：文件类附件的预览／文档源／打开原文件按会话档案里冻结的
+    // 视图（attachmentId → originPath）回退，路径只从档案取，渲染层送的一律不用。
+    archivedAttachment: ({ conversationId, attachmentId }) => {
+      const turns = getConversationTurnsRaw(conversationId);
+      if (!Array.isArray(turns)) return null;
+      for (let index = turns.length - 1; index >= 0; index -= 1) {
+        const views = turns[index]?.attachments;
+        if (!Array.isArray(views)) continue;
+        const hit = views.find((view) => view?.attachmentId === attachmentId);
+        if (hit) return hit;
+      }
+      return null;
+    },
     log,
   });
 

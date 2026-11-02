@@ -310,6 +310,7 @@ export function registerHistoryIpc({ history, delivery = null }) {
     const result = delivery?.readArtifactPreview?.(
       String(payload?.taskId ?? ''),
       String(payload?.artifactId ?? ''),
+      { textOnly: payload?.textOnly === true },
     );
     return result ?? { ok: false, message: '文件预览不可用' };
   });

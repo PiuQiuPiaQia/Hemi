@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { pdfFixture } from '../../../scripts/lib/document-fixtures.mjs';
 import {
   createAttachmentStore,
   formatBytes,
@@ -169,6 +170,84 @@ test('attachFile：图片附件生成缩略图（文件类不走暂存回退）'
     assert.equal(attachment.kind, 'image');
     assert.match(attachment.thumbnailUrl ?? '', /^data:image\/png;base64/);
     assert.equal(attachment.stagedPath, undefined, '文件附件不走暂存回退');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('readPreview：重启后文件类附件按会话档案回退（路径只从档案取，失效给源失效文案）', () => {
+  const ws = tempWorkspace();
+  try {
+    const md = ws.file('纪要.md', '# 议程\n第二条');
+    const png = path.join(ws.dir, 'shot.png');
+    writeFileSync(png, Buffer.from('pngbytes'));
+    const gone = path.join(ws.dir, 'moved.pdf');
+    const archive = new Map([
+      ['att-md', { attachmentId: 'att-md', name: '纪要.md', kind: 'text', originPath: md, sizeBytes: 12, source: 'picker' }],
+      ['att-png', { attachmentId: 'att-png', name: 'shot.png', kind: 'image', originPath: png, sizeBytes: 8, source: 'drop' }],
+      ['att-gone', { attachmentId: 'att-gone', name: 'moved.pdf', kind: 'text', originPath: gone, sizeBytes: 9 }],
+      ['att-relative', { attachmentId: 'att-relative', name: '纪要.md', kind: 'text', originPath: '纪要.md' }],
+    ]);
+    const restarted = storeFor(ws, {
+      archivedAttachment: ({ conversationId, attachmentId }) => (conversationId === 'c1' ? archive.get(attachmentId) ?? null : null),
+    });
+
+    // 文本：按档案里的原路径重读，markdown 标记由扩展名判定。
+    const text = restarted.readPreview({ conversationId: 'c1', attachmentId: 'att-md' });
+    assert.equal(text.ok, true);
+    assert.equal(text.kind, 'text');
+    assert.equal(text.markdown, true);
+    assert.match(text.text, /议程/);
+
+    // 图片：同一回退也走 data URL（原文件仍在）。
+    const image = restarted.readPreview({ conversationId: 'c1', attachmentId: 'att-png' });
+    assert.equal(image.ok, true);
+    assert.equal(image.kind, 'image');
+    assert.match(image.dataUrl, /^data:image\/png;base64,/);
+
+    // 原文件被移走：给「不在原位置」而不是「附件不存在」。
+    const missing = restarted.readPreview({ conversationId: 'c1', attachmentId: 'att-gone' });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.code, 'source-missing');
+    assert.match(missing.message, /不在登记时的位置/);
+
+    // 边界：相对路径不采用；别的会话不串；档案里没有就还是 unknown。
+    assert.equal(restarted.readPreview({ conversationId: 'c1', attachmentId: 'att-relative' }).code, 'unknown');
+    assert.equal(restarted.readPreview({ conversationId: 'c2', attachmentId: 'att-md' }).code, 'unknown');
+    assert.equal(restarted.readPreview({ conversationId: 'c1', attachmentId: 'att-none' }).code, 'unknown');
+
+    // 档案查询抛错不能把预览打断（按 unknown 如实返回）。
+    const broken = storeFor(ws, {
+      archivedAttachment: () => {
+        throw new Error('archive offline');
+      },
+    });
+    assert.equal(broken.readPreview({ conversationId: 'c1', attachmentId: 'att-md' }).code, 'unknown');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('readDocumentSource／openSource：重启后同样按档案回退（文档源与打开原文件）', async () => {
+  const ws = tempWorkspace();
+  try {
+    const pdf = path.join(ws.dir, '报告.pdf');
+    writeFileSync(pdf, pdfFixture());
+    const opened = [];
+    const restarted = storeFor(ws, {
+      archivedAttachment: () => ({ attachmentId: 'att-pdf', name: '报告.pdf', kind: 'text', originPath: pdf }),
+      openInBrowser: async (filePath) => {
+        opened.push(filePath);
+        return { ok: true };
+      },
+    });
+    const source = await restarted.readDocumentSource({ conversationId: 'c1', attachmentId: 'att-pdf' });
+    assert.equal(source.ok, true);
+    assert.equal(source.format, 'pdf');
+    assert.ok(source.bytes.length > 0);
+    assert.deepEqual(await restarted.openSource({ conversationId: 'c1', attachmentId: 'att-pdf' }), { ok: true });
+    // 回退按 realpath 解析（macOS 上 /var 是 /private/var 的软链）。
+    assert.deepEqual(opened, [realpathSync(pdf)]);
   } finally {
     ws.cleanup();
   }

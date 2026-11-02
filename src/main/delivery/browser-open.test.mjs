@@ -91,14 +91,14 @@ test('openArtifactPreviewFile：按档案寻址，未登记/跨任务/非文件/
   const home = mkdtempSync(path.join(os.tmpdir(), 'hemi-preview-open-'));
   try {
     writeFileSync(path.join(home, 'notes.md'), '# 说明');
-    writeFileSync(path.join(home, 'data.csv'), 'a,b');
+    writeFileSync(path.join(home, 'bundle.zip'), 'PK');
     const history = {
       getRecord(taskId) {
         if (taskId !== 't1') return null;
         return {
           deliverables: [
             { id: 'a1', kind: 'file', path: path.join(home, 'notes.md') },
-            { id: 'a2', kind: 'file', path: path.join(home, 'data.csv') },
+            { id: 'a2', kind: 'file', path: path.join(home, 'bundle.zip') },
             { id: 'a3', kind: 'file', path: path.join(home, 'moved.md') },
             { id: 'a4', kind: 'link', url: 'https://example.com' },
           ],
@@ -118,7 +118,7 @@ test('openArtifactPreviewFile：按档案寻址，未登记/跨任务/非文件/
     assert.equal((await opener.openArtifactPreviewFile('t1', 'nope')).ok, false);
     assert.equal((await opener.openArtifactPreviewFile('t2', 'a1')).ok, false);
     assert.equal((await opener.openArtifactPreviewFile('t1', 'a4')).ok, false);
-    // 未支持格式（csv 不在预览清单）。
+    // 未支持格式（zip 不在预览清单）。
     assert.match((await opener.openArtifactPreviewFile('t1', 'a2')).message, /不支持在浏览器打开/);
     // 文件被移走：存在性查证拦截。
     assert.match((await opener.openArtifactPreviewFile('t1', 'a3')).message, /不在原位置/);

@@ -343,15 +343,17 @@ contextBridge.exposeInMainWorld('hemiVoice', {
     ipcRenderer.invoke('delivery:open-source', { taskId, sourceId }),
   readDeliveryImage: (taskId, artifactId) =>
     ipcRenderer.invoke('delivery:read-image', { taskId, artifactId }),
-  // 026：应用内文件预览的受控读取（Markdown/纯文本/图片；按档案寻址）。
-  readArtifactPreview: (taskId, artifactId) =>
-    ipcRenderer.invoke('delivery:read-preview', { taskId, artifactId }),
+  // 026：应用内文件预览的受控读取（文本/图片/媒体/文档；textOnly＝提取文字）。
+  readArtifactPreview: (taskId, artifactId, options) =>
+    ipcRenderer.invoke('delivery:read-preview', { taskId, artifactId, textOnly: options?.textOnly }),
   // 027：预览面板路径点击——受控在浏览器打开已登记文件（主进程寻址）。
   openArtifactPreviewFile: (taskId, artifactId) =>
     ipcRenderer.invoke('delivery:open-preview-file', { taskId, artifactId }),
   // 062：会话交付物受控读取/打开＋Markdown 本地链接受控解析（渲染层不持路径）。
   readConversationDeliverable: (conversationId, artifactId, linkPath = null) =>
     ipcRenderer.invoke('delivery:read-conversation-deliverable', { conversationId, artifactId, linkPath }),
+  readConversationDeliverableText: (conversationId, artifactId, linkPath = null) =>
+    ipcRenderer.invoke('delivery:read-conversation-deliverable-text', { conversationId, artifactId, linkPath }),
   openConversationDeliverable: (conversationId, artifactId, linkPath = null, intent = 'preview-file', applicationId = null) =>
     ipcRenderer.invoke('delivery:open-conversation-deliverable', { conversationId, artifactId, linkPath, intent, applicationId }),
   listConversationDeliverableApplications: (conversationId, artifactId, linkPath = null) =>
