@@ -604,7 +604,7 @@ function createLlmFlowRuntime(conversationId) {
     },
 
     async retryRecovery({ runId, recoveryId }) {
-      if (controllerOf().getSnapshot().activeRunId !== runId) return { ok: false, code: 'run-changed' };
+      if (controllerOf().getSnapshot().activeRunId !== runId) return { ok: false, code: 'run-changed', message: '对话已切换，请刷新后再试。' };
       return { ok: Boolean(runtime?.get(conversationId)?.retryConnection(recoveryId)) };
     },
     backgroundCommand: request => getAgentRuntime().backgroundCommand(conversationId,request),

@@ -482,8 +482,20 @@ export function createConversationController({
         }
         case 'retryRecovery': {
           const run = snapshot.runs[snapshot.activeRunId];
-          if (!run || command.targetRunId !== run.runId || command.recoveryId !== run.recovery?.id || !['waiting','offline'].includes(run.recovery.phase)) return { ok: false, code: 'run-changed' };
-          return runtime.retryRecovery?.({ runId: run.runId, recoveryId: command.recoveryId }) ?? { ok: false, code: 'unsupported' };
+          if (!run || command.targetRunId !== run.runId) return { ok: false, code: 'run-changed', message: '对话已经切到新的运行，这条恢复提示已过期。' };
+          if (command.recoveryId !== run.recovery?.id) return { ok: false, code: 'run-changed', message: '恢复周期已更新，请再点一次「立即重试」。' };
+          if (run.recovery.phase === 'connecting') return { ok: false, code: 'busy', message: '正在连接，稍等片刻即可，无需手动重试。' };
+          if (!['waiting','offline'].includes(run.recovery.phase)) return { ok: false, code: 'run-changed', message: '这轮恢复已结束，无需重试。' };
+          const attempt = await runtime.retryRecovery?.({ runId: run.runId, recoveryId: command.recoveryId });
+          if (!attempt?.ok && !attempt?.code) {
+            // 适配层只返回布尔：按恢复状态翻译被拒原因（冷却 / 到期 / 无可提前的等待）。
+            const recovery = run.recovery, nowMs = Date.now();
+            const message = recovery?.notBefore && nowMs < recovery.notBefore
+              ? `服务要求冷却，约 ${Math.max(1, Math.ceil((recovery.notBefore - nowMs) / 1000))} 秒后可再试。`
+              : recovery && nowMs >= recovery.deadlineAt ? '自动恢复已到期，可点「重新开始」发起新一轮。' : '现在还不能提前重试，请稍候。';
+            return { ok: false, code: 'cooldown', message };
+          }
+          return attempt ?? { ok: false, code: 'unsupported', message: '当前会话不支持手动重试。' };
         }
         case 'reorderInput': {
           const result = commit({ type: 'input-reordered', inputId: command.inputId, overInputId: command.overInputId,

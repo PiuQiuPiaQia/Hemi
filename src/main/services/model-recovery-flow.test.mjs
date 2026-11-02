@@ -5,9 +5,9 @@ import {restoreFlowSnapshot} from './flow-bootstrap.mjs';
 import {createFlowTimelineProjector, queueStoppedIdle} from '@hemi/conversation-flow/core';
 
 test('recovery is an authoritative run fact: survives projection, prevents preemption and rejects stale commands', async () => {
-  const starts=[],stops=[],retries=[],saves=[];
+  const starts=[],stops=[],retries=[],saves=[];let retryResult={ok:true};
   const controller=createConversationController({conversationId:'c',effects:{store:{update:async()=>saves.push(1),flush:async()=>{}},runtime:{
-    start:async value=>{starts.push(value);return {};},stop:async value=>stops.push(value),retryRecovery:async value=>{retries.push(value);return {ok:true};},
+    start:async value=>{starts.push(value);return {};},stop:async value=>stops.push(value),retryRecovery:async value=>{retries.push(value);return retryResult;},
   }}});
   await controller.command({type:'send',input:{inputId:'a',text:'original'}});
   const runId=controller.getSnapshot().activeRunId;
@@ -16,9 +16,22 @@ test('recovery is an authoritative run fact: survives projection, prevents preem
   const rows=createFlowTimelineProjector()(controller.getSnapshot()).transcripts;
   assert.equal(rows.at(-1).recovery.id,recovery.id);
   assert.equal(rows.filter(row=>row.author==='user').length,1);
-  assert.equal((await controller.command({type:'retryRecovery',targetRunId:'stale',recoveryId:recovery.id})).ok,false);
-  assert.equal((await controller.command({type:'retryRecovery',targetRunId:runId,recoveryId:'stale'})).ok,false);
+  const stale=(await controller.command({type:'retryRecovery',targetRunId:'stale',recoveryId:recovery.id}));
+  assert.equal(stale.ok,false);assert.match(String(stale.message),/新的运行/);
+  const staleId=(await controller.command({type:'retryRecovery',targetRunId:runId,recoveryId:'stale'}));
+  assert.equal(staleId.ok,false);assert.match(String(staleId.message),/恢复周期已更新/);
   assert.equal(retries.length,0);
+  assert.equal(controller.applyFact({type:'run-recovery',runId,recovery:{...recovery,phase:'connecting'}}).applied,true);
+  const connecting=(await controller.command({type:'retryRecovery',targetRunId:runId,recoveryId:recovery.id}));
+  assert.equal(connecting.ok,false);assert.match(String(connecting.message),/正在连接/);
+  assert.equal(controller.applyFact({type:'run-recovery',runId,recovery}).applied,true);
+  retryResult={ok:false};
+  assert.equal(controller.applyFact({type:'run-recovery',runId,recovery:{...recovery,notBefore:Date.now()+5000}}).applied,true);
+  const cooled=(await controller.command({type:'retryRecovery',targetRunId:runId,recoveryId:recovery.id}));
+  assert.equal(cooled.ok,false);assert.match(String(cooled.message),/服务要求冷却/);
+  assert.equal(retries.length,1);
+  assert.equal(controller.applyFact({type:'run-recovery',runId,recovery}).applied,true);
+  retryResult={ok:true};
   assert.equal((await controller.command({type:'retryRecovery',targetRunId:runId,recoveryId:recovery.id})).ok,true);
   const queued=await controller.command({type:'send',preempt:'active',input:{inputId:'b',text:'next'}});
   assert.equal(queued.disposition,'queued');assert.equal(stops.length,0);assert.equal(starts.length,1);
