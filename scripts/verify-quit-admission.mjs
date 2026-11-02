@@ -74,7 +74,17 @@ try{for(const mode of ['dev','built']){
   assert.equal(flow.timeline.length,2);assert.equal(flow.pending.length,0);assert.equal(Object.keys(flow.runs).length,1);
   assert.equal(requests,initialRequests);check('UI preserves the refused draft and shows the closing reason without a stopped task');
   // Wait for the existing draft writer's durable receipt, not a fixed debounce.
-  await page.waitForFunction(async()=> (await window.hemiVoice.getDraft('conv-quit'))?.text==='DRAFT_MUST_SURVIVE_QUIT');
+  // Playwright treats a Promise returned by this predicate as truthy before its
+  // value settles. Poll from Node so a null first receipt cannot end the wait.
+  const draftDeadline=Date.now()+10000;
+  let durableDraft;
+  do {
+   durableDraft=await page.evaluate(()=>window.hemiVoice.getDraft('conv-quit'));
+   if(durableDraft?.text==='DRAFT_MUST_SURVIVE_QUIT')break;
+   await pause(30);
+  }while(Date.now()<draftDeadline);
+  assert.equal(durableDraft?.text,'DRAFT_MUST_SURVIVE_QUIT');
+  assert.equal(JSON.parse(await fs.readFile(path.join(profile,'drafts/conv-quit.json'),'utf8')).text,'DRAFT_MUST_SURVIVE_QUIT');
   await app.evaluate(async({app,BrowserWindow})=>{const w=BrowserWindow.getAllWindows().find(w=>/^(http|file):/.test(w.webContents.getURL())&&!new URL(w.webContents.getURL()).searchParams.has('mode'));w.hide();app.emit('activate');app.emit('second-instance');await new Promise(r=>setTimeout(r,100));if(w.isVisible())throw new Error('quitting window reopened');});
   check('activation and second launch do not reopen a quitting window');
   await app.close();app=null;await launch();await pause(300);

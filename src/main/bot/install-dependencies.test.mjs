@@ -210,8 +210,18 @@ test('shell proxy discovery reads an interactive shell, ignores banners and excl
 
 test('a hung npm process is terminated and reported without retrying an uncertain process', async t => {
   const f = await fixture(t, 'setInterval(()=>{},1000);');
-  await assert.rejects(installBotDependencies({ ...f, timeoutMs: 500 }), error => error.kind === 'timeout');
-  assert.equal(JSON.parse(await fs.readFile(path.join(f.directory, 'calls.json'))).length, 1);
+  let failure;
+  await assert.rejects(installBotDependencies({ ...f, timeoutMs: 500 }), error => {
+    failure = error;
+    return error.kind === 'timeout';
+  });
+  // The deadline includes Node startup. On a loaded runner the child can be
+  // terminated before executing the fixture, so calls.json is not a receipt.
+  // The installer's durable attempt log records every spawn, including that case.
+  const result = JSON.parse(await fs.readFile(path.join(path.dirname(failure.logFile), 'result.json')));
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.attempts[0].kind, 'timeout');
+  assert.equal(result.attempts[0].strategy, 'direct');
 });
 
 test('an exit-handler error is classified by the underlying failure in npm debug logs', async t => {
