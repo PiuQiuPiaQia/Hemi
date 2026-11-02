@@ -52,6 +52,39 @@ test('isValidSshTarget：接受别名/user@host/[IPv6]，拒绝选项注入与�
   assert.equal(isValidSshTarget(''), false);
 });
 
+test('071 isValidSshTarget：带端口的 ssh:// 目标（登记串）合法，路径/注入仍拒绝', () => {
+  assert.equal(isValidSshTarget('ssh://devbox:2222'), true);
+  assert.equal(isValidSshTarget('ssh://deploy@example.com:22022'), true);
+  assert.equal(isValidSshTarget('ssh://user@[2001:db8::1]:22'), true);
+  assert.equal(isValidSshTarget('ssh://example.com'), true);
+  assert.equal(isValidSshTarget('ssh://example.com/workspace'), false); // URI 不带路径
+  assert.equal(isValidSshTarget('ssh://-oProxyCommand=evil'), false); // 注入仍拒
+  assert.equal(isValidSshTarget('ssh://a b'), false);
+});
+
+test('071 exec/probe：ssh://user@host:port 目标串原样进 argv（端口折进登记串，全链路不另传 port）', { skip: process.platform === 'win32' ? '假 ssh 是 sh 脚本、命令落本机 POSIX 沙箱：win 起不来（043 Windows 批次范围外）' : false }, async () => {
+  const runner = newRunner();
+  const out = await runner.exec({ host: 'ssh://deploy@devbox.example:2222', command: 'printf ok' });
+  assert.equal(out.code, 0);
+  assert.equal(out.stdout.toString('utf8'), 'ok');
+  // probe 协议同样吃 URI 目标：host 字段回显归一目标串。
+  mkdirSync(path.join(fake.home, 'proj'), { recursive: true });
+  const probed = await runner.probe({ host: 'ssh://deploy@devbox.example:2222', dir: '~/proj' });
+  assert.equal(probed.ok, true);
+  assert.equal(probed.host, 'ssh://deploy@devbox.example:2222');
+  // macOS /var → /private/var：与远端口径一致，按 realpath 归一后比对。
+  assert.equal(probed.realDir, realpathSync(path.join(fake.home, 'proj')));
+  // close() 对 URI 目标同样收口（-O exit 路径）。
+  runner.close();
+});
+
+test('071 sshFailureCopy：URI 目标叙述用可读形式，终端命令保持完整目标', () => {
+  const copy = sshFailureCopy('auth', 'ssh://deploy@example.com:2222');
+  assert.match(copy, /deploy@example\.com:2222 拒绝了登录/);
+  assert.match(copy, /ssh ssh:\/\/deploy@example\.com:2222/);
+  assert.ok(!copy.includes('ssh://deploy@example.com:2222 拒绝了登录'));
+});
+
 test('resolveHostname uses actual OpenSSH HostName for aliases and IPv6 without leaking user or SSH port', {skip: process.platform !== 'darwin'}, async () => {
   const config = path.join(tmpBase, 'pairing-ssh-config');
   writeFileSync(config, 'Host pairing-alias\n  HostName 203.0.113.42\n  User fixture\n  Port 2222\nHost pairing-v6\n  HostName 2001:db8::42\n', {mode: 0o600});

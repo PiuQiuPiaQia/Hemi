@@ -7,6 +7,8 @@ import type { WorkspaceState, WorkspaceView } from '@/shared/types'
  * 049 ·「服务器上的文件夹…」添加对话框（交互稿 v2）：两个字段——服务器
  * （SSH 配置里的 Host 或 user@host）与文件夹（远端路径）。校验由主进程经
  * 系统 ssh 完成（BatchMode，不弹密码框）；错误按分类给终端修复方式。
+ * 071：新增可选「端口」字段（留空走 ~/.ssh/config/默认 22）；也认服务器框里
+ * 直接写 user@host:22（端口框优先）。
  * 只用产品既有的 h37 对话框/表单/提示样式，不新增 CSS。
  */
 type Phase = 'idle' | 'checking' | 'error'
@@ -15,7 +17,7 @@ type AddRemoteResult = {
   ok: boolean
   cancelled?: boolean
   kind?: string
-  field?: 'host' | 'dir'
+  field?: 'host' | 'dir' | 'port'
   message?: string
   /** kind=auth：本机无免密密钥，提示可输密码。 */
   canPassword?: boolean
@@ -26,10 +28,11 @@ type AddRemoteResult = {
 /** fixtures 静态场景预置（产品运行不传；对齐交互稿 v2 的多状态截图）。 */
 export type RemoteFolderDialogFixture = {
   host?: string
+  port?: string
   dir?: string
   password?: string
   phase?: Phase
-  error?: { field: 'host' | 'dir'; text: string }
+  error?: { field: 'host' | 'dir' | 'port'; text: string }
 };
 
 export function RemoteFolderDialog({
@@ -44,16 +47,23 @@ export function RemoteFolderDialog({
 }) {
   const titleId = useId()
   const [host, setHost] = useState(fixture?.host ?? '')
+  const [port, setPort] = useState(fixture?.port ?? '')
   const [dir, setDir] = useState(fixture?.dir ?? '')
   const [password, setPassword] = useState(fixture?.password ?? '')
   const [remember, setRemember] = useState(true)
   const [phase, setPhase] = useState<Phase>(fixture?.phase ?? 'idle')
-  const [error, setError] = useState<{ field: 'host' | 'dir'; text: string } | null>(fixture?.error ?? null)
+  const [error, setError] = useState<{ field: 'host' | 'dir' | 'port'; text: string } | null>(fixture?.error ?? null)
   const checking = phase === 'checking'
   const canSubmit = host.trim() !== '' && dir.trim() !== '' && !checking
 
   const submit = async () => {
     if (!canSubmit) return
+    const portText = port.trim()
+    if (portText && !/^\d{1,5}$/.test(portText)) {
+      setPhase('error')
+      setError({ field: 'port', text: '端口是 1–65535 的数字，留空则用 SSH 配置（默认 22）。' })
+      return
+    }
     setPhase('checking')
     setError(null)
     let result: AddRemoteResult | undefined
@@ -63,6 +73,7 @@ export function RemoteFolderDialog({
         dir.trim(),
         password.trim() ? password : undefined,
         remember,
+        portText ? portText : undefined,
       )
     } catch (error_) {
       result = { ok: false, message: `添加失败：${String((error_ as Error)?.message ?? error_)}` }
@@ -120,6 +131,24 @@ export function RemoteFolderDialog({
               }}
             />
             {error?.field === 'host' ? <span className="h37-error-text">{error.text}</span> : null}
+          </div>
+          <div className="h37-field">
+            <label htmlFor="h49-port">端口（可选）</label>
+            <input
+              id="h49-port"
+              className="h37-input h37m-mono"
+              inputMode="numeric"
+              placeholder="如 2222；留空用 SSH 配置或 22"
+              value={port}
+              disabled={checking}
+              aria-invalid={error?.field === 'port' ? true : undefined}
+              onChange={(event) => {
+                setPort(event.target.value)
+                setPhase('idle')
+                setError(null)
+              }}
+            />
+            {error?.field === 'port' ? <span className="h37-error-text">{error.text}</span> : null}
           </div>
           <div className="h37-field">
             <label htmlFor="h49-dir">文件夹</label>

@@ -24,6 +24,7 @@ import {
 import { Markdown } from '@/shared/markdown';
 import type { MessageAttachmentView, TaskActionName, TaskArtifact, TaskStateSnapshot } from '@/shared/types';
 import type { ArtifactPreviewResult, AttachmentDocumentPreview, ConversationDeliverableView } from '@shared/protocol';
+import { formatSshTarget } from '@shared/ssh-target.mjs';
 import {
   isPreviewableArtifact,
   previewTabKey,
@@ -739,10 +740,10 @@ export function FilePreviewPanel({
   const remoteArtifact = Boolean(currentArtifact?.host ?? currentDeliverable?.host);
   const pathValue = (() => {
     if (currentAttachment) return currentAttachment.source === 'paste' ? '' : currentAttachment.originPath ?? '';
-    if (currentDeliverable?.host) return `${currentDeliverable.host}:${currentDeliverable.path}`;
+    if (currentDeliverable?.host) return `${formatSshTarget(currentDeliverable.host)}:${currentDeliverable.path}`;
     if (currentDeliverable?.path) return currentDeliverable.path;
     if (activeTab?.kind === 'deliverable') return activeResult?.path ?? '';
-    if (remoteArtifact && currentArtifact?.path) return `${currentArtifact.host}:${currentArtifact.path}`;
+    if (remoteArtifact && currentArtifact?.path) return `${formatSshTarget(currentArtifact.host)}:${currentArtifact.path}`;
     return currentArtifact?.path ?? '';
   })();
   const pathEnabled = !remoteArtifact && Boolean(pathValue) && Boolean(activeResult?.ok);

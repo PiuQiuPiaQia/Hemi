@@ -7,6 +7,7 @@ import { AlertTriangle, Check, FolderOpen, FolderPlus, House, Server, X } from '
 import type { WorkspaceState, WorkspaceView } from '@/shared/types'
 import { MenuSearch, MenuSeparator } from '@/components/menu'
 import { displayPath } from '@/windows/voice/lib/path-format'
+import { formatSshTarget } from '@shared/ssh-target.mjs'
 import { RemoteFolderDialog } from './remote-folder-dialog'
 
 /**
@@ -28,7 +29,7 @@ export type WorkspaceBarValue = { kind: 'view'; view: WorkspaceView } | { kind: 
 
 const hostOf = (view: WorkspaceView | null | undefined) => view?.host ?? null
 
-/** 路径显示：远端 host:路径（~ 按远端家缩写）；本机 displayPath。 */
+/** 路径显示：远端 host:路径（~ 按远端家缩写；071 端口目标折回可读 host:port）；本机 displayPath。 */
 function pathOf(view: WorkspaceView): string {
   const host = hostOf(view)
   if (!host) return displayPath(view.dir)
@@ -36,7 +37,7 @@ function pathOf(view: WorkspaceView): string {
   const shortened = home && (view.dir === home || view.dir.startsWith(`${home}/`))
     ? `~${view.dir.slice(home.length)}`
     : view.dir
-  return `${host}:${shortened}`
+  return `${formatSshTarget(host)}:${shortened}`
 }
 
 export function WorkspaceBar({
@@ -83,6 +84,8 @@ export function WorkspaceBar({
   const isProject = currentView?.type === 'project'
   const missing = currentView?.status === 'missing'
   const currentHost = hostOf(currentView)
+  // 071：显示用可读形式（ssh://user@host:2222 → user@host:2222）；逻辑判断用原值。
+  const currentHostLabel = currentHost ? formatSshTarget(currentHost) : null
 
   const projects = useMemo(() => {
     const keyword = filter.trim().toLowerCase()
@@ -95,7 +98,7 @@ export function WorkspaceBar({
     )
   }, [state, filter])
 
-  const label = currentView ? (currentHost ? `${currentView.name} · ${currentHost}` : currentView.name) : '家目录'
+  const label = currentView ? (currentHostLabel ? `${currentView.name} · ${currentHostLabel}` : currentView.name) : '家目录'
   const dirTitle = currentView ? pathOf(currentView) : '旧会话：033 之前的会话没有工作区绑定，任务在家目录执行'
   const triggerTitle = `${label} · ${dirTitle}（点击切换，只影响接下来的任务）`
 
@@ -103,7 +106,7 @@ export function WorkspaceBar({
     <div className="h33-workspace-alert" role="status">
       <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
       <div className="h33-workspace-alert-text">
-        <strong>{currentHost ? `连不上 ${currentHost}` : `${currentView?.name} 工作区不可用`}</strong>
+        <strong>{currentHostLabel ? `连不上 ${currentHostLabel}` : `${currentView?.name} 工作区不可用`}</strong>
         <span>
           {currentView?.message ?? (currentHost ? '连接不上服务器' : '目录不存在或已移走')}；发送已暂停，草稿已保留。
         </span>

@@ -468,11 +468,13 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   addWorkspaceFolder: () => ipcRenderer.invoke('workspace:add-folder'),
   removeWorkspace: (id) => ipcRenderer.invoke('workspace:remove', { id }),
   // 049：添加服务器上的文件夹（SSH 目标＋远端路径；probe 通过才登记）。
-  addRemoteWorkspace: (host, dir, password, remember) =>
+  // 071：port 可选（端口框）；主进程折进 ssh://user@host:port 目标串。
+  addRemoteWorkspace: (host, dir, password, remember, port) =>
     ipcRenderer.invoke('workspace:add-remote', {
       host, dir,
       ...(password ? { password } : {}),
       ...(remember === false ? { remember: false } : {}),
+      ...(port ? { port } : {}),
     }),
   // 049：重试连接（重新探测登记的远端项目并更新状态缓存；认证失败可带密码重试）。
   probeRemoteWorkspace: (id, password, remember) =>

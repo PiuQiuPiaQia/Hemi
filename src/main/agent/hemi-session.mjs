@@ -15,6 +15,7 @@ import { createCommandScope } from './gate/command-execution.mjs';
 import { BACKGROUND_WAIT_GUIDANCE } from './background-wait.mjs';
 import {commandDeadline} from './gate/command-deadline.mjs';
 import { createAccessContext } from './gate/access-context.mjs';
+import { formatSshTarget } from '../../shared/ssh-target.mjs';
 // 049：远端工作区的同名工具接管与访问上下文（SSH 后端）。
 import { createRemoteAccessContext, hemiRemoteFileTools, hemiRemoteBash } from '../remote/remote-file-tools.mjs';
 import { createRemoteFs } from '../remote/remote-fs.mjs';
@@ -90,11 +91,13 @@ function ensureRemoteCwdPlaceholder(agentDir) {
 
 /** 049：远端工作区的系统提示段（身份 + 项目上下文，R-05/R-10）。 */
 export function remoteWorkspaceSystemBlock(remoteInfo) {
+  // 071：host 可能是 ssh://user@host:port 目标串；对模型叙述用可读形式。
+  const displayHost = formatSshTarget(remoteInfo.host);
   const lines = [
-    `当前工作区在远程服务器上：${remoteInfo.host}:${remoteInfo.dir}。`,
+    `当前工作区在远程服务器上：${displayHost}:${remoteInfo.dir}。`,
     '文件工具（read/write/edit/ls/grep/glob）与 bash 都在这台服务器上执行——相对路径按上述服务器目录解析；浏览器、桌面操控、视觉与联网检索仍在本地这台电脑上执行。',
     '本地文件系统与服务器是两台机器：不要用本地路径访问项目文件，也不要把服务器路径交给浏览器或桌面工具。',
-    `与 ${remoteInfo.host} 的连接中断时如实报告哪些改动已落在服务器上、哪些没有完成；不自动重试有副作用的命令。`,
+    `与 ${displayHost} 的连接中断时如实报告哪些改动已落在服务器上、哪些没有完成；不自动重试有副作用的命令。`,
   ];
   const context = String(remoteInfo.contextText ?? '').trim();
   if (context) lines.push('', context);

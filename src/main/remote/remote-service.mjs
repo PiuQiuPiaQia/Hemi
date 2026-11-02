@@ -8,6 +8,7 @@ import path from 'node:path';
 
 import { createSshRunner } from './ssh-runner.mjs';
 import { createRemoteFs } from './remote-fs.mjs';
+import { formatSshTarget } from '../../shared/ssh-target.mjs';
 
 let instance = null;
 
@@ -133,7 +134,8 @@ export function createRemoteService({ userDataDir, crypto = null, log = null }) 
     try {
       const fs = createRemoteFs({ runner, host: view.host, workspaceDir: view.dir, remoteHome: view.remoteHome ?? null });
       const [excerpt, listed] = await Promise.all([fs.contextExcerpt(), fs.lsEntries(view.dir)]);
-      const lines = ['［工作区 · 当前项目（服务器）］', `项目「${view.name}」：${view.host}:${view.dir}`];
+      // 071：host 可能是 ssh://user@host:port 目标串；叙述用可读形式。
+      const lines = ['［工作区 · 当前项目（服务器）］', `项目「${view.name}」：${formatSshTarget(view.host)}:${view.dir}`];
       if (listed.ok) {
         const names = listed.names
           .filter((name) => !['.DS_Store', 'node_modules', '.git'].some((bad) => name === `${bad}/` || name === bad) && !name.startsWith('._'))

@@ -15,14 +15,20 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import { formatSshTarget } from '../../shared/ssh-target.mjs';
+
 /** POSIX sh 单引号转义：值外面包一层单引号，内部单引号闭合再转义再重开。 */
 export function shq(value) {
   return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
 }
 
-/** SSH 目标（Host 别名或 user@host）合法性：argv 安全 + 无控制字符。 */
+/** SSH 目标（Host 别名、user@host 或 ssh://user@host:port）合法性：argv 安全 + 无控制字符。 */
 export function isValidSshTarget(host) {
-  return /^[A-Za-z0-9_@.\-:[\]]+$/.test(String(host ?? '').trim()) && !String(host).trim().startsWith('-');
+  const text = String(host ?? '').trim();
+  // 071：带端口的登记目标折成 ssh:// URI（OpenSSH 7.7+ 原生解析）；此处只认
+  // 前缀，主体仍按原字符集校验（不允许路径、空格等）。
+  const body = text.startsWith('ssh://') ? text.slice('ssh://'.length) : text;
+  return /^[A-Za-z0-9_@.\-:[\]]+$/.test(body) && !text.startsWith('-');
 }
 
 /**
@@ -316,19 +322,22 @@ export function createSshRunner({ controlDir, sshBin = 'ssh', passwordProvider =
 
 /** 连接错误分类 → 可操作的中文文案（终端修复方式；应用内不做指纹确认/密码输入）。 */
 export function sshFailureCopy(kind, host) {
+  // 071：host 可能是 ssh://user@host:port（端口折进目标串）；叙述里用可读形式
+  // （user@host:port），给出的终端命令保持可直接复制的完整目标。
+  const display = formatSshTarget(host);
   switch (kind) {
     case 'hostkey':
-      return `还没确认过 ${host} 的主机指纹。先在终端运行一次 ssh ${host} 并确认指纹，再回来重试。`;
+      return `还没确认过 ${display} 的主机指纹。先在终端运行一次 ssh ${host} 并确认指纹，再回来重试。`;
     case 'auth':
-      return `${host} 拒绝了登录（Permission denied）。先在终端运行 ssh ${host} 确认能免密登录，再回来重试。`;
+      return `${display} 拒绝了登录（Permission denied）。先在终端运行 ssh ${host} 确认能免密登录，再回来重试。`;
     case 'timeout':
-      return `连接 ${host} 超时。检查网络或 VPN 后重试。`;
+      return `连接 ${display} 超时。检查网络或 VPN 后重试。`;
     case 'unreachable':
-      return `连不上 ${host}（无法解析主机名或网络不可达）。检查网络或 VPN 后重试。`;
+      return `连不上 ${display}（无法解析主机名或网络不可达）。检查网络或 VPN 后重试。`;
     case 'no-ssh':
       return `本机找不到 ssh 命令。请先安装 OpenSSH（macOS 自带，检查 PATH）。`;
     default:
-      return `连接 ${host} 失败，原因未能识别。可在终端运行 ssh ${host} 看具体报错。`;
+      return `连接 ${display} 失败，原因未能识别。可在终端运行 ssh ${host} 看具体报错。`;
   }
 }
 

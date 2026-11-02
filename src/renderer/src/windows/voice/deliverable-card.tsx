@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AppWindow, FileArchive, FileCode2, FileSpreadsheet, FileText, Download, FolderOpen, ImageIcon, Presentation, RotateCcw, Video } from 'lucide-react';
 import type { ConversationDeliverableReadResult, FileOpenApplicationsResult, TurnPart } from '@shared/protocol';
 import { Menu, MenuGroup, MenuSeparator } from '@/components/menu';
+import { formatSshTarget } from '@shared/ssh-target.mjs';
 
 export const DeliverableContext = createContext<{
   conversationId: string | null;
@@ -124,7 +125,7 @@ function DeliverableCard({ file, onOpen, onResolved }: { file: FilePart; onOpen?
   }, [menuOpen, conversationId, key, file.artifactId, file.linkPath]);
 
   const name = result?.name || file.name;
-  const details = [name, file.description, [label, fileSize(result?.size ?? file.size)].filter(Boolean).join(' · '), file.host ? `远端 · ${file.host}` : null].filter(Boolean).join('\n');
+  const details = [name, file.description, [label, fileSize(result?.size ?? file.size)].filter(Boolean).join(' · '), file.host ? `远端 · ${formatSshTarget(file.host)}` : null].filter(Boolean).join('\n');
   const open = () => {
     if (file.linkPath) context?.onOpenLink(file.linkPath);
     else if (onOpen) onOpen(file.artifactId, file.name);

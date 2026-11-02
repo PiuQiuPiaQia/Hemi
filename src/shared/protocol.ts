@@ -1385,7 +1385,9 @@ export type WorkspaceView = {
   status: 'ok' | 'missing';
   /** missing 时的可展示原因（目录被移走/卸载/拒绝访问）。 */
   message?: string;
-  /** 049：SSH 目标（有 host 即远端项目；路径是服务器上的 POSIX 真实路径）。 */
+  /** 049：SSH 目标（有 host 即远端项目；路径是服务器上的 POSIX 真实路径）。
+   * 071：带自定义端口时是 ssh://user@host:port 目标串（OpenSSH 7.7+ 原生解析），
+   * 显示用 formatSshTarget() 折回可读形式。 */
   host?: string;
   /** 049：远端 $HOME（显示路径缩 ~ 用；本机项目无此字段）。 */
   remoteHome?: string;
@@ -2778,17 +2780,21 @@ export type HemiVoiceBridge = {
   ) => Promise<{ ok: boolean; state?: WorkspaceState; reason?: string }>;
   /** 049 R-01：添加服务器上的文件夹（SSH 目标＋远端路径；probe 通过才登记）。
    * 密码登录（2026-10-12 用户裁决）：可选 password 经 SSH_ASKPASS 喂给系统 ssh，
-   * 只进会话内存不落盘；认证失败回 canPassword 供界面引导输入密码。 */
+   * 只进会话内存不落盘；认证失败回 canPassword 供界面引导输入密码。
+   * 071：可选 port（端口框；host 里写 user@host:22 也认，端口框优先）。主进程
+   * 把端口折进 ssh://user@host:port 目标串，后续登记/重试/产物下载全按它一致。 */
   addRemoteWorkspace: (
     host: string,
     dir: string,
     password?: string,
     /** 勾「记住密码」（默认 true）：safeStorage 加密落盘，重启恢复；false 只进内存。 */
     remember?: boolean,
+    /** SSH 端口（可选）：1–65535；留空走 ~/.ssh/config（默认 22）。 */
+    port?: string | number,
   ) => Promise<{
     ok: boolean;
     kind?: string;
-    field?: 'host' | 'dir';
+    field?: 'host' | 'dir' | 'port';
     message?: string;
     /** kind=auth 时为 true：本机无免密密钥，可改输密码。 */
     canPassword?: boolean;

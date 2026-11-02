@@ -12,6 +12,7 @@ import { IPC } from '../../shared/ipc-channels.mjs';
 import { createWorkspaceStore } from '../workspace/workspace-store.mjs';
 import { createRemoteService, setRemoteService } from '../remote/remote-service.mjs';
 import { isValidSshTarget } from '../remote/ssh-runner.mjs';
+import { resolveRemoteTarget } from '../../shared/ssh-target.mjs';
 import { createWorkspaceOpener, normalizeOpenTarget, workspaceViewForOpen } from '../services/workspace-open.mjs';
 import { readStoredConfig, saveStoredConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
@@ -90,6 +91,8 @@ export function registerWorkspaceIpc() {
 
   // 049 R-01/R-02：添加服务器上的文件夹——probe（登录、目录、真实路径）通过才登记。
   // 失败按分类返回可操作文案（终端修复方式），不登记。
+  // 071：可选端口（端口框或 user@host:port）；折进目标串 ssh://user@host:port，
+  // 后续重试/执行/产物下载/密码池全按该目标串一致。
   // 密码登录（2026-10-12 用户裁决）：可选 password——SSH_ASKPASS 喂给系统 ssh，
   // 探测通过后只进会话内存（不落盘，重启后重试连接时重输）。
   ipcMain.handle(IPC.workspace.addRemote, async (_event, payload) => {
@@ -97,15 +100,25 @@ export function registerWorkspaceIpc() {
     const dir = String(payload?.dir ?? '').trim();
     const password = typeof payload?.password === 'string' && payload.password ? payload.password : null;
     const remember = payload?.remember !== false; // 默认记住（用户要的）；显式 false 才只进内存
+    // 071：可选端口。host 本身也认 user@host:2222 / ssh://…:2222（显式端口框优先）。
+    const portInput = payload?.port == null ? null : String(payload.port).trim();
     if (!isValidSshTarget(host)) {
-      return { ok: false, kind: 'invalid-host', field: 'host', message: '服务器格式不对：填 SSH 配置里的 Host，或 user@host。' };
+      return { ok: false, kind: 'invalid-host', field: 'host', message: '服务器格式不对：填 SSH 配置里的 Host，或 user@host（端口可写 user@host:22 或填端口框）。' };
+    }
+    const resolved = resolveRemoteTarget({ host, port: portInput });
+    if (!resolved.ok) {
+      return { ok: false, kind: 'invalid-port', field: 'port', message: resolved.reason };
+    }
+    const target = resolved.target;
+    if (!isValidSshTarget(target)) {
+      return { ok: false, kind: 'invalid-host', field: 'host', message: '服务器格式不对：填 SSH 配置里的 Host，或 user@host（端口可写 user@host:22 或填端口框）。' };
     }
     if (!dir || dir.startsWith('-')) {
       return { ok: false, kind: 'invalid-dir', field: 'dir', message: '文件夹路径不能为空（服务器上的路径，如 ~/projects/atlas）。' };
     }
-    const probed = await remoteService.probeWorkspace({ host, dir, password });
+    const probed = await remoteService.probeWorkspace({ host: target, dir, password });
     if (!probed.ok) {
-      log.warn(`远端项目添加失败（${host} · ${probed.kind}）：${probed.message}`);
+      log.warn(`远端项目添加失败（${target} · ${probed.kind}）：${probed.message}`);
       return {
         ok: false,
         kind: probed.kind,
@@ -114,14 +127,14 @@ export function registerWorkspaceIpc() {
         ...(probed.kind === 'auth' ? { canPassword: true } : {}),
       };
     }
-    if (password) remoteService.rememberPassword(host, password, { remember });
-    const result = store.addRemote({ host, dir: probed.realDir, remoteHome: probed.remoteHome });
+    if (password) remoteService.rememberPassword(target, password, { remember });
+    const result = store.addRemote({ host: target, dir: probed.realDir, remoteHome: probed.remoteHome });
     if (!result.ok) {
       log.warn(`远端项目登记失败：${result.reason}`);
       return { ok: false, kind: 'registry', message: result.reason };
     }
     log.info(
-      `远端项目已${result.deduped ? '命中既有登记' : '登记'}：「${result.workspace.name}」${host}:${result.workspace.dir}`,
+      `远端项目已${result.deduped ? '命中既有登记' : '登记'}：「${result.workspace.name}」${target}:${result.workspace.dir}`,
     );
     return { ...result, state: store.getState() };
   });

@@ -30,6 +30,7 @@ import type {
 } from '@/shared/types';
 import { isPreviewableArtifact } from '@/windows/voice/lib/preview-tabs';
 import { useClipboardCopy } from '@/lib/use-clipboard-copy';
+import { formatSshTarget } from '@shared/ssh-target.mjs';
 
 /**
  * 025 自适应成果交付（渲染层）：四类结果卡 + 同窗报告阅读视图。
@@ -202,8 +203,8 @@ function ArtifactChip({
         {artifact.name}
       </button>
       {artifact.kind === 'file' && artifact.path ? (
-        <small className="h33-artifact-path" title={artifact.host ? `${artifact.host}:${artifact.path}` : artifact.path}>
-          {artifact.host ? `${artifact.host}:${artifact.path}` : artifact.path}
+        <small className="h33-artifact-path" title={artifact.host ? `${formatSshTarget(artifact.host)}:${artifact.path}` : artifact.path}>
+          {artifact.host ? `${formatSshTarget(artifact.host)}:${artifact.path}` : artifact.path}
         </small>
       ) : null}
       {/* 049 R-11：远端产物不提供访达定位（不在本机）。 */}
@@ -725,7 +726,7 @@ export function DeliveryList({
               } else onOpenArtifact?.(artifact.id, primaryIntent);
             };
             const copyTarget = artifact.kind === 'file'
-              ? (artifact.host ? `${artifact.host}:${artifact.path}` : artifact.path)
+              ? (artifact.host ? `${formatSshTarget(artifact.host)}:${artifact.path}` : artifact.path)
               : artifact.url;
             const ext = artifact.kind === 'file' ? extLabelOf(artifact.name) : null;
             return (
