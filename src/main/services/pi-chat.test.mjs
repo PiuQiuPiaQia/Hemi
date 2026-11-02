@@ -6,6 +6,8 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import { chatTurn } from './text-model.mjs';
 import { addHistoryCacheBreakpoint, chatTurnPi } from './pi-chat.mjs';
@@ -39,6 +41,46 @@ function captureBodies() {
     onPayload: (payload) => { bodies.push(payload); },
   };
 }
+
+test('高档经真实请求链路与本地 HTTP 发送模型最高档，低/中/自动/关保持原语义', async (t) => {
+  const received = [];
+  const server = createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    received.push({ url: req.url, body: JSON.parse(raw) });
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(doneFrames().join(''));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+  const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+  for (const [model, level, expectedEffort, expectedThinking] of [
+    ['deepseek-flash', 'high', 'max', { type: 'enabled' }],
+    ['deepseek-v4-pro', 'high', 'max', { type: 'enabled' }],
+    ['deepseek-flash', 'low', 'low', { type: 'enabled' }],
+    ['deepseek-flash', 'medium', 'high', { type: 'enabled' }],
+    ['deepseek-flash', 'default', 'high', { type: 'enabled' }],
+    ['deepseek-flash', 'off', undefined, { type: 'disabled' }],
+    ['gpt-5.1', 'high', 'high', undefined],
+    ['demo-relay', 'high', 'high', undefined],
+  ]) {
+    const result = await chatTurn({
+      baseUrl, apiKey: 'local-test-only', model, thinkingLevel: level,
+      messages: [{ role: 'user', content: 'hi' }], maxPreStreamRetries: 0,
+    });
+    assert.equal(result.content, '好');
+    const { url, body } = received.at(-1);
+    assert.equal(url, '/v1/chat/completions');
+    assert.equal(body.reasoning_effort, expectedEffort, `${model}/${level}`);
+    assert.deepEqual(body.thinking, expectedThinking, `${model}/${level}`);
+    assert.equal(body.max_tokens, 32768, '本轮不调整输出预算');
+  }
+  assert.equal(received.length, 8);
+});
 
 // ---- 思考字段等价矩阵（4 格式 × 档位；差异已登记技术方案「等价门」） ----
 

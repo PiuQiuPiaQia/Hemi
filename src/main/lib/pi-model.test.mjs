@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models';
+import { clampThinkingLevel } from '@earendil-works/pi-ai/models';
 import { candidateModelDef, modelBaseUrl, piModelOf, providerRegistrationOf, sdkThinkingLevelOf } from './pi-model.mjs';
 
 test('完整接口地址统一归一，agent 注册和轻量模型使用相同基址', () => {
@@ -37,9 +38,21 @@ test('显式格式覆盖目录默认值，不修改 SDK 目录或让会话互相
   assert.equal(DEEPSEEK_MODELS['deepseek-flash'].thinkingLevelMap.low, 'low');
 });
 
-test('产品三档不扩充，默认映射中档；未知输入仍按默认处理', () => {
-  assert.deepEqual(['low', 'medium', 'high', 'off', 'default', 'bad'].map(sdkThinkingLevelOf),
-    ['low', 'medium', 'high', 'off', 'medium', 'medium']);
+test('产品三档不扩充，高请求最高档；默认与未知输入仍按中档处理', () => {
+  assert.deepEqual(['low', 'medium', 'high', 'off', 'default', 'bad', 'max'].map(sdkThinkingLevelOf),
+    ['low', 'medium', 'max', 'off', 'medium', 'medium', 'medium']);
+});
+
+test('高档交给真实 Pi SDK 按模型能力夹取，不为未知型号猜测最高档能力', () => {
+  for (const [model, expected] of [
+    ['deepseek-flash', 'max'],
+    ['deepseek-v4-pro', 'max'],
+    ['gpt-5.1', 'high'],
+    ['demo-relay', 'high'],
+  ]) {
+    const definition = candidateModelDef({ model });
+    assert.equal(clampThinkingLevel(definition, sdkThinkingLevelOf('high')), expected, model);
+  }
 });
 
 test('兼容端点不继承型号目录的原生会话控制，也不把未知图像能力当作支持', () => {

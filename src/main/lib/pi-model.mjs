@@ -20,9 +20,10 @@ export function modelBaseUrl(baseUrl, api = 'openai-completions') {
     : url.replace(/\/chat\/completions$/, '');
 }
 
-/** 产品三档保持不变；不支持的厂商档位由 Pi 自己夹取。 */
+/** 产品三档保持不变：高＝请求模型最高档；可用档位与原生字段由 Pi 夹取/翻译。 */
 export function sdkThinkingLevelOf(value) {
   const level = normalizeThinkingLevel(value);
+  if (level === 'high') return 'max';
   return level === 'default' ? DEFAULT_LEVEL_TIER : level;
 }
 
