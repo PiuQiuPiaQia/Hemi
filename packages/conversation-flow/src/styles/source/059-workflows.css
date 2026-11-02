@@ -1743,12 +1743,6 @@ label.h59-resolve {
   border: calc(var(--sp-2) * 2) solid var(--n-300);
   transform: scale(0.6);
 }
-.compact-shell[data-workflow-open="true"]
-  .h24-navrail-item[data-current="true"] {
-  color: var(--ink);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-1);
-}
 .h59-node-copy strong {
   line-height: 1.5;
 }
