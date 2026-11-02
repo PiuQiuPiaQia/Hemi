@@ -11,6 +11,7 @@ import { useCapability } from '@/windows/voice/lib/use-platform-state';
  * - Windows：按能力快照渲染——WP-04 探针未过前如实「暂不可用」，不显示
  *   已授权/可配置的假象（AC-03）。
  * 037：渲染为「唤起与显示」分组里的一行（h37-row + h37-switch）。
+ * 2026-11-02 用户裁决：分组从「通用」页整组挪进「语音与通话」页。
  */
 export function PushToTalkSection() {
   const isMac = window.hemiVoice?.platform === 'darwin';

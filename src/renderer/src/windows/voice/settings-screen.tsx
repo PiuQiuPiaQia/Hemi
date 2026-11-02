@@ -311,19 +311,9 @@ export function SettingsScreen({
                       <div className="h37-page-head">
                         <div>
                           <h2>通用</h2>
-                          <p>选择适合你的唤起方式。</p>
+                          <p>基本设置与版本信息。</p>
                         </div>
                       </div>
-                      <section className="h37-section" id="settings-invoke">
-                        <div className="h37-section-head">
-                          <h3>唤起与显示</h3>
-                        </div>
-                        <div className="h37-group">
-                          {/* 022 长按 Option（仅 macOS 渲染）／034 v3 悬浮球：自包含读写、立即生效。 */}
-                          <PushToTalkSection />
-                          <FloatingOrbSection />
-                        </div>
-                      </section>
                       {/* 044 应用内更新：版本号、检查更新与下载安装（自包含读写）。 */}
                       <AboutUpdateSection />
                     </>
@@ -334,13 +324,27 @@ export function SettingsScreen({
                       <div className="h37-page-head">
                         <div>
                           <h2>语音与通话</h2>
-                          <p>调整 Hemi 怎样听、怎样说。</p>
+                          <p>调整 Hemi 怎样唤起、怎样听、怎样说。</p>
                         </div>
                       </div>
                       <div className="h37-settings-stack">
+                        {/* 2026-11-02 用户裁决：「唤起与显示」（长按说话＋悬浮球）从通用页
+                            整组挪进语音页——本质是语音交互入口，按用户心智归位；
+                            通用页副标题随之改为「基本设置与版本信息」。
+                            锚点 id settings-invoke 保留，深层直达不失效。 */}
+                        <section className="h37-section" id="settings-invoke">
+                          <div className="h37-section-head">
+                            <h3>唤起与显示</h3>
+                          </div>
+                          <div className="h37-group">
+                            {/* 022 长按 Option（仅 macOS 渲染）／034 v3 悬浮球：自包含读写、立即生效。 */}
+                            <PushToTalkSection />
+                            <FloatingOrbSection />
+                          </div>
+                        </section>
+
                         {/* 013：首位说话人过滤（默认关；仅通话模式生效，切换后下一次通话生效）。
-                            开关即时保存。P2：去掉「长按说话 → 去通用页设置」跳转行（重复入口，
-                            设置本体在通用页）。 */}
+                            开关即时保存。 */}
                         <section className="h37-section">
                           <div className="h37-section-head">
                             <h3>通话偏好</h3>

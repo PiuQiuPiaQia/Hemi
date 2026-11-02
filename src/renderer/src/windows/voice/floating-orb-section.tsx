@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
  * 与 PushToTalkSection 同区（都是「在其他地方唤起 Hemi」的全局开关）。
  * 自包含：自己读 UiPreferences、开关联动 IPC 立即生效（无保存按钮语义），
  * 主界面不再镜像该状态。
- * 037：渲染为「其他」分组里的一行（h37-row + h37-switch）。
+ * 037：渲染为「唤起与显示」分组里的一行（h37-row + h37-switch）；
+ * 2026-11-02 随分组从「通用」页挪进「语音与通话」页（原「其他」分组名已废）。
  */
 export function FloatingOrbSection() {
   // 偏好没读到时按默认开渲染（主进程默认 true），避免凭空的告警。
