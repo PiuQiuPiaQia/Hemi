@@ -1,6 +1,6 @@
 /** Portable view projection: execution and all historical data stay authoritative in the Host. */
 const itemId = item => item.kind === 'user' ? item.id : item.itemId;
-const bytes = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+const WINDOW_QAS = 10, HISTORY_QAS = 10, RECLAIM_BUFFER_QAS = 5;
 const pick = (values, ids) => Object.fromEntries(Object.entries(values ?? {}).filter(([id]) => ids.has(id)));
 function viewFor(snapshot, timeline, start, total) {
   const runs = new Set(timeline.map(item => item.runId));
@@ -25,51 +25,38 @@ export function flowReplyText(snapshot, {runId,generation}) {
   return snapshot.timeline.filter(item=>item.kind==='assistant'&&item.runId===runId)
     .flatMap(item=>item.parts.filter(part=>part.kind==='text').map(part=>String(part.content??''))).filter(text=>text.trim()).join('\n\n');
 }
-// Row count is a target; bytes and a 100-row ceiling bound oversized QA groups.
-// Normal pages begin with a question. A larger group explicitly continues across pages.
-function rangeView(snapshot, end, limit, maxBytes, offset = 0, total = snapshot.timeline.length) {
-  let start = Math.max(0, end - Math.max(1, Math.min(100, limit)));
-  let view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);
-  if (end - start > 1 && bytes(view) > maxBytes) {
-    let low = 1, high = end - start, keep = 1;
-    while (low <= high) {
-      const count = Math.floor((low + high) / 2), candidate = viewFor(snapshot, snapshot.timeline.slice(end - count, end), offset + end - count, total);
-      if (bytes(candidate) <= maxBytes) {keep = count; low = count + 1;} else high = count - 1;
-    }
-    start = end - keep; view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);
+// One question and all following answer/process rows form one paging unit.
+// Never split a QA because of its row count, bytes or child execution details.
+function rangeView(snapshot, end, limit, offset = 0, total = snapshot.timeline.length) {
+  const count = Number.isSafeInteger(limit) && limit > 0 ? limit : 1;
+  let start = end, questions = 0;
+  while (start > 0) {
+    start--;
+    if (snapshot.timeline[start].kind === 'user' && ++questions >= count) break;
   }
-  if (start > 0 && snapshot.timeline[start]?.kind !== 'user') {
-    let question = start - 1;
-    while (question >= Math.max(0, end - 100) && snapshot.timeline[question].kind !== 'user') question--;
-    if (question >= 0 && snapshot.timeline[question].kind === 'user' && end - question <= 100) {
-      const whole = viewFor(snapshot, snapshot.timeline.slice(question, end), offset + question, total);
-      if (bytes(whole) <= maxBytes) {start = question; view = whole;}
-    }
-    if (snapshot.timeline[start]?.kind !== 'user') {
-      let nextQuestion = start;
-      while (nextQuestion < end && snapshot.timeline[nextQuestion].kind !== 'user') nextQuestion++;
-      if (nextQuestion < end) {start = nextQuestion; view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);}
-    }
-  }
+  const view = viewFor(snapshot, snapshot.timeline.slice(start, end), offset + start, total);
   if (view.timeline.length && view.timeline[0].kind !== 'user') {
     view.history.continuation = {questionId: view.timeline[0].afterInputId ?? snapshot.history?.continuation?.questionId ?? null};
   }
   return view;
 }
-export function projectFlowWindow(snapshot, {limit=32,maxBytes=256*1024,start=snapshot.history?.start??0,total=snapshot.history?.total??snapshot.timeline.length}={}) {
-  return rangeView(snapshot, snapshot.timeline.length, limit, maxBytes, start, total);
+export function projectFlowWindow(snapshot, {limit=WINDOW_QAS,start=snapshot.history?.start??0,total=snapshot.history?.total??snapshot.timeline.length}={}) {
+  return rangeView(snapshot, snapshot.timeline.length, limit, start, total);
 }
-export function flowHistoryPage(snapshot, {before,generation,limit=32,maxBytes=256*1024}={}) {
+export function flowHistoryPage(snapshot, {before,generation,limit=HISTORY_QAS}={}) {
   if (generation!==snapshot.generation || !Number.isSafeInteger(before) || before<0 || before>snapshot.timeline.length)
     throw Object.assign(new Error('历史版本已变化，请重新同步后读取。'),{code:'conflict'});
-  const view = rangeView(snapshot, before, limit, maxBytes), start = view.history.start;
+  const view = rangeView(snapshot, before, limit), start = view.history.start;
   const questionId = view.timeline[0]?.kind === 'user' ? view.timeline[0].id : view.history.continuation?.questionId ?? null;
   return {conversationId:snapshot.conversationId,generation:snapshot.generation,revision:snapshot.revision,start,end:before,total:snapshot.timeline.length,snapshot:view,
     ...(view.history.continuation || snapshot.timeline[before]?.kind === 'assistant' ? {continuation:{questionId,earlier:Boolean(view.history.continuation),later:snapshot.timeline[before]?.kind === 'assistant'}} : {})};
 }
 function diff(previous,next) {
   if(previous.generation!==next.generation)return {kind:'snapshot',snapshot:next};
-  const changes=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const changes=[],equal=(a,b)=>a===b||JSON.stringify(a)===JSON.stringify(b);
+  // Unchanged child transcripts can be large; compare their immutable entries
+  // before serializing metadata for every streamed text patch.
+  const equalMap=(a={},b={})=>a===b||(Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(key=>Object.hasOwn(b,key)&&equal(a[key],b[key])));
   const meta={};for(const key of ['phase','activeRunId','awaitingUser','queuePaused','history'])if(!equal(previous[key],next[key]))meta[key]=next[key];
   if(Object.keys(meta).length)changes.push({kind:'meta',meta});
   if(!equal(previous.pending,next.pending))changes.push({kind:'queue',pending:next.pending});
@@ -79,7 +66,7 @@ function diff(previous,next) {
     if(index>=previous.timeline.length)changes.push({kind:'item-appended',item:next.timeline[index]});
     else if(!equal(previous.timeline[index],next.timeline[index]))changes.push({kind:'item-updated',item:next.timeline[index]});
   }
-  for(const key of ['runs','tasks','artifacts','permissions'])if(!equal(previous[key],next[key]))changes.push({kind:key,[key]:next[key]});
+  for(const key of ['runs','tasks','artifacts','permissions'])if(!equalMap(previous[key],next[key]))changes.push({kind:key,[key]:next[key]});
   if(!equal(previous.backgroundJobs??[],next.backgroundJobs??[]))changes.push({kind:'background-jobs',jobs:next.backgroundJobs??[]});
   if(!equal(previous.pendingReports,next.pendingReports))changes.push({kind:'reports',pendingReports:next.pendingReports});
   return {kind:'patch',conversationId:next.conversationId,generation:next.generation,baseRevision:previous.revision,revision:next.revision,changes};
@@ -105,7 +92,12 @@ export function createFlowWindowProjector(applyChange,readSnapshot) {
       if(change.kind==='timeline'){start=0;total=change.timeline.length;}
       else if(change.kind==='item-appended' && !previous.timeline.some(item=>itemId(item)===itemId(change.item)))total++;
     }
-    const next=projectFlowWindow(applied.snapshot,{start,total});views.set(frame.id,next);
+    // Keep a five-QA buffer. Once exceeded, return to ten complete QAs;
+    // a burst can reclaim more than five. Output patches keep the boundary.
+    const questions=applied.snapshot.timeline.filter(item=>item.kind==='user').length;
+    const limit=frame.change.kind==='snapshot'||questions>WINDOW_QAS+RECLAIM_BUFFER_QAS
+      ? WINDOW_QAS : WINDOW_QAS+RECLAIM_BUFFER_QAS;
+    const next=projectFlowWindow(applied.snapshot,{start,total,limit});views.set(frame.id,next);
     const change=diff(previous,next);
     if(change.kind==='patch'&&frame.change.kind==='patch'){
       const ids=new Set(next.timeline.map(itemId));

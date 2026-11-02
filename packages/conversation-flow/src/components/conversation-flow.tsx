@@ -146,6 +146,7 @@ function ConversationFlowBody({
     [entries, Boolean(state?.interimText)],
   );
   const lastUser = items.findLast((item) => item.author === "user")?.id ?? null;
+  const questionIds = useMemo(() => items.filter(item => item.author === 'user').map(item => item.id), [items]);
   const oldScrollIntent = useRef(state?.scrollIntent?.id);
   useEffect(() => {
     const next = state?.scrollIntent?.id;
@@ -277,7 +278,7 @@ function ConversationFlowBody({
           </p>
         </article>
       );
-    if (entry.type === 'gap') return state?.history ? <HistoryLoader history={state.history} gap/> : null;
+    if (entry.type === 'gap') return state?.history ? <HistoryLoader history={state.history} gap onRead={() => virtual.current?.readHistory()}/> : null;
     const item = entry.type === "stages" ? entry.items[0] : entry.item;
     const previous = entries[index - 1];
     const prev = previous && previous.type !== "gap"
@@ -473,11 +474,12 @@ function ConversationFlowBody({
           data-transcript-scroll
         >
           <div className="conversation-list h24-reading">
-            {state?.history && (state.history.hasMore || historyVisible) ? <HistoryLoader history={state.history}/> : null}
+            {state?.history && (state.history.hasMore || historyVisible) ? <HistoryLoader history={state.history} onRead={() => virtual.current?.readHistory()}/> : null}
             {state?.notice ? <p className="h24-reply-status" role="status">{state.notice}</p> : null}
             <VirtualTranscript
               ref={virtual}
               rowIds={rowIds}
+              questionIds={questionIds}
               editingId={editingId}
               onPinnedChange={setPinned}
               lastUserId={lastUser}

@@ -9,15 +9,13 @@ const end = (segment: Segment) => segment.start + segment.items.length;
 /** Presentation history only. The replica owns the authoritative live head.
  * Retain the reading segment across reconnects, with at most one explicit gap.
  */
-export function createHistoryView({maxRows=256,maxBytes=2*1024*1024}={}) {
+export function createHistoryView() {
   let current: FlowSnapshotView | null = null;
   let segments: Segment[] = [];
   let reading = false;
   let following = true;
   let liveHead: FlowSnapshotView | null = null;
   const updates = new Map<string, FlowSnapshotView['timeline'][number]>();
-  const sizes=new WeakMap<object,number>();
-  const size=(item:object)=>{let bytes=sizes.get(item);if(bytes===undefined){bytes=new TextEncoder().encode(JSON.stringify(item)).byteLength;sizes.set(item,bytes);}return bytes;};
   function compose(source: FlowSnapshotView, next: Segment[]) {
     const joined: Segment[] = [];
     for (const segment of next) {
@@ -35,17 +33,6 @@ export function createHistoryView({maxRows=256,maxBytes=2*1024*1024}={}) {
       runs: {...current?.runs, ...source.runs}, tasks: {...current?.tasks, ...source.tasks}, artifacts: {...current?.artifacts, ...source.artifacts}};
     if (source.history) current = retainFlowRows(current, current.timeline, current.history);
     return current;
-  }
-  function trimOlder(minimum:number) {
-    if(!current?.history||!liveHead?.history||!segments.length)return;
-    const totalRows=segments.reduce((n,s)=>n+s.items.length,0),totalBytes=segments.reduce((n,s)=>n+s.items.reduce((b,item)=>b+size(item),0),0);
-    if(totalRows<=maxRows&&totalBytes<=maxBytes)return;
-    const first=segments[0],tail={start:liveHead.history.start,items:liveHead.timeline,continuation:liveHead.history.continuation};
-    const rowBudget=Math.max(minimum,maxRows-tail.items.length),byteBudget=maxBytes-tail.items.reduce((n,item)=>n+size(item),0);
-    let count=0,bytes=0;
-    for(const item of first.items){if(count>=minimum&&(count>=rowBudget||bytes+size(item)>byteBudget))break;count++;bytes+=size(item);}
-    if(count>=first.items.length&&segments.length===1)return;
-    compose(current,[{...first,items:first.items.slice(0,count)},tail]);
   }
   return {
     get snapshot() { return current; },
@@ -84,9 +71,8 @@ export function createHistoryView({maxRows=256,maxBytes=2*1024*1024}={}) {
       const fetched = {start, continuation: start === page.start ? page.snapshot.history?.continuation : undefined, items: page.snapshot.timeline.slice(start - page.start).map(item => updates.get(itemId(item)) ?? item)};
       compose({...current, runs: {...page.snapshot.runs, ...current.runs}, tasks: {...page.snapshot.tasks, ...current.tasks}, artifacts: {...page.snapshot.artifacts, ...current.artifacts}},
         [...segments.slice(0, index), fetched, ...segments.slice(index)]);
-      // A backwards reader keeps the new page and nearby QA plus the live head.
-      // Explicit gap reads preserve the reader's requested material until return.
-      if(target==='older')trimOlder(fetched.items.length);
+      // Reading is explicit: retain complete fetched QAs until the user returns
+      // to the live end. Do not evict their middle or repeatedly expose gaps.
       return true;
     },
   };

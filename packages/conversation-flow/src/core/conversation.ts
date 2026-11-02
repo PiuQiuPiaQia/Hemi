@@ -48,7 +48,7 @@ export interface ConversationClientState {
   error: string;
   /** Offline history is optional; cache failures never block conversation operations. */
   cacheNotice?: string;
-  history?: {hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number};follow?(value:boolean):void};
+  history?: {total?:number;hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number};follow?(value:boolean):void};
 }
 
 export function createConversation({ scope, transport, storage, lifecycle, makeId = () => crypto.randomUUID(), requestTimeoutMs = 15000, pollIntervalMs = transport.subscribe ? 0 : 2000, onDispose }: {
@@ -91,7 +91,7 @@ export function createConversation({ scope, transport, storage, lifecycle, makeI
   function followHistory(value: boolean) { if (history.follow(value)) publishHistory(); }
   function publishHistory(error = state.history?.error ?? '', target = state.history?.target) {
     const snapshot = history.snapshot;
-    update({snapshot, history: {follow: followHistory, hasMore: Boolean(transport.fetchHistory && (snapshot?.history?.start ?? 0) > 0), loading: Boolean(historyRead), error, target, continuation: Boolean(snapshot?.history?.continuation), gap: snapshot?.history?.gap ? {beforeId: snapshot.history.gap.beforeId, remaining: snapshot.history.gap.end - snapshot.history.gap.start} : undefined}});
+    update({snapshot, history: {follow: followHistory, total: snapshot?.history?.total ?? snapshot?.timeline.length, hasMore: Boolean(transport.fetchHistory && (snapshot?.history?.start ?? 0) > 0), loading: Boolean(historyRead), error, target, continuation: Boolean(snapshot?.history?.continuation), gap: snapshot?.history?.gap ? {beforeId: snapshot.history.gap.beforeId, remaining: snapshot.history.gap.end - snapshot.history.gap.start} : undefined}});
   }
   function show(head: FlowSnapshotView) {
     const changed = !history.snapshot || history.snapshot.generation !== head.generation;

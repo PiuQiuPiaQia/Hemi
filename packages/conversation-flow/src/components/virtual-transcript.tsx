@@ -25,6 +25,7 @@ import {useTranscriptViewport} from './use-transcript-viewport.js';
 import type {FlowSurfaceState} from '../types/api.js';
 
 export type VirtualTranscriptHandle = {
+  readHistory: () => void;
   scrollToBottom: (options?: { behavior?: "instant" | "smooth" }) => void;
   scrollToMessage: (
     id: string,
@@ -35,6 +36,7 @@ export type VirtualTranscriptHandle = {
 /** One scroll owner. The key on this component scopes all measurements/UI state to a generation. */
 export function VirtualTranscript({
   rowIds,
+  questionIds,
   editingId,
   renderRow,
   getRowText,
@@ -45,6 +47,7 @@ export function VirtualTranscript({
   ref,
 }: {
   rowIds: string[];
+  questionIds: string[];
   editingId: string | null;
   renderRow: (index: number) => ReactNode;
   getRowText: (
@@ -73,6 +76,7 @@ export function VirtualTranscript({
   const [margin, setMargin] = useState(0);
   const [retained, setRetained] = useState<string[]>([]);
   const pinned = useRef(true);
+  const endIntent = useRef(false);
   const [following, setFollowing] = useState(true);
   const interactionVersion = useRef(0);
   const store = useMemo<TranscriptRowStates>(() => new Map(), []);
@@ -90,8 +94,14 @@ export function VirtualTranscript({
   }, [history?.follow, following, editingId, retained.length]);
   const intent = useTranscriptViewport(viewport, {
     history,
-    historyHeight: () => body.current?.parentElement?.querySelector('.h24-history-load')?.clientHeight ?? 0,
-    read: () => {virtualizer.cancelScroll(); setPinned(false);},
+    nearStart: () => {
+      const first = virtualizer.getVirtualItemForOffset(viewport?.scrollTop ?? 0);
+      // All rows belonging to the first three QAs prefetch the previous ten.
+      const fourth = questionIds[3] ? rowIds.indexOf(questionIds[3]) : rowIds.length;
+      return first !== undefined && first.index < fourth;
+    },
+    read: () => {endIntent.current = false; virtualizer.cancelScroll(); setPinned(false);},
+    towardEnd: () => {endIntent.current = true;},
     interact: () => {interactionVersion.current++;},
   });
   const getKey = useCallback((index: number) => rowIds[index], [rowIds]);
@@ -134,9 +144,12 @@ export function VirtualTranscript({
     followOnAppend: following ? "auto" : false,
     scrollEndThreshold: following ? 1 : 0,
     onChange: (instance) => {
-      if (instance.isAtEnd(1)) setPinned(true);
+      // Prepend anchoring also scrolls forward. Only an actual downward input
+      // may resume following after the user has started reading history.
+      if (instance.isAtEnd(1) && (pinned.current || endIntent.current)) setPinned(true);
       else if (
         !pinned.current &&
+        endIntent.current &&
         instance.isScrolling &&
         instance.scrollDirection === "forward" &&
         instance.isAtEnd(36)
@@ -163,11 +176,15 @@ export function VirtualTranscript({
   useImperativeHandle(
     ref,
     () => ({
+      // Set the ref synchronously before a button starts its request: fast IPC
+      // can finish before React ever renders the intermediate loading state.
+      readHistory: () => {intent.current(); endIntent.current = false; interactionVersion.current++; virtualizer.cancelScroll(); setPinned(false);},
       scrollToBottom: jump,
       scrollToMessage: async (id, options) => {
         const index = rowIds.indexOf(id);
         if (index >= 0) {
           intent.current();
+          endIntent.current = false;
           setPinned(false);
           virtualizer.scrollToIndex(index, {
             align: options?.align ?? "start",
@@ -214,14 +231,22 @@ export function VirtualTranscript({
   }, [jump]);
   const previousUser = useRef(lastUserId);
   const previousKeys = useRef(rowIds);
+  const previousTotal = useRef(history?.total);
   useLayoutEffect(() => {
     if (!viewport || loading) return;
     // Initial open and own sends position directly; asynchronous measurements keep the end anchored.
     // A local echo moving into the Host queue exposes an older last user; it is not another send.
-    const userAdded = previousUser.current !== lastUserId && lastUserId !== null && !previousKeys.current.includes(lastUserId);
+    const previousTail = previousKeys.current.at(-1);
+    const tailIndex = previousTail ? rowIds.indexOf(previousTail) : -1;
+    // The Host can create an assistant placeholder before delivering its user.
+    // That user is inserted before the old tail, but advances the canonical total.
+    const liveAppend = history?.total !== undefined && previousTotal.current !== undefined && history.total > previousTotal.current;
+    const userAdded = previousUser.current !== lastUserId && lastUserId !== null && !previousKeys.current.includes(lastUserId)
+      && (liveAppend || (tailIndex >= 0 && rowIds.indexOf(lastUserId) > tailIndex));
     if ((userAdded && !history?.gap) || pinned.current) jump();
     previousUser.current = lastUserId;
-  }, [viewport, loading, lastUserId, jump, Boolean(history?.gap)]);
+    previousTotal.current = history?.total;
+  }, [viewport, loading, lastUserId, jump, Boolean(history?.gap), history?.total]);
   useEffect(() => {
     const valid = new Set(rowIds);
     for (const id of store.keys()) if (!valid.has(id)) store.delete(id);

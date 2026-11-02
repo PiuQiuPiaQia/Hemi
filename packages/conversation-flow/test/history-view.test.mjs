@@ -6,22 +6,20 @@ const row=i=>({kind:'user',id:'u'+i,runId:'r'+i,text:'Question '+i,inputSource:'
 const full=(length,revision=1,generation=1)=>({schemaVersion:1,conversationId:'history',revision,generation,phase:'idle',activeRunId:null,queuePaused:false,pending:[],timeline:Array.from({length},(_,i)=>row(i)),runs:{},tasks:{},artifacts:{},permissions:{},pendingReports:[]});
 test('following the live end releases backfilled QA and their terminal metadata; reading keeps it until then',async t=>{
   const f=await fixture(t);await f.client.loadHistory();
-  assert.equal(f.client.getSnapshot().snapshot.timeline.length,64);
-  f.head(200,2);assert.ok(f.client.getSnapshot().snapshot.timeline.some(item=>item.id==='u36'));
+  assert.equal(f.client.getSnapshot().snapshot.timeline.length,20);
+  f.head(200,2);assert.ok(f.client.getSnapshot().snapshot.timeline.some(item=>item.id==='u80'));
   f.client.getSnapshot().history.follow(true);
-  let state=f.client.getSnapshot();assert.equal(state.snapshot.timeline.length,32);assert.equal(state.snapshot.history.start,168);
+  let state=f.client.getSnapshot();assert.equal(state.snapshot.timeline.length,10);assert.equal(state.snapshot.history.start,190);
   assert.equal(state.snapshot.history.gap,undefined);assert.equal(state.history.hasMore,true);
-  await f.client.loadHistory();state=f.client.getSnapshot();assert.equal(state.snapshot.timeline[0].id,'u136');
+  await f.client.loadHistory();state=f.client.getSnapshot();assert.equal(state.snapshot.timeline[0].id,'u180');
 });
-test('backwards paging bounds retained QA and exposes evicted middle history as a reloadable gap',async t=>{
+test('backwards reading retains requested QA without evicting its middle; returning live reclaims old QA',async t=>{
   const f=await fixture(t);f.head(1000,2);
-  for(let i=0;i<20;i++)await f.client.loadHistory();
+  for(let i=0;i<30;i++)await f.client.loadHistory();
   const state=f.client.getSnapshot();
-  assert.ok(state.snapshot.timeline.length<=256);assert.equal(state.snapshot.timeline[0].id,'u328');
-  assert.equal(state.snapshot.timeline.at(-1).id,'u999');assert.ok(state.history.gap.remaining>0);
-  const remaining=state.history.gap.remaining;await f.client.loadHistory('gap');
-  assert.ok(f.client.getSnapshot().history.gap.remaining<remaining);
-  f.client.getSnapshot().history.follow(true);assert.equal(f.client.getSnapshot().snapshot.timeline.length,32);
+  assert.equal(state.snapshot.timeline.length,310);assert.equal(state.snapshot.timeline[0].id,'u690');
+  assert.equal(state.snapshot.timeline.at(-1).id,'u999');assert.equal(state.history.gap,undefined);
+  f.client.getSnapshot().history.follow(true);assert.equal(f.client.getSnapshot().snapshot.timeline.length,10);
 });
 async function fixture(t) {
   let source=full(100),receive,offline,online,read,reads=0;
@@ -37,13 +35,13 @@ test('discontinuous heads retain the reading segment and expose one user-driven 
   const f=await fixture(t);await f.client.loadHistory();const first=f.client.getSnapshot().snapshot.timeline[0].id;
   f.head(200,2);f.head(300,3);
   let state=f.client.getSnapshot();assert.equal(state.snapshot.timeline[0].id,first);assert.equal(state.snapshot.timeline.at(-1).id,'u299');assert.equal(f.reads,1);
-  assert.deepEqual(state.snapshot.history.gap,{start:100,end:268,beforeId:'u268'});
-  await f.client.loadHistory();assert.equal(f.client.getSnapshot().snapshot.history.start,4);
+  assert.deepEqual(state.snapshot.history.gap,{start:100,end:290,beforeId:'u290'});
+  await f.client.loadHistory();assert.equal(f.client.getSnapshot().snapshot.history.start,70);
   let iterations=0;
-  while(f.client.getSnapshot().history.gap){assert.ok(iterations++<10);await f.client.loadHistory('gap');}
-  state=f.client.getSnapshot();assert.deepEqual(state.snapshot.timeline.map(item=>item.id),Array.from({length:296},(_,i)=>'u'+(i+4)));
-  await f.client.loadHistory();assert.equal(f.client.getSnapshot().history.hasMore,false);assert.ok(f.client.getSnapshot().snapshot.timeline.length<=256);
-  while(f.client.getSnapshot().history.gap)await f.client.loadHistory('gap');
+  while(f.client.getSnapshot().history.gap){assert.ok(iterations++<30);await f.client.loadHistory('gap');}
+  state=f.client.getSnapshot();assert.deepEqual(state.snapshot.timeline.map(item=>item.id),Array.from({length:230},(_,i)=>'u'+(i+70)));
+  while(f.client.getSnapshot().history.hasMore)await f.client.loadHistory();
+  assert.equal(f.client.getSnapshot().history.hasMore,false);assert.equal(f.client.getSnapshot().history.gap,undefined);
   assert.equal(f.client.getSnapshot().snapshot.timeline.length,300,'explicit gap reads can still recover all archived rows');
 });
 test('late history responses cannot cross generation or Host authority fences',async t=>{
@@ -58,17 +56,15 @@ test('a valid page overtaken by a fuller live baseline is discarded without a fa
   const f=await fixture(t);let resolve;
   f.hold(cursor=>new Promise(done=>resolve=()=>done(flowHistoryPage(full(100,1,cursor.generation),cursor))));
   const read=f.client.loadHistory();await new Promise(setImmediate);f.head(20,2);resolve();await read;
-  assert.equal(f.client.getSnapshot().snapshot.timeline.length,20);assert.equal(f.client.getSnapshot().history.error,'');
+  assert.equal(f.client.getSnapshot().snapshot.timeline.length,10);assert.equal(f.client.getSnapshot().history.error,'');
 });
-test('normal history pages align to QA boundaries; oversized QA has explicit continuations and no lost rows',()=>{
+test('pages count complete QAs and never fragment a long QA into partial pages',()=>{
   const source=full(0);source.timeline=Array.from({length:20},(_,i)=>[row(i),...Array.from({length:3},(_,j)=>({kind:'assistant',itemId:`a${i}-${j}`,runId:'r'+i,afterInputId:'u'+i,parts:[]}))]).flat();
-  let view=projectFlowWindow(source,{limit:6});assert.equal(view.timeline[0].kind,'user');assert.equal(view.history.continuation,undefined);
-  const page=flowHistoryPage(source,{generation:1,before:view.history.start,limit:6});assert.equal(page.snapshot.timeline[0].kind,'user');assert.equal(page.continuation,undefined);
+  let view=projectFlowWindow(source,{limit:6});assert.equal(view.timeline.filter(item=>item.kind==='user').length,6);assert.equal(view.timeline[0].kind,'user');assert.equal(view.history.continuation,undefined);
+  const page=flowHistoryPage(source,{generation:1,before:view.history.start});assert.equal(page.snapshot.timeline.filter(item=>item.kind==='user').length,10);assert.equal(page.snapshot.timeline[0].kind,'user');assert.equal(page.continuation,undefined);
   source.timeline=[row(0),...Array.from({length:250},(_,j)=>({kind:'assistant',itemId:'a'+j,runId:'r0',afterInputId:'u0',parts:[{partId:'p'+j,kind:'text',content:'x'.repeat(12000)}]}))];
-  view=projectFlowWindow(source);assert.deepEqual(view.history.continuation,{questionId:'u0'});assert.ok(Buffer.byteLength(JSON.stringify(view))<256*1024);
-  let before=view.history.start,ids=view.timeline.map(item=>item.itemId??item.id),continuations=0;
-  while(before){const page=flowHistoryPage(source,{generation:1,before});if(page.continuation)continuations++;ids=[...page.snapshot.timeline.map(item=>item.itemId??item.id),...ids];before=page.start;}
-  assert.ok(continuations>1);assert.deepEqual(ids,source.timeline.map(item=>item.itemId??item.id));
+  view=projectFlowWindow(source);assert.equal(view.history.continuation,undefined);assert.equal(view.history.start,0);
+  assert.deepEqual(view.timeline,source.timeline,'even a QA above the old row/byte ceilings remains complete');
 });
 
 test('history loading during a connection recovery gives feedback and recovers without consuming a read',async t=>{
@@ -78,6 +74,6 @@ test('updates overtaking a history response win over the earlier page data',asyn
  const f=await fixture(t);let resolve;
  f.hold(cursor=>new Promise(done=>resolve=()=>done(flowHistoryPage(full(100),cursor))));
  const read=f.client.loadHistory();await new Promise(setImmediate);
- f.change({kind:'patch',conversationId:'history',generation:1,baseRevision:1,revision:2,changes:[{kind:'item-updated',item:{...row(40),text:'newer historical content'}}]});
- resolve();await read;assert.equal(f.client.getSnapshot().snapshot.timeline.find(item=>item.id==='u40').text,'newer historical content');
+ f.change({kind:'patch',conversationId:'history',generation:1,baseRevision:1,revision:2,changes:[{kind:'item-updated',item:{...row(80),text:'newer historical content'}}]});
+ resolve();await read;assert.equal(f.client.getSnapshot().snapshot.timeline.find(item=>item.id==='u80').text,'newer historical content');
 });

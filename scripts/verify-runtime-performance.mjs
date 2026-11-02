@@ -93,7 +93,8 @@ async function renderer(mode){
     await page.getByRole('textbox',{name:'输入消息',exact:true}).waitFor();
     await page.waitForFunction(()=>document.querySelector('.h67-virtual-transcript'));
     await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('index.html')||w.webContents.getURL().includes('127.0.0.1'));w.setContentSize(1440,900);w.show();w.focus();});
-    const initial=await page.locator('.h67-virtual-transcript').evaluate(el=>Number(el.dataset.virtualTotal));assert.ok(initial>0&&initial<=100);assert.ok(initial<record.flow.timeline.length);check('initial local IPC view is paged');
+    const initial=await page.locator('.h67-virtual-transcript').evaluate(el=>Number(el.dataset.virtualTotal));assert.ok(initial>0);assert.ok(initial<record.flow.timeline.length);
+    const head=await page.evaluate(()=>window.hemiVoice.flowGetSnapshot('conv-perf-long'));assert.equal(head.timeline.filter(item=>item.kind==='user').length,10);check('initial local IPC view contains ten complete QAs');
     await app.evaluate(({ipcMain,Notification})=>{Notification.prototype.show=function(){};globalThis.__performanceClipboard='';ipcMain.removeHandler('system:copy-text');ipcMain.handle('system:copy-text',(_event,text)=>{globalThis.__performanceClipboard=text;return {ok:true};});});
     await page.getByRole('button',{name:'复制完整回答',exact:true}).last().click();
     await page.waitForTimeout(100);

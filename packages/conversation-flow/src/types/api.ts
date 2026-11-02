@@ -210,7 +210,7 @@ export interface PermissionView {
   readOnly?: boolean;
 }
 export interface FlowSurfaceState {
-  history?: {follow?(value:boolean):void;hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number;load():void};load():void};
+  history?: {follow?(value:boolean):void;total?:number;hasMore:boolean;loading:boolean;error:string;target?:'older'|'gap';continuation?:boolean;gap?:{beforeId:string;remaining:number;load():void};load():void};
   /** Mobile hosts can show action failures as a short-lived toast. */
   transientActionErrors?: boolean;
   readOnly?: boolean;
