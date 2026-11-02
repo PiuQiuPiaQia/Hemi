@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PROVIDER_PRESETS,
-  findDefaultModel,
+  findPreferredModel,
   guessVision,
   hostOf,
   isLocalEndpoint,
@@ -80,16 +80,18 @@ test('hostOf / matchPreset / providerTile / isLocalEndpoint', () => {
   assert.equal(isLocalEndpoint('https://api.openai.com/v1'), false);
 });
 
-test('findDefaultModel：初始化/兜底按目录模型键选择，无有效引用时取第一个', () => {
+test('findPreferredModel：初始化选中沿上次选择（有效），否则第一个模型', () => {
   const dir = directory();
-  dir.defaultModelId = 'p2/m-glm';
-  assert.equal(findDefaultModel(dir)?.model.model, 'glm-4.5');
-  dir.defaultModelId = 'gone/missing';
-  assert.equal(findDefaultModel(dir)?.model.model, 'qwen-max');
-  dir.defaultModelId = null;
-  assert.equal(findDefaultModel(dir)?.model.model, 'qwen-max');
-  assert.equal(findDefaultModel({ ...dir, providers: [] }), null);
-  assert.equal(findDefaultModel(null), null);
+  dir.lastConversationModelKey = 'p2/m-glm';
+  assert.equal(findPreferredModel(dir)?.model.model, 'glm-4.5');
+  dir.lastConversationModelKey = 'gone/missing';
+  assert.equal(findPreferredModel(dir)?.model.model, 'qwen-max');
+  dir.lastConversationModelKey = null;
+  assert.equal(findPreferredModel(dir)?.model.model, 'qwen-max');
+  dir.lastConversationModelKey = 'auto';
+  assert.equal(findPreferredModel(dir)?.model.model, 'qwen-max');
+  assert.equal(findPreferredModel({ ...dir, providers: [] }), null);
+  assert.equal(findPreferredModel(null), null);
 });
 
 test('providerSaveInput：整体提交、空 Key 不覆盖、空型号过滤、视觉名为空不传', () => {

@@ -119,9 +119,6 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   getSubscriptionQuota: (provider, options) => ipcRenderer.invoke('oauth:quota', { provider, force: options?.force === true }),
   saveModelProfile: (profile) => ipcRenderer.invoke('llm:save-model-profile', profile),
   removeModelProfile: (payload) => ipcRenderer.invoke('llm:remove-model-profile', payload),
-  // 041 修复：主进程读 payload.modelKey——此前发 { profileId} 自 033 起永远 undefined，
-  // 设默认三条入口（主脑模型下拉/设为主脑模型/首添加自动设默认）必抛「没有这个模型」。
-  setDefaultModelProfile: (modelKey) => ipcRenderer.invoke('llm:set-default-model-profile', { modelKey }),
   // 2026-10-08：记上次主脑模型选择（模型键或 'auto'），新建对话优先恢复。
   setLastConversationModel: (modelKey) => ipcRenderer.invoke('llm:set-last-conversation-model', { modelKey }),
   setVisionModel: (modelKey) => ipcRenderer.invoke('llm:set-vision-model', { modelKey }),
@@ -131,9 +128,8 @@ contextBridge.exposeInMainWorld('hemiVoice', {
   // 038 自动模型路由：角色逐项即时保存（patch＝{ chatModelKey|executionModelKey|fallbackModelKey: modelKey|null }）。
   getRoleModels: () => ipcRenderer.invoke('llm:get-role-models'),
   saveRoleModel: (patch) => ipcRenderer.invoke('llm:save-role-model', { patch }),
-  // 033 思考强度快捷拨盘：只写档位、下一轮对话即生效；031 起可带 profileId 只改该组。
-  setThinkingLevel: (level, profileId) =>
-    ipcRenderer.invoke('llm:set-thinking-level', profileId ? { level, profileId } : level),
+  // 033 思考强度快捷拨盘：2026-11 起读写目录级全局档，下一轮对话即生效。
+  setThinkingLevel: (level) => ipcRenderer.invoke('llm:set-thinking-level', level),
   testTextModel: (overrides) => ipcRenderer.invoke('llm:test-model', overrides),
   // 047 New API 站点登录导入：状态机在主进程，这里只有命令与安全状态订阅。
   startProviderImport: (payload) => ipcRenderer.invoke('provider-import:start', payload ?? {}),

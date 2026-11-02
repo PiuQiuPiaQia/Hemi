@@ -184,7 +184,12 @@ export function WorkflowStudio({
       .listModelProfiles()
       .then((d) => {
         setDirectory(d);
-        setSelected(d.defaultModelId);
+        // 2026-11：初始选中沿上次会话选择（非 auto 且有效），否则自动路由。
+        const last = d.lastConversationModelKey;
+        const known = last && last !== 'auto'
+          ? d.providers.some((provider) => provider.models.some((model) => model.modelKey === last))
+          : false;
+        setSelected(known ? last! : 'auto');
       })
       .catch((e) => setNotice(String(e)));
   }, []);

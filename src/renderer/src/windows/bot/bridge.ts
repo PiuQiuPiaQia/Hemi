@@ -37,7 +37,8 @@ export function botModelDirectory(state: BotState): ModelProfilesDirectory {
   }
   return {
     version: 3,
-    defaultModelId: state.cache?.defaultModel ?? null,
+    // 2026-11：桌面目录的「默认模型」概念删除；Bot 状态里的 defaultModel 是
+    // Bot 自己的初始选择锚（host 侧与新会话选择联动），不映射进目录视图。
     lastConversationModelKey: state.cache?.lastConversationModelKey ?? null,
     providers: [...providers.values()],
     roleModels: state.cache?.roleModels ?? {},

@@ -124,9 +124,13 @@ export async function registerAllIpcHandlers() {
   // 工作流只组装业务生命周期；节点执行复用对话运行时的模型、门控与角色能力。
   const workflowLog = createLogger('workflow');
   const userDataDir = app.getPath('userData');
+  // 2026-11：「默认模型」回落删除——工作流模型选择沿会话选择，其次上次选择；
+  // 都没有或已失效＝自动路由（不暗换到任何隐藏模型）。
   const currentSelection = async ({conversationId, entryMode} = {}) => {
     const directory = await getProfiles().list();
-    const key = entryMode === 'chat' ? getConversationMetadata(conversationId)?.profileId ?? directory.defaultModelId : directory.defaultModelId;
+    const allKeys = new Set(directory.providers.flatMap((provider) => provider.models.map((model) => model.modelKey)));
+    const stored = entryMode === 'chat' ? getConversationMetadata(conversationId)?.profileId ?? directory.lastConversationModelKey : directory.lastConversationModelKey;
+    const key = stored === 'auto' || (stored && allKeys.has(stored)) ? stored : 'auto';
     return key === 'auto' ? {mode: 'auto'} : {mode: 'fixed', modelKey: key};
   };
   const resolvePlan = selection => freezeWorkflowModel({selection, store: getProfiles(), roles: loadRoles()});

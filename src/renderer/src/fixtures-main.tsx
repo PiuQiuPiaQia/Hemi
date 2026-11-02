@@ -1326,7 +1326,6 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
   // 原样确认（fixtures 不做真实编辑）。
   listModelProfiles: async () => ({
     version: 2,
-    defaultModelId: 'mp-deep/m-chat',
     providers: [
       {
         id: 'mp-deep',
@@ -1344,7 +1343,6 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
   }),
   saveModelProfile: async () => ({ ok: true }),
   removeModelProfile: async () => ({ ok: true }),
-  setDefaultModelProfile: async () => ({ ok: true }),
   // 2026-10-08：上次主脑模型选择记录桩（fixtures 不做真实落盘）。
   setLastConversationModel: async () => ({ ok: true, lastConversationModelKey: null }),
   testModelProfile: async () => ({ ok: true, latencyMs: 18, resolvedModel: 'stub', sample: 'pong' }),
@@ -1426,12 +1424,13 @@ const stubBridgeMethods: Record<string, (...args: unknown[]) => unknown> = {
   }),
   removeWorkspace: async (id: unknown) => ({ ok: true, state: fixtureWorkspaceState({ projects: [] }) , removed: String(id) }),
   // 049：远端工作区通道桩（对话框校验/重试连接的交互评审可点）。
-  addRemoteWorkspace: async (host: unknown, dir: unknown) => ({
+  // 071：port 也折进 host（对齐主进程 ssh:// 目标串）。
+  addRemoteWorkspace: async (host: unknown, dir: unknown, _password?: unknown, _remember?: unknown, port?: unknown) => ({
     ok: true,
     workspace: {
       id: 'ws-remote-new', type: 'project' as const, name: String(dir ?? '/home/dev/projects/new').split('/').pop() || 'new',
       dir: String(dir ?? '/home/dev/projects/new'), status: 'ok' as const,
-      host: String(host ?? 'devbox'), remoteHome: '/home/dev',
+      host: port ? `ssh://${String(host ?? 'devbox')}:${String(port)}` : String(host ?? 'devbox'), remoteHome: '/home/dev',
     },
     state: fixtureRemoteWorkspaceState(),
   }),
@@ -1817,7 +1816,6 @@ function stubModelV2(
   });
   const directory = {
     version: 2,
-    defaultModelId: 'mp-qwen/m-max',
     visionModelKey: 'mp-qwen/m-vl',
     roleModels: Object.fromEntries(Object.entries(roleModels.slots).map(([key, slot]) => [key, slot.modelKey])),
     ...directoryOverrides,
@@ -1867,7 +1865,6 @@ function stubSubscriptionQuota(state: string, extra: { environment?: 'bot' } = {
   });
   const directory = {
     version: 2 as const,
-    defaultModelId: 'mp-oauth-openai/m-0',
     providers: [
       oauthProvider('mp-oauth-openai', 'ChatGPT', 'openai', 'https://chatgpt.com/backend-api/codex', ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']),
       oauthProvider('mp-oauth-bigmodel', 'GLM Coding Plan', 'bigmodel', 'https://open.bigmodel.cn/api/coding/paas/v4', ['glm-5.1', 'glm-4.6']),
@@ -4008,7 +4005,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         textDraft: '',
         modelProfiles: {
           version: 2,
-          defaultModelId: 'mp-a/m-chat',
           providers: [
             {
               id: 'mp-a', name: 'DeepSeek 日常', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
@@ -4787,7 +4783,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         initialPage="models"
         modelProfilesFixture={{
           version: 2,
-          defaultModelId: 'mp-deep/m-chat',
           providers: [
             {
               id: 'mp-deep', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
@@ -5079,7 +5074,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         textDraft: '',
         modelProfiles: {
           version: 2,
-          defaultModelId: 'mp-a/m-chat',
           providers: [
             {
               id: 'mp-a', name: 'DeepSeek 日常', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions',
@@ -5107,7 +5101,6 @@ const scenes: Record<string, () => React.ReactElement> = {
         textDraft: '',
         modelProfiles: {
           version: 2,
-          defaultModelId: 'mp-a/m-chat',
           roleModels: { main: 'mp-a/m-reasoner', explorer: 'mp-a/m-chat' },
           providers: [
             {
@@ -5195,8 +5188,10 @@ const scenes: Record<string, () => React.ReactElement> = {
     });
     return <SettingsScreen {...settingsProps} initialPage="web" />;
   },
-  // 041：六分类新页——通用（唤起与显示）、模型页 Jev 组展开（深层定位目标态）、
+  // 041：六分类新页——通用、模型页 Jev 组展开（深层定位目标态）、
   // 电脑与浏览器整页（桌面操控＋浏览器控制＋空允许列表）。
+  // 2026-11-02：「唤起与显示」分组挪进语音页，本场景通用页只剩更新区；
+  // 语音页含唤起与显示，见 settings-model-voice / settings-model-voice-mac。
   'settings-general': () => {
     stubExecutor();
     return <SettingsScreen {...settingsProps} initialPage="general" />;

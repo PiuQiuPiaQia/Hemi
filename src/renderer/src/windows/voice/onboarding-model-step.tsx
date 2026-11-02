@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ModelProfilesDirectory } from '@/shared/types';
 import { AddProviderScreen, type ProviderSetupController } from './model-profiles-section';
-import { findDefaultModel, providerSaveInput } from './lib/provider-presets';
+import { findPreferredModel, providerSaveInput } from './lib/provider-presets';
 
 function message(error: unknown) {
   return String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '');
 }
 
-/** 首启与设置共用供应商接入组件；完成前只验证所选的默认模型。 */
+/** 首启与设置共用供应商接入组件；完成后把所选模型写为主 agent 槽位（main）并记为上次选择。 */
 export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
   onContinue: () => Promise<void>;
   onBack: () => void;
@@ -22,7 +22,7 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
 
   const adopt = useCallback((next: ModelProfilesDirectory) => {
     setDirectory(next);
-    const current = findDefaultModel(next);
+    const current = findPreferredModel(next);
     setSelected(current?.model.modelKey ?? '');
     setVision(current?.model.supportsVision === true);
     return next;
@@ -34,7 +34,7 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
     window.hemiVoice.listModelProfiles().then((next) => {
       if (!active) return;
       adopt(next);
-      setAdding(!findDefaultModel(next));
+      setAdding(!findPreferredModel(next));
     }).catch((reason) => { if (active) setError(message(reason)); });
     return () => { active = false; };
   }, [adopt]);
@@ -65,8 +65,12 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
         }));
         if (!saved.ok) throw new Error('图片能力没有保存成功，请重试。');
       }
-      const result = await window.hemiVoice.setDefaultModelProfile(selected);
-      if (!result.ok) throw new Error('默认模型没有保存成功，请重试。');
+      // 2026-11 用户裁决：引导完成后把所选模型写为主 agent 槽位（自动路由的
+      // main），并记为上次会话选择（新对话恢复用）——不再有「默认模型」。
+      const main = await window.hemiVoice.saveRoleModel({ main: selected });
+      if (!main.ok) throw new Error('主模型没有保存成功，请重试。');
+      const remembered = await window.hemiVoice.setLastConversationModel(selected);
+      if (remembered && remembered.ok === false) throw new Error('主模型没有保存成功，请重试。');
       if (vision || directory?.visionModelKey === selected) {
         const saved = await window.hemiVoice.setVisionModel(vision ? selected : null);
         if (!saved.ok) throw new Error('看图模型没有保存成功，请重试。');
@@ -78,7 +82,7 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
 
   if (!directory) return (
     <div className="onboarding-model-panel" role="status">
-      {error ? <><p className="onboarding-field-error">{error}</p><button type="button" className="h37-btn h37-btn-secondary" onClick={() => void reload().then(next => setAdding(!findDefaultModel(next))).catch(reason => setError(message(reason)))}>重新读取</button></> : '正在读取模型配置…'}
+      {error ? <><p className="onboarding-field-error">{error}</p><button type="button" className="h37-btn h37-btn-secondary" onClick={() => void reload().then(next => setAdding(!findPreferredModel(next))).catch(reason => setError(message(reason)))}>重新读取</button></> : '正在读取模型配置…'}
     </div>
   );
 
@@ -86,7 +90,7 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
     directory,
     readOnly: directory.corrupt === true,
     reload,
-    back: () => findDefaultModel(directory) ? setAdding(false) : onBack(),
+    back: () => findPreferredModel(directory) ? setAdding(false) : onBack(),
     setStatus: () => {},
     saveProvider: async (input) => {
       const saved = await window.hemiVoice.saveModelProfile(input);
@@ -106,7 +110,7 @@ export function OnboardingModelStep({ onContinue, onBack, onBusyChange }: {
       ) : (
         <>
           <fieldset disabled={busy} className="onboarding-model-fields">
-            <label htmlFor="onboarding-default-model">默认模型</label>
+            <label htmlFor="onboarding-default-model">主要使用的模型</label>
             <select id="onboarding-default-model" className="h37-input onboarding-input" value={selected} onChange={(event) => {
               const key = event.target.value;
               setSelected(key);

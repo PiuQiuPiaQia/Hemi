@@ -60,16 +60,46 @@ test('parseModelKey／normalizeDirectory：键解析、供应商去重、默认�
   assert.deepEqual(parseModelKey('mp-a/m1'), { providerId: 'mp-a', modelId: 'm1' });
   assert.equal(parseModelKey('no-separator'), null);
 
+  // 2026-11 v3→v4：defaultModelId 指针删除；全局思考档从默认条目迁一次。
   const dir = normalizeDirectory({
-    defaultModelId: 'gone/m9',
+    version: 3,
+    defaultModelId: 'a/m2',
+    lastConversationModelKey: 'a/m1',
     providers: [
-      { id: 'a', name: 'A', baseUrl: 'https://a/v1', models: [{ id: 'm1', model: 'model-a1' }, { id: 'm2', model: 'model-a2' }] },
+      { id: 'a', name: 'A', baseUrl: 'https://a/v1', models: [{ id: 'm1', model: 'model-a1' }, { id: 'm2', model: 'model-a2', thinkingLevel: 'high' }] },
       { id: 'a', name: '重复', models: [{ id: 'm1', model: 'dup' }] }, // 同 id 供应商去重
       { id: 'b', models: [] }, // 无模型 → 归一化丢弃
     ],
   });
   assert.equal(dir.providers.length, 1);
-  assert.equal(dir.defaultModelId, 'a/m1', '无效默认回落首个模型键');
+  assert.equal(dir.defaultModelId, undefined, 'v4 目录不再有默认模型指针');
+  assert.equal(dir.version, 4, '目录归一化即 v4');
+  assert.equal(dir.thinkingLevel, 'high', '全局档从 defaultModelId 指向条目迁');
+  assert.equal(dir.lastConversationModelKey, 'a/m1', '上次选择保留');
+
+  // 顶层已有 thinkingLevel 的 v4 目录：直接使用，不再看条目。
+  const explicit = normalizeDirectory({
+    version: 4,
+    thinkingLevel: 'low',
+    defaultModelId: 'a/m2',
+    providers: [
+      { id: 'a', name: 'A', baseUrl: 'https://a/v1', models: [{ id: 'm1', model: 'model-a1', thinkingLevel: 'high' }] },
+    ],
+  });
+  assert.equal(explicit.thinkingLevel, 'low', '目录级单值优先于条目档');
+
+  // 条目上的 thinkingLevel 继续容忍（normalize 不丢）——但只作数据保留。
+  assert.equal(
+    normalizeDirectory({
+      version: 3,
+      defaultModelId: 'a/m1',
+      providers: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', models: [{ id: 'm1', model: 'model-a1', thinkingLevel: 'off' }] },
+      ],
+    }).providers[0].models[0].thinkingLevel,
+    'off',
+    '条目 thinkingLevel 容忍保留',
+  );
 });
 
 test('CRUD：供应商级保存（多模型）、编辑互不影响；Key 非空才覆盖', async () => {
@@ -120,7 +150,7 @@ test('CRUD：供应商级保存（多模型）、编辑互不影响；Key 非空
   assert.equal(resolvedB.baseUrl, 'http://127.0.0.1:11434/v1', 'B 不受影响');
 });
 
-test('resolve：模型键 → 供应商端点/Key + 模型字段；失效回落默认', async () => {
+test('resolve：模型键 → 供应商端点/Key + 模型字段；思考档一律全局档；缺省沿上次选择', async () => {
   const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
     version: 2,
     defaultModelId: 'a/m1',
@@ -132,35 +162,39 @@ test('resolve：模型键 → 供应商端点/Key + 模型字段；失效回落�
   const store = storeFor(fs);
   assert.equal((await store.resolve({ modelKey: 'b/m1' })).model, 'model-b1');
   assert.equal((await store.resolve({ modelKey: 'b/m1' })).apiKey, '', 'B 无 Key');
-  assert.equal((await store.resolve({ modelKey: 'a/m2' })).thinkingLevel, 'high', '思考档随模型');
-  assert.equal((await store.resolve({})).model, 'model-a1');
+  // 2026-11：发送档位是目录级单值（v3 迁移自默认条目 a/m1——无档 → 'default'），
+  // 与所请求的模型条目无关（a/m2 条目档 high 不再作为发送依据）。
+  assert.equal((await store.resolve({ modelKey: 'a/m2' })).thinkingLevel, 'default', '思考档全局单值');
   const missing = await store.resolve({ modelKey: 'gone/m9' });
   assert.equal(missing.missingModelKey, true);
-  assert.equal(missing.model, 'model-a1', '失效选择回落默认模型');
+  assert.equal(missing.model, 'model-a1', '失效选择回落首个模型（只读兜底）');
 
-  await store.setDefault('b/m1');
+  // 缺省解析沿上次选择（非 auto）；没有上次选择回落第一个模型。
+  await store.setLastConversationModel('b/m1');
   assert.equal((await store.resolve({})).model, 'model-b1');
+  await store.setLastConversationModel('auto');
+  assert.equal((await store.resolve({})).model, 'model-a1', 'auto 不作固定解析，回落首个');
 });
 
-test('删除供应商：含默认模型需显式替代；事务替换默认', async () => {
+test('删除供应商：直接删除；上次选择指向被删供应商时清空', async () => {
   const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
     version: 2,
     defaultModelId: 'a/m1',
+    lastConversationModelKey: 'a/m1',
     providers: [
       { id: 'a', name: 'A', baseUrl: 'https://a/v1', encryptedApiKey: enc('key-a'), models: [{ id: 'm1', model: 'model-a1' }] },
       { id: 'b', name: 'B', baseUrl: 'https://b/v1', models: [{ id: 'm1', model: 'model-b1' }, { id: 'm2', model: 'model-b2' }] },
+      { id: 'c', name: 'C', baseUrl: 'https://c/v1', models: [{ id: 'm1', model: 'model-c1' }] },
     ],
   }) });
   const store = storeFor(fs);
-  await assert.rejects(store.removeProvider({ providerId: 'a' }), /默认模型/, '含默认模型且未给替代 → 拒绝');
-  await store.removeProvider({ providerId: 'b' }); // 不含默认 → 直接删
-  // 重建 b 再验替代路径（此时 a 是唯一供应商 + 默认所在）。
-  await store.saveProvider({ name: 'B2', baseUrl: 'https://b/v1', models: [{ model: 'model-b1' }, { model: 'model-b2' }] });
-  const providers = (await store.list()).providers;
-  const b2 = providers.find((p) => p.name === 'B2');
-  await assert.rejects(store.removeProvider({ providerId: 'a' }), /默认模型/);
-  const result = await store.removeProvider({ providerId: 'a', replacementModelId: `${b2.id}/${b2.models[0].id}` });
-  assert.equal(result.defaultModelId, `${b2.id}/${b2.models[0].id}`);
+  await store.removeProvider({ providerId: 'b' }); // 不持有任何选择 → 直接删
+  const result = await store.removeProvider({ providerId: 'a' });
+  assert.equal(result.ok, true, '删除不再要求「默认模型替代」');
+  const list = await store.list();
+  assert.equal(list.providers.length, 1);
+  assert.equal(list.lastConversationModelKey, null, '上次选择指向被删供应商 → 清空（回落自动路由）');
+  assert.equal(list.defaultModelId, undefined, '目录视图无默认模型字段');
 });
 
 test('envOverride：环境覆盖返回有效值并置空模型键；损坏目录只读回落', async () => {
@@ -217,36 +251,39 @@ test('070 resolveStrict：文件不存在／空供应商列表＝未配置，只
   assert.equal((await junk.list()).corrupt, true);
 });
 
-// —— 032：空目录首组创建即默认；makeDefault；不落明文 ——
+// —— 032→2026-11：空目录首组创建；「默认组/默认模型」概念删除 ——
 
-test('空目录首组创建即默认并回读生效', async () => {
+test('空目录首组创建并回读生效；目录不再有默认指针', async () => {
   const fs = memoryFs({});
   const store = storeFor(fs);
   let list = await store.list();
   assert.equal(list.providers.length, 0, '空目录不生成占位组');
-  assert.equal(list.defaultModelId, null);
+  assert.equal(list.defaultModelId, undefined);
+  assert.equal(list.thinkingLevel, 'default');
 
   const saved = await store.saveProvider({
     name: '首组', baseUrl: 'https://first/v1', apiKey: 'key-1', models: [{ model: 'model-1' }],
   });
   list = await store.list();
   assert.equal(list.providers.length, 1);
-  assert.equal(list.defaultModelId, saved.modelKeys[0], '首组保存即默认');
+  assert.equal(list.defaultModelId, undefined, '保存不再设置任何「默认」指针');
   assert.deepEqual(Object.keys(list.providers[0].models[0]).sort(), [
     'id', 'model', 'modelKey', 'supportsVision', 'thinkingLevel', 'visionModel',
-  ], '渲染层模型条目只含配置字段，初始化/兜底引用由目录维护');
+  ], '渲染层模型条目只含配置字段，选择由角色槽位/上次选择维护');
   const resolved = await store.resolve({});
-  assert.equal(resolved.model, 'model-1');
+  assert.equal(resolved.model, 'model-1', '缺省解析回落首个模型（只读兜底）');
   assert.equal(resolved.apiKey, 'key-1');
-  // 回读核验：落盘文件里的默认键就是这个组（重启后仍生效）。
+  // 回读核验：落盘文件不含 defaultModelId / makeDefault 痕迹。
   const persisted = JSON.parse(fs.files.get('/ud/text-model-profiles.json'));
-  assert.equal(persisted.defaultModelId, saved.modelKeys[0]);
+  assert.equal(persisted.defaultModelId, undefined);
+  assert.equal(persisted.thinkingLevel, 'default');
 });
 
-test('makeDefault（首启引导裁决）：保存的分组取代既有默认组', async () => {
+test('保存供应商不触碰既有选择与全局档（makeDefault 输入被忽略）', async () => {
   const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
     version: 2,
     defaultModelId: 'a/m1',
+    thinkingLevel: 'high',
     providers: [
       { id: 'a', name: 'A', baseUrl: 'https://a/v1', encryptedApiKey: enc('key-a'), models: [{ id: 'm1', model: 'model-a1' }] },
     ],
@@ -256,13 +293,10 @@ test('makeDefault（首启引导裁决）：保存的分组取代既有默认组
     name: '引导组', baseUrl: 'https://b/v1', apiKey: 'key-b', models: [{ model: 'model-b1' }], makeDefault: true,
   });
   const list = await store.list();
-  assert.equal(list.defaultModelId, saved.modelKeys[0], '引导保存的分组成为默认');
-  assert.notEqual(list.defaultModelId, 'a/m1');
-  // 不带 makeDefault 的普通新建不抢默认（设置页语义不变）。
-  const second = await store.saveProvider({ name: '普通', baseUrl: 'https://c/v1', models: [{ model: 'model-c1' }] });
-  const after = await store.list();
-  assert.equal(after.defaultModelId, saved.modelKeys[0]);
-  assert.ok(second.modelKeys.every((key) => key !== after.defaultModelId));
+  assert.equal(list.defaultModelId, undefined, '2026-11：没有「引导组成为默认」这回事');
+  assert.equal(list.thinkingLevel, 'high', '全局档不受供应商保存影响');
+  const persisted = JSON.parse(fs.files.get('/ud/text-model-profiles.json'));
+  assert.equal(persisted.defaultModelId, undefined, '落盘文件同样无指针');
 });
 
 test('safeStorage 不可用：带新 Key 的保存被拒、不落明文；目录不损坏', async () => {
@@ -488,19 +522,50 @@ test('lastConversationModelKey：供应商保存/导入不丢；删除所在供�
   await store.saveProvider({ name: 'B', baseUrl: 'https://b/v1', models: [{ model: 'model-b1' }] });
   assert.equal((await store.list()).lastConversationModelKey, 'a/m2', '供应商保存不丢上次选择');
 
-  // 删除 A（不含默认模型 m1？含——a/m1 是默认）需替代；替代后上次选择指向被删供应商 → 清理。
-  const list = await store.list();
-  const b = list.providers.find((p) => p.name === 'B');
-  await store.removeProvider({ providerId: 'a', replacementModelId: `${b.id}/${b.models[0].id}` });
+  // 删除 A（上次选择 a/m2 在它名下）——2026-11：直接删除，无需替代；上次选择清理。
+  await store.removeProvider({ providerId: 'a' });
   assert.equal((await store.list()).lastConversationModelKey, null, '指向被删供应商 → 清理');
 
   // 重新记一笔后走 047 导入路径——同文件字段不丢。
-  const replacementKey = (await store.list()).defaultModelId;
-  await store.setLastConversationModel(replacementKey);
+  const bListed = (await store.list()).providers.find((provider) => provider.name === 'B');
+  const remembered = `${bListed.id}/${bListed.models[0].id}`;
+  await store.setLastConversationModel(remembered);
   await store.importProvidersAtomic({
     operationId: 'op-1',
     planHash: 'hash-1',
     providers: [{ deterministicId: 'imp-1', name: '导入', baseUrl: 'https://imp/v1', apiKey: 'k', api: 'openai-completions', models: [{ model: 'imp-model' }] }],
   });
-  assert.equal((await store.list()).lastConversationModelKey, replacementKey, '导入不丢上次选择');
+  assert.equal((await store.list()).lastConversationModelKey, remembered, '导入不丢上次选择');
+});
+
+// —— 2026-11：思考强度目录级单值（拨盘读写这一份，不碰模型条目） ——
+
+test('setThinkingLevel：写目录级单值；模型条目 thinkingLevel 原样保留；同值不落盘', async () => {
+  const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
+    version: 3,
+    defaultModelId: 'a/m2',
+    providers: [
+      { id: 'a', name: 'A', baseUrl: 'https://a/v1', models: [{ id: 'm1', model: 'model-a1' }, { id: 'm2', model: 'model-a2', thinkingLevel: 'high' }] },
+    ],
+  }) });
+  const store = storeFor(fs);
+  // v3→v4 迁移：全局档 := 默认条目（a/m2）的档位。
+  assert.equal((await store.list()).thinkingLevel, 'high', '迁移后全局档＝原默认条目档');
+
+  // 拨盘改档：只动目录顶层，条目档保持原样。
+  const receipt = await store.setThinkingLevel('low');
+  assert.equal(receipt.ok, true);
+  assert.equal(receipt.thinkingLevel, 'low');
+  const persisted = JSON.parse(fs.files.get('/ud/text-model-profiles.json'));
+  assert.equal(persisted.thinkingLevel, 'low', '目录顶层落盘');
+  assert.equal(persisted.providers[0].models[1].thinkingLevel, 'high', '条目档不随拨盘改动');
+  assert.equal(persisted.defaultModelId, undefined, '迁移后文件不再含默认指针');
+  assert.equal((await store.resolve({ modelKey: 'a/m2' })).thinkingLevel, 'low', '发送解析读全局档');
+
+  // 非法值归一为 default；同值重写不落盘。
+  await store.setThinkingLevel('胡说的');
+  assert.equal((await store.list()).thinkingLevel, 'default');
+  const before = fs.files.get('/ud/text-model-profiles.json');
+  await store.setThinkingLevel('default');
+  assert.equal(fs.files.get('/ud/text-model-profiles.json'), before, '同值不落盘');
 });

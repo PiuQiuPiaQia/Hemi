@@ -106,7 +106,7 @@ async function fixture(t, platform, mode, policy = {}) {
   let call,switchModel;
   if (platform === 'PC') {
     const alternate={...config,modelKey:'test/other',model:'handoff-other'};
-    const store = {list:async () => ({defaultModelId:config.modelKey}), resolveStrict:async key => ({ok:true, config:key===alternate.modelKey?alternate:config})};
+    const store = {list:async () => ({}), resolveStrict:async key => ({ok:true, config:key===alternate.modelKey?alternate:config})};
     const policySnapshot = await freezeModelPolicy({store, modelKey:config.modelKey});
     const modelPlan = await hydrateModelPlan(resolveModelPlan(policySnapshot), store);
     ctx = {conversationId:'handoff', runId:'handoff-root', generation:1, policySnapshot, modelPlan, config, inputSource:'text', workspace:{id:'proof',type:'project',dir:workspace}};

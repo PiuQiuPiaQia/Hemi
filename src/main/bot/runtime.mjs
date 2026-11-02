@@ -89,7 +89,7 @@ export function createBotExecutor({dataDir, readEntries, readConversation, saveE
   const access = createPermissionService({dir: dataDir});
   const taskFacts = flowService ? createTaskFactPublisher({flowService}) : null;
   const profilesFor = ctx => ({
-    async list() { return {roleModels: {}, defaultModelId: ctx?.policySnapshot?.fixedKey}; },
+    async list() { return {roleModels: {}}; },
     async resolveStrict(key) {
       const revision = ctx?.policySnapshot?.revisions?.[key];
       if (!revision) return {ok: false, message: '任务缺少受理时的模型版本。'};

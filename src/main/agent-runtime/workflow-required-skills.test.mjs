@@ -33,7 +33,7 @@ async function fixture(t) {
   });
   const config = { modelKey: 'p/local', providerId: 'p', model: 'local', api: 'openai-completions',
     apiKey: 'SYNTHETIC', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, thinkingLevel: 'off' };
-  const profiles = { list: async () => ({ defaultModelId: config.modelKey }),
+  const profiles = { list: async () => ({}),
     resolveStrict: async () => ({ ok: true, config }) };
   const plan = await freezeWorkflowModel({ selection: { mode: 'fixed', modelKey: config.modelKey }, store: profiles, roles: new Map() });
   const source = path.join(root, 'source'); await fs.mkdir(source);

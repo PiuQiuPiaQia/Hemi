@@ -673,8 +673,9 @@ export type TaskPermissionChoice = "deny" | "once" | "task" | "persistent";
 
 export type ModelProfilesDirectory = {
   version: number;
-  defaultModelId: string | null;
-  /** 2026-10-08：上次主脑模型选择（模型键或 'auto'；null＝未记录/已失效，新建对话回落默认）。 */
+  /** 2026-11：思考强度全局档（目录级单值；「默认模型」指针已删除）。 */
+  thinkingLevel?: ThinkingLevel;
+  /** 2026-10-08：上次主脑模型选择（模型键或 'auto'；null＝未记录/已失效，新建对话回落自动路由）。 */
   lastConversationModelKey?: string | null;
   corrupt?: boolean;
   envOverride?: boolean;

@@ -40,6 +40,12 @@ async function fixture(t) {
   return { dir, filePath, transport, credentials, runtime, profiles, login, urls, connect };
 }
 
+/** 2026-11：目录不再有 defaultModelId——测试取唯一账号供应商的第一个模型。 */
+async function mainConfig(f) {
+  const list = await f.profiles.list();
+  return f.profiles.get(list.providers[0].models[0].modelKey);
+}
+
 test('BigModel 实际 Provider：授权→项目令牌→加密目录→路由/签名/流式/工具/图片', async t => {
   const f = await fixture(t);
   f.transport.bigmodel.state.keys = [];
@@ -79,8 +85,9 @@ test('BigModel 实际 Provider：授权→项目令牌→加密目录→路由/�
 
 test('项目令牌并发刷新只签发一次；重登保留选择；退出阻止旧请求', async t => {
   const f = await fixture(t); await f.connect();
-  const key = (await f.profiles.list()).defaultModelId;
-  const config = await f.profiles.get(key);
+  const remembered = await f.profiles.setLastConversationModel((await f.profiles.list()).providers[0].models[0].modelKey);
+  const key = remembered.lastConversationModelKey;
+  const config = await mainConfig(f);
   await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
   await Promise.all(Array.from({ length: 4 }, () => f.runtime.models.getAuth('bigmodel')));
   assert.equal(f.transport.bigmodel.state.issued, 2);
@@ -89,12 +96,12 @@ test('项目令牌并发刷新只签发一次；重登保留选择；退出阻�
   assert.equal((await f.profiles.list()).providers.find(item => item.oauthProvider === 'bigmodel').hasApiKey, false);
   await assert.rejects(pingTextModel(config));
   assert.equal((await f.connect()).phase, 'success');
-  assert.equal((await f.profiles.list()).defaultModelId, key);
+  assert.equal((await f.profiles.list()).lastConversationModelKey, key, '重登保留上次选择（默认指针已随 2026-11 删除）');
 });
 
 test('复用的主会话在项目令牌过期后继续执行，重试不持有旧令牌', async t => {
   const f = await fixture(t); await f.connect();
-  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const config = await mainConfig(f);
   const session = createHemiSession({ cwd: f.dir, agentDir: path.join(f.dir, 'agent'), routing: { execution: config, fallbacks: [] },
     tools: [], features: {}, settings: { retry: { enabled: false } } });
   t.after(() => session.dispose());
@@ -197,7 +204,7 @@ test('上游明确拒绝项目令牌时续签一次，重试使用新令牌和�
 
 test('复用 Hemi 会话处理追加指令时，SDK 认证后到期不会中断或重放回合', async t => {
   const f = await fixture(t); await f.connect();
-  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const config = await mainConfig(f);
   const native = f.runtime.models.getProvider('bigmodel');
   const derive = native.auth.oauth.toAuth;
   let expire = false;
@@ -459,7 +466,7 @@ test('签名预检期间项目令牌刷新会重建预检，推理只发送一�
 
 test('只在明确签名拒绝时重新握手一次；上游错误透传但凭据形态打码', async t => {
   const f = await fixture(t); await f.connect();
-  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const config = await mainConfig(f);
   f.transport.bigmodel.state.rejectSignatures = 1;
   assert.equal((await chatTurn({ ...config, messages: [{ role: 'user', content: 'retry signature' }] })).content, 'OAuth OK');
   assert.equal(f.transport.bigmodel.state.modelCalls, 2);
@@ -488,7 +495,7 @@ test('拒绝恶意授权/路由；取消 polling 不落盘也不创建账号密�
   f.transport.bigmodel.state.pending = 0;
   assert.equal((await f.connect()).phase, 'success');
   f.transport.bigmodel.state.mapping = [{ from: 'https://open.bigmodel.cn/api/anthropic/v1/messages', to: 'https://attacker.invalid/steal' }];
-  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const config = await mainConfig(f);
   await assert.rejects(pingTextModel(config));
   assert.equal(f.transport.bigmodel.state.modelCalls, 0);
   assert.ok(f.transport.requests.every(item => !item.url.includes('attacker.invalid')));
@@ -535,7 +542,7 @@ test('共享签名握手中取消一个请求不影响另一个；退出后不�
 test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或暴露上游正文', async t => {
   const f = await fixture(t); await f.connect();
   f.transport.bigmodel.state.handshakeStatus = 404;
-  const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+  const config = await mainConfig(f);
   await assert.rejects(pingTextModel(config), error => /签名握手失败（HTTP 404）/.test(error.message) && !/PRIVATE UPSTREAM/.test(error.message));
   assert.equal(f.transport.bigmodel.state.modelCalls, 0);
 });
@@ -543,7 +550,7 @@ test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或�
 test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故障不重放已执行工作', async t => {
   for (const mode of ['complete', 'short-token', 'malformed', 'http-failure', 'preflight-failure']) await t.test(mode, async t => {
     const f = await fixture(t); await f.connect();
-    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const config = await mainConfig(f);
     const owner = { conversationId: 'verification-test', rootRunId: 'run', generation: 1 };
     const journal = createRunJournal({ dir: path.join(f.dir, 'journal') });
     await journal.beginRoot(owner);
@@ -585,7 +592,7 @@ test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故�
 test('GLM 预检不消耗执行额度，触顶总结仍只允许一次实际推理', async t => {
   for (const kind of ['execution', 'summary']) await t.test(kind, async t => {
     const f = await fixture(t); await f.connect();
-    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const config = await mainConfig(f);
     const owner = { conversationId: 'budget-test', rootRunId: 'run', generation: 1 };
     const journal = createRunJournal({ dir: path.join(f.dir, 'journal') }); await journal.beginRoot(owner);
     const policy = await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey });
@@ -611,7 +618,7 @@ test('GLM 预检不消耗执行额度，触顶总结仍只允许一次实际推�
 test('GLM 真实 SDK 与恢复器：连接拒绝可恢复，EPIPE 不伪装 503 或重复提交推理', async t => {
   for (const code of ['ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET', 'preflight EPIPE']) await t.test(code, async t => {
     const f = await fixture(t); await f.connect();
-    const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
+    const config = await mainConfig(f);
     const owner = { conversationId: 'transport-test', rootRunId: 'run', generation: 1 };
     const journal = createRunJournal({ dir: path.join(f.dir, 'journal') });
     await journal.beginRoot(owner);

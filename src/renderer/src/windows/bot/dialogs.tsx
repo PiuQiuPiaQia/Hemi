@@ -192,7 +192,7 @@ export function BotModelSetup({
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Bot 初始化未完成，请重试。'); }
     finally { reportBusy(false); }
   }
-  const directory: ModelProfilesDirectory = { version: 2, defaultModelId: null, providers: Array.from(new Map((state.cache?.models ?? []).map(model => [model.providerId, {
+  const directory: ModelProfilesDirectory = { version: 2, providers: Array.from(new Map((state.cache?.models ?? []).map(model => [model.providerId, {
     id: model.providerId, name: model.name, baseUrl: model.baseUrl, api: 'openai-completions' as const,
     hasApiKey: true, keyStoredSecurely: true, updatedAt: 0, models: [],
   }])).values()) };

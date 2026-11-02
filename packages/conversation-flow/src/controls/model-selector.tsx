@@ -45,10 +45,14 @@ export function ModelSelectorChip({ directory, currentProfileId, onSelect, onOpe
         }
         if (currentProfileId)
             return null;
-        for (const provider of directory.providers) {
-            const model = provider.models.find((entry) => entry.modelKey === directory.defaultModelId);
-            if (model)
-                return { provider, model };
+        // 2026-11：「默认模型」删除——无有效会话选择时高亮上次选择，再退自动路由。
+        const last = directory.lastConversationModelKey;
+        if (last && last !== 'auto') {
+            for (const provider of directory.providers) {
+                const model = provider.models.find((entry) => entry.modelKey === last);
+                if (model)
+                    return { provider, model };
+            }
         }
         const provider = directory.providers[0];
         return provider ? { provider, model: provider.models[0] ?? null } : null;
@@ -84,7 +88,7 @@ export function ModelSelectorChip({ directory, currentProfileId, onSelect, onOpe
             ? '模型由环境变量覆盖，这里的选择暂不生效'
             : isAuto
                 ? `自动路由：${autoHint}（点击切换）`
-                : `当前模型：${current?.model?.model ?? '默认'}${current?.provider?.name ? ` · ${current.provider.name}` : ''}（点击切换，只影响接下来的回合）`} defaultOpen={fixtureOpen} onOpen={() => setFilter('')}>
+                : `当前模型：${current?.model?.model ?? '自动路由'}${current?.provider?.name ? ` · ${current.provider.name}` : ''}（点击切换，只影响接下来的回合）`} defaultOpen={fixtureOpen} onOpen={() => setFilter('')}>
       {close => <>
           <MenuSearch className="h24-model-filter" placeholder="搜索名称 / 型号 / 端点" value={filter} autoFocus onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => {
                 if (event.key === 'Escape') {
@@ -123,7 +127,7 @@ export function ModelSelectorChip({ directory, currentProfileId, onSelect, onOpe
           </div> : null}
           {groups.length ? (groups.map(([groupName, entries]) => (<div key={groupName}>
                 <MenuGroup label={groupName}/>
-                <ModelOptions models={entries.map(({ provider, model }) => ({ id: model.modelKey, name: model.model || '未填型号', description: provider.name, source: provider.source, disabledReason: model.unavailableReason || (!provider.hasApiKey ? (provider.oauthProvider ? '账号未登录，到 设置 → 模型 重新登录后可选' : '这个供应商还没配 API Key，到 设置 → 模型 补上后可选') : undefined), unavailableLabel: model.unavailableReason ? '不可用' : '未配 Key' }))} selected={isAuto ? 'auto' : current?.model?.modelKey ?? directory.defaultModelId} onSelect={id => { close(); if (id !== currentProfileId)
+                <ModelOptions models={entries.map(({ provider, model }) => ({ id: model.modelKey, name: model.model || '未填型号', description: provider.name, source: provider.source, disabledReason: model.unavailableReason || (!provider.hasApiKey ? (provider.oauthProvider ? '账号未登录，到 设置 → 模型 重新登录后可选' : '这个供应商还没配 API Key，到 设置 → 模型 补上后可选') : undefined), unavailableLabel: model.unavailableReason ? '不可用' : '未配 Key' }))} selected={isAuto ? 'auto' : current?.model?.modelKey ?? directory.lastConversationModelKey ?? 'auto'} onSelect={id => { close(); if (id !== currentProfileId)
                 onSelect(id); }}/>
               </div>))) : !showAuto ? (<p style={{ fontSize: 'var(--fs-12)', color: 'var(--muted)', padding: 'var(--sp-4) var(--sp-8)' }}>
               没有匹配的模型。

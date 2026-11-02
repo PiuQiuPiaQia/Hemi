@@ -1,15 +1,14 @@
 /**
  * 055 R-12 · 对话配置面 IPC（从 llm.ipc 抽出，产品行为不变）。
  *
- * 覆盖：031 多组模型目录（列表/保存/删除/默认/上次选择）、041 拉取模型列表、
- * 032 逐组探活、056 角色模型保存、033 思考档拨盘、
+ * 覆盖：031 多组模型目录（列表/保存/删除/上次选择）、041 拉取模型列表、
+ * 032 逐组探活、056 角色模型保存、033 思考档拨盘（2026-11 起读写目录级单值）、
  * 032 首启引导 saveConfig/getConfig、设置页「测试连通性」。
  * llm.ipc 只留耳／口适配、主 agent 回合与 029 队列。
  */
 
 import { ipcMain } from 'electron';
 
-import { parseModelKey } from '../lib/model-profiles.mjs';
 import { AUTO_SELECTION_ID } from '../lib/model-routing.mjs';
 import {
   classifyModelError,
@@ -17,7 +16,6 @@ import {
   normalizeBaseUrl,
   pingTextModel,
 } from '../services/text-model.mjs';
-import { normalizeThinkingLevel } from '../services/thinking-level.mjs';
 import { resolveTextModelConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
@@ -52,17 +50,10 @@ export function registerLlmProfilesIpc() {
     getProfiles().saveProvider(payload ?? {}),
   );
   ipcMain.handle(IPC.llm.removeModelProfile, async (_event, payload) =>
-    getProfiles().removeProvider({
-      providerId: payload?.providerId,
-      replacementModelId: payload?.replacementModelId,
-    }),
-  );
-  ipcMain.handle(IPC.llm.setDefaultModelProfile, async (_event, payload) =>
-    // 041：兼容旧 preload 的 { profileId } 包法（dev 热更新窗口内新主进程可能配旧渲染层）。
-    getProfiles().setDefault(payload?.modelKey ?? payload?.profileId),
+    getProfiles().removeProvider({ providerId: payload?.providerId }),
   );
   // 2026-10-08：记上次主脑模型选择（纯缓存：失效值主进程清空，不抛错）。
-  // 056：全局看图模型（单独配置，不再挂在默认模型条目上）。
+  // 056：全局看图模型（单独配置，不再挂在模型条目上）。
   ipcMain.handle(IPC.llm.setVisionModel, async (_event, payload) =>
     getProfiles().setVisionModel(payload?.modelKey ?? null),
   );
@@ -150,108 +141,94 @@ export function registerLlmProfilesIpc() {
   });
 
   ipcMain.handle(IPC.llm.getConfig, async () => {
-    // 031：模型就绪判定与首启引导读默认组（环境覆盖仍生效并如实返回有效值）。
-    const resolved = await getProfiles().resolve({ decryptSecrets: false });
+    // 2026-11：就绪按「存在可用选择」口径——上次选择（非 auto）优先，其次自动
+    // 路由的主 agent 槽位；都没有（或指向已不存在的模型）＝未就绪，展示占位并
+    // 引导去设置。不借任何隐藏兜底模型。思考档返回目录级单值。
+    const directory = await getProfiles().list();
+    const last = directory.lastConversationModelKey;
+    const candidate = last && last !== AUTO_SELECTION_ID ? last : directory.roleModels?.main ?? null;
+    const usable = candidate && directory.providers.some((provider) =>
+      provider.models.some((model) => model.modelKey === candidate))
+      ? candidate
+      : null;
+    if (!usable) {
+      return {
+        baseUrl: '',
+        model: '',
+        hasApiKey: false,
+        keyStoredSecurely: false,
+        thinkingLevel: directory.thinkingLevel ?? 'default',
+        supportsVision: false,
+        visionModel: '',
+      };
+    }
+    const resolved = await getProfiles().resolve({ modelKey: usable, decryptSecrets: false });
     return {
       baseUrl: resolved.baseUrl,
       model: resolved.model,
       hasApiKey: resolved.hasApiKey,
       keyStoredSecurely: resolved.keyStoredSecurely,
-      // 033：思考强度档位（default＝厂商中档）。
+      // 033：思考强度档位（default＝厂商中档；2026-11 起为目录级单值）。
       thinkingLevel: resolved.thinkingLevel,
       supportsVision: resolved.supportsVision,
       visionModel: resolved.visionModel,
     };
   });
 
-  // 首启引导只配一组：写进默认模型所在的供应商（默认模型字段被表单覆盖，
-  // 同供应商其余模型保留）；目录为空时新建单模型供应商——按目录判定，
-  // 不依赖 resolve 的占位 providerId。看图字段随模型条目落目录。
+  // 首启引导兼容通道（当前引导 UI 走 saveModelProfile＋saveRoleModel，本通道
+  // 只剩自测脚本使用）：写进主供应商（第一个）的条目，目录为空时新建单模型
+  // 供应商。2026-11：思考档写目录级单值；不再有「默认模型」概念。
   ipcMain.handle(IPC.llm.saveConfig, async (_event, config) => {
     const directory = await getProfiles().list();
-    const defaultKey = directory.defaultModelId ? parseModelKey(directory.defaultModelId) : null;
-    const defaultProvider = defaultKey
-      ? directory.providers.find((item) => item.id === defaultKey.providerId) ?? null
-      : null;
-    let providerId = null;
-    if (defaultProvider) {
-      providerId = (
-        await getProfiles().saveProvider({
-          id: defaultProvider.id,
-          name: defaultProvider.name,
-          baseUrl: config?.baseUrl ?? defaultProvider.baseUrl,
-          apiKey: config?.apiKey,
-          models: defaultProvider.models.map((model) =>
-            model.modelKey === directory.defaultModelId
-              ? {
-                  ...model,
-                  model: typeof config?.model === 'string' && config.model.trim() ? config.model.trim() : model.model,
-                  thinkingLevel: config?.thinkingLevel ?? model.thinkingLevel,
-                  thinkingFormat: config?.thinkingFormat ?? model.thinkingFormat,
-                  supportsVision: typeof config?.supportsVision === 'boolean' ? config.supportsVision : model.supportsVision,
-                  visionModel: typeof config?.visionModel === 'string' && config.visionModel.trim() ? config.visionModel.trim() : model.visionModel,
-                }
-              : model,
-          ),
-        })
-      ).providerId;
-    } else {
-      providerId = (
-        await getProfiles().saveProvider({
-          name: '默认供应商',
-          baseUrl: config?.baseUrl,
-          apiKey: config?.apiKey,
-          makeDefault: true,
-          models: [
-            {
-              model: typeof config?.model === 'string' ? config.model.trim() : '',
-              thinkingLevel: config?.thinkingLevel,
-              thinkingFormat: config?.thinkingFormat,
-              supportsVision: config?.supportsVision === true,
-              visionModel: config?.visionModel,
-            },
-          ],
-        })
-      ).providerId;
-    }
+    const provider = directory.providers[0] ?? null;
+    const entry = provider?.models[0] ?? null;
+    const model = typeof config?.model === 'string' ? config.model.trim() : '';
+    const models = provider && entry
+      ? [
+          {
+            ...entry,
+            model: model || entry.model,
+            thinkingFormat: config?.thinkingFormat ?? entry.thinkingFormat,
+            supportsVision: typeof config?.supportsVision === 'boolean' ? config.supportsVision : entry.supportsVision,
+            visionModel: typeof config?.visionModel === 'string' && config.visionModel.trim() ? config.visionModel.trim() : entry.visionModel,
+          },
+          ...provider.models.slice(1),
+        ]
+      : [
+          {
+            model,
+            thinkingFormat: config?.thinkingFormat,
+            supportsVision: config?.supportsVision === true,
+            visionModel: config?.visionModel,
+          },
+        ];
+    const saved = await getProfiles().saveProvider({
+      ...(provider ? { id: provider.id } : {}),
+      name: provider?.name ?? '主供应商',
+      baseUrl: config?.baseUrl ?? provider?.baseUrl,
+      apiKey: config?.apiKey,
+      models,
+    });
+    if (!saved.ok) throw new Error('模型配置没有保存成功，请重试。');
+    const level = await getProfiles().setThinkingLevel(config?.thinkingLevel);
     const resolved = await getProfiles().resolve({ decryptSecrets: false });
     return {
       baseUrl: resolved.baseUrl,
       model: resolved.model,
-      thinkingLevel: resolved.thinkingLevel,
+      thinkingLevel: level.thinkingLevel,
       thinkingFormat: resolved.thinkingFormat,
       hasApiKey: resolved.hasApiKey,
       keyStoredSecurely: resolved.keyStoredSecurely,
       supportsVision: resolved.supportsVision,
       visionModel: resolved.visionModel,
-      ...(providerId ? { providerId } : {}),
+      ...(saved.providerId ? { providerId: saved.providerId } : {}),
     };
   });
 
-  // 033/031：思考强度快捷拨盘——带模型键只改该模型；缺省改默认模型。
+  // 033/041→2026-11：思考强度快捷拨盘——读写目录级单值（不再按模型键写条目）。
   ipcMain.handle(IPC.llm.setThinkingLevel, async (_event, payload) => {
-    // 自动（角色路由）模式的思考档随各模型自己的设置，拨盘改的是默认模型。
-    const modelKey =
-      typeof payload === 'object' && payload && typeof payload.profileId === 'string' && payload.profileId !== AUTO_SELECTION_ID
-        ? payload.profileId
-        : (await getProfiles().list()).defaultModelId;
-    const target = await getProfiles().get(modelKey, { decryptSecrets: false });
-    if (!target) return { thinkingLevel: 'default' };
-    const provider = (await getProfiles().list()).providers.find((item) => item.id === target.providerId);
-    if (!provider) return { thinkingLevel: 'default' };
-    const level = normalizeThinkingLevel(typeof payload === 'object' && payload ? payload.level : payload);
-    if (target.thinkingLevel === level) return { thinkingLevel: target.thinkingLevel };
-    await getProfiles().saveProvider({
-      id: provider.id,
-      name: provider.name,
-      baseUrl: provider.baseUrl,
-      models: provider.models.map((model) => ({
-        ...model,
-        thinkingLevel: model.modelKey === modelKey ? level : model.thinkingLevel,
-      })),
-    });
-    const after = await getProfiles().get(modelKey, { decryptSecrets: false });
-    return { thinkingLevel: after?.thinkingLevel ?? 'default' };
+    const level = typeof payload === 'object' && payload ? payload.level : payload;
+    return getProfiles().setThinkingLevel(level);
   });
 
   // 设置页「测试连通性」：用表单当前值（含未保存的 key）探活。

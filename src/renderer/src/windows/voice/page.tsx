@@ -74,6 +74,7 @@ import {
 } from '@/shared/types';
 import { SetupScreen } from '@/windows/voice/setup-screen';
 import { createLogger } from '@/shared/log';
+import { formatSshTarget } from '@shared/ssh-target.mjs';
 import { buildInputHistory } from '@/windows/voice/lib/input-history';
 import { VoiceScreen } from '@/windows/voice/voice-screen';
 import { useConversationFlow,sendLocalConversationCommand,waitLocalGeneration } from '@/windows/voice/lib/use-conversation-flow';
@@ -998,7 +999,7 @@ export default function Home() {
         workspaceStateRef.current = result.state;
         setWorkspaceState(result.state);
       }
-      logChain(result?.ok ? `连接恢复：${result.state?.projects.find((item) => item.id === id)?.host ?? id}` : `仍连不上：${result?.message ?? '未知原因'}`);
+      logChain(result?.ok ? `连接恢复：${formatSshTarget(result.state?.projects.find((item) => item.id === id)?.host ?? id)}` : `仍连不上：${result?.message ?? '未知原因'}`);
       if (!result?.ok && result?.kind === 'auth' && result.canPassword && !password) {
         const host = result.state?.projects.find((item) => item.id === id)?.host
           ?? workspaceStateRef.current?.projects.find((item) => item.id === id)?.host
@@ -1055,7 +1056,7 @@ export default function Home() {
       }
       bindWorkspace(workspace.id);
       logChain(
-        `项目已指定 → ${workspace.name}${workspace.host ? ` · ${workspace.host}` : ''}（本会话接下来的任务生效）`,
+        `项目已指定 → ${workspace.name}${workspace.host ? ` · ${formatSshTarget(workspace.host)}` : ''}（本会话接下来的任务生效）`,
       );
     },
     [bindWorkspace],
@@ -1364,7 +1365,8 @@ export default function Home() {
   /**
    * 新建对话要恢复的选择：目录里记的上次选择仍可用才返回它——模型在场且
    * 供应商有 Key（与选择菜单的可选口径一致）；「自动（角色路由）」须路由配了
-   * 主 agent 且无环境覆盖。否则返回 null＝回落默认模型（031 原口径兜底）。
+   * 主 agent 且无环境覆盖。否则返回 null＝回落自动路由（2026-11：不暗换到任何
+   * 隐藏模型；路由没配主模型时由受理报错引导去设置）。
    */
   const lastUsedProfileForNewConversation = useCallback((): string | null => {
     const directory = modelProfilesRef.current;
@@ -2721,10 +2723,10 @@ export default function Home() {
   }, [detachTurn, stopTtsPlayback]);
 
   /**
-   * 2026-10-07 用户裁决：每个新会话的思考档都从「自动」起步。041 的全局档
-   * 机制保留（档位仍写默认模型条目、会话中随时可拨），只是进入新对话态时
-   * 重置回 default——否则上个会话拨过的档会一直粘到后续所有新会话。
-   * 档位本就是 default 时主进程跳过落盘（见 llm.ipc set-thinking-level）。
+   * 2026-10-07 用户裁决：每个新会话的思考档都从「自动」起步。2026-11 起档位是
+   * 目录级单值（拨盘读写这一份，会话中随时可拨），进入新对话态时重置回
+   * default——否则上个会话拨过的档会一直粘到后续所有新会话。
+   * 档位本就是 default 时主进程跳过落盘（见 llm-profiles.ipc set-thinking-level）。
    */
   const resetThinkingLevelForNewConversation = useCallback(async () => {
     const receipt = await window.hemiVoice
@@ -3039,9 +3041,9 @@ export default function Home() {
     setModelForm((current) => ({ ...current, ...next }));
   }, []);
 
-  /** 033：思考强度拨盘选档——落库（只写档位）并同步表单，下一轮对话即生效。
-   *  041 用户裁决：全局一档，永远写默认模型条目（全局槽），不再跟会话选择/
-   *  自动路由走；发送侧用各模型自己的 thinkingFormat 映射翻译这一档。
+  /** 033：思考强度拨盘选档——落库（目录级全局档）并同步表单，下一轮对话即生效。
+   *  041→2026-11 用户裁决：全局一档（目录级单值），不再跟会话选择/具体模型条目
+   *  走；发送侧按目标模型经 sdkThinkingLevelOf ＋ thinkingLevelMap 翻译夹紧这一档。
    *  2026-10-07 用户裁决：全局档只在会话内保持——每个新会话重置回「自动」
    *  （resetThinkingLevelForNewConversation）。 */
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevel) => {

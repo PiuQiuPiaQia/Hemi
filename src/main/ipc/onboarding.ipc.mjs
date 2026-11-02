@@ -5,7 +5,6 @@ import { ipcMain, app } from 'electron';
 import { createOnboardingStore } from '../lib/onboarding-state.mjs';
 import { readStoredConfig } from '../lib/config-store.mjs';
 import { createLogger } from '../lib/logger.mjs';
-import { parseModelKey } from '../lib/model-profiles.mjs';
 import { getProfiles } from './llm.ipc.mjs';
 import { IPC } from '../../shared/ipc-channels.mjs';
 
@@ -13,7 +12,7 @@ import { IPC } from '../../shared/ipc-channels.mjs';
  * 032 冷启动引导 IPC：主进程是引导进度的唯一权威，渲染层只拿快照与
  * 提交前进/完成意图。模型完整性按真实存储判定；语音配置只报告状态：
  * - 可选语音：doubao-asr.json 有已保存的密文 Key（环境变量/内存态不算）；
- * - 必需模型：目录默认组的接口地址、型号、加密保存的 Key 完整。
+ * - 必需模型：存在有 Key 的供应商且角色路由主槽位指向有效模型（2026-11）。
  */
 
 const onboardingLog = createLogger('onboarding');
@@ -30,17 +29,19 @@ async function hasPersistedAsrKey() {
   return (await readStoredConfig()).keyStoredSecurely;
 }
 
-/** 默认模型组是否字段完整且 Key 已加密保存（环境覆盖不参与判定）。 */
+/**
+ * 就绪判定（2026-11 用户裁决）：存在有 Key 的供应商 且 角色路由主槽位（main）
+ * 指向有效模型——引导完成后写 roleModels.main，首启门槛随之从「默认组完整」
+ * 改为「主槽位可用」（环境覆盖不参与判定）。
+ */
 async function defaultModelComplete() {
   const directory = await getProfiles().list();
-  if (!directory?.defaultModelId || directory.corrupt) return false;
-  const parsed = parseModelKey(directory.defaultModelId);
-  if (!parsed) return false;
-  const provider = directory.providers.find((item) => item.id === parsed.providerId);
-  if (!provider) return false;
-  const model = provider.models.find((item) => item.id === parsed.modelId);
-  if (!model) return false;
-  return Boolean(provider.baseUrl.trim() && model.model.trim() && provider.keyStoredSecurely);
+  if (!directory || directory.corrupt) return false;
+  if (!directory.providers.some((provider) => provider.keyStoredSecurely)) return false;
+  const main = directory.roleModels?.main;
+  if (!main) return false;
+  return directory.providers.some((provider) =>
+    provider.models.some((model) => model.modelKey === main && model.model.trim()));
 }
 
 const store = createOnboardingStore({

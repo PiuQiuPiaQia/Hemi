@@ -29,7 +29,7 @@ function fakeProfiles({ strictResults = {}, resolved = null, directory = null } 
   return {
     calls,
     profiles: {
-      list: async () => directory ?? { providers: [], defaultModelId: null },
+      list: async () => directory ?? { providers: [] },
       resolveStrict: async (modelKey) => {
         calls.push(['strict', modelKey]);
         return strictResults[modelKey] ?? { ok: false, reason: 'missing', message: 'x' };
@@ -57,11 +57,11 @@ test('resolveLightModel（056）：自动（角色路由）→ 路由主 agent �
   const strictOk = { ok: true, config: { baseUrl: 'http://main', apiKey: 'k', model: 'routing-main', api: 'openai-completions' } };
   const fake = fakeProfiles({
     strictResults: { 'p/main': strictOk },
-    directory: { providers: [], defaultModelId: null, roleModels: { main: 'p/main' } },
+    directory: { providers: [], roleModels: { main: 'p/main' } },
   });
   const config = await resolveLightModel({ getProfiles: () => fake.profiles, profileId: 'auto' });
   assert.equal(config.model, 'routing-main');
-  const unset = fakeProfiles({ directory: { providers: [], defaultModelId: null } });
+  const unset = fakeProfiles({ directory: { providers: [] } });
   const fallback = await resolveLightModel({ getProfiles: () => unset.profiles, profileId: 'auto' });
   assert.equal(fallback, null);
 });

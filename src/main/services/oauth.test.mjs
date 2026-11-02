@@ -112,8 +112,10 @@ test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
 
 test('刷新并发互斥；退出使既有冻结计划失效；重登保留模型键与路由', async t => {
   const f = await fixture(t); await f.connect('openai');
-  const initial = await f.profiles.list(), key = initial.defaultModelId;
+  // 2026-11：目录不再有 defaultModelId——选择语义落在角色槽位与上次选择。
+  const key = (await f.profiles.list()).providers[0].models[0].modelKey;
   await f.profiles.saveRoleModel({ main: key });
+  await f.profiles.setLastConversationModel(key);
   const snapshot = await freezeModelPolicy({ store: f.profiles, modelKey: 'auto' });
   const plan = await hydrateModelPlan(resolveModelPlan(snapshot), f.profiles);
   const routed = createHemiSession({ cwd: f.dir, agentDir: path.join(f.dir, 'routed'), routing: { execution: plan.primary, fallbacks: [] }, tools: [], features: {} });
@@ -128,7 +130,7 @@ test('刷新并发互斥；退出使既有冻结计划失效；重登保留模�
   assert.equal((await f.profiles.list()).providers[0].hasApiKey, false);
   await assert.rejects(hydrateModelPlan(resolveModelPlan(snapshot), f.profiles), /重新登录/);
   await f.connect('openai');
-  const next = await f.profiles.list(); assert.equal(next.defaultModelId, key); assert.equal(next.roleModels.main, key);
+  const next = await f.profiles.list(); assert.equal(next.lastConversationModelKey, key); assert.equal(next.roleModels.main, key);
   assert.equal((await f.profiles.resolve({ decryptSecrets: false })).hasApiKey, true);
   await assert.rejects(f.profiles.saveProvider({ ...next.providers[0], apiKey: 'malicious', models: next.providers[0].models }), /重新登录/);
 });

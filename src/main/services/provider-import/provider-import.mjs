@@ -483,7 +483,6 @@ export function createImportCoordinator({
         operationId: op.operationId,
         planHash: op.planHash,
         providers,
-        firstDefaultModelKey: op.intent.firstDefaultModelKey ?? null,
       });
     } catch (error) {
       return failOp(op, 'STORE_FAILED', { retryTarget: 'saving', detail: error?.message });

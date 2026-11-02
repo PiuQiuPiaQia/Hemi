@@ -26,7 +26,6 @@ import {
   KEYLESS_PLACEHOLDER_KEY,
   PROVIDER_PRESETS,
   draftModelEntry,
-  findDefaultModel,
   guessVision,
   hostOf,
   isLocalEndpoint,
@@ -349,28 +348,16 @@ function MoreMenu({ label, entries, disabled }: { label: string; entries: MenuEn
   );
 }
 
-/** 删除供应商确认：默认模型在它名下时先选替代模型（主进程同样会拒绝无替代的删除）。 */
+/** 删除供应商确认（2026-11：无「默认模型替代」概念——直接确认即可）。 */
 function DeleteProviderDialog({
   provider,
-  directory,
   onCancel,
   onConfirm,
 }: {
   provider: ModelProviderView;
-  directory: ModelProfilesDirectory;
   onCancel: () => void;
-  onConfirm: (replacementModelId?: string) => Promise<string | null>;
+  onConfirm: () => Promise<string | null>;
 }) {
-  const current = findDefaultModel(directory);
-  const holdsDefault = current?.provider.id === provider.id;
-  const replacements = useMemo(
-    () =>
-      directory.providers
-        .filter((item) => item.id !== provider.id)
-        .flatMap((item) => item.models.map((model) => ({ provider: item, model }))),
-    [directory, provider.id],
-  );
-  const [replacement, setReplacement] = useState(holdsDefault ? (replacements[0]?.model.modelKey ?? '') : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -380,15 +367,10 @@ function DeleteProviderDialog({
     cancelRef.current?.focus();
   }, []);
 
-  const picked = replacements.find((item) => item.model.modelKey === replacement);
   const confirm = async () => {
-    if (holdsDefault && !replacement) {
-      setError('这个供应商里有默认模型：先在下面选一个替代模型，再删除。');
-      return;
-    }
     setBusy(true);
     setError(null);
-    const failure = await onConfirm(holdsDefault ? replacement : undefined);
+    const failure = await onConfirm();
     if (failure) {
       setBusy(false);
       setError(failure);
@@ -415,37 +397,7 @@ function DeleteProviderDialog({
         }}
       >
         <h3 id="h37m-delete-title">删除「{provider.name}」？</h3>
-        <p>
-          它的 {provider.models.length} 个型号和已存的 Key 会一起删除，不能恢复。
-          {holdsDefault ? '当前主脑模型在它名下，先选一个替代：' : ''}
-        </p>
-        {holdsDefault ? (
-          <div className="h37m-dialog-pick">
-            <Pick
-              label="替代的主脑模型"
-              value={replacement}
-              display={picked?.model.model ?? '选一个模型'}
-              sub={picked?.provider.name}
-              disabled={busy}
-              onChange={(value) => {
-                setReplacement(value);
-                setError(null);
-              }}
-            >
-              {directory.providers
-                .filter((item) => item.id !== provider.id)
-                .map((item) => (
-                  <optgroup key={item.id} label={item.name}>
-                    {item.models.map((model) => (
-                      <option key={model.modelKey} value={model.modelKey}>
-                        {model.model}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-            </Pick>
-          </div>
-        ) : null}
+        <p>它的 {provider.models.length} 个型号和已存的 Key 会一起删除，不能恢复。</p>
         {error ? (
           <p className="h37-error-text h37m-dialog-error" role="alert">
             {error}
@@ -1445,7 +1397,6 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
                 <span className="h37-row-end">
                   {ctl.external ? <>
                     {model.supportsVision ? <span className="h37-badge">能看图</span> : null}
-                    {directory.defaultModelId === model.modelKey ? <span className="h37-badge" data-tone="ok">默认</span> : null}
                   </> : <>
                   {/* 041：模型本身的普通配置直接放行内——能看图即改即存（正在当看图模型用时锁住）。 */}
                   <span className="h37m-vision-toggle">
@@ -1575,11 +1526,10 @@ function ProviderView({ ctl, provider }: { ctl: Controller; provider: ModelProvi
       {deleteOpen ? (
         <DeleteProviderDialog
           provider={provider}
-          directory={directory}
           onCancel={() => setDeleteOpen(false)}
-          onConfirm={async (replacementModelId) => {
+          onConfirm={async () => {
             const error = await mutate(null, async () => {
-              const result = await bridge.removeModelProfile({ providerId: provider.id, replacementModelId });
+              const result = await bridge.removeModelProfile({ providerId: provider.id });
               if (!result?.ok) throw new Error('主进程没有确认删除');
             });
             if (error) return error;

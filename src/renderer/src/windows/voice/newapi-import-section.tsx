@@ -808,7 +808,7 @@ export function NewApiImportView({
                     </div>
                   ))}
                 </div>
-                <div className="h37-section-foot">已有的默认模型和自动路由没有改动。</div>
+                <div className="h37-section-foot">已有的模型选择和自动路由没有改动。</div>
                 <div className="h47n-foot">
                   <button type="button" className="h37-btn h37-btn-primary" onClick={finish}>
                     完成

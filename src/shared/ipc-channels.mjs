@@ -169,11 +169,10 @@ export const IPC = {
     testModel: 'llm:test-model',
     /** 031：思考强度快捷拨盘（只写档位，下一轮对话即生效）。 */
     setThinkingLevel: 'llm:set-thinking-level',
-    /** 031 多组模型配置：目录列表 / 保存（新建或更新）/ 删除 / 默认组 / 逐组测试。 */
+    /** 031 多组模型配置：目录列表 / 保存（新建或更新）/ 删除 / 逐组测试。 */
     listModelProfiles: 'llm:list-model-profiles',
     saveModelProfile: 'llm:save-model-profile',
     removeModelProfile: 'llm:remove-model-profile',
-    setDefaultModelProfile: 'llm:set-default-model-profile',
     /** 2026-10-08：记上次主脑模型选择（模型键或 'auto'；新建对话优先恢复）。 */
     setLastConversationModel: 'llm:set-last-conversation-model',
     /** 056：全局看图模型（单独配置）。 */

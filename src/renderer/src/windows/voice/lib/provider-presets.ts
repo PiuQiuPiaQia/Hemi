@@ -158,14 +158,18 @@ export function thinkingLabel(level: ThinkingLevel): string {
 
 export type ModelRef = { provider: ModelProviderView; model: ModelEntryView };
 
-/** 初始化与兜底用的模型：defaultModelId 优先，否则取第一个。 */
-export function findDefaultModel(directory: ModelProfilesDirectory | null): ModelRef | null {
+/**
+ * 初始化选中的模型（2026-11：「默认模型」删除后的兜底口径）：上次选择（非 auto
+ * 且仍在目录里）优先，其次第一个模型；目录为空返回 null（引导先去添加）。
+ */
+export function findPreferredModel(directory: ModelProfilesDirectory | null): ModelRef | null {
   if (!directory) return null;
   let first: ModelRef | null = null;
+  const last = directory.lastConversationModelKey;
   for (const provider of directory.providers) {
     for (const model of provider.models) {
       const ref = { provider, model };
-      if (directory.defaultModelId && model.modelKey === directory.defaultModelId) return ref;
+      if (last && last !== 'auto' && model.modelKey === last) return ref;
       if (!first) first = ref;
     }
   }

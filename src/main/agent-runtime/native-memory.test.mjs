@@ -22,7 +22,7 @@ async function fixture(t,respond){
 
 test('workflow root loads official memory and release closes the original lifecycle', {timeout:30000}, async t=>{
  const f=await fixture(t,body=>({tool:body.messages.some(message=>message.role==='tool')?null:{id:'workflow-memory',type:'function',function:{name:'memory_write',arguments:JSON.stringify({target:'long_term',content:'WORKFLOW_NATIVE_SHARED_FACT'})}}}));
- const store={list:async()=>({defaultModelId:'p/native',roleModels:{main:'p/native'}}),resolveStrict:async()=>({ok:true,config:f.config})};
+ const store={list:async()=>({roleModels:{main:'p/native'}}),resolveStrict:async()=>({ok:true,config:f.config})};
  const runtime=createAgentRuntime({userDataDir:path.join(f.root,'data'),nativeMemory:true,getProfiles:()=>store,resolveCapabilities:async()=>({features:{},extensionConfig:{}}),getAccessService:()=>null});
  f.own(()=>runtime.close());
  const plan=await freezeWorkflowModel({selection:{mode:'fixed',modelKey:'p/native'},store,roles:new Map()});

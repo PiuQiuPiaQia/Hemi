@@ -29,7 +29,7 @@ async function fixture(t) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const config = {modelKey:'test/browser-goal',model:'browser-goal',api:'openai-completions',apiKey:'SYNTHETIC_ONLY',
     baseUrl:`http://127.0.0.1:${server.address().port}/v1`,thinkingLevel:'off'};
-  const store = {list:async () => ({defaultModelId:config.modelKey}),resolveStrict:async () => ({ok:true,config})};
+  const store = {list:async () => ({}),resolveStrict:async () => ({ok:true,config})};
   const policySnapshot = await freezeModelPolicy({store,modelKey:config.modelKey});
   const modelPlan = await hydrateModelPlan(resolveModelPlan(policySnapshot),store);
   const runtime = createAgentRuntime({userDataDir:path.join(dir,'data'),getProfiles:() => store,

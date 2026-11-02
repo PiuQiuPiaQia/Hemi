@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 
 import { Markdown } from '@/shared/markdown'
+import { formatSshTarget } from '@shared/ssh-target.mjs';
 import { Menu, MenuItem } from '@/components/menu'
 import { useClipboardCopy } from '@/lib/use-clipboard-copy'
 import { segmentTaggedText } from '@/windows/voice/lib/composer-tokens'
@@ -752,7 +753,7 @@ export function VoiceScreen({
     workspaceCurrent?.kind === 'view'
       ? workspaceCurrent.view.type === 'project'
         ? workspaceCurrent.view.host
-          ? `${workspaceCurrent.view.name} · ${workspaceCurrent.view.host}`
+          ? `${workspaceCurrent.view.name} · ${formatSshTarget(workspaceCurrent.view.host)}`
           : workspaceCurrent.view.name
         : ''
       : workspaceCurrent?.kind === 'legacy'
@@ -1155,7 +1156,7 @@ export function VoiceScreen({
                       onRetryRemote={(id) => onWorkspaceRetryRemote?.(id)}
                       onRemove={(id) => onWorkspaceRemove?.(id)}
                     />}
-                    {/* 033：思考强度拨盘（设置页「正在使用」同源）。041：全局一档，自动路由下也可改。 */}
+                    {/* 033：思考强度拨盘（设置页「正在使用」同源）。041→2026-11：目录级全局档，自动路由下也可改。 */}
                     <ThinkingLevelStrip
                       level={thinkingLevel}
                       onChange={(level) => onThinkingLevelChange?.(level)}

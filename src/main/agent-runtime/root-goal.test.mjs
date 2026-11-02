@@ -44,7 +44,7 @@ for (const mode of ['normal','chunked','fail-open']) test(`shared PC runtime ${m
     await fs.rm(root, {recursive:true,force:true});
   });
   const config = {modelKey:'test/shared-goal',providerId:'test',model:'shared-goal',api:'openai-completions',apiKey:'SYNTHETIC_ONLY',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,thinkingLevel:'off'};
-  const store = {list:async () => ({defaultModelId:config.modelKey}),resolveStrict:async () => ({ok:true,config})};
+  const store = {list:async () => ({}),resolveStrict:async () => ({ok:true,config})};
   const policySnapshot = await freezeModelPolicy({store,modelKey:config.modelKey});
   const modelPlan = await hydrateModelPlan(resolveModelPlan(policySnapshot), store);
   const ctx = {conversationId:'shared-goal',runId:'shared-root',generation:1,policySnapshot,modelPlan,config,inputSource:'text',workspace:{id:'proof',type:'project',dir:root}};

@@ -103,6 +103,8 @@ export type BotCache = {
   revision: number;
   enabled: boolean;
   defaultDir: string;
+  /** Bot 自己的初始模型选择锚（'auto'＝路由；配置变更后回落用）。2026-11：与
+   * 桌面目录已删除的「默认模型」无关——新会话优先 lastConversationModelKey。 */
   defaultModel: string;
   lastConversationModelKey?: string | null;
   recentDirs: string[];

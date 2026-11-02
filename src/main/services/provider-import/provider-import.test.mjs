@@ -346,7 +346,7 @@ test('全链路：登录→选择→创建→查证→读Key→验证→原子�
   assert.equal(list.providers.length, 2);
   assert.equal(list.providers.filter((provider) => provider.api === 'openai-completions').length, 1);
   assert.equal(list.providers.filter((provider) => provider.api === 'anthropic-messages').length, 1);
-  assert.equal(list.defaultModelId.startsWith('mpi-'), true, '首次导入设默认');
+  assert.equal(list.defaultModelId, undefined, '2026-11：导入不设默认指针');
   const credentials = await harness.store.providerCredentials(list.providers[0].id);
   assert.equal(credentials.apiKey, `sk-${harness.site.tokens[0].key}`, '共享本次 Key（vvcode 补前缀口径）');
 

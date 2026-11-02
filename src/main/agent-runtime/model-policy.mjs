@@ -19,11 +19,14 @@ export function compileRolePolicy(roleModels) {
 /** 受理时冻结完整公开配置，不把 Key 写入队列或运行档案。 */
 export async function freezeModelPolicy({ store, modelKey = null, fixedConfig = null, budgets = DEFAULT_BUDGETS }) {
   const directory = await store.list();
-  const routed = modelKey === 'auto';
+  // 2026-11：「默认模型」回落删除——未显式选择时沿上次选择（无效值归一化时已清），
+  // 从未选择过＝自动路由（不暗换到任何隐藏模型；路由没配主模型时受理明确报错）。
+  const effectiveKey = modelKey ?? directory.lastConversationModelKey ?? 'auto';
+  const routed = effectiveKey === 'auto';
   if (routed && directory.envOverride) fail('环境变量正在覆盖模型配置，自动路由不可用；移除覆盖后重试');
   const policy = routed ? compileRolePolicy(directory.roleModels) : null;
   if (routed && !policy) fail('角色路由还没配主 agent 模型');
-  const keys = routed ? [...new Set([...policy.main, ...Object.values(policy.roles).flat()])] : [modelKey ?? directory.defaultModelId];
+  const keys = routed ? [...new Set([...policy.main, ...Object.values(policy.roles).flat()])] : [effectiveKey];
   const candidates = {};
   for (const key of keys) {
     const resolved = fixedConfig && keys.length === 1 ? { ok: true, config: fixedConfig } : await store.resolveStrict(key);

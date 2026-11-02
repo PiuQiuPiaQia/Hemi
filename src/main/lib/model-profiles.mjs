@@ -1,12 +1,16 @@
 // 031 多组模型配置：供应商（端点+Key）下挂多个模型的目录、迁移与回合解析。
 //
 // 2026-09-30 用户裁决（参照 ZCode／DSH ProviderEditor）：一个供应商配置多个
-// 模型——endpoint 与 Key 属于供应商，型号/思考强度/视觉能力属于模型；会话
-// 选择与默认值都落在「模型键」（providerId/modelId）上。
+// 模型——endpoint 与 Key 属于供应商，型号/视觉能力属于模型；会话选择落在
+// 「模型键」（providerId/modelId）上。
+//
+// 2026-11 用户裁决：「默认模型」概念删除——选哪个模型就用哪个；选自动路由走
+// 角色槽位策略。旧档的 defaultModelId 指针随 v3→v4 迁移删除，只用来做一次
+// 全局思考档（thinkingLevel，目录级单值）的迁移来源。模型条目上的
+// thinkingLevel 同样停止作为发送依据，持久层继续容忍该字段存在。
 //
 // 其余纪律：Key 只存注入的加密存储密文（不可用时仅进程内存）、渲染层只拿视图；
-// 损坏目录只读回落；删除含默认模型的供应商必须显式给替代模型；
-// HEMI_LLM_* 环境覆盖最高且如实标记。
+// 损坏目录只读回落；HEMI_LLM_* 环境覆盖最高且如实标记。
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -16,8 +20,9 @@ import { noteActivity } from './perf.mjs';
 import { hasSupportedSecret } from './local-secrets.mjs';
 import { isOAuthProvider, OAUTH_PROVIDERS } from '../services/oauth-models.mjs';
 
-/** 047：目录 schema 3＝2 ＋顶层 importReceipts（导入提交事实，普通读写显式保留）。 */
-export const PROFILES_VERSION = 3;
+/** 目录 schema 4＝删除「默认模型」指针（defaultModelId），思考档独立为目录级单值
+ *  thinkingLevel；v3 的档位从默认条目迁一次（2026-11 用户裁决）。 */
+export const PROFILES_VERSION = 4;
 /** 无目录/损坏目录时的只读占位身份。 */
 const PLACEHOLDER_PROVIDER_ID = 'mp-unconfigured';
 const PLACEHOLDER_PROVIDER_NAME = '未配置';
@@ -105,7 +110,20 @@ export function normalizeProvider(raw) {
   };
 }
 
-/** 目录归一化；defaultModelId 无效时回落首个模型键。 */
+/** 模型键 → 条目（归一化前的迁移查找用；不依赖 store 实例）。 */
+function findModelEntry(providers, modelKey) {
+  const parsed = parseModelKey(modelKey);
+  if (!parsed) return null;
+  const provider = providers.find((item) => item.id === parsed.providerId);
+  return provider?.models.find((item) => item.id === parsed.modelId) ?? null;
+}
+
+/**
+ * 目录归一化（v4）。旧档迁移（只发生一次，随后文件重写为 v4 形状）：
+ * - 顶层 thinkingLevel 缺失时，从旧 defaultModelId 指向条目的 thinkingLevel 迁
+ *   （2026-11 用户裁决：全局档 := 迁移前默认模型的档位；条目档此后只容忍不读取）。
+ * - defaultModelId 指针删除；visionModelKey 的旧档迁移仍按旧指针口径判一次。
+ */
 export function normalizeDirectory(raw) {
   const providers = (Array.isArray(raw?.providers) ? raw.providers : [])
     .map(normalizeProvider)
@@ -119,23 +137,27 @@ export function normalizeDirectory(raw) {
     unique.push(provider);
   }
   const allKeys = unique.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
-  const defaultModelId = allKeys.includes(raw.defaultModelId) ? raw.defaultModelId : allKeys[0];
   // 056：角色模型原样保留（失效引用不改指默认；有效性在解析时判定）。
   const roleModels = normalizeRoleModels(raw.roleModels, raw.autoRouting);
   // 047：导入回执随目录归一化保留（version 2 文件缺省为空，旧模型/Key 不改）。
   const importReceipts = normalizeImportReceipts(raw.importReceipts);
-  // 056：全局看图模型（模型键；2026-10-14 用户裁决单独配置）。旧档没有该字段时从默认
-  // 模型条目迁：默认模型自己能看图＝看图用它；条目上挂了看图模型键＝用那个。
-  const visionModelKey = normalizeVisionModelKey(raw, unique, allKeys, defaultModelId);
+  // 056：全局看图模型（模型键；2026-10-14 用户裁决单独配置）。旧档没有该字段时按
+  // 旧默认模型口径迁一次：默认模型自己能看图＝看图用它；条目上挂了看图模型键＝用那个。
+  const legacyDefaultKey = allKeys.includes(raw.defaultModelId) ? raw.defaultModelId : allKeys[0];
+  const visionModelKey = normalizeVisionModelKey(raw, unique, allKeys, legacyDefaultKey);
+  // 2026-11：目录级思考档单值。旧档（v3 及更早）顶层没有该字段 → 从默认条目迁。
+  const legacyLevel = Object.prototype.hasOwnProperty.call(raw ?? {}, 'thinkingLevel')
+    ? raw.thinkingLevel
+    : findModelEntry(unique, raw.defaultModelId)?.thinkingLevel;
   // 2026-10-08：上次主脑模型选择（模型键或 'auto'）。引用失效即丢弃——新建
-  // 对话回落默认模型，不静默改指别的模型。
+  // 对话回落自动路由，不静默改指别的模型。
   const lastConversationModelKey =
     raw.lastConversationModelKey === AUTO_SELECTION_ID || allKeys.includes(raw.lastConversationModelKey)
       ? raw.lastConversationModelKey
       : null;
   return {
     version: PROFILES_VERSION,
-    defaultModelId,
+    thinkingLevel: normalizeThinkingLevel(legacyLevel),
     ...(lastConversationModelKey ? { lastConversationModelKey } : {}),
     ...(roleModels ? { roleModels } : {}),
     visionModelKey,
@@ -340,7 +362,7 @@ export function createProfileStore({
         if (!corrupt) {
           return {
             version: PROFILES_VERSION,
-            defaultModelId: null,
+            thinkingLevel: 'default',
             corrupt: false,
             envOverride: envOverrideActive(env),
             providers: [],
@@ -348,7 +370,7 @@ export function createProfileStore({
         }
         return {
           version: PROFILES_VERSION,
-          defaultModelId: null,
+          thinkingLevel: 'default',
           corrupt,
           envOverride: envOverrideActive(env),
           providers: [
@@ -364,7 +386,8 @@ export function createProfileStore({
       }
       return {
         version: directory.version,
-        defaultModelId: directory.defaultModelId,
+        // 2026-11：目录级思考档单值（拨盘读写这一份；发送侧统一翻译到各模型）。
+        thinkingLevel: directory.thinkingLevel,
         // 2026-10-08：上次主脑模型选择（新建对话恢复用；null＝未记录/已失效）。
         lastConversationModelKey: directory.lastConversationModelKey ?? null,
         // 056：角色路由槽位（null＝未配；角色未配＝跟随 main）。
@@ -396,7 +419,8 @@ export function createProfileStore({
         ...(found.provider.oauthProvider ? { oauthProvider: found.provider.oauthProvider } : {}),
         model: found.model.model,
         apiKey,
-        thinkingLevel: found.model.thinkingLevel,
+        // 2026-11：思考档是目录级单值；条目上的旧字段不再作为发送依据。
+        thinkingLevel: directory.thinkingLevel,
         thinkingFormat: found.model.thinkingFormat,
         supportsVision: found.model.supportsVision,
         visionModel: found.model.visionModel,
@@ -423,10 +447,9 @@ export function createProfileStore({
      * 保存供应商（新建或更新）：端点/名称/Key 与模型列表整体提交；
      * id 缺省＝新建；Key 非空才覆盖（空＝保留已存）；模型条目按 id 稳定身份。
      *
-     * 032：目录为空（未建组）时允许首次创建——首组即默认组；
-     * `makeDefault: true`（首启引导用，2026-09-30 用户裁决）把保存的分组
-     * 立即设为默认，即使目录里已有别的默认候选。safeStorage 不可用时
-     * 不把新 Key 落成明文——直接拒绝保存。
+     * 2026-11：「默认模型／默认分组」概念删除——保存不再触碰任何指针，
+     * 首组与后续组一律平权（引导侧改写角色槽位，见 onboarding.ipc）。
+     * safeStorage 不可用时不把新 Key 落成明文——直接拒绝保存。
      */
     async saveProvider(input) {
       // 038：写路径进串行队列，与角色保存/拨盘修改互不覆盖。
@@ -475,21 +498,15 @@ export function createProfileStore({
       const providers = previous
         ? directory.providers.map((item) => (item.id === next.id ? next : item))
         : [...(directory?.providers ?? []), next];
-      const allKeys = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
-      const fallbackDefault = directory?.defaultModelId && allKeys.includes(directory.defaultModelId)
-        ? directory.defaultModelId
-        : allKeys[0];
       await persist({
         version: PROFILES_VERSION,
-        defaultModelId: input?.makeDefault === true
-          ? `${next.id}/${next.models[0].id}`
-          : fallbackDefault,
+        thinkingLevel: directory?.thinkingLevel ?? 'default',
         // 038：整体保存不得丢弃已存的角色引用；047：导入回执同文件保留；
         // 2026-10-08：上次主脑模型选择同样保留。
         ...(directory?.roleModels ? { roleModels: directory.roleModels } : {}),
         ...(directory?.importReceipts?.length ? { importReceipts: directory.importReceipts } : {}),
         ...(directory?.lastConversationModelKey ? { lastConversationModelKey: directory.lastConversationModelKey } : {}),
-        // 056：全局看图模型（没设置过＝null 也要落盘，防止下次读取又从默认条目迁一遍）。
+        // 056：全局看图模型（没设置过＝null 也要落盘，防止下次读取又从旧默认条目迁一遍）。
         visionModelKey: directory?.visionModelKey ?? null,
         providers,
       });
@@ -512,39 +529,25 @@ export function createProfileStore({
         });
         const provider = normalizeProvider({ id, name: previous?.name ?? OAUTH_PROVIDERS[oauthProvider], oauthProvider, baseUrl: catalog[0].baseUrl, api: catalog[0].api, models, createdAt: previous?.createdAt, updatedAt: Date.now() });
         const providers = previous ? directory.providers.map(item => item.id === id ? provider : item) : [...(directory?.providers ?? []), provider];
-        const keys = providers.flatMap(item => item.models.map(model => `${item.id}/${model.id}`));
-        await persist({ ...directory, version: PROFILES_VERSION, providers, defaultModelId: keys.includes(directory?.defaultModelId) ? directory.defaultModelId : `${id}/${models[0].id}`, visionModelKey: directory?.visionModelKey ?? null });
+        await persist({ ...directory, version: PROFILES_VERSION, thinkingLevel: directory?.thinkingLevel ?? 'default', providers, visionModelKey: directory?.visionModelKey ?? null });
         return { ok: true, providerId: id };
       });
     },
 
-    /** 删除供应商（连同其模型）；含默认模型时必须显式给替代模型键。 */
-    async removeProvider({ providerId, replacementModelId = '' }) {
+    /** 删除供应商（连同其模型）；上次选择指向被删供应商时清空（回落自动路由）。 */
+    async removeProvider({ providerId } = {}) {
       return queueWrite(async () => {
       await ensureLoaded();
       if (!directory) throw new Error(corrupt ? '配置目录损坏' : '配置目录不可用');
       if (directory.providers.length <= 1) throw new Error('至少保留一个供应商');
       const target = directory.providers.find((item) => item.id === providerId);
       if (!target) throw new Error('没有这个供应商');
-      const hadDefault = target.models.some((model) => `${target.id}/${model.id}` === directory.defaultModelId);
-      let defaultModelId = directory.defaultModelId;
-      if (hadDefault) {
-        const replacement = parseModelKey(replacementModelId);
-        const replacementProvider = replacement
-          ? directory.providers.find((item) => item.id === replacement.providerId && item.id !== providerId)
-          : null;
-        if (!replacementProvider || !replacementProvider.models.some((model) => model.id === replacement.modelId)) {
-          throw new Error('这个供应商里有默认模型，删除前先选择替代模型');
-        }
-        defaultModelId = replacementModelId;
-      }
       const providers = directory.providers.filter((item) => item.id !== providerId);
       const remainingKeys = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
       const lastKey = directory.lastConversationModelKey;
       if (target.oauthProvider) await oauth.models.logout(target.oauthProvider);
       await persist({
         ...directory,
-        defaultModelId,
         // 2026-10-08：上次主脑模型选择指向被删供应商 → 一并丢弃（undefined 不落盘）。
         lastConversationModelKey:
           !lastKey || lastKey === AUTO_SELECTION_ID || remainingKeys.includes(lastKey)
@@ -552,17 +555,22 @@ export function createProfileStore({
             : undefined,
         providers,
       });
-      return { ok: true, defaultModelId };
+      return { ok: true };
       });
     },
 
-    /** 设默认模型（modelKey）。 */
-    async setDefault(modelKey) {
+    /**
+     * 2026-11：思考强度全局档（目录级单值，拨盘读写这一份）。2026-10-07 裁决的
+     * 「每个新会话重置回自动」由渲染层写 'default' 实现；同值跳过落盘。
+     */
+    async setThinkingLevel(level) {
       return queueWrite(async () => {
         await ensureLoaded();
-        if (!directory || !findModel(modelKey)) throw new Error('没有这个模型');
-        await persist({ ...directory, defaultModelId: String(modelKey) });
-        return { ok: true, defaultModelId: String(modelKey) };
+        if (!directory) return { ok: false, thinkingLevel: 'default' };
+        const next = normalizeThinkingLevel(level);
+        if (directory.thinkingLevel === next) return { ok: true, thinkingLevel: next };
+        await persist({ ...directory, thinkingLevel: next });
+        return { ok: true, thinkingLevel: next };
       });
     },
 
@@ -635,17 +643,17 @@ export function createProfileStore({
     },
 
     /**
-     * 047：批量原子导入供应商（仅主进程调用；一次生成全部供应商、默认与
-     * 同文件回执，一次持久化）。幂等：同 operationId＋planHash 重试返回原回执；
-     * hash 异或 deterministicId 撞车＝冲突，不覆盖。已有有效默认/角色保持，
-     * 目录首次为空才采用 firstDefaultModelKey。回执与全部供应商同文件落盘，
-     * 解决「已保存、journal 未记成功即崩溃」窗口——回执是提交事实权威。
+     * 047：批量原子导入供应商（仅主进程调用；一次生成全部供应商与同文件回执，
+     * 一次持久化）。幂等：同 operationId＋planHash 重试返回原回执；
+     * hash 异或 deterministicId 撞车＝冲突，不覆盖。已有角色/上次选择保持；
+     * 2026-11：不再设置「默认模型」——导入只加供应商，选择归角色槽位与
+     * lastConversationModelKey。回执与全部供应商同文件落盘，解决「已保存、
+     * journal 未记成功即崩溃」窗口——回执是提交事实权威。
      */
     async importProvidersAtomic({
       operationId,
       planHash,
       providers: providerInputs,
-      firstDefaultModelKey = null,
     }) {
       return queueWrite(async () => {
         await ensureLoaded();
@@ -701,24 +709,7 @@ export function createProfileStore({
         }
 
         const providers = [...(directory?.providers ?? []), ...nextProviders];
-        const allKeys = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
         const newKeys = nextProviders.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model.id}`));
-        // 最新目录已有有效默认就保持；首次为空才用 firstDefaultModelKey（必须在新集合中）。
-        let defaultModelId = directory?.defaultModelId && allKeys.includes(directory.defaultModelId)
-          ? directory.defaultModelId
-          : null;
-        if (!defaultModelId) {
-          if (!directory || !(directory.providers ?? []).length) {
-            const requested = firstDefaultModelKey && newKeys.includes(firstDefaultModelKey)
-              ? firstDefaultModelKey
-              : newKeys[0];
-            if (!requested) throw new Error('导入计划里没有可作默认的模型');
-            defaultModelId = requested;
-          } else {
-            defaultModelId = allKeys[0];
-          }
-        }
-
         const receipt = {
           operationId,
           planHash,
@@ -728,7 +719,7 @@ export function createProfileStore({
         };
         await persist({
           version: PROFILES_VERSION,
-          defaultModelId,
+          thinkingLevel: directory?.thinkingLevel ?? 'default',
           ...(directory?.roleModels ? { roleModels: directory.roleModels } : {}),
           ...(directory?.lastConversationModelKey ? { lastConversationModelKey: directory.lastConversationModelKey } : {}),
           visionModelKey: directory?.visionModelKey ?? null,
@@ -747,6 +738,7 @@ export function createProfileStore({
      * 都明确报原因。返回 { ok, config } 或 { ok: false, reason, message }。
      * 070：未配置（文件不存在／空目录）与损坏分开报——前者是新装机的正常状态，
      * 引导去设置；后者才提示修复。文案不绑定自动路由，固定模型与轻量调用共用。
+     * 2026-11：思考档一律返回目录级单值（发送侧统一翻译）。
      */
     async resolveStrict(modelKey) {
       await ensureLoaded();
@@ -772,7 +764,7 @@ export function createProfileStore({
           ...(found.provider.oauthProvider ? { oauthProvider: found.provider.oauthProvider } : {}),
           apiKey,
           model: found.model.model,
-          thinkingLevel: found.model.thinkingLevel,
+          thinkingLevel: directory.thinkingLevel,
           thinkingFormat: found.model.thinkingFormat,
           supportsVision: found.model.supportsVision,
           visionModel: found.model.visionModel,
@@ -780,7 +772,11 @@ export function createProfileStore({
       };
     },
 
-    /** 回合解析：modelKey → 供应商端点/Key + 模型字段；环境覆盖最高并如实标记。 */
+    /**
+     * 回合解析：modelKey → 供应商端点/Key + 模型字段；环境覆盖最高并如实标记。
+     * modelKey 缺省时沿「上次主脑模型选择」（非 auto 且仍有效），再不行回落
+     * 首个模型——只作只读兜底（getConfig 展示用），受理链路走 resolveStrict。
+     */
     async resolve({ modelKey = null, decryptSecrets = true } = {}) {
       await ensureLoaded();
       let base;
@@ -798,7 +794,7 @@ export function createProfileStore({
           apiKey: decryptSecrets ? await providerApiKey(found.provider) : '',
           hasApiKey: await providerHasStoredKey(found.provider),
           model: found.model.model,
-          thinkingLevel: found.model.thinkingLevel,
+          thinkingLevel: directory.thinkingLevel,
           thinkingFormat: found.model.thinkingFormat,
           supportsVision: found.model.supportsVision,
           visionModel: found.model.visionModel,
@@ -806,8 +802,10 @@ export function createProfileStore({
         resolvedKey = base.modelKey;
       } else {
         if (modelKey) missing = true;
+        const lastKey = directory?.lastConversationModelKey;
+        const fallbackModelKey = lastKey && lastKey !== AUTO_SELECTION_ID ? lastKey : null;
         const fallback = directory
-          ? findModel(directory.defaultModelId) ?? (() => {
+          ? findModel(fallbackModelKey) ?? (() => {
               const provider = directory.providers[0];
               return { provider, model: provider.models[0] };
             })()
@@ -823,7 +821,7 @@ export function createProfileStore({
               apiKey: decryptSecrets ? await providerApiKey(fallback.provider) : '',
               hasApiKey: await providerHasStoredKey(fallback.provider),
               model: fallback.model.model,
-              thinkingLevel: fallback.model.thinkingLevel,
+              thinkingLevel: directory.thinkingLevel,
               thinkingFormat: fallback.model.thinkingFormat,
               supportsVision: fallback.model.supportsVision,
               visionModel: fallback.model.visionModel,

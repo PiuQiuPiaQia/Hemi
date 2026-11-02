@@ -42,30 +42,30 @@ function storeFor(fs, overrides = {}) {
   });
 }
 
-const importInput = (operationId, planHash, providers, firstDefaultModelKey = null) => ({
-  operationId, planHash, providers, firstDefaultModelKey,
+const importInput = (operationId, planHash, providers) => ({
+  operationId, planHash, providers,
 });
 
-test('批量原子导入：一次生成全部供应商＋默认＋同文件回执；Key 加密；幂等重试返回原回执', async () => {
+test('批量原子导入：一次生成全部供应商＋同文件回执；Key 加密；幂等重试返回原回执', async () => {
   const fs = memoryFs();
   const store = storeFor(fs);
   const committed = await store.importProvidersAtomic(importInput('op-1', 'hash-1', [
     { deterministicId: 'mpi-a', name: '站A · default', baseUrl: 'https://s/v1', api: 'openai-completions', models: [{ model: 'gpt-5.2' }], apiKey: 'sk-shared' },
     { deterministicId: 'mpi-b', name: '站A · default · Anthropic', baseUrl: 'https://s', api: 'anthropic-messages', models: [{ model: 'claude-opus-4.6' }], apiKey: 'sk-shared' },
-  ], 'mpi-b/claude-opus-4.6'));
+  ]));
 
   assert.equal(committed.receipt.operationId, 'op-1');
   assert.deepEqual(committed.receipt.providerIds, ['mpi-a', 'mpi-b']);
   assert.equal(committed.providers.length, 2);
-  // 首次导入（空目录）：firstDefaultModelKey 生效
+  // 2026-11：导入只加供应商，不再设置「默认模型」。
   const list = await store.list();
-  assert.equal(list.defaultModelId, 'mpi-b/claude-opus-4.6');
+  assert.equal(list.defaultModelId, undefined);
   assert.equal(list.providers.length, 2);
   assert.equal(list.providers[1].api, 'anthropic-messages');
   assert.equal(list.providers[0].hasApiKey, true);
   // 同文件回执＋密文
   const raw = JSON.parse(fs.files.get('/ud/text-model-profiles.json'));
-  assert.equal(raw.version, 3);
+  assert.equal(raw.version, 4);
   assert.equal(raw.importReceipts.length, 1);
   assert.equal(JSON.stringify(raw).includes('sk-shared'), false);
 
@@ -86,7 +86,7 @@ test('批量原子导入：一次生成全部供应商＋默认＋同文件回�
   );
 });
 
-test('已有目录：默认/角色/旧供应商保留；deterministicId 撞车拒绝；v2 回执缺省为空', async () => {
+test('已有目录：角色/旧供应商保留；deterministicId 撞车拒绝；v2 回执缺省为空', async () => {
   const fs = memoryFs({ '/ud/text-model-profiles.json': JSON.stringify({
     version: 2,
     defaultModelId: 'old/m1',
@@ -102,7 +102,7 @@ test('已有目录：默认/角色/旧供应商保留；deterministicId 撞车�
   ]));
   const list = await store.list();
   assert.equal(list.providers.length, 2);
-  assert.equal(list.defaultModelId, 'old/m1', '已有有效默认保持');
+  assert.equal(list.defaultModelId, undefined, '目录不再有默认指针');
   assert.equal(list.roleModels.explorer, 'old/m1', '角色引用保留');
   const credentials = await store.providerCredentials('mpi-new');
   assert.equal(credentials.apiKey, 'sk-new');

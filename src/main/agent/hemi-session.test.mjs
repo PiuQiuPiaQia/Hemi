@@ -381,7 +381,7 @@ test('生产运行时：后台错误在原生落盘后进入请求，同一根�
     return { content: 'DONE' };
   });
   const config = { ...model, modelKey: 'test/background', providerId: 'test', supportsVision: false };
-  const store = { list: async () => ({ defaultModelId: config.modelKey }), resolveStrict: async () => ({ ok: true, config }) };
+  const store = { list: async () => ({}), resolveStrict: async () => ({ ok: true, config }) };
   const policySnapshot = await freezeModelPolicy({ store, modelKey: config.modelKey, budgets: { maxRequestsPerRun: 3 } });
   const modelPlan = await hydrateModelPlan(resolveModelPlan(policySnapshot), store);
   let archived = null;

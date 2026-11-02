@@ -1488,11 +1488,16 @@ export type ModelProviderView = {
   models: ModelEntryView[];
 };
 
-/** 031 v2：目录（defaultModelId 是模型键）。 */
+/**
+ * 031 v2：目录。2026-11 用户裁决：「默认模型」概念删除（defaultModelId 不再
+ * 存在于存储与线协议）；思考档是目录级单值 thinkingLevel，选哪个模型就用哪个，
+ * 选自动路由走角色槽位策略。
+ */
 export type ModelProfilesDirectory = {
   version: number;
-  defaultModelId: string | null;
-  /** 2026-10-08：上次主脑模型选择（模型键或 'auto'；null＝未记录/已失效，新建对话回落默认）。 */
+  /** 2026-11：思考强度全局档（目录级单值；拨盘读写这一份，发送侧按模型翻译）。 */
+  thinkingLevel?: ThinkingLevel;
+  /** 2026-10-08：上次主脑模型选择（模型键或 'auto'；null＝未记录/已失效，新建对话回落自动路由）。 */
   lastConversationModelKey?: string | null;
   corrupt?: boolean;
   envOverride?: boolean;
@@ -1534,14 +1539,10 @@ export type ModelProviderSaveInput = {
   /** 046：线协议；缺省沿已存值（新建落 openai-completions）。 */
   api?: ModelProviderApi;
   apiKey?: string;
-  /**
-   * 032（2026-09-30 用户裁决）：首启引导保存的分组一律设为默认分组——
-   * 保存后立即设默认并回读核验，存在旧默认组时取而代之。设置页不传。
-   */
-  makeDefault?: boolean;
   models: Array<{
     id?: string;
     model: string;
+    /** 2026-11：条目档只做持久层容忍（不再作为发送依据）；发送用目录级全局档。 */
     thinkingLevel?: ThinkingLevel;
     thinkingFormat?: string | null;
     supportsVision?: boolean;
@@ -2221,9 +2222,9 @@ export type HemiVoiceBridge = {
   onBackupProgress: (callback: (event: BackupProgressEvent) => void) => () => void;
   getTextModelConfig: () => Promise<TextModelConfig>;
   saveTextModelConfig: (config: TextModelSaveConfig) => Promise<TextModelConfig>;
-  /** 033：思考强度快捷拨盘（只写档位，下一轮对话即生效；031 起可指定组）。 */
-  setThinkingLevel: (level: ThinkingLevel, profileId?: string) => Promise<{ thinkingLevel: ThinkingLevel }>;
-  /** 031 v2 多组模型配置：目录 / 保存供应商 / 删除供应商（默认模型需替代）/ 默认模型 / 逐模型测试。 */
+  /** 033：思考强度快捷拨盘（2026-11：读写目录级全局档，下一轮对话即生效）。 */
+  setThinkingLevel: (level: ThinkingLevel) => Promise<{ ok?: boolean; thinkingLevel: ThinkingLevel }>;
+  /** 031 v2 多组模型配置：目录 / 保存供应商 / 删除供应商 / 逐模型测试。 */
   listModelProfiles: () => Promise<ModelProfilesDirectory>;
   startOAuthLogin: (provider: OAuthProvider) => Promise<OAuthLoginState>;
   getOAuthLoginState: () => Promise<OAuthLoginState | null>;
@@ -2235,9 +2236,7 @@ export type HemiVoiceBridge = {
   saveModelProfile: (provider: ModelProviderSaveInput) => Promise<{ ok: boolean; providerId: string; modelKeys: string[] }>;
   removeModelProfile: (payload: {
     providerId: string;
-    replacementModelId?: string;
-  }) => Promise<{ ok: boolean; defaultModelId?: string }>;
-  setDefaultModelProfile: (modelKey: string) => Promise<{ ok: boolean; defaultModelId: string }>;
+  }) => Promise<{ ok: boolean }>;
   /** 2026-10-08：记上次主脑模型选择（模型键或 'auto'；新建对话恢复用，纯缓存不抛错）。 */
   setLastConversationModel: (modelKey: string) => Promise<{ ok: boolean; lastConversationModelKey?: string | null }>;
   /** 056：全局看图模型（模型键或 null＝不单独配置）。 */
