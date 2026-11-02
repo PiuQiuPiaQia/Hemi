@@ -13,12 +13,14 @@ export async function untilBot(read, timeout = 30000) {
 }
 export async function createBotCapabilityFixture(respond, {capabilityOptions = {}, pageHtml = '', root = null} = {}) {
   root ??= await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-capability-'));
+  const trace = (...values) => {if (process.env.HEMI_BOT_FIXTURE_TRACE === '1') console.log('[bot-fixture]', Date.now(), ...values);};
+  trace('create', root);
   const requests = [], errors = [];
   const server = http.createServer(async (request, response) => {
     if (request.method === 'GET') {response.setHeader('Content-Type', 'text/html; charset=utf-8');response.end(pageHtml);return;}
     try {
       let raw = '';for await (const chunk of request) raw += chunk;
-      const body = JSON.parse(raw);if (replyToGoalCheck(body, response)) return;
+      const body = JSON.parse(raw);trace('provider', {messages: body.messages?.length, tools: body.messages?.filter(message => message.role === 'tool').length});if (replyToGoalCheck(body, response)) return;
       // Upstream pi-memory writes a recap when a real SDK session closes.
       // Answer that independent request without treating it as a scenario turn.
       const recap = body.messages?.some(message => message.role === 'system' && String(message.content).startsWith('You are a session recap assistant.'));
@@ -34,22 +36,25 @@ export async function createBotCapabilityFixture(respond, {capabilityOptions = {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const options = {dataDir: path.join(root, 'data'), defaultDir: path.join(root, 'workspace'), capabilityOptions, allowLoopbackModels: true, validateModel: async () => {}};
-  let host = await createBotHost(options);const hello = await host.request('handshake');
+  trace('listening', server.address());
+  let host = await createBotHost(options);trace('host-created');const hello = await host.request('handshake');trace('handshake');
   const call = (method, params = {}) => host.request(method, {instanceId: hello.instanceId, requestId: 'request-' + randomUUID(), ...params});
   await call('model.sync', {models: [{modelKey: 'fixture/model', providerId: 'fixture', name: 'Fixture', model: 'fixture', api: 'openai-completions',
     baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'synthetic-only-key', supportsVision: true, thinkingLevel: 'off'}]});
   return {root, call, requests, get host() {return host;},
     async send(id, text, input = {}, decidePermission = null) {
+      trace('send', id, text);
       await call('flow.command', {id, command: {type: 'send', input: {inputId: 'input-' + randomUUID(), text, ...input}}});
       return untilBot(async () => {
         if (errors.length) throw new Error('Synthetic provider failed: ' + errors.at(-1));const detail = await call('session.open', {id});
         if (decidePermission) for (const permission of Object.values(detail.permissions ?? {}).filter(permission => permission.status === 'pending')) {
           await call('permission.decide', {id, permissionId: permission.id, value: await decidePermission(permission)});
         }
-        return detail.flow.phase === 'idle' && !detail.flow.pending.length ? detail : null;
+        if (detail.flow.phase === 'idle' && !detail.flow.pending.length) {trace('idle', id);return detail;}
+        return null;
       }, decidePermission ? 120000 : 30000);
     },
-    async restart() {await host.close();host = await createBotHost(options);},
-    async close() {await host.close();server.closeAllConnections();await new Promise(resolve => server.close(resolve));await fs.rm(root, {recursive: true, force: true});},
+    async restart() {trace('restart-close');await host.close();trace('restart-create');host = await createBotHost(options);trace('restarted');},
+    async close() {trace('close-host');await host.close();trace('close-server');server.closeAllConnections();await new Promise(resolve => server.close(resolve));await fs.rm(root, {recursive: true, force: true});trace('closed');},
   };
 }
