@@ -8,6 +8,14 @@ const MODEL_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages';
 const GATEWAY_URL = `${ZCODE_ORIGIN}/api/v1/ultra/anthropic/v1/messages`;
 const digest = value => createHash('sha256').update(value).digest();
 const hex = size => randomBytes(size).toString('hex');
+/** Upstream error bodies are surfaced for diagnosis, but credential-shaped
+ * substrings (JWTs, bearer tokens, long random ids) are masked before they
+ * reach user-visible messages; ordinary error text passes through untouched. */
+const redactSecrets = value => value
+  .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, '***')
+  .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, '$1***')
+  .replace(/\b[0-9a-fA-F]{32,}\b/g, '***')
+  .replace(/[A-Za-z0-9+/=_.-]{40,}/g, '***');
 function waitFor(promise, signal) {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -158,8 +166,18 @@ export function createCodingTransport(credentials) {
             else ready.state.key = null;
           }
           if (response.ok) return response;
-          await response.body?.cancel().catch(() => {});
-          const message = response.status === 401 ? 'GLM 编程套餐登录或请求签名已失效，请重新登录。' : response.status === 429 ? 'GLM 编程套餐额度或并发已达上限，请稍后重试。' : 'GLM 编程套餐请求失败，请检查套餐状态后重试。';
+          // Surface the upstream error instead of a canned message: the
+          // provider's own reason is what makes 401/429 diagnosable. Extract a
+          // message field when the body parses as JSON, fall back to the raw
+          // body capped in length, and keep the anthropic-style envelope.
+          const raw = await response.text().catch(() => '');
+          let detail = raw;
+          try {
+            const data = JSON.parse(raw);
+            const field = [data?.error?.message, data?.msg, data?.data?.msg, data?.message].find(value => typeof value === 'string' && value.trim());
+            if (field) detail = field;
+          } catch {}
+          const message = typeof detail === 'string' && detail.trim() ? redactSecrets(detail).slice(0, 500) : `GLM 编程套餐上游返回 HTTP ${response.status}，未提供错误详情。`;
           return Response.json({ type: 'error', error: { type: 'api_error', message } }, { status: response.status });
         } catch (error) {
           signal.throwIfAborted();

@@ -354,6 +354,48 @@ test('明确令牌拒绝最多重发一次，普通 401 不续签；并发已换
   });
 });
 
+test('推理错误透传上游详情，不再替换为固定文案', async t => {
+  await t.test('上游给出错误 message 时原样透传', async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    const fetchImpl = async (url, init) => {
+      const response = await f.transport.fetch(url, init);
+      if (String(url).endsWith('/ultra/anthropic/v1/messages')) {
+        await response.body?.cancel();
+        return Response.json({ type: 'error', error: { type: 'api_error', message: '上游真实原因：project token revoked' } }, { status: 401 });
+      }
+      return response;
+    };
+    const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+      'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+      });
+    assert.equal(response.status, 401);
+    const body = await response.json();
+    assert.equal(body.error.message, '上游真实原因：project token revoked');
+  });
+  await t.test('上游无错误详情时回退为状态说明', async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    const fetchImpl = async (url, init) => {
+      const response = await f.transport.fetch(url, init);
+      if (String(url).endsWith('/ultra/anthropic/v1/messages')) {
+        await response.body?.cancel();
+        return new Response(null, { status: 429 });
+      }
+      return response;
+    };
+    const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl, authKey })(
+      'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+      });
+    assert.equal(response.status, 429);
+    const body = await response.json();
+    assert.match(body.error.message, /上游返回 HTTP 429/);
+    assert.doesNotMatch(body.error.message, /额度或并发|请重新登录/);
+  });
+});
+
 test('推理已返回 HTTP 200 后流中断，不续签或自动重放生成', async t => {
   const f = await fixture(t); await f.connect();
   globalThis.fetch = async (url, init) => {
@@ -415,7 +457,7 @@ test('签名预检期间项目令牌刷新会重建预检，推理只发送一�
   assert.equal(f.transport.bigmodel.state.modelCalls, 1);
 });
 
-test('只在明确签名拒绝时重新握手一次；上游响应不会泄露凭据', async t => {
+test('只在明确签名拒绝时重新握手一次；上游错误透传但凭据形态打码', async t => {
   const f = await fixture(t); await f.connect();
   const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
   f.transport.bigmodel.state.rejectSignatures = 1;
@@ -423,7 +465,8 @@ test('只在明确签名拒绝时重新握手一次；上游响应不会泄露�
   assert.equal(f.transport.bigmodel.state.modelCalls, 2);
   assert.equal(f.transport.bigmodel.state.handshakes, 2);
   f.transport.bigmodel.state.rawFailure = true;
-  await assert.rejects(pingTextModel(config), error => !/synthetic-bigmodel-login|PRIVATE UPSTREAM/.test(error.message));
+  await assert.rejects(pingTextModel(config), error => !/a{32}/.test(error.message) && /UPSTREAM SAYS/.test(error.message),
+    'upstream error text is surfaced, credential-shaped substrings are masked');
   f.transport.bigmodel.state.rawFailure = false;
   f.transport.bigmodel.state.rejectSignatures = 4;
   const before = f.transport.bigmodel.state.modelCalls;

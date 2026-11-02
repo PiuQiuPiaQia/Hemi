@@ -83,7 +83,7 @@ export function createBigModelTestProvider() {
       assert.equal(JSON.parse(body.metadata.user_id).session_id, sessionId);
       assert.ok(!JSON.stringify(body).includes('synthetic-bigmodel-login'));
       if (state.rejectSignatures-- > 0) return Response.json({ code: 401, msg: 'VERIFY_SIGNATURE_INVALID' }, { status: 401 });
-      if (state.rawFailure) return Response.json({ error: { message: 'synthetic-bigmodel-login PRIVATE UPSTREAM BODY' } }, { status: 403 });
+      if (state.rawFailure) return Response.json({ error: { message: `UPSTREAM SAYS invalid token ${'a'.repeat(64)} rejected` } }, { status: 403 });
       // The common fixture below supplies actual Anthropic text/tool SSE frames.
     }
     return null;
