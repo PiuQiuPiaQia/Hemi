@@ -5,7 +5,7 @@ import { createHash, createHmac, hkdfSync, createCipheriv, generateKeyPairSync, 
 const jwt = (payload, signature) => `${Buffer.from(JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' })).toString('base64url')}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${signature}`;
 export function createBigModelTestProvider() {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const state = { polls: 0, pending: 0, issued: 0, handshakes: 0, handshakeStatus: 200, modelCalls: 0, rejectSignatures: 0, keys: [{ name: 'hemi-coding-plan', apiKey: 'hemi-test-key' }], mapping: undefined, pollStatus: 'ready', authorizeUrl: 'https://bigmodel.cn/login?appId=zcode&state=synthetic', rawFailure: false };
+  const state = { polls: 0, pending: 0, issued: 0, projectTokenTtlSeconds: 18000, handshakes: 0, handshakeStatus: 200, modelCalls: 0, rejectSignatures: 0, keys: [{ name: 'hemi-coding-plan', apiKey: 'hemi-test-key' }], mapping: undefined, pollStatus: 'ready', authorizeUrl: 'https://bigmodel.cn/login?appId=zcode&state=synthetic', rawFailure: false };
   const zcodeToken = jwt({ exp: Math.floor(Date.now() / 1000) + 86400 }, 'synthetic-zcode');
   let projectToken;
   const restoreProjectToken = candidate => {
@@ -39,11 +39,17 @@ export function createBigModelTestProvider() {
     }
     if (url.pathname.endsWith('/api_keys/hemi-test-key/access_tokens')) {
       assert.equal(headers.get('authorization'), 'Bearer synthetic-bigmodel-login');
-      assert.deepEqual(body, { clientType: 'zcode', clientVersion: '3.16.3' });
-      projectToken = jwt({ token_use: 'project_access', api_key: 'hemi-test-key', exp: Math.floor(Date.now() / 1000) + 18000 }, `synthetic-project-${++state.issued}`);
-      return Response.json({ code: 200, data: { enable: true, tokenType: 'Bearer', accessToken: projectToken, expiresIn: 18000, expiresAt: Math.floor(Date.now() / 1000) + 18000 } });
+      assert.deepEqual(body, { clientType: 'zcode', clientVersion: '3.17.1' });
+      const expiresAt = Math.floor(Date.now() / 1000) + state.projectTokenTtlSeconds;
+      projectToken = jwt({ token_use: 'project_access', api_key: 'hemi-test-key', exp: expiresAt }, `synthetic-project-${++state.issued}`);
+      return Response.json({ code: 200, data: { enable: true, tokenType: 'Bearer', accessToken: projectToken, expiresIn: state.projectTokenTtlSeconds, expiresAt } });
     }
-    if (url.pathname === '/api/v1/agent/configs') return envelope({ proxyEndpoint: { mapping: state.mapping ?? [{ from: 'https://open.bigmodel.cn/api/anthropic/v1/messages', to: 'https://zcode.z.ai/api/v1/ultra/anthropic/v1/messages', zcodeAuthorizationHeader: 'X-ZCode-Authorization' }] } });
+    if (url.pathname === '/api/v1/agent/configs') {
+      assert.equal(headers.get('user-agent'), 'ZCode/3.17.1');
+      assert.equal(headers.get('x-zcode-app-version'), '3.17.1');
+      assert.equal(headers.get('x-release-channel'), 'production');
+      return envelope({ proxyEndpoint: { mapping: state.mapping ?? [{ from: 'https://open.bigmodel.cn/api/anthropic/v1/messages', to: 'https://zcode.z.ai/api/v1/ultra/anthropic/v1/messages', zcodeAuthorizationHeader: 'X-ZCode-Authorization' }] } });
+    }
     if (url.pathname === '/api/paas/c1f3a7e2/v2/client') {
       assert.equal(url.origin, 'https://open.bigmodel.cn', 'key exchange stays on the original provider before inference routing');
       state.handshakes++;
@@ -66,9 +72,11 @@ export function createBigModelTestProvider() {
       assert.match(headers.get('x-zcode-authorization'), /^Bearer [^.]+\.[^.]+\.synthetic-zcode$/);
       assert.equal(headers.get('x-app-id'), 'zcode');
       const sessionId = headers.get('x-session-id'), ts = headers.get('x-client-ts'), nonce = headers.get('x-client-nonce');
-      assert.equal(headers.get('x-zcode-app-version'), '3.16.3');
-      assert.equal(headers.get('x-client-version'), '3.16.3');
-      const message = `hemi-test-key\n${ts}\n3.16.3\n${sessionId}\n${nonce}`;
+      assert.equal(headers.get('user-agent'), 'ZCode/3.17.1 ai-sdk/anthropic/3.0.81');
+      assert.equal(headers.get('x-zcode-app-version'), '3.17.1');
+      assert.equal(headers.get('x-client-version'), '3.17.1');
+      assert.equal(headers.get('x-release-channel'), 'production');
+      const message = `hemi-test-key\n${ts}\n3.17.1\n${sessionId}\n${nonce}`;
       assert.ok(verify(null, Buffer.from(message), publicKey, Buffer.from(headers.get('x-client-sig'), 'base64')));
       const challenge = createHash('sha256').update(`hemi-test-key\nzcode\n${sessionId}\n${ts}`).digest('hex').slice(0, 32);
       assert.equal(createHash('sha256').update(`${challenge}\n${headers.get('x-client-pow')}`).digest()[0], 0);

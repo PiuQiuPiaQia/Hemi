@@ -5,7 +5,7 @@ import { MODEL_PREFLIGHT, modelConnectionError } from '../lib/model-transport.mj
 // Protocol references: Z.ai's published CLI OAuth and project access token APIs.
 // Hemi owns this implementation; no ZCode runtime or proxy is bundled.
 export const ZCODE_ORIGIN = 'https://zcode.z.ai';
-export const ZCODE_VERSION = '3.16.3';
+export const ZCODE_VERSION = '3.17.1';
 export const BIGMODEL_ORIGIN = 'https://bigmodel.cn';
 const KEY_NAME = 'hemi-coding-plan';
 const loginRequired = () => new Error('GLM 编程套餐登录已失效，请重新登录。');
@@ -34,7 +34,8 @@ export function ensureCodingCredential(credentials, { authKey, fetchImpl = (...a
     if (!credential || codingAuthKey(credential) !== authKey) throw new Error('GLM 编程套餐登录已更新，请重新发送或重新登录。');
     return credential;
   };
-  const needsRefresh = credential => credential.expires <= Date.now() + 5 * 60_000
+  const needsRefresh = credential => credential.expires <= Date.now()
+    || (credential.refreshAt ?? credential.expires - 5 * 60_000) <= Date.now()
     || (rejectedAccess !== undefined && credential.access === rejectedAccess);
   const operation = (async () => {
     signal.throwIfAborted();
@@ -86,6 +87,7 @@ export async function codingJson(fetchImpl, url, { signal, stage = '服务请求
 }
 
 async function projectCredential(fetchImpl, credential, signal) {
+  const startedAt = Date.now();
   const path = `${BIGMODEL_ORIGIN}/api/biz/v1/organization/${encodeURIComponent(credential.organizationId)}/projects/${encodeURIComponent(credential.projectId)}/api_keys/${encodeURIComponent(credential.apiKeyId)}/access_tokens`;
   const data = await codingJson(fetchImpl, path, {
     method: 'POST', signal,
@@ -93,13 +95,17 @@ async function projectCredential(fetchImpl, credential, signal) {
     body: JSON.stringify({ clientType: 'zcode', clientVersion: ZCODE_VERSION }),
   });
   const claims = tokenClaims(data?.accessToken ?? '');
-  const expires = Math.min(Number(data?.expiresAt) * 1000, Date.now() + Number(data?.expiresIn) * 1000, Number(claims.exp) * 1000);
+  const expires = Math.min(Number(data?.expiresAt) * 1000, startedAt + Number(data?.expiresIn) * 1000, Number(claims.exp) * 1000);
+  const now = Date.now();
   if (data?.enable === false || data?.enabled === false) throw new Error('GLM 编程套餐暂未开放项目令牌，请稍后重试。');
   if (!validText(data?.accessToken) || claims.token_use !== 'project_access' || claims.api_key !== credential.apiKeyId || !Number.isFinite(expires) || expires <= Date.now()) {
     throw new Error('GLM 编程套餐返回的项目令牌无效，请稍后重试。');
   }
-  if (expires - 120000 <= Date.now()) throw new Error('GLM 编程套餐续签返回的有效期不足，请稍后重试。');
-  return { ...credential, access: data.accessToken, expires: expires - 120000 };
+  // The issuer may return a cached token near expiry. Refresh lead time is a
+  // scheduling policy, not proof that a still-valid project token is expired.
+  // Short renewals get a bounded lead so signing does not renew on every check.
+  return { ...credential, access: data.accessToken, expires,
+    refreshAt: expires - Math.min(5 * 60_000, (expires - now) / 2) };
 }
 
 async function locateProject(fetchImpl, loginToken, signal) {

@@ -45,7 +45,9 @@ test('BigModel 实际 Provider：授权→项目令牌→加密目录→路由/�
   f.transport.bigmodel.state.keys = [];
   assert.equal((await f.connect()).phase, 'success');
   assert.equal(new URL(f.urls[0]).hostname, 'bigmodel.cn');
-  assert.equal(new URL(new URL(f.urls[0]).searchParams.get('redirect')).origin, 'https://zcode.z.ai');
+  const redirect = new URL(new URL(f.urls[0]).searchParams.get('redirect'));
+  assert.equal(redirect.origin, 'https://zcode.z.ai');
+  assert.equal(redirect.searchParams.get('app_version'), '3.17.1');
   const directory = await f.profiles.list();
   const account = directory.providers.find(provider => provider.oauthProvider === 'bigmodel');
   assert.equal(account.hasApiKey, true);
@@ -117,6 +119,35 @@ test('SDK 已完成认证后项目令牌到期，原请求续签后继续且只�
   assert.equal(payloads, 1, 'continue this request rather than replaying the agent turn');
   assert.equal(f.transport.bigmodel.state.issued, 2);
   assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+});
+
+test('续签返回仍有效的短期项目令牌时，SDK 和签名传输继续当前请求', async t => {
+  for (const mode of ['sdk-auth', 'signed-transport']) await t.test(mode, async t => {
+    const f = await fixture(t); await f.connect();
+    const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
+    const issuedBefore = f.transport.bigmodel.state.issued;
+    f.transport.bigmodel.state.projectTokenTtlSeconds = 60;
+    await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    if (mode === 'sdk-auth') {
+      const reply = await f.runtime.models.completeSimple(f.runtime.models.getModel('bigmodel', 'glm-5.3'), {
+        messages: [{ role: 'user', content: 'short valid token', timestamp: Date.now() }],
+      });
+      assert.equal(reply.stopReason, 'stop');
+    } else {
+      const response = await createCodingTransport(f.credentials).forRequest({ fetchImpl: f.transport.fetch, authKey })(
+        'https://open.bigmodel.cn/api/anthropic/v1/messages', {
+          method: 'POST', body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+        });
+      assert.equal(response.status, 200);
+      await response.body.cancel();
+    }
+    const credential = await f.credentials.read('bigmodel');
+    assert.ok(credential.expires > Date.now());
+    assert.ok(credential.expires <= Date.now() + 60000);
+    assert.equal(f.transport.bigmodel.state.issued - issuedBefore, 1, 'fresh short tokens must not renew again between signing and inference');
+    assert.equal(f.transport.bigmodel.state.handshakes, 1);
+    assert.equal(f.transport.bigmodel.state.modelCalls, 1);
+  });
 });
 
 test('签名预检期间项目令牌到期，当前请求自行续签并重建签名', async t => {
@@ -193,7 +224,7 @@ test('复用 Hemi 会话处理追加指令时，SDK 认证后到期不会中断�
 test('传输层与 SDK 并发续签只签发一次；取消发起者和排队者不影响其他请求', { timeout: 10000 }, async t => {
   const f = await fixture(t); await f.connect();
   const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
-  await f.credentials.modify('bigmodel', async current => ({ ...current, expires: Date.now() + 240000 }));
+  await f.credentials.modify('bigmodel', async ({ refreshAt, ...current }) => ({ ...current, expires: Date.now() + 240000 }));
   const arrived = Promise.withResolvers(), blocked = Promise.withResolvers();
   t.after(() => blocked.resolve());
   const fetchImpl = async (url, init) => {
@@ -256,7 +287,7 @@ test('续签期间排队的退出或重登阻止旧请求，续签结果不会�
 });
 
 test('续签失败保留登录失效与连接错误的区别，不发送推理或泄露上游内容', async t => {
-  for (const failure of [401, 503, 'ECONNREFUSED', 'invalid-token', 'short-lived-token']) await t.test(String(failure), async t => {
+  for (const failure of [401, 503, 'ECONNREFUSED', 'invalid-token', 'expired-token']) await t.test(String(failure), async t => {
     const f = await fixture(t); await f.connect();
     const authKey = (await f.runtime.models.getAuth('bigmodel')).auth.apiKey;
     await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
@@ -266,9 +297,9 @@ test('续签失败保留登录失效与连接错误的区别，不发送推理�
         renewals++;
         if (failure === 'ECONNREFUSED') throw new TypeError('PRIVATE UPSTREAM', { cause: Object.assign(new Error('synthetic-bigmodel-login'), { code: failure }) });
         if (failure === 'invalid-token') return Response.json({ code: 200, data: { accessToken: 'PRIVATE UPSTREAM synthetic-bigmodel-login' } });
-        if (failure === 'short-lived-token') {
+        if (failure === 'expired-token') {
           const response = await f.transport.fetch(url, init), body = await response.json();
-          body.data.expiresIn = 60;
+          body.data.expiresIn = 0;
           return Response.json(body);
         }
         return new Response('PRIVATE UPSTREAM synthetic-bigmodel-login', { status: failure });
@@ -467,7 +498,7 @@ test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或�
 });
 
 test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故障不重放已执行工作', async t => {
-  for (const mode of ['complete', 'malformed', 'http-failure', 'preflight-failure']) await t.test(mode, async t => {
+  for (const mode of ['complete', 'short-token', 'malformed', 'http-failure', 'preflight-failure']) await t.test(mode, async t => {
     const f = await fixture(t); await f.connect();
     const config = await f.profiles.get((await f.profiles.list()).defaultModelId);
     const owner = { conversationId: 'verification-test', rootRunId: 'run', generation: 1 };
@@ -475,6 +506,10 @@ test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故�
     await journal.beginRoot(owner);
     const policy = await freezeModelPolicy({ store: f.profiles, modelKey: config.modelKey });
     const execution = { journal, owner, plan: resolveModelPlan(policy), store: f.profiles, budgets: policy.budgets };
+    if (mode === 'short-token') {
+      f.transport.bigmodel.state.projectTokenTtlSeconds = 60;
+      await f.credentials.modify('bigmodel', async current => ({ ...current, expires: 0 }));
+    }
     const complete = { status: 'complete', reason: '实际文件已核对', evidence: ['文件只写入一次'], remaining: [], nextAction: '' };
     globalThis.fetch = async (url, init) => {
       if (mode === 'preflight-failure' && String(url).endsWith('/v2/client'))
@@ -482,7 +517,7 @@ test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故�
       const response = await f.transport.fetch(url, init);
       if (!String(url).endsWith('/ultra/anthropic/v1/messages')) return response;
       if (mode === 'http-failure') { await response.body.cancel(); return Response.json({ error: { message: 'Synthetic outage' } }, { status: 503 }); }
-      if (mode !== 'complete') return response;
+      if (!['complete', 'short-token'].includes(mode)) return response;
       return new Response((await response.text()).replaceAll('OAuth OK', JSON.stringify(JSON.stringify(complete)).slice(1, -1)), { headers: response.headers });
     };
     let runs = 0;
@@ -495,7 +530,7 @@ test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故�
     assert.equal(goalRunOutcome(result), 'completed'); await journal.finishRoot(owner, 'completed');
     const state = await journal.snapshot(), goal = state.roots[owner.rootRunId].goal, rows = Object.values(state.requests);
     assert.equal(goal.verificationAttempts.length, 1); assert.equal(goal.verifications.length, 1);
-    assert.equal(Boolean(goal.verifications[0].verificationBypassed), mode !== 'complete');
+    assert.equal(Boolean(goal.verifications[0].verificationBypassed), !['complete', 'short-token'].includes(mode));
     assert.ok(rows.every(row => row.endedAt)); assert.equal(new Set(rows.map(row => row.logicalCallId)).size, 1);
     assert.equal(rows.filter(row => !row.preflight).length, mode === 'preflight-failure' ? 0 : 1);
     assert.equal(rows.filter(row => row.preflight).length, 2);

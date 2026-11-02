@@ -57,7 +57,7 @@ node scripts/verify-bigmodel-live.mjs --user-data=<已授权账号目录> --mode
 - 签发仍使用 `projectCredential`，不在已持有存储锁的 SDK `oauth.refresh` 中再次获取锁。已开始的签发最多等待 15 秒；单个请求取消只结束自己的等待，签发结果仍可保存供其他请求使用。
 - 签发后重新读取凭据，因此续签期间排队的退出或重登会阻止旧请求。令牌变化后重建路由、认证头、握手和签名，沿用最多两次预检的上限；本地到期不会直接结束原任务。
 - 第一次明确的 `VERIFY_APIKEY_EXPIRED` 拒绝会换发令牌；如果其他请求已更换被拒绝的令牌则直接复用。`VERIFY_SIGNATURE_INVALID` 只重建签名私钥。两者共用最多一次推理重发的上限；普通 401、HTTP 200 后的流错误不进入该认证恢复分支，不发送无签名回退请求。
-- 无效或有效期不足的签发结果不写入凭据存储，返回可重试的受控错误；账号授权被拒绝才提示重新登录。错误消息与诊断输出不包含令牌或上游原始正文。
+- 无效或已过期的签发结果不写入凭据存储，返回可重试的受控错误；账号授权被拒绝才提示重新登录。仍有效的短期签发结果按下述 2026-11-02 规则处理。错误消息与诊断输出不包含令牌或上游原始正文。
 
 本次基线为 `de447c7f603b1e4cda00fa50a833cafe1b717532` 加工作区原有改动及本次未提交修改。环境：macOS arm64、Node.js `22.22.3`、Pi SDK `1.3.0`。
 
@@ -77,3 +77,46 @@ HEMI_USER_DATA_DIR=<新临时目录> node scripts/verify-bigmodel-live.mjs --use
 - 语法和所改文件的空白检查通过。Git 仍报告工作区原有 AppleDouble `._*.idx` 索引错误；未修改 Git 对象文件。
 
 未等待真实五小时自然到期，未运行全量测试、构建或渲染器回归；本次没有 UI 生命周期或依赖变更。未提交、发版、替换已安装应用或部署生产 Bot，未进行 Windows 或移动真机测试。
+
+## 2026-11-02：仍有效的短期续签结果
+
+安装版 0.2.54 的认证模块与本次修改前的源码一致，已包含此前的请求内续签修复。现场错误发生在正文生成后的独立目标校验：SDK 的 OAuth 续签调用触发本地“有效期不足”检查。该检查先确认令牌仍有效，再因为剩余有效期不超过两分钟而拒绝，因此这条错误不表示账号授权失效。现场只读探测已恢复正常；没有保存历史签发响应，无法追溯当时的精确剩余秒数或缓存时序。
+
+共享认证模块现将真实到期时间 `expires` 与提前续签时间 `refreshAt` 分开：
+
+- `expires` 取响应绝对到期时间、请求发出时加 `expiresIn`、JWT `exp` 三者的最小值，不再人为扣除两分钟。网络耗时不能延长有效期。
+- `refreshAt` 最多提前五分钟，短期结果最多提前剩余寿命的一半，避免签名前后检查反复换发刚取得的有效令牌。旧凭据缺少该字段时沿用五分钟窗口；真正到期或上游明确拒绝仍会立即续签。
+- 仍校验令牌用途、账号项目标识和实际有效期；退出、重登、取消、签名与有界重试规则不变。没有把 OAuth 错误一概当作目标完成，也不重放历史任务。
+
+验证基线 `3e43b6b52653bff58b71f5fd0286718c4ab64a3c` 加本次工作树差异；macOS arm64 / Node 22.22.3 / Pi SDK 1.3.0。各测试夹具创建独立临时目录。
+
+```sh
+node --test src/main/services/bigmodel-coding.test.mjs src/main/services/oauth.test.mjs src/main/bot/oauth.test.mjs src/main/bot/oauth-errors.test.mjs src/main/agent-runtime/goal-verification.test.mjs
+node --check src/main/services/bigmodel-coding-auth.mjs
+git diff --check -- src/main/services/bigmodel-coding-auth.mjs src/main/services/bigmodel-coding.test.mjs scripts/bigmodel-test-fixture.mjs docs/technical/bigmodel-coding-auth.md
+```
+
+73 项通过。新增 SDK 与签名传输回归在修复前均失败，修复后剩余 60 秒的令牌可完成同一请求，签名前后只续签一次、推理只提交一次；目标校验场景正常完成而无需故障放行。既有并发、退出、重登、过期与无效令牌、HTTP/网络故障和其他账号路径通过。
+
+真实 `glm-5.3-flash` 探针只使用内存凭据副本，并在续签响应的内存副本中将 `expiresIn` 上限设为 60 秒；续签、路由、签名和推理均 HTTP 200，回复 `OK`、终态 `stop`，原账号文件 SHA-256 未改变。该探针验证真实服务链路，但不代表等待真实令牌自然到期。脱敏结果位于忽略目录 `.visual/workflow/bigmodel-short-token/live.json`。
+
+未运行全量测试、构建或 UI 回归；本次只修改认证服务、协议夹具及测试和文档，没有 IPC、渲染器或依赖变更。未提交、发版、更新安装版、部署生产 Bot、修改正式会话状态或操作实体设备；无关工作树改动保持原状。
+
+## 2026-11-02：同步 3.17.1 协议版本与发布通道
+
+参照 [zcode-api `0329b309`](https://github.com/TriDefender/zcode-api/commit/0329b309709ec66fa4ab0e39f6c09febf4cfdcd7) 的版本更新，将共享 `ZCODE_VERSION` 从 `3.16.3` 升到 `3.17.1`，覆盖授权跳转 `app_version`、项目令牌签发 `clientVersion`、User-Agent、身份头、签名内容与 `X-Client-Version`。同时对齐[上游身份头](https://github.com/TriDefender/zcode-api/blob/158e7653b738cbed0996243eeabd26f816638e81/src/proxy/identity.ts)中已存在的通道差异，改为 `X-Release-Channel: production`。桌面与 Bot 使用同一实现，保留本轮短期令牌续签修复；没有引入上游源码、运行时、依赖或不适用于当前 Coding Plan 的功能。
+
+协议夹具独立固定预期版本和通道，验证签发请求、配置请求、推理请求及真实 Ed25519 签名；既有授权测试同时核验跳转版本。更新夹具后，旧版本实现的授权链路先失败，修改共享常量后通过。
+
+验证基线仍为 `3e43b6b52653bff58b71f5fd0286718c4ab64a3c` 加本轮工作树差异；macOS arm64 / Node 22.22.3 / Pi SDK 1.3.0。上述五个测试文件再次运行，73 项通过；认证和传输模块 `node --check` 及本次文件 `git diff --check` 通过。
+
+真实服务验证使用新临时 `HEMI_USER_DATA_DIR`，只读取已有账号并在内存中续签：
+
+```sh
+HEMI_USER_DATA_DIR=<新临时目录> node scripts/verify-bigmodel-live.mjs --user-data=<已有授权账号目录> --model=glm-5.3-flash --refresh --expire-after-auth
+HEMI_USER_DATA_DIR=<新临时目录> node scripts/verify-bigmodel-live.mjs --user-data=<已有授权账号目录> --model=glm-5.3 --refresh
+```
+
+两种型号的续签、路由与签名握手均 HTTP 200；推理阶段均返回 HTTP 429，未重试或重放，不能宣称本轮真实推理成功。`glm-5.3` 探针前后账号文件 SHA-256 相同。此前评估使用 `3.17.1 + production` 临时副本已取得 `glm-5.3-flash` 的 `OK/stop`；归一化本地导入路径后，产品认证和传输模块与该成功副本逐字一致。脱敏结果位于忽略目录 `.visual/workflow/zcode-api-update-review/{compatibility,product-live}.json`。
+
+本次未运行全量测试、构建或 UI 回归，没有 IPC、渲染器或依赖变更。未提交、发版、更新安装版或部署生产 Bot；Windows 与实体移动设备未复验，无关工作树改动保持原状。

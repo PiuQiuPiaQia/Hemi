@@ -28,7 +28,7 @@ export function codingIdentity(deviceId, model = false) {
   return {
     'HTTP-Referer': ZCODE_ORIGIN,
     'User-Agent': `ZCode/${ZCODE_VERSION}${model ? ' ai-sdk/anthropic/3.0.81' : ''}`,
-    'X-ZCode-App-Version': ZCODE_VERSION, 'X-Title': 'Z Code@electron', 'X-Release-Channel': 'stable',
+    'X-ZCode-App-Version': ZCODE_VERSION, 'X-Title': 'Z Code@electron', 'X-Release-Channel': 'production',
     'X-Client-Language': Intl.DateTimeFormat().resolvedOptions().locale,
     'X-Client-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
     'X-Platform': `${process.platform}-${process.arch}`,
