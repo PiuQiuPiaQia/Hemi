@@ -142,7 +142,8 @@ export function projectFlowTimeline(
       positionedParts.splice(before, 0, {kind: 'recovery', partId: `recovery:${recoveryPosition.recovery.id}`});
     }
     for (const part of positionedParts) {
-      if (part.kind === 'notice' && part.level === 'error' && recoveryErrors.has(item.runId)) continue;
+      // 恢复结束后（终态）放行错误原文：状态行只保留极简状态，失败原因回到回合留痕原位。
+      if (part.kind === 'notice' && part.level === 'error' && recoveryErrors.has(item.runId) && !['failed','expired','stopped'].includes(recoveryPosition?.recovery.phase ?? '')) continue;
       const kind = part.kind === 'recovery' ? 'recovery' : part.kind === 'delegation' ? 'delegation' : part.kind === 'notice' ? 'notice' : 'body';
       const last = segments.at(-1);
       if (last && last.kind === kind && kind === 'body') last.parts.push(part);

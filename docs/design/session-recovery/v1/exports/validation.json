@@ -1,10 +1,10 @@
 {
   "date": "2026-10-23",
   "scope": "30-minute backoff policy and compact recovery-row design prototype; no production recovery implementation",
-  "commit": "b31c949bc4f3920e961881cf979e5f1693ca8a38",
+  "commit": "fd3e58db921580d7161315ae99ac5d909a995d5d",
   "workingTree": true,
   "environment": {
-    "node": "v22.22.3",
+    "node": "v25.2.1",
     "platform": "darwin",
     "arch": "arm64"
   },
@@ -48,11 +48,6 @@
     {
       "mode": "dev",
       "name": "Unknown action outcome waits for result query and explicit continue",
-      "status": "pass"
-    },
-    {
-      "mode": "dev",
-      "name": "Keyboard can expand and collapse diagnostic history",
       "status": "pass"
     },
     {
@@ -103,11 +98,6 @@
     {
       "mode": "built",
       "name": "Unknown action outcome waits for result query and explicit continue",
-      "status": "pass"
-    },
-    {
-      "mode": "built",
-      "name": "Keyboard can expand and collapse diagnostic history",
       "status": "pass"
     },
     {

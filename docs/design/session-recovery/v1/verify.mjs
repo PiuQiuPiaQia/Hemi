@@ -58,7 +58,7 @@ try{
   await page.goto(base);await page.locator('.conversation-fragment .recovery-notice').waitFor();
   const notice=()=>page.locator('.conversation-fragment .recovery-notice');
   const state=()=>notice().getAttribute('data-state');
-  const clickNotice=async name=>{const target=notice().getByRole('button',{name,exact:true});if(!await target.isVisible())await notice().getByRole('button',{name:'恢复详情',exact:true}).click();await target.click();};
+  const clickNotice=async name=>{await notice().getByRole('button',{name,exact:true}).click();};
   const pick=label=>page.locator('.scenario-tabs').getByRole('button',{name:label,exact:true}).click();
   const waitState=value=>page.waitForFunction(value=>document.querySelector('.conversation-fragment .recovery-notice')?.dataset.state===value,value);
   const draft=page.getByRole('textbox',{name:'消息草稿'});
@@ -105,21 +105,16 @@ try{
   await page.getByRole('button',{name:'确认并继续'}).click();await waitState('connecting');
   pass(mode,'Unknown action outcome waits for result query and explicit continue');
 
-  await pick('短暂中断');const detailToggle=notice().getByRole('button',{name:'恢复详情',exact:true});await detailToggle.focus();await page.keyboard.press('Enter');
-  assert.equal(await detailToggle.getAttribute('aria-expanded'),'true');assert.equal(await notice().locator('.recovery-details').isVisible(),true);await page.keyboard.press('Enter');assert.equal(await notice().locator('.recovery-details').isVisible(),false);
-  pass(mode,'Keyboard can expand and collapse diagnostic history');
-  await pick('持续失败');assert.match(await notice().innerText(),/60 秒后重试/);await notice().getByRole('button',{name:'恢复详情',exact:true}).click();assert.match(await notice().innerText(),/剩余 18 分钟/);
-  await pick('30 分钟到期');assert.match(await notice().innerText(),/自动恢复已到期/);await notice().getByRole('button',{name:'恢复详情',exact:true}).click();assert.match(await notice().innerText(),/剩余 0 分钟/);await clickNotice('重新开始恢复');await waitState('connecting');assert.match(await notice().innerText(),/第 1 次/);await notice().getByRole('button',{name:'恢复详情',exact:true}).click();assert.match(await notice().innerText(),/剩余 30 分钟/);
+  await pick('持续失败');assert.match(await notice().innerText(),/60 秒后重试/);
+  await pick('30 分钟到期');assert.match(await notice().innerText(),/自动恢复已到期/);await clickNotice('重新开始恢复');await waitState('connecting');assert.match(await notice().innerText(),/第 1 次/);
   pass(mode,'Late failures show 60s backoff; deadline exposes explicit restart of a fresh cycle');
 
   await page.locator('.sample').filter({has:page.getByRole('heading',{name:'等待重试',exact:true})}).getByRole('button',{name:'停止恢复',exact:true}).click();
   assert.equal(await state(),'stopped');
-  const waitingSample=page.locator('.sample').filter({has:page.getByRole('heading',{name:'等待重试',exact:true})});await waitingSample.getByRole('button',{name:'恢复详情',exact:true}).click();
-  await waitingSample.getByRole('button',{name:'立即重试',exact:true}).click();
+  const waitingSample=page.locator('.sample').filter({has:page.getByRole('heading',{name:'等待重试',exact:true})});await waitingSample.getByRole('button',{name:'立即重试',exact:true}).click();
   await waitState('connecting');assert.match(await notice().innerText(),/第 12 次/);
   pass(mode,'Component-sheet actions open the matching interactive state and execute their named action');
 
-  for(const toggle of await page.locator('.sample .details-toggle[aria-expanded=true]').all())await toggle.click();
   for(const width of [1440,768,375]){
    await page.setViewportSize({width,height:1000});
    for(const [key,label] of [['waiting','短暂中断'],['backoff','持续失败'],['offline','网络离线'],['exhausted','30 分钟到期'],['auth','需要修复'],['uncertain','结果待确认'],['recovered','恢复成功']]){

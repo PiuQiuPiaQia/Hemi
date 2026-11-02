@@ -432,7 +432,7 @@ export function ChatTurnItem({
         data-continuation={continuation ? "true" : undefined}
         data-lead={lead ? "true" : undefined}
       >
-        {item.recovery ? <ModelRecoveryNotice recovery={item.recovery} onAction={onRecoveryAction} onRestart={onRetry} failureText={item.text} /> : <TurnErrorNotice
+        {item.recovery ? <ModelRecoveryNotice recovery={item.recovery} onAction={onRecoveryAction} onRestart={onRetry} /> : <TurnErrorNotice
           message={item.text}
           onRetry={onRetry}
           busy={retryBusy}

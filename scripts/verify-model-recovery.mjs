@@ -78,7 +78,6 @@ try{
  scenario='manual';await newChat();const manualId=await send('RECOVERY_MANUAL 手动立即重试');
  await wait(async()=>{const current=await flow(manualId);return current?.runs[current.activeRunId]?.recovery?.phase==='waiting'&&current.runs[current.activeRunId].recovery.attempt===2;},'second backoff');
  const manualFlow=await flow(manualId),manualRun=manualFlow.activeRunId,manualRecovery=manualFlow.runs[manualRun].recovery;
- await recovery().getByRole('button',{name:'恢复详情',exact:true}).click();
  const immediate=recovery().getByRole('button',{name:'立即重试',exact:true});await wait(async()=>!await immediate.isDisabled(),'manual cooldown elapsed');await immediate.click();
  const stale=await page.evaluate(({cid,runId,id})=>window.hemiVoice.flowCommand(cid,{type:'retryRecovery',targetRunId:runId,recoveryId:id}),{cid:manualId,runId:manualRun,id:manualRecovery.id});
  assert.equal(stale.ok,false);
@@ -109,10 +108,7 @@ try{
  assert.equal(counts.get('expiry'),1);assert.equal(Object.values((await flow(expiryId)).runs).at(-1).recovery.phase,'expired');
  assert.equal(await page.getByRole('button',{name:'继续任务',exact:true}).count(),0,'deadline recovery has one restart action, not a second continue-task action');
  for(const width of [1440,768,375]){await size(width);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.ok((await recovery().boundingBox()).height<=40);await shot(`expired-${width}`);}
- await page.keyboard.press('Tab');await recovery().getByRole('button',{name:'恢复详情',exact:true}).press('Enter');
- await wait(async()=>await recovery().getByRole('button',{name:'恢复详情',exact:true}).getAttribute('aria-expanded')==='true','keyboard expands recovery details',3000);
- assert.equal(await recovery().getByRole('button',{name:'恢复详情',exact:true}).getAttribute('aria-expanded'),'true');await shot('details-375');
- check('主进程时钟跨过 30 分钟，原请求到期且不补发；三档宽度≤40px，键盘详情可用');
+ check('主进程时钟跨过 30 分钟，原请求到期且不补发；三档宽度≤40px');
  assert.deepEqual(report.errors,[]);
  report.requests=Object.fromEntries(counts);report.result='PASS';
 }catch(error){report.result='FAIL';report.failure=String(error.stack??error);if(page&&!page.isClosed())await shot('failure').catch(()=>{});throw error;}

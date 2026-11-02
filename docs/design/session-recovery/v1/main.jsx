@@ -1,4 +1,4 @@
-import React,{useEffect,useId,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {ArrowUp,ArrowUpRight,Check,CheckCheck,ChevronDown,ChevronRight,CircleAlert,FileText,Folder,LoaderCircle,Pause,Play,Plus,RefreshCw,ShieldCheck,Square,WifiOff,X} from 'lucide-react';
 import '../../../../src/renderer/src/tokens.css';
@@ -27,9 +27,9 @@ const copy={
 };
 function Action({children,onClick,primary=false,disabled=false,...rest}){return <button type="button" className={'recovery-button'+(primary?' primary':'')} onClick={onClick} disabled={disabled} {...rest}>{children}</button>;}
 function RecoveryNotice({state='waiting',seconds=1,attempt=1,compact=false,onAction=()=>{},history=[],elapsedMs=0}){
- const c=copy[state],Icon=c.icon,[expanded,setExpanded]=useState(false),detailId=useId();
+ const c=copy[state],Icon=c.icon;
  const titles={waiting:'正在重连',connecting:'正在重连',syncing:'正在核对进度',offline:'等待网络恢复',exhausted:'自动恢复已到期',auth:'密钥已失效',uncertain:'待核对操作结果',stopped:'已停止重连',recovered:'已恢复'};
- useEffect(()=>setExpanded(false),[state]);
+ // 2026-11-03 用户裁决：不设展开详情——状态行只保留状态、时间和操作，历史重试次数没有读者。
  return <div className={'recovery-notice '+c.tone+(compact?' sample-notice':'')} data-state={state}>
   <div className="recovery-row">
    <Icon className={'notice-icon'+(['connecting','syncing'].includes(state)?' spinning':'')} size={14} strokeWidth={1.75} aria-hidden="true"/>
@@ -38,25 +38,14 @@ function RecoveryNotice({state='waiting',seconds=1,attempt=1,compact=false,onAct
    {state==='connecting'&&<span className="countdown">第 {attempt} 次</span>}
 
    <div className="notice-actions">
+    {state==='waiting'&&<Action onClick={()=>onAction('retry')}>立即重试</Action>}
     {['waiting','connecting','syncing'].includes(state)&&<Action aria-label="停止恢复" onClick={()=>onAction('stop')}>停止</Action>}
-    {state==='offline'&&<Action aria-label="停止等待" onClick={()=>onAction('stop')}>停止</Action>}
-    {state==='exhausted'&&<Action primary aria-label="重新开始恢复" onClick={()=>onAction('retry')}>重新开始</Action>}
+    {state==='offline'&&<><Action onClick={()=>onAction('check')}>检查连接</Action><Action aria-label="停止等待" onClick={()=>onAction('stop')}>停止</Action></>}
+    {state==='exhausted'&&<><Action primary aria-label="重新开始恢复" onClick={()=>onAction('retry')}>重新开始</Action><Action onClick={()=>onAction('model')}>更换模型</Action></>}
     {state==='auth'&&<Action primary aria-label="检查模型设置" onClick={()=>onAction('settings')}>检查设置</Action>}
-    {state==='uncertain'&&<Action primary aria-label="核对操作结果" onClick={()=>onAction('verify')}>核对结果</Action>}
+    {state==='uncertain'&&<><Action primary aria-label="核对操作结果" onClick={()=>onAction('verify')}>核对结果</Action><Action onClick={()=>onAction('stop')}>暂不继续</Action></>}
     {state==='stopped'&&<Action primary onClick={()=>onAction('retry')}>继续尝试</Action>}
    </div>
-   <button type="button" className="details-toggle" aria-label="恢复详情" aria-expanded={expanded} aria-controls={detailId} onClick={()=>setExpanded(value=>!value)}><ChevronDown size={13} aria-hidden="true"/></button>
-  </div>
-  <div className="recovery-details" id={detailId} hidden={!expanded}>
-      <p className="notice-description recovery-budget">已重试 {state==='waiting'?Math.max(0,attempt-1):attempt} 次 · 剩余 {Math.ceil(Math.max(0,RECOVERY_WINDOW_MS-elapsedMs)/60000)} 分钟</p>
-   <div className="detail-actions">
-    {state==='waiting'&&<Action onClick={()=>onAction('retry')}>立即重试</Action>}
-    {state==='offline'&&<Action onClick={()=>onAction('check')}>检查连接</Action>}
-    {['exhausted','stopped'].includes(state)&&<Action onClick={()=>onAction('model')}>更换模型</Action>}
-    {state==='uncertain'&&<Action onClick={()=>onAction('stop')}>暂不继续</Action>}
-   </div>
-   <ol aria-label="恢复记录"><li><time>14:32:08</time><span>模型连接中断 · HTTP 503</span></li>{history.map((item,index)=><li key={index}><time>+{item.time}s</time><span>{item.text}</span></li>)}<li><time>当前</time><span>{state==='waiting'?`等待第 ${attempt} 次重试`:c.title}</span></li></ol>
-   <code>Service unavailable · 演示诊断信息</code>
   </div>
  </div>;
 }
@@ -96,7 +85,7 @@ function App(){
      <div className="user-message">整理这次更新的改动，生成一份发布说明。</div>
      <div className="assistant-message"><p>我已经检查了最近的提交，正在整理发布说明。</p><div className="completed-step"><Check size={13}/><FileText size={13}/>已读取 12 条提交记录<span>已完成</span></div><p className="partial-reply">本次更新主要包含会话体验和文件预览的改进。</p>
       {showResult&&<p className="continued-reply">接下来会把这些改动按功能整理，并补充使用说明。</p>}
-      {settled?<details className="settled-record"><summary><CheckCheck size={14}/>恢复记录<ChevronDown size={12}/></summary><p>自动恢复 {attempt} 次，已核对任务进度。</p></details>:<RecoveryNotice state={state} seconds={seconds} attempt={attempt} details history={history} elapsedMs={elapsedMs} onAction={action}/>}
+      {settled?<details className="settled-record"><summary><CheckCheck size={14}/>恢复记录<ChevronDown size={12}/></summary><p>自动恢复 {attempt} 次，已核对任务进度。</p></details>:<RecoveryNotice state={state} seconds={seconds} attempt={attempt} history={history} elapsedMs={elapsedMs} onAction={action}/>}
      </div>
     </div>
     <div className="composer-area"><div className="composer"><textarea aria-label="消息草稿" value={draft} onChange={e=>setDraft(e.target.value)}/><div className="composer-toolbar"><span><Plus size={16}/><span className="model-label">当前模型<ChevronDown size={11}/></span></span><button type="button" className="send-button" aria-label="发送消息" disabled={busy||showResult||!draft.trim()} onClick={()=>{setFeedback('演示：草稿可正常发送；已停止旧任务恢复。');setDraft('');}}><ArrowUp size={16}/></button></div></div>{busy?<p className="composer-hint">停止重连后可发送</p>:null}</div>
