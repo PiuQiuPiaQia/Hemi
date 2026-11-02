@@ -1,17 +1,23 @@
 name: Bot capability diagnostic
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Focused capability matrix or the actual full npm test gate'
+        type: choice
+        options: [focused, full]
+        default: focused
 permissions:
   contents: read
 jobs:
   capabilities:
     name: Windows real Bot capability · ${{ matrix.scenario }}
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        scenario: [browser, history, all]
+        scenario: ${{ fromJSON(inputs.mode == 'full' && '["full"]' || '["browser","history","all"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,5 +25,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Real SDK and browser boundary (180s watchdog)
+      - name: Real test boundary (focused 180s / full 900s watchdog)
         run: node scripts/diagnose-bot-capabilities.mjs ${{ matrix.scenario }}
