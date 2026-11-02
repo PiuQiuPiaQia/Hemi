@@ -15,7 +15,9 @@ async function fixture(t){
   const tool=(name,args)=>({index:0,id:randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
   trace('model-request',{main,checking,firstLine:firstLine.slice(0,160),toolNames:toolMessages.map(m=>m.name)});
   if(checking){
-   const facts=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence),live=facts.backgroundJobs.filter(j=>j.status==='running');
+   // Evidence also lists earlier roots' commands for context. They are not
+   // obligations of a promoted independent goal and must not gate its completion.
+   const facts=JSON.parse(JSON.parse(body.messages.at(-1).content).evidence),live=facts.backgroundJobs.filter(j=>j.rootRunId===facts.rootRunId&&j.status==='running');
    trace('goal-check',{rootRunId:facts.rootRunId,jobs:facts.backgroundJobs});
    // Optional bounded network latency reproduces the full-run timing window
    // through the real SDK HTTP boundary, not by replacing Host scheduling.
@@ -24,6 +26,7 @@ async function fixture(t){
     :{status:'complete',reason:'真实后台命令已结束，成果存在，已取消命令没有产生副作用',evidence:['proof.txt 实际写入'],remaining:[],nextAction:''});
   }
   else if(!main)content='后台任务验收';
+  else if(firstLine.startsWith('INDEPENDENT_AFTER_STOP'))content='INDEPENDENT_COMPLETE';
   else if(firstLine.startsWith('FOLLOW_UP_QUESTION')){followEntered=true;await followGate;content='FOLLOW_UP_ANSWER';}
   else if(!body.messages.some(m=>m.role==='tool'))tools=[
    tool('bash',{command:cmd("process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('cancelled.txt','BAD'),10000)"),run_in_background:true,timeout_ms:14000}),
@@ -58,6 +61,11 @@ for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a 
  if(action==='promoteInput')await f.call('flow.command',{id:f.id,command:{type:'send',input:{inputId:'next',text:'INDEPENDENT_AFTER_STOP'}}});
  await f.call('flow.command',{id:f.id,command:action==='stop'?{type:'stop'}:{type:'promoteInput',inputId:'next'}});
  const stopped=await until(async()=>{const s=await f.flow();return s.phase==='idle'&&(action==='stop'||s.timeline.some(i=>i.kind==='user'&&i.id==='next')&&s.pending.length===0)?s:null;});
+ if(action==='promoteInput'){
+  const promoted=Object.values(stopped.runs).find(run=>run.inputIds?.includes('next'));
+  assert.equal(promoted?.outcome,'completed','the independent promoted goal completes, rather than halting on unrelated jobs');
+  assert.match(JSON.stringify(stopped.timeline),/INDEPENDENT_COMPLETE/);
+ }
  assert.deepEqual(stopped.backgroundJobs.map(j=>[j.id,j.startedAt,j.deadlineAt]),before.map(j=>[j.id,j.startedAt,j.deadlineAt]),'停止新目标不能清理旧目标命令或重置其期限');
  const state=await snapshot();
  assert.equal(state.roots[originalRun].status,'waiting_background','原后台目标仍保留完成通知的接收方');

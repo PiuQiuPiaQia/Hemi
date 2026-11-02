@@ -7,7 +7,7 @@
 - 思考强度“高”交由 Pi SDK 请求模型支持的最高档：DeepSeek Flash/Pro 可发送 max，不支持该档位的型号由 SDK 按实际能力夹取。界面与存储仍保持低／中／高三档，低、中、自动与关闭语义不变；不增加型号猜测或兜底映射，不调整 token 上限。
 
 - Bot 初始化先确认执行进程归属，再启动权限存储加载；被拒绝的第二个实例不再留下无主异步写盘，避免失败清理与初始化写入相互竞态。
-- 修正安装超时与退出草稿验收夹具：按宿主持久化回执核对执行次数与草稿落盘，失败初始化时回收测试监听器。保留真实 SDK、浏览器和命令边界验证，不跳过失败功能，也不据定向通过声称旧版全部超时的根因已解决。
+- 修正安装超时与退出草稿验收夹具：按宿主持久化回执核对执行次数与草稿落盘，失败初始化时回收测试监听器；后台命令夹具按根目标归属校验完成义务，避免把旧目标命令误算作后续独立目标的待办。保留真实 SDK、浏览器和命令边界验证，不跳过失败功能，也不据定向通过声称旧版全部超时的根因已解决。
 
 注意：macOS 继续使用固定自签名身份，不等于 Apple Developer ID 签名或苹果公证，首次打开仍可能出现 Gatekeeper 提示。
 
@@ -22,6 +22,6 @@ Expanded file previews and fixes for shutdown admission, GLM Coding Plan token r
 - High thinking requests the model's highest supported tier through Pi SDK: DeepSeek Flash/Pro can send max, while the SDK clamps other models to their supported capabilities. The UI and stored settings remain low/medium/high, with low, medium, automatic, and off semantics unchanged. No guessed model capability maps or token-limit changes are introduced.
 
 - Bot initialization now acquires process ownership before loading permission storage. A rejected second instance no longer leaves orphaned asynchronous writes racing failure cleanup.
-- Installation-timeout and quit-draft fixtures now verify durable host receipts, and failed fixture initialization releases its listener. Real SDK, browser, and command boundaries remain under test; no failing functionality is skipped, and focused passes do not establish that every earlier timeout cause has been resolved.
+- Installation-timeout and quit-draft fixtures now verify durable host receipts, and failed fixture initialization releases its listener. Background-command fixtures check completion obligations by root goal, rather than treating earlier commands as obligations of a later independent goal. Real SDK, browser, and command boundaries remain under test; no failing functionality is skipped, and focused passes do not establish that every earlier timeout cause has been resolved.
 
 Note: macOS continues to use a pinned self-signed identity, not Apple Developer ID signing or Apple notarization. Gatekeeper warnings may still appear on first launch.
