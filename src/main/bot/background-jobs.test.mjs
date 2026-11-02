@@ -29,7 +29,7 @@ async function fixture(t){
   else if(firstLine.startsWith('INDEPENDENT_AFTER_STOP'))content='INDEPENDENT_COMPLETE';
   else if(firstLine.startsWith('FOLLOW_UP_QUESTION')){followEntered=true;await followGate;content='FOLLOW_UP_ANSWER';}
   else if(!body.messages.some(m=>m.role==='tool'))tools=[
-   tool('bash',{command:cmd("process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('cancelled.txt','BAD'),10000)"),run_in_background:true,timeout_ms:14000}),
+   tool('bash',{command:cmd("process.stdout.write('FIRST_ALIVE');const t=setInterval(()=>{if(require('fs').existsSync('first-release')){clearInterval(t);require('fs').writeFileSync('cancelled.txt','BAD')}},30)"),run_in_background:true,timeout_ms:14000}),
    tool('bash',{command:cmd("process.stdout.write('SECOND_ALIVE');let reported=false;const t=setInterval(()=>{if(!reported&&require('fs').existsSync('progress')){reported=true;process.stdout.write('SECOND_PROGRESS')}if(require('fs').existsSync('release')){clearInterval(t);require('fs').writeFileSync('proof.txt','DONE')}},30)"),run_in_background:true,timeout_ms:14000}),
   ];
   else if(all.includes('后台命令状态观察')&&!toolMessages.some(m=>m.name==='job_list'))tools=[tool('job_list',{})];
@@ -77,6 +77,9 @@ for(const action of ['stop','promoteInput'])test(`real Host/SDK: ${action} on a 
  await control('stop',before[1].id);
  await until(async()=>(await f.flow()).backgroundJobs.length===0);
  f.releaseFollow();
+ // Releasing the side-effect gate only after confirmed cancellation proves
+ // cancellation, without racing a fixed 10-second timer on a loaded runner.
+ await fs.writeFile(path.join(f.workspace,'first-release'),'go');
  assert.equal(await fs.stat(path.join(f.workspace,'cancelled.txt')).catch(()=>null),null);
 });
 test('real Host/SDK: jobs release foreground; results wait behind a question and resume the original goal once',{timeout:30000},async t=>{
@@ -112,6 +115,9 @@ test('real Host/SDK: jobs release foreground; results wait behind a question and
  assert.match(JSON.stringify(done.timeline),/FOLLOW_UP_ANSWER/);
  assert.match(JSON.stringify(done.timeline),/成果已核对完成/);
  assert.equal(await fs.readFile(path.join(f.workspace,'proof.txt'),'utf8'),'DONE');
+ // Releasing the side-effect gate only after confirmed cancellation proves
+ // cancellation, without racing a fixed 10-second timer on a loaded runner.
+ await fs.writeFile(path.join(f.workspace,'first-release'),'go');
  assert.equal(await fs.stat(path.join(f.workspace,'cancelled.txt')).catch(()=>null),null);
  assert.equal(done.timeline.flatMap(x=>x.parts??[]).filter(p=>p.kind==='notice'&&p.level==='error').length,0);
  const before=f.requests.filter(b=>b.tools?.length).length;await f.restart();await pause(100);assert.equal(f.requests.filter(b=>b.tools?.length).length,before,'restart never replays old commands');
