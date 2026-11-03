@@ -1,27 +1,21 @@
-完善文件预览，并修复退出保护、GLM 编程套餐续签、思考强度映射与 Bot 初始化失败清理。
+修复任务恢复与模型切换体验，完善模型请求恢复提示。
 
-- 对话交付物、任务产物与附件统一扩展文档、音频等预览：PDF、Word、Excel、PowerPoint 可查看原文并提取文字；CSV 支持表格与原文切换，HTML 在受限沙箱中预览并可查看源码，更多配置与代码文件按纯文本显示。
-- 重启后可从当前会话归档恢复附件来源；原文件移动或删除时明确提示来源不可用。任务远程产物仍需先下载再预览。
-- 应用退出期间拒绝新的输入和会话执行，避免取消后又接受任务；保留未发送的草稿，重新启动后由用户明确发送，不自动重放。
-- GLM 编程套餐跟进 ZCode 3.17.1 请求头，按令牌真实有效期安排提前续签，避免短有效期令牌在每次请求时反复续签或被误判为有效期不足。
-- 思考强度“高”交由 Pi SDK 请求模型支持的最高档：DeepSeek Flash/Pro 可发送 max，不支持该档位的型号由 SDK 按实际能力夹取。界面与存储仍保持低／中／高三档，低、中、自动与关闭语义不变；不增加型号猜测或兜底映射，不调整 token 上限。
-
-- Bot 初始化先确认执行进程归属，再启动权限存储加载；被拒绝的第二个实例不再留下无主异步写盘，避免失败清理与初始化写入相互竞态。
-- 修正安装超时与退出草稿验收夹具：按宿主持久化回执核对执行次数与草稿落盘，失败初始化时回收测试监听器；后台命令夹具按根目标归属校验完成义务，避免把旧目标命令误算作后续独立目标的待办。保留真实 SDK、浏览器和命令边界验证，不跳过失败功能，也不据定向通过声称旧版全部超时的根因已解决。
+- 停止后的任务可通过「恢复」按钮继续；文字或语音输入「继续」等明确指令时，沿用原目标、已有成果和下一步，不再把「继续」当成一个空的新任务。没有可恢复目标时仍按普通消息处理，不自动重放已停止的工作。
+- 统一桌面与 Bot 会话的目标恢复入口，修复恢复时用户原话与助手回应的显示顺序。
+- 精简模型选择提示：切换后直接更新当前模型名，不再显示重复的成功提示；保留读屏播报、环境覆盖警示与不可选原因，统一下拉菜单和 /model 面板的搜索与禁用说明。
+- 已知模型按服务商目录使用输出上限，不再一律压到 32K；只有目录未收录的自定义型号继续使用 32K 兜底。
+- 精简模型请求恢复状态行，保留「立即重试」操作和回合中的完整错误信息；重试被拒时说明冷却、连接中或恢复周期已变更等原因，并修复按钮状态卡滞。
 
 注意：macOS 继续使用固定自签名身份，不等于 Apple Developer ID 签名或苹果公证，首次打开仍可能出现 Gatekeeper 提示。
 
 ---
 
-Expanded file previews and fixes for shutdown admission, GLM Coding Plan token renewal, thinking-level mapping, and failed Bot initialization cleanup.
+Fixes for task resumption, model switching, and model-request recovery feedback.
 
-- Conversation deliverables, task artifacts, and attachments gain document and audio previews. PDF, Word, Excel, and PowerPoint support original-document viewing and text extraction; CSV offer table and raw-text views; HTML uses a restricted sandbox with a source toggle. More configuration and code formats display as plain text.
-- Attachments can recover their source from the current conversation archive after restart. Moved or deleted originals show a source-unavailable message. Remote task artifacts still need to be downloaded before previewing.
-- New input and conversation execution are rejected while the app is quitting, preventing cancelled work from being replaced by a newly accepted task. Unsent drafts are preserved and require an explicit send after restart; no automatic replay.
-- GLM Coding Plan follows ZCode 3.17.1 request headers and schedules renewal from the token's actual lifetime, avoiding repeated renewal on every request or incorrectly rejecting short-lived tokens.
-- High thinking requests the model's highest supported tier through Pi SDK: DeepSeek Flash/Pro can send max, while the SDK clamps other models to their supported capabilities. The UI and stored settings remain low/medium/high, with low, medium, automatic, and off semantics unchanged. No guessed model capability maps or token-limit changes are introduced.
-
-- Bot initialization now acquires process ownership before loading permission storage. A rejected second instance no longer leaves orphaned asynchronous writes racing failure cleanup.
-- Installation-timeout and quit-draft fixtures now verify durable host receipts, and failed fixture initialization releases its listener. Background-command fixtures check completion obligations by root goal, rather than treating earlier commands as obligations of a later independent goal. Real SDK, browser, and command boundaries remain under test; no failing functionality is skipped, and focused passes do not establish that every earlier timeout cause has been resolved.
+- Resume stopped tasks with the Resume button. Explicit text or voice requests such as “继续” retain the original objective, existing results, and next action instead of creating an empty new task. Without a resumable objective, input remains a normal message; stopped work is never replayed automatically.
+- Unified task-resume controls in desktop and Bot conversations, with corrected ordering of the user's request and the resumed response.
+- Reduced redundant model-switching feedback. The selected model name updates directly, while screen-reader announcements, environment-override warnings, and unavailable-model explanations remain. Search and disabled-state wording now match between the dropdown and /model panel.
+- Known models use their provider-catalog output limits instead of a universal 32K cap. Unlisted custom models retain the 32K fallback.
+- Simplified model-request recovery status while retaining Retry now and full error details in the conversation. Rejected retries explain cooldown, an active connection, or a changed recovery cycle; retry controls no longer remain stuck.
 
 Note: macOS continues to use a pinned self-signed identity, not Apple Developer ID signing or Apple notarization. Gatekeeper warnings may still appear on first launch.
