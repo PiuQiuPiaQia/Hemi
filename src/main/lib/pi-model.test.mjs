@@ -25,7 +25,9 @@ test('非 Anthropic 目录保留 SDK 兼容和能力信息，输出上限集中�
   assert.equal(model.compat.requiresReasoningContentOnAssistantMessages, true);
   assert.equal(model.compat.maxTokensField, 'max_tokens');
   assert.equal(model.contextWindow, native.contextWindow);
-  assert.equal(model.maxTokens, 32768);
+  assert.equal(model.maxTokens, native.maxTokens, '目录命中用目录值，不再统一压到 32k');
+  // 目录查不到的自定义型号才用兜底。
+  assert.equal(candidateModelDef({ model: 'some-private-model' }).maxTokens, 32768);
   assert.equal(model.compat.supportsStrictMode, false);
 });
 

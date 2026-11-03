@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 
+import { OPENAI_MODELS } from '@earendil-works/pi-ai/providers/openai.models';
+import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models';
 import { chatTurn } from './text-model.mjs';
 import { addHistoryCacheBreakpoint, chatTurnPi } from './pi-chat.mjs';
 
@@ -77,7 +79,9 @@ test('高档经真实请求链路与本地 HTTP 发送模型最高档，低/中/
     assert.equal(url, '/v1/chat/completions');
     assert.equal(body.reasoning_effort, expectedEffort, `${model}/${level}`);
     assert.deepEqual(body.thinking, expectedThinking, `${model}/${level}`);
-    assert.equal(body.max_tokens, 32768, '本轮不调整输出预算');
+    // 2026-11：目录命中用目录值（再由 pi-ai 按上下文余量裁剪），未命中才用兜底。
+    const budget = { ...OPENAI_MODELS, ...DEEPSEEK_MODELS }[model]?.maxTokens ?? 32768;
+    assert.equal(body.max_tokens, budget, `${model} 输出预算随目录（未命中走兜底）`);
   }
   assert.equal(received.length, 8);
 });
@@ -176,7 +180,7 @@ test('目录命中时显式格式同样优先：三档交给 SDK 发 qwen 参数
     assert.equal(cap.bodies[0].enable_thinking, true);
     assert.ok(!('thinking' in cap.bodies[0]));
     assert.ok(!('reasoning_effort' in cap.bodies[0]));
-    assert.ok(cap.bodies[0].max_tokens <= 32768);
+    assert.equal(cap.bodies[0].max_tokens, 384000, '显式格式不改变输出预算：目录命中仍是目录值');
   }
 });
 

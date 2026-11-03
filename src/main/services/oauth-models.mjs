@@ -6,6 +6,7 @@ import { githubCopilotProvider } from '@earendil-works/pi-ai/providers/github-co
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { openAICodexResponsesApi } from '@earendil-works/pi-ai/api/openai-codex-responses.lazy';
 import { bigModelCodingProvider } from './bigmodel-coding.mjs';
+import { FALLBACK_OUTPUT_TOKENS } from '../lib/model-output-limit.mjs';
 
 export const OAUTH_PROVIDERS = Object.freeze({ openai: 'ChatGPT', anthropic: 'Claude', 'github-copilot': 'GitHub Copilot', bigmodel: 'GLM Coding Plan（BigModel）' });
 export const isOAuthProvider = id => Object.hasOwn(OAUTH_PROVIDERS, id ?? '');
@@ -25,7 +26,8 @@ function oauthModelRequest(candidate, context, options, simple) {
   if (!native) throw new Error('账号模型已不在服务商目录中，请重新登录并刷新模型。');
   // Never forward the alias provider's placeholder key/base URL into native auth resolution.
   const { apiKey, headers, baseUrl, ...request } = options;
-  return runtime.models[simple ? 'streamSimple' : 'stream']({ ...native, maxTokens: Math.min(native.maxTokens, 32768), input: candidate.supportsVision ? ['text', 'image'] : ['text'] }, context, request);
+  // 账号目录同样不压上限（pi-ai 按上下文窗口余量裁剪）；缺值时才用兜底。
+  return runtime.models[simple ? 'streamSimple' : 'stream']({ ...native, maxTokens: native.maxTokens || FALLBACK_OUTPUT_TOKENS, input: candidate.supportsVision ? ['text', 'image'] : ['text'] }, context, request);
 }
 
 /** Register both SDK streaming contracts for the app's OAuth providers. */

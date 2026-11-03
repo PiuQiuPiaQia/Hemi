@@ -9,7 +9,10 @@ import { oauthCatalogModel, oauthModelApi, streamOAuthModel } from '../services/
 
 // 只查原厂目录；伙伴／订阅计划目录存在同名型号，不能按名字拿其专用端点能力。
 const OPENAI_CATALOGS = [OPENAI_MODELS, DEEPSEEK_MODELS, ZAI_CODING_CN_MODELS, ZAI_MODELS];
-export const MODEL_OUTPUT_LIMIT = 32768;
+import { FALLBACK_OUTPUT_TOKENS } from './model-output-limit.mjs';
+
+/** 目录查不到型号时的输出上限兜底；目录命中一律用目录值（pi-ai 再按上下文余量裁剪）。 */
+export const MODEL_OUTPUT_LIMIT = FALLBACK_OUTPUT_TOKENS;
 export const piApiOf = (api) => ['anthropic-messages', 'openai-responses'].includes(api) ? api : 'openai-completions';
 
 /** 配置容忍完整接口 URL，SDK 接收基址并自行拼协议路径。 */
@@ -39,7 +42,7 @@ export function candidateModelDef(candidate) {
     const native = oauthCatalogModel(candidate.oauthProvider, candidate.model);
     if (!native) throw new Error('账号模型目录不可用，请重新登录');
     const { provider, baseUrl, ...definition } = native;
-    return { ...definition, name: candidate.name || native.name, maxTokens: Math.min(native.maxTokens, MODEL_OUTPUT_LIMIT), input: candidate.supportsVision ? ['text', 'image'] : ['text'] };
+    return { ...definition, name: candidate.name || native.name, maxTokens: native.maxTokens || MODEL_OUTPUT_LIMIT, input: candidate.supportsVision ? ['text', 'image'] : ['text'] };
   }
   const api = piApiOf(candidate.api);
   const catalog = api === 'anthropic-messages'
@@ -55,7 +58,8 @@ export function candidateModelDef(candidate) {
     input: candidate.supportsVision === true ? ['text', 'image'] : ['text'],
     cost: catalog?.cost ? { ...catalog.cost } : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: catalog?.contextWindow || 128000,
-    maxTokens: Math.min(catalog?.maxTokens || MODEL_OUTPUT_LIMIT, MODEL_OUTPUT_LIMIT),
+    // 目录命中用目录值（pi-ai 会按 contextWindow 余量再裁剪）；未命中才用兜底。
+    maxTokens: catalog?.maxTokens || MODEL_OUTPUT_LIMIT,
     ...(catalog?.thinkingLevelMap ? { thinkingLevelMap: { ...catalog.thinkingLevelMap } } : {}),
   };
   if (api === 'anthropic-messages') {
