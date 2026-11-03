@@ -3,6 +3,7 @@ import {agentReplyText} from '../../shared/agent-reply.mjs';
 import { withExecutionScope } from '../agent-runtime/execution-scope.mjs';
 import {closeUnconfirmedCommand} from '../services/command-cleanup-failure.mjs';
 import {closeConversationRun} from '../services/run-completion.mjs';
+import {publishGoalStatus} from '../services/goal-status-projection.mjs';
 import {waitRunSettled} from '../services/run-settle.mjs';
 import {commandDeadline} from '../agent/gate/command-deadline.mjs';
 import { ipcMain, app, shell, dialog, net } from 'electron';
@@ -410,7 +411,7 @@ function createLlmFlowRuntime(conversationId) {
     /** goal-resume 受理前的只读准入查询（账本摘要；事务准入仍在 runtime.resumeGoal）。 */
     findResumableGoal: async (request = {}) => {
       const agentRuntime = getAgentRuntime();
-      return agentRuntime?.journal?.findResumableGoal(conversationId, {goalId: request.goalId}) ?? null;
+      return agentRuntime?.journal?.findResumableGoal(conversationId, {goalId: request.goalId, generation:controllerOf().getSnapshot().generation}) ?? null;
     },
     async start({ runId, envelope, source, continuationOf, background, resume }) {
       if(background){
@@ -675,14 +676,12 @@ function completeInput(inputId, error, result) {
 }
 
 /** 目标投影进 flow 快照（goal-resume 按钮口径）：运行收口后从账本组装追加；
- *  投影失败静默——按钮状态由下一次收口纠正，不阻断运行收口。 */
+ *  异步读取跨越新回合、回卷或控制器重建时丢弃，避免旧恢复状态迟到写回。
+ *  投影失败不阻断运行收口，由下一次收口纠正。 */
 async function applyGoalStatus(conversationId) {
   try {
-    const agentRuntime = getAgentRuntime();
-    if (!agentRuntime?.journal || !flowService?.has(conversationId)) return;
-    const { goal } = await agentRuntime.journal.goalProjection(conversationId);
-    getConversationFlowService().controllerFor(conversationId).applyFact({ type: 'goal-status', goal: goal ?? null });
-  } catch { /* 迟到/旧代事实由归约层丢弃 */ }
+    await publishGoalStatus({conversationId, journal:getAgentRuntime()?.journal, flowService});
+  } catch { /* 投影只影响恢复入口，不阻断本次运行收口。 */ }
 }
 
 /** 队列派发的 chat payload：最新历史＋条目正文（旧 turn-queue 同口径；profile 缺省）。 */

@@ -108,3 +108,45 @@
 修复：从 `PHASE_TITLES` 删除 `continuing`，并在原处加注释说明为何不投影。该轮若确有后台命令/资源等待，仍由既有的 jobs/resources 分支正常展示，不丢失真实状态。`compacting / verifying / waiting-subagents / finishing` 保留——它们对应用户可感知、可行动的真实阶段。
 
 复验（改动后重跑）：`npm run build` exit 0、`node scripts/check-spacing.mjs` spacing ok、`node scripts/verify-goal-resume.mjs` 与 `--dev` 均 exit 0 / 14 项 PASS。截图 `ui-continue-whitelist.png` 已更新：恢复回合进行中只剩「正在想」，无额外活动行。
+
+## 第三批：旧恢复条跨新回合／跨会话／重启复活（2026-11-03 23:0x–23:4x）
+
+用户在 `conv-mw0nlcn0-wniazs` 复现并上报：前批修复后，**随便一个会话**里旧目标停止后提出普通问题，旧「继续任务」恢复条照样出现——问题运行中、完成后、页面重载甚至应用重启都可能在。基线 `node scripts/verify-goal-resume.mjs`（built）真实失败于「新普通回合运行中不能保留旧恢复状态」，基线证据 `baseline-built.log` / `baseline-report.json` / `baseline-failure.png`。
+
+### 根因（多层叠加，独立评审后逐层核实）
+
+1. **账本排序与资格**：`latestRoot` 使用不存在的 `startedAt` 字段（恒 0 兜底），实际只按数组序；老链晚终止（`terminalAt` 更晚）会把更新独立链挤出恢复资格。恢复资格无会话隔离、无代次隔离；同链后继（恢复/续答新建的 root，`admissionSeq` 更高）又把旧链顶回「最近受理」。`beginGoal` 等答复续接守卫未按会话过滤，别的会话的新目标会遮断本会话的合法续接。
+2. **归约层投影**：新独立回合 `run-preparing` 不清旧 `goal` 投影；收口后异步 `goal-status` 在回到 idle 后能把已被清掉的投影再次写回；回卷（`generation-bumped`）不清 `goal`。
+3. **持久化残留**：旧快照中跨链的 resumable 投影在重启恢复时不按 runs 证据校正。
+4. **工作流身份**：flow 层不认识工作流回合（受理 `source='user'/'queue'` 且无 kind），会把工作流当成新独立主目标，误清有效恢复条——与账本层排除 workflow root 的口径不一致。
+
+### 修复
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 账本 | `src/main/agent-runtime/run-journal.mjs` | 持久 `admissionSeq` 受理序；`latestMainRoot` 会话过滤＋跳过同链后继（链优先级由链头决定）＋无 goal 准备中 root 占位遮断＋`exceptRootRunId`；`findResumableGoal`/`resumeGoal`/`goalProjection` 统一只认最近独立主目标链，可选 `generation`（先选链再校验代际，不回退历史同代链）；跨代恢复拒绝 `goal-generation-mismatch`；`beginGoal` 续接守卫会话过滤＋最新链守卫 |
+| 归约 | `src/shared/conversation-flow.mjs` | 新独立主回合受理即清 `goal`；恢复/续答/后台接续/事件播报/工作流不清；忙期迟到 `goal-status` 丢弃且不动 revision；带 `generation` 校验；`generation-bumped` 清 `goal` |
+| 重启 | `src/main/services/flow-bootstrap.mjs` | `restoreFlowSnapshot` 按 runs 证据清除被更新独立链遮断的历史 resumable 投影；无证据保守保留；工作流回合不算独立链（新 `kind` 标记＋旧 `workflow-card` 证据兼容） |
+| 受理 | `src/main/services/conversation-controller.mjs` | 工作流结构化输入受理带 `kind:'workflow'` |
+| 异步投影 | `src/main/ipc/llm.ipc.mjs` ＋ 新增 `src/main/services/goal-status-projection.mjs` | 收口后异步投影带身份栅栏：控制器同一、仍 idle、`generation/runs/goal` 引用未变才写回；恢复准入查询传当前 `generation` |
+
+新增测试：`run-journal.test.mjs` 32 用例（含移除守卫后用例真实失败的负对照）、`goal-resume.test.mjs` 11 用例、`flow-bootstrap.test.mjs` 恢复校正 4 用例、`goal-status-projection.test.mjs` 5 用例（真实 journal＋flow service）、`conversation-controller.test.mjs` 工作流标记。
+
+### 验证（改动后真实退出码；基线 `ceebf3917d0d3dba6667f9ac7505156e1dbb3404` 加当前未提交工作树，Node v22.21.1 / darwin-arm64，macOS 26.5.1）
+
+| 命令 | 结果 |
+| --- | --- |
+| `npm run build` | exit 0（SDK、typecheck、Vite 全过） |
+| `node --test src/main/agent-runtime/*.test.mjs` | **198/198** pass |
+| `node --test packages/conversation-flow/test/*.test.mjs` ＋ controller/flow-service/bootstrap/projection 等定向集合 | **214/214** pass |
+| `node scripts/check-spacing.mjs` | `spacing ok` |
+| `node scripts/verify-goal-resume.mjs`（built） | exit 0，**17 项 PASS**，`errors: []` |
+| `node scripts/verify-goal-resume.mjs --dev` | exit 0，**17 项 PASS**，`errors: []` |
+
+两份 `report.json` 均记录 `commit: ceebf391…`、`workingTree: true`。相对前批新增的 UI 场景（两模式均过）：普通问题运行中首字前／完成／页面重载后无旧恢复条；默认与显式历史 `goalId` 的恢复均被拒；向持久快照注入旧投影后**真实重启隔离应用**不复活（`ordinary-restarted-no-goal-bar.png`）；最新停止目标的恢复入口跨真实重启保留并可继续原目标（8b，续跑产物核对）。原 14 项（停止/恢复/完成/幂等/入口收敛/横幅/文字与语音白名单回显/普通输入回归）全部保留通过。截图位于 `.visual/workflow/goal-resume-history/{built,dev}/`，基线失败证据同目录。
+
+### 边界与缺口
+
+- 历史无 `admissionSeq` 的旧 root 同毫秒受理顺序无持久证据可恢复（按 `createdAt`＋写入序比较），仅新受理有持久序；已在代码注释与本节声明。
+- 验证仍用合成模型／ASR／静音采集设备与全新临时 `HEMI_USER_DATA_DIR`；未验证真实供应商、真实麦克风、远端 Bot 与多主题环境。
+- 本批改动未提交；并行会话的未提交改动（许可材料、浏览器扩展、OAuth 等）原样保留。Windows CI 历史失败调查按用户指示暂停，未因本批恢复。

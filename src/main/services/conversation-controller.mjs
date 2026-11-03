@@ -146,6 +146,7 @@ export function createConversationController({
     const continuationOf = resume ? resume.sourceRootRunId : input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
     preparingAborted = false;
     commit({ type: 'run-preparing', runId, rootRunId: background?.rootRunId ?? runId, continuationOf,
+      ...(input?.workflow ? {kind:'workflow'} : {}),
       ...(resume ? { resumeOf: resume.sourceRootRunId, resumeGoal: resume.goal } : {}),
       source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
     try {

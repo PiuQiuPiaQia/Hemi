@@ -18,7 +18,7 @@ import {WebSocketServer} from 'ws';
 import {IPC} from '../src/shared/ipc-channels.mjs';
 
 const mode = process.argv.includes('--dev') ? 'dev' : 'built';
-const evidence = path.resolve('.visual/workflow/goal-resume', mode);
+const evidence = path.resolve('.visual/workflow/goal-resume-history', mode);
 const userData = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `hemi-goal-resume-${mode}-`)));
 const workspace = path.join(userData, 'workspace/default');
 fs.mkdirSync(workspace, {recursive:true}); fs.mkdirSync(evidence, {recursive:true});
@@ -31,6 +31,9 @@ const held = new Set();
 const pausedResumes = new Set();
 const heldResumes = new Map();
 const releaseResume = marker => { pausedResumes.delete(marker); heldResumes.get(marker)?.(); heldResumes.delete(marker); };
+const pausedInputs = new Set();
+const heldInputs = new Map();
+const releaseInput = text => { pausedInputs.delete(text); heldInputs.get(text)?.(); heldInputs.delete(text); };
 let app, page, vite;
 const verdict = (status, reason, remaining = [], question) => ({status,reason,evidence:['实际会话与真实工具结果'],remaining,nextAction:status === 'continue' ? '写入剩余成果' : '',...(question ? {question} : {})});
 const MARKER = 'PC_GOAL_RESUME';
@@ -51,11 +54,14 @@ const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
     const checking = body.messages.some(message => message.role==='system' && JSON.stringify(message.content).includes(GOAL_CHECK_SYSTEM)), main = Boolean(body.tools?.length);
-    const userTexts = body.messages.filter(message => message.role==='user').map(message => typeof message.content==='string' ? message.content : JSON.stringify(message.content)).reverse();
-    const texts = checking ? [JSON.stringify(JSON.parse(userTexts[0]).objective)] : userTexts;
-    const marker = markerOf(texts.join('\n'));
-    const resumeTurn = !checking && (texts[0] ?? '').includes('［宿主目标恢复');
-    report.requests.push({marker,text:texts[0]?.slice(0, 60) ?? null,checking,main,model:body.model,resumeContext:resumeTurn,tools:body.tools?.length ?? 0});
+    const userTexts = body.messages.filter(message => message.role==='user').map(message => typeof message.content==='string' ? message.content
+      : Array.isArray(message.content) ? message.content.filter(part => part.type==='text').map(part => part.text).join('\n') : JSON.stringify(message.content)).reverse();
+    const texts = checking ? [JSON.parse(userTexts[0]).objective] : userTexts;
+    // 当前消息的宿主事实锚点会引用历史目标；模拟服务只按用户输入或恢复正文选择场景。
+    const currentText = (texts[0] ?? '').split('\n\n【本轮事实锚点】')[0];
+    const resumeTurn = !checking && currentText.startsWith('［宿主目标恢复');
+    const marker = markerOf(currentText);
+    report.requests.push({marker,text:currentText.slice(0, 60),checking,main,model:body.model,resumeContext:resumeTurn,tools:body.tools?.length ?? 0});
     if (!main && !checking) { respond(res,body,marker ?? 'PC 验收'); return; }
     if (checking) {
       assert.equal(body.tools?.length ?? 0,0); assert.equal(body.tool_choice,'none');
@@ -65,9 +71,11 @@ const server = http.createServer(async (req, res) => {
       respond(res,body,JSON.stringify(verdict('complete', marker ? '实际文件已写入并核对' : '普通文本回合，无需产物'))); return;
     }
     let content, tool;
+    const pausedInput = [...pausedInputs].find(text => (texts[0] ?? '').includes(text));
+    if (pausedInput) await new Promise(resolve => heldInputs.set(pausedInput, resolve));
     // 恢复回合的判定看最后一条 user 消息是否为宿主注入的恢复上下文——
     // 不能全量 includes：历史里会残留早前目标的恢复消息（多轮目标会误判）。
-    const resumeMarker = markerOf(resumeTurn ? texts[0] : '');
+    const resumeMarker = markerOf(resumeTurn ? currentText : '');
     if (resumeTurn) {
       // 恢复回合：宿主注入恢复上下文；UI 检查释放后才开始输出与真实文件操作。
       if (pausedResumes.has(resumeMarker)) await new Promise(resolve => heldResumes.set(resumeMarker, resolve));
@@ -101,7 +109,7 @@ asr.on('connection', socket => {
     if ((data[1] & 0xf) === 3) { socket.send(asrFrame([], true)); socket.close(); }
   });
 });
-fs.writeFileSync(path.join(userData,'text-model-profiles.json'), JSON.stringify({version:3,defaultModelId:'pc-goals/main',lastConversationModelKey:'pc-goals/main',providers:[{id:'pc-goals',name:'PC 目标恢复验收',api:'openai-completions',baseUrl,models:[{id:'main',model:'pc-goals',thinkingLevel:'off',supportsVision:false}]}]}));
+fs.writeFileSync(path.join(userData,'text-model-profiles.json'), JSON.stringify({version:4,thinkingLevel:'off',lastConversationModelKey:'pc-goals/main',roleModels:{main:'pc-goals/main'},providers:[{id:'pc-goals',name:'PC 目标恢复验收',api:'openai-completions',baseUrl,models:[{id:'main',model:'pc-goals',thinkingLevel:'off',supportsVision:false}]}]}));
 const wait = async (predicate,label,timeout=45000) => {
   const deadline = Date.now()+timeout;
   while (Date.now()<deadline) { const value = await predicate(); if (value) return value; await new Promise(resolve => setTimeout(resolve,50)); }
@@ -186,7 +194,7 @@ try {
     await vite.listen(); process.env.VITE_DEV_SERVER_URL=vite.resolvedUrls.local[0];
   } else delete process.env.VITE_DEV_SERVER_URL;
   await launch();
-  await page.evaluate(baseUrl => window.hemiVoice.saveModelProfile({id:'pc-goals',name:'PC 目标恢复验收',api:'openai-completions',baseUrl,apiKey:'SYNTHETIC_ONLY',models:[{id:'main',model:'pc-goals',thinkingLevel:'off',supportsVision:false}],makeDefault:true}),baseUrl);
+  await page.evaluate(baseUrl => window.hemiVoice.saveModelProfile({id:'pc-goals',name:'PC 目标恢复验收',api:'openai-completions',baseUrl,apiKey:'SYNTHETIC_ONLY',models:[{id:'main',model:'pc-goals',thinkingLevel:'off',supportsVision:false}]}),baseUrl);
   await page.evaluate(() => window.hemiVoice.saveConfig({apiKey:'SYNTHETIC_ONLY',ttsEnabled:false}));
   await page.reload(); await input().waitFor();
 
@@ -274,24 +282,66 @@ try {
   await page.screenshot({path:path.join(evidence,'ui-goal-bar-completed.png')});
   check('目标横幅：按钮恢复后续跑完成（真实产物核对），完成后横幅消失');
 
-  // 8) 「继续」白名单：先验证白名单外文本不转换（直发普通文本回合），
-  //    再验证精确命中 → goal-resume，且原话在时间线以用户气泡回显。
+  // 8) 历史停止目标不能在新普通问答中反复冒出；最新目标停止后仍可正常恢复。
   const TEXT_MARKER = 'PC_RESUME_TEXT';
   await send(`${TEXT_MARKER} 先做第一段，稍后停止后我会输入继续类指令。`);
   await wait(() => held.size===1,'whitelist verifier request in flight');
-  const textSourceRun = (await flow(cid)).activeRunId;
+  let textSourceRun = (await flow(cid)).activeRunId;
   await stopRun(cid, textSourceRun);
   await settled(cid,5);
-  await waitForResumable(cid);
-  // 8a) 白名单外：宿主对停止后的新输入按「直发新任务」处理（2026-10-18 裁决：
-  //     空队列暂停随直发解除）——断言它按普通文本回合直达模型，而非 goal-resume。
-  await input().fill('继续，但换个思路'); await input().press('Enter');
-  await wait(async()=>{const v=await flow(cid);return v.phase==='idle'&&Object.keys(v.runs).length===6;},'non-whitelist text settled as a normal turn');
-  assert.ok(report.requests.some(r=>r.main&&!r.resumeContext&&(r.text ?? '').includes('继续，但换个思路')),'non-whitelist text reaches the model as a normal turn');
+  const historicalProjection = await waitForResumable(cid);
+  // 8a) 白名单外文本是独立新目标；在真实模型首字前挂住，核对旧条即时消失。
+  const ordinaryInput = '继续，但换个思路';
+  pausedInputs.add(ordinaryInput);
+  await input().fill(ordinaryInput); await input().press('Enter');
+  await wait(() => heldInputs.has(ordinaryInput),'ordinary question held before first output');
+  assert.notEqual((await flow(cid)).goal?.resumable,true,'新普通回合运行中不能保留旧恢复状态');
+  await goalBar().waitFor({state:'detached'});
+  await assertNoLegacyResume();
+  await page.screenshot({path:path.join(evidence,'ordinary-running-no-goal-bar.png')});
+  check('停止旧目标后提出普通问题：新回合首字前不再显示旧恢复条');
+  releaseInput(ordinaryInput);
+  await wait(async()=>{const v=await flow(cid);return v.phase==='idle'&&Object.keys(v.runs).length===6&&v.goal===null;},'ordinary question completed without reviving old goal');
+  assert.ok(report.requests.some(r=>r.main&&!r.resumeContext&&(r.text ?? '').includes(ordinaryInput)),'non-whitelist text reaches the model as a normal turn');
   assert.equal((await continuationRuns(cid,textSourceRun)).length,0,'non-whitelist text must not trigger goal-resume');
-  check('「继续，但换个思路」不被转换：按普通文本回合直发并得到模型处理');
-  // 8b) 精确命中：输入「继续」→ goal-resume；原话以用户气泡回显在时间线。
-  await waitForResumable(cid);
+  const historicalGoal = textSourceRun;
+  for (const goalId of [undefined,historicalGoal]) {
+    const receipt = await page.evaluate(({cid,goalId}) => window.hemiVoice.flowCommand(cid,{type:'goal-resume',...(goalId?{goalId}:{})}),{cid,goalId});
+    assert.equal(receipt.ok,false); assert.equal(receipt.code,'goal-not-resumable');
+  }
+  await goalBar().waitFor({state:'detached'});
+  await page.reload(); await input().waitFor();
+  assert.equal((await flow(cid)).goal,null,'重新打开会话也不能复活历史停止目标');
+  await goalBar().waitFor({state:'detached'});
+  await page.screenshot({path:path.join(evidence,'ordinary-completed-no-goal-bar.png')});
+  check('普通问答完成及页面重载后均无旧恢复条；默认和指定历史 goalId 的恢复均被拒');
+
+  // 8a-restart) 持久化注入旧客户端遗留的可恢复投影，再真正重启隔离应用。
+  await app.close(); app=null; page=null;
+  const conversationFile = path.join(userData,'runtime-v2/conversations',`${cid}.json`);
+  const savedConversation = JSON.parse(fs.readFileSync(conversationFile,'utf8'));
+  savedConversation.flow.goal = {...historicalProjection,resumable:true};
+  fs.writeFileSync(conversationFile,JSON.stringify(savedConversation,null,2));
+  await launch(); await input().waitFor();
+  assert.equal((await flow(cid)).goal,null,'应用重启恢复账本时必须清掉被新普通目标遮蔽的旧投影');
+  await goalBar().waitFor({state:'detached'});
+  await page.screenshot({path:path.join(evidence,'ordinary-restarted-no-goal-bar.png')});
+  check('隔离应用真实重启后，旧持久恢复条不会复活');
+
+  // 8b) 新建当前目标再停止：精确白名单仍只接续这个最新目标。
+  await send(`${TEXT_MARKER} 新目标做到第一段，停止后输入继续。`);
+  await wait(() => held.size===1,'latest text goal verifier in flight');
+  textSourceRun = (await flow(cid)).activeRunId;
+  await stopRun(cid,textSourceRun);
+  await settled(cid,7);
+  const latestResume = await waitForResumable(cid);
+  assert.equal(latestResume.goalId,textSourceRun);
+  await app.close(); app=null; page=null;
+  await launch(); await input().waitFor();
+  assert.equal((await flow(cid)).goal?.goalId,textSourceRun,'最新停止目标的恢复投影应跨应用重启保留');
+  assert.equal((await flow(cid)).goal?.resumable,true,'重启清理旧投影不能误清真正的最新停止目标');
+  await goalBar().waitFor();
+  check('最新停止目标的恢复入口跨隔离应用重启保留，可继续原目标');
   pausedResumes.add(TEXT_MARKER);
   await input().fill('继续'); await input().press('Enter');
   const [textResume] = await wait(async()=>{const runs=await continuationRuns(cid,textSourceRun);return runs.length ? runs : null;},'whitelist phrase triggers goal-resume');
@@ -303,7 +353,7 @@ try {
   await page.screenshot({path:path.join(evidence,'ui-continue-whitelist.png')});
   check('输入「继续」精确命中白名单：改发 goal-resume；用户回显在前，「正在想」占位紧随其后');
   releaseResume(TEXT_MARKER);
-  const textSettled = await settled(cid,7);
+  const textSettled = await settled(cid,8);
   assert.equal(fs.readFileSync(proofPath(TEXT_MARKER),'utf8'),`${TEXT_MARKER}_RESUMED`);
   assert.deepEqual(errors(textSettled),[]);
   await page.locator(`[data-run-id="${textResume.runId}"] .h24-waiting-status`).waitFor({state:'detached'});
@@ -314,7 +364,7 @@ try {
   // 9) 普通文本回合回归：无 marker 输入走原文本回合并得到模型回应。
   const rootsBefore = Object.keys(journal().roots).length;
   await send('继续，但换个思路这个说法只是普通输入');
-  await wait(async()=>{const v=await flow(cid);return v.phase==='idle'&&Object.keys(v.runs).length===8;},'plain text turn settled');
+  await wait(async()=>{const v=await flow(cid);return v.phase==='idle'&&Object.keys(v.runs).length===9;},'plain text turn settled');
   assert.ok(report.requests.some(r=>r.main&&!r.checking&&(r.text ?? '').includes('这个说法只是普通输入')),'plain text reaches the model');
   assert.equal(Object.keys(journal().roots).length,rootsBefore+1,'plain turn opens its own root, not a goal-resume continuation');
   assert.equal((await continuationRuns(cid,textSourceRun)).length,1,'plain turn does not extend the resumed goal');
@@ -326,7 +376,7 @@ try {
   await wait(()=>held.size===1,'voice verifier request in flight');
   const voiceSourceRun = (await flow(cid)).activeRunId;
   await stopRun(cid,voiceSourceRun);
-  await settled(cid,9);
+  await settled(cid,10);
   await waitForResumable(cid);
   await assertNoLegacyResume();
   pausedResumes.add(VOICE_MARKER);
@@ -341,7 +391,7 @@ try {
   await page.screenshot({path:path.join(evidence,'ui-voice-continue-whitelist.png')});
   check('语音定稿「接着做」触发 goal-resume：原话气泡在前，占位与通话活动指示均在后');
   releaseResume(VOICE_MARKER);
-  const voiceSettled = await settled(cid,10);
+  const voiceSettled = await settled(cid,11);
   assert.equal(fs.readFileSync(proofPath(VOICE_MARKER),'utf8'),`${VOICE_MARKER}_RESUMED`);
   assert.deepEqual(errors(voiceSettled),[]);
   await page.locator(`[data-run-id="${voiceResume.runId}"] .h24-waiting-status`).waitFor({state:'detached'});
@@ -358,6 +408,7 @@ try {
   throw error;
 } finally {
   for (const marker of pausedResumes) releaseResume(marker);
+  for (const text of pausedInputs) releaseInput(text);
   await app?.close().catch(() => {}); for (const item of held) item.res.destroy();
   for (const client of asr.clients) client.terminate();
   await new Promise(resolve => asr.close(resolve));

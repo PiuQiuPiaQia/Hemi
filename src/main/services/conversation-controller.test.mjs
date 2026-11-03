@@ -981,9 +981,13 @@ test('060 用户移除并入：旧命令明确拒绝，排队消息、资料与�
 
 test('同一 inputId 在准备槽内并发重送只受理一次，不额外入队',async()=>{
   const effects=makeEffects(),controller=makeController(effects);
+  const goal={goalId:'main-stopped',objective:'主目标',phase:'cancelled',round:1,status:'cancelled',resumable:true};
+  controller.applyFact({type:'goal-status',goal});
   const first=controller.command({type:'send',input:{inputId:'stable-workflow-request',text:'工作流',workflow:{invocationId:'inv-1'}}});
   await settle();
   assert.equal(controller.getSnapshot().phase,'preparing');
+  assert.equal(controller.getSnapshot().runs[controller.getSnapshot().activeRunId].kind,'workflow');
+  assert.deepEqual(controller.getSnapshot().goal,goal,'工作流受理不清除主目标恢复资格');
   const duplicate=await controller.command({type:'send',input:{inputId:'stable-workflow-request',text:'工作流',workflow:{invocationId:'inv-1'}}});
   assert.equal(duplicate.ok,true);
   assert.equal(controller.getSnapshot().pending.length,0);

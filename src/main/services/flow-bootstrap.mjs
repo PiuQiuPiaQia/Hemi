@@ -177,6 +177,25 @@ export function normalizeFlowHistory(flow, turns, { conversationId = flow?.conve
 }
 
 /**
+ * 恢复条资格的证据核对（runs 账本）：chain-start＝复用自身 rootRunId 且非恢复
+ * （resumeOf）/非续答（continuationOf）/非事件播报（source='event' 不构成新链受
+ * 理）的新回合；恢复、续答与复用旧 root 的后台接续都归入原链，不把老链重新变成
+ * 最近受理。runs 的键序即受理顺序（flow 快照按 JSON 保序落盘），最后一个
+ * chain-start 就是最近受理的独立主链（与 run-journal 的 admissionSeq 同口径）。
+ */
+function latestIndependentChainKey(flow) {
+  // 旧 flow 的 run 无 kind；其真实 workflow-card 仍能证明它属于工作流。
+  const workflows = new Set((flow.timeline ?? []).filter(item => item.parts?.some(part => part.kind === 'workflow-card')).map(item => item.runId));
+  let latest = null;
+  for (const [runId, run] of Object.entries(flow.runs ?? {})) {
+    if (!run || run.legacy || run.source === 'event' || run.kind === 'workflow' || workflows.has(runId)) continue;
+    if (run.resumeOf || run.continuationOf || !run.rootRunId || run.rootRunId !== runId) continue;
+    latest = runId;
+  }
+  return latest;
+}
+
+/**
  * 恢复口径（契约 §8：恢复统一将遗留主运行标中断）：读到的持久 flow 若停在
  * 运行中，恢复为 idle＋对应运行 outcome=interrupted；待发送项保留、队列暂停
  * （submitting 按证据回 pending 或 needs-review——无证据即 needs-review）。
@@ -224,6 +243,13 @@ export function restoreFlowSnapshot(flow) {
     snapshot.pending = snapshot.pending.map((item) => (
       item.state === 'submitting' ? { ...item, state: 'needs-review' } : item.state === 'editing' ? { ...item, state: 'pending' } : item
     ));
+  }
+  // 历史快照可能持久着旧版跨链投影的 resumable 恢复条（新普通回合收口后仍未消）。
+  // 按受理证据校正：其后受理过更新的独立主链（goalId 不属于该链）即清除；找不到
+  // 任何独立链证据时保守保留，不误伤真正等待恢复的停止目标。
+  if (snapshot.goal?.resumable) {
+    const latestChain = latestIndependentChainKey(snapshot);
+    if (latestChain != null && snapshot.goal.goalId !== latestChain) snapshot.goal = null;
   }
   return snapshot;
 }

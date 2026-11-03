@@ -330,9 +330,14 @@ export function applyFlowFact(snapshot, fact) {
         outcome: null,
         ...(fact.resumeOf ? {resumeOf: fact.resumeOf} : {}),
         ...(fact.continuationOf ? {continuationOf: fact.continuationOf} : {}),
+        ...(fact.kind === 'workflow' ? {kind:'workflow'} : {}),
       };
+      // 新独立主回合受理即清旧目标投影；恢复、续答、后台接续、事件播报及工作流
+      // 不构成新的主目标链。恢复回合带 resumeGoal 即时投影（resumable:false）。
+      const sameChain = Boolean(fact.resumeOf || fact.continuationOf || fact.source === 'event' || fact.kind === 'workflow' || (fact.rootRunId && fact.rootRunId !== fact.runId));
       const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'preparing', activeRunId: fact.runId, runs: { ...snapshot.runs, [fact.runId]: run },
-        ...(fact.resumeGoal ? { goal: { ...fact.resumeGoal, resumable: false } } : {}) };
+        ...(fact.resumeGoal ? { goal: { ...fact.resumeGoal, resumable: false } } : {}),
+        ...(sameChain ? {} : { goal: null }) };
       return { snapshot: next, patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] }, applied: true };
     }
     case 'run-started': {
@@ -423,6 +428,12 @@ export function applyFlowFact(snapshot, fact) {
     case 'goal-status': {
       // 宿主从账本组装的目标投影（收口后异步追加）；无变化不递增 revision。
       if (!('goal' in fact)) return { snapshot, patch: null, applied: false, dropped: 'invalid-goal-status' };
+      if (fact.generation != null && fact.generation !== snapshot.generation) {
+        return { snapshot, patch: null, applied: false, dropped: 'stale-generation' };
+      }
+      // 收口后异步读取账本再追加，可能晚于下一次 run-preparing 受理：运行中不覆盖
+      // 目标投影——run-preparing 已按新回合清掉/替换的旧恢复条不能被迟到事实复活。
+      if (snapshot.phase !== 'idle') return { snapshot, patch: null, applied: false, dropped: 'goal-status-busy' };
       const goal = fact.goal ?? null;
       if (JSON.stringify(snapshot.goal ?? null) === JSON.stringify(goal)) return { snapshot, patch: null, applied: false, dropped: 'goal-unchanged' };
       const next = { ...snapshot, revision: snapshot.revision + 1, goal };
@@ -521,7 +532,7 @@ export function applyFlowFact(snapshot, fact) {
       const artifacts = Object.fromEntries(Object.entries(snapshot.artifacts).filter(([, artifact]) => !removedTasks.has(artifact.taskId)));
       const permissions = Object.fromEntries(Object.entries(snapshot.permissions).filter(([, permission]) => !removedTasks.has(permission.taskId)));
       const pendingReports = snapshot.pendingReports.filter((report) => !removedTasks.has(report.taskId));
-      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, awaitingUser:null, timeline, tasks, artifacts, permissions, pendingReports,backgroundJobs:[] };
+      const next = { ...snapshot, revision: snapshot.revision + 1, generation: snapshot.generation + 1, awaitingUser:null, goal:null, timeline, tasks, artifacts, permissions, pendingReports,backgroundJobs:[] };
       return {
         snapshot: next,
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'timeline', timeline },

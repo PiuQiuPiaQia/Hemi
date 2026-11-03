@@ -141,3 +141,75 @@ test('restart closes run, tool and thinking from a single fact; repairs older in
  const saved={schemaVersion:1,conversationId:'jobs',revision:1,generation:1,phase:'idle',activeRunId:null,pending:[],runs:{},timeline:[],tasks:{},artifacts:{},permissions:{},pendingReports:[],backgroundJobs:[{id:'old',runId:'old',generation:1,status:'running'}]};
  const restored=restoreFlowSnapshot(saved);assert.deepEqual(restored.backgroundJobs,[]);assert.equal(saved.backgroundJobs.length,1);
 });
+
+// ---- 恢复条资格证据校正：旧版跨链投影污染的持久快照在恢复边界清掉 ----
+
+const goalChip = (goalId, extra = {}) => ({goalId, objective: `目标 ${goalId}`, phase: 'cancelled', round: 2, status: 'cancelled', nextAction: null, remaining: [], reason: '用户停止', ...extra});
+const runOf = (runId, overrides = {}) => ({runId, rootRunId: runId, generation: 1, source: 'user', inputIds: [], startedAt: 1, endedAt: 2, closedAt: 2, outcome: 'completed', ...overrides});
+const snapshotWith = (runs, goal) => ({schemaVersion: 1, conversationId: 'c', revision: 7, generation: 1, phase: 'idle', activeRunId: null, queuePaused: false, pending: [], timeline: [], runs, tasks: {}, artifacts: {}, permissions: {}, pendingReports: [], ...(goal ? {goal} : {})});
+
+test('恢复校正：旧停止目标的 resumable 投影被更新的独立回合遮断即清除', () => {
+  const flow = snapshotWith({
+    'run-old': runOf('run-old', {outcome: 'stopped'}),
+    'run-new': runOf('run-new'),
+  }, goalChip('run-old', {resumable: true}));
+  const restored = restoreFlowSnapshot(flow);
+  assert.equal(restored.goal, null, '新普通回合之后不残留旧恢复条');
+  assert.equal(flow.goal.resumable, true, '原对象不被修改');
+});
+
+test('恢复校正：最近受理链自身的停止投影保留；同链恢复/续答/后台接续不遮断', () => {
+  const kept = restoreFlowSnapshot(snapshotWith({
+    'run-a': runOf('run-a'),
+    'run-b': runOf('run-b', {outcome: 'stopped'}),
+  }, goalChip('run-b', {resumable: true})));
+  assert.deepEqual(kept.goal, goalChip('run-b', {resumable: true}), '最新链的恢复条如实保留');
+  const resumed = restoreFlowSnapshot(snapshotWith({
+    'run-a': runOf('run-a'),
+    'run-resume': runOf('run-resume', {resumeOf: 'run-a', outcome: 'stopped'}),
+  }, goalChip('run-a', {resumable: true})));
+  assert.deepEqual(resumed.goal, goalChip('run-a', {resumable: true}), '同链恢复回合不遮断原链');
+  const continued = restoreFlowSnapshot(snapshotWith({
+    'run-a': runOf('run-a'),
+    'run-cont': runOf('run-cont', {continuationOf: 'run-a', outcome: 'stopped'}),
+  }, goalChip('run-a', {resumable: true})));
+  assert.deepEqual(continued.goal, goalChip('run-a', {resumable: true}), '同链续答不遮断原链');
+  const background = restoreFlowSnapshot(snapshotWith({
+    'run-a': runOf('run-a'),
+    'run-bg': runOf('run-bg', {rootRunId: 'run-a', outcome: 'stopped'}),
+  }, goalChip('run-a', {resumable: true})));
+  assert.deepEqual(background.goal, goalChip('run-a', {resumable: true}), '复用原 root 的后台接续不遮断');
+});
+
+test('恢复校正：老链迟到的后台接续回合不把恢复条抢回老链；无 runs 证据保守保留', () => {
+  const lateBackground = restoreFlowSnapshot(snapshotWith({
+    'run-old': runOf('run-old', {outcome: 'stopped'}),
+    'run-new': runOf('run-new', {outcome: 'stopped'}),
+    // 老链迟到接续：受理序在 run-new 之后，但 rootRunId 复用旧 root，属老链。
+    'run-old-bg': runOf('run-old-bg', {rootRunId: 'run-old', outcome: 'stopped'}),
+  }, goalChip('run-new', {resumable: true})));
+  assert.deepEqual(lateBackground.goal, goalChip('run-new', {resumable: true}), '最近独立链仍是 run-new');
+  const noEvidence = restoreFlowSnapshot(snapshotWith({}, goalChip('run-x', {resumable: true})));
+  assert.deepEqual(noEvidence.goal, goalChip('run-x', {resumable: true}), '无账本证据不误伤真停止恢复条');
+  const activeOnly = restoreFlowSnapshot(snapshotWith({'run-a': runOf('run-a')}, goalChip('run-a', {resumable: false})));
+  assert.deepEqual(activeOnly.goal, goalChip('run-a', {resumable: false}), '非 resumable 投影不属本轮校正范围');
+});
+
+test('恢复校正：工作流新标记与旧工作流卡均不遮断主目标恢复条', () => {
+  for (const legacy of [false,true]) {
+    const snapshot=snapshotWith({
+      'run-old':runOf('run-old',{outcome:'stopped'}),
+      'run-workflow':runOf('run-workflow',legacy?{}:{kind:'workflow'}),
+    },goalChip('run-old',{resumable:true}));
+    if (legacy) snapshot.timeline=[{kind:'assistant',runId:'run-workflow',parts:[{kind:'workflow-card',invocationId:'real-workflow'}]}];
+    assert.deepEqual(restoreFlowSnapshot(snapshot).goal,snapshot.goal,`工作流不清主目标恢复条：legacy=${legacy}`);
+  }
+});
+
+test('恢复校正：事件播报回合不构成独立链，不遮断恢复条', () => {
+  const restored = restoreFlowSnapshot(snapshotWith({
+    'run-old': runOf('run-old', {outcome: 'stopped'}),
+    'event-run-1': runOf('event-run-1', {source: 'event'}),
+  }, goalChip('run-old', {resumable: true})));
+  assert.deepEqual(restored.goal, goalChip('run-old', {resumable: true}), '事件回合不算新链受理');
+});

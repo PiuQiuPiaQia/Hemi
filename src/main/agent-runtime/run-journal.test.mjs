@@ -227,9 +227,10 @@ test('工作流挂起释放会话占用，恢复原身份前须等其他目标�
 
 // ---- goal-resume：终态目标显式恢复（新建 root 接续，不复活旧 root） ----
 
-/** 造一个带校验记录的已停止目标；requests 控制停止前已用的请求数。 */
-async function stoppedGoal(journal, {rootRunId = 'r', verdict = null, finish = 'cancelled', reason = '用户停止', requests = 2} = {}) {
-  const rootOwner = {...owner, rootRunId};
+/** 造一个带校验记录的已停止目标；requests 控制停止前已用的请求数。
+ *  conversationId/generation 可选：资格矩阵按独立会话隔离，代际用例按 generation 区分。 */
+async function stoppedGoal(journal, {rootRunId = 'r', verdict = null, finish = 'cancelled', reason = '用户停止', requests = 2, conversationId = owner.conversationId, generation = owner.generation} = {}) {
+  const rootOwner = {...owner, conversationId, generation, rootRunId};
   await journal.beginRoot(rootOwner);
   await journal.beginGoal(rootOwner, '完成目标恢复验收', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
   for (let i = 1; i <= requests; i++) {
@@ -249,11 +250,13 @@ async function stoppedGoal(journal, {rootRunId = 'r', verdict = null, finish = '
   return rootOwner;
 }
 
-test('goal-resume 资格矩阵：被停止/失败/部分完成/中断可恢复，blocked/完成/等待答复/继续过不可恢复', async t => {
+test('goal-resume 资格矩阵：被停止/失败/部分完成/中断可恢复，blocked/完成不可恢复（独立会话隔离）', async t => {
   const {journal} = await fixture(t);
   for (const [finish, expected] of [['cancelled', true], ['failed', true], ['partial', true], ['interrupted', true], ['blocked', false]]) {
-    const rootOwner = await stoppedGoal(journal, {rootRunId: `st-${finish}`, finish});
-    const summary = await journal.findResumableGoal(owner.conversationId, {goalId: rootOwner.rootRunId});
+    // 每个终态独立会话：新语义下恢复入口只属最近受理链，多链共存会互相遮断。
+    const conversationId = `matrix-${finish}`;
+    const rootOwner = await stoppedGoal(journal, {rootRunId: `st-${finish}`, finish, conversationId});
+    const summary = await journal.findResumableGoal(conversationId, {goalId: rootOwner.rootRunId});
     assert.equal(Boolean(summary), expected, finish);
     if (expected) {
       assert.equal(summary.goalId, rootOwner.rootRunId);
@@ -274,9 +277,7 @@ test('goal-resume 资格矩阵：被停止/失败/部分完成/中断可恢复�
   await journal.recordGoalCheck(doneOwner, {status: 'complete', reason: '已完成', evidence: ['结果验证'], remaining: [], nextAction: ''});
   await journal.finishRoot(doneOwner, 'completed');
   assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'st-done'}), null);
-  // goalId 缺省取最新可恢复者。
-  const latest = await journal.findResumableGoal(owner.conversationId);
-  assert.ok(latest && ['st-cancelled','st-failed','st-partial','st-interrupted'].includes(latest.goalId), `latest=${latest?.goalId}`);
+  // 无 goalId 的默认查询＝最近受理链的投影（见下方遮断/受理顺序用例，此处不跨链）。
 });
 
 test('goal-resume 新建 root 接续：goal.id/累计请求连续，旧 root 标 continued；二次恢复幂等拒绝', async t => {
@@ -345,8 +346,318 @@ test('goal-resume 绕过 workflow root；同会话其他执行目标占用时拒
   const sourceOwner = await stoppedGoal(journal, {rootRunId: 'r'});
   const busyOwner = {...owner, rootRunId: 'busy'};
   await journal.beginRoot(busyOwner);
-  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), {code: 'busy'});
-  await journal.finishRoot(busyOwner, 'completed');
-  const resumed = await journal.resumeGoal({...owner, rootRunId: 'resume-1'});
-  assert.equal(resumed.goal.id, sourceOwner.rootRunId);
+  // 新独立回合已建 root（尚无 goal）进行中：统一口径下按 already-active 拒绝——
+  // 最近受理就是该回合，旧链不提供恢复入口（busy 栅栏保留为并发兜底）。
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), error => error.code === 'goal-already-active' && error.rootRunId === 'busy');
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}, {goalId: 'r'}), {code: 'goal-not-resumable'});
+  // 该回合收口（如准备失败）：已受理的独立回合持续遮断旧链，不因无 goal 而失效。
+  await journal.finishRoot(busyOwner, 'failed', '输入准备失败');
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), {code: 'goal-not-resumable'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}, {goalId: sourceOwner.rootRunId}), {code: 'goal-not-resumable'});
+});
+
+// ---- 恢复资格只属最近受理的独立主目标链（不按终止时间、不跨链、不猜任务） ----
+
+test('旧停止目标被新独立目标遮断：新回合运行中/完成后，默认与显式旧 goalId 均不恢复', async t => {
+  const {journal} = await fixture(t);
+  const oldOwner = await stoppedGoal(journal, {rootRunId: 'old-r'});
+  // 新普通回合运行中：恢复入口已让位；同链语义只认 already-active（指向新链）。
+  const runningOwner = {...owner, rootRunId: 'new-r'};
+  await journal.beginRoot(runningOwner);
+  await journal.beginGoal(runningOwner, '新的普通问题', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'old-r'}), null, '显式旧 goalId 被拒');
+  assert.deepEqual(await journal.findResumableGoal(owner.conversationId), {alreadyActive: true, goalId: 'new-r', rootRunId: 'new-r'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x1'}, {goalId: 'old-r'}), {code: 'goal-not-resumable'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x2'}), {code: 'goal-already-active'});
+  // 新回合完成：最新链非可恢复，旧链也不再提供恢复入口（不按历史目标猜）。
+  await journal.checkGoal(runningOwner);
+  await journal.recordGoalCheck(runningOwner, {status: 'complete', reason: '已答复', evidence: ['回答'], remaining: [], nextAction: ''});
+  await journal.finishRoot(runningOwner, 'completed', '完成');
+  assert.equal(await journal.findResumableGoal(owner.conversationId), null);
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'old-r'}), null);
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x3'}, {goalId: 'old-r'}), {code: 'goal-not-resumable'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x4'}), {code: 'goal-not-resumable'});
+  assert.deepEqual((await journal.goalProjection(owner.conversationId)).goal, null, '普通问答收口后不残留恢复投影');
+  assert.equal((await journal.root(oldOwner)).status, 'cancelled', '旧 root 原终态不被恢复尝试改写');
+});
+
+test('旧目标晚终止不夺恢复入口：受理顺序优先于 terminalAt（后台链迟到收口）', async t => {
+  const {journal} = await fixture(t);
+  const policy = {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3};
+  // 旧目标后台交接释放会话占用后，新目标受理并停止。
+  const aOwner = {...owner, rootRunId: 'a'};
+  await journal.beginRoot(aOwner);
+  await journal.beginGoal(aOwner, '旧目标', policy);
+  await journal.suspendGoal(aOwner);
+  const bOwner = {...owner, rootRunId: 'b'};
+  await journal.beginRoot(bOwner);
+  await journal.beginGoal(bOwner, '新目标', policy);
+  await journal.endGoal(bOwner, 'cancelled', '用户停止');
+  await journal.finishRoot(bOwner, 'cancelled', '用户停止');
+  // 旧链迟到接续并很久之后才终止：terminalAt 晚于新链，但受理早于新链。
+  const realNow = Date.now();
+  const late = t.mock.method(Date, 'now', () => realNow + 10_000_000);
+  try {
+    await journal.resumeBackgroundGoal(aOwner);
+    await journal.endGoal(aOwner, 'cancelled', '用户停止');
+    await journal.finishRoot(aOwner, 'cancelled', '用户停止');
+  } finally { late.mock.restore(); }
+  const summary = await journal.findResumableGoal(owner.conversationId);
+  assert.equal(summary.goalId, 'b', '恢复入口属最近受理链，不属晚终止旧链');
+  assert.equal(summary.sourceRootRunId, 'b');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'a'}), null);
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal.goalId, 'b');
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x'}, {goalId: 'a'}), {code: 'goal-not-resumable'});
+});
+
+test('辅助与 workflow root 不构成独立链，不抢占主会话恢复候选', async t => {
+  const {journal} = await fixture(t);
+  const stopped = await stoppedGoal(journal, {rootRunId: 'main-r'});
+  // 之后受理的辅助 root（子代理/运输通道）与挂起的 workflow root 都不是独立主链。
+  await journal.beginRoot({...owner, rootRunId: 'aux-r', taskId: 't1'}, {kind: 'auxiliary', sourceRootRunId: 'main-r'});
+  const wfOwner = {...owner, rootRunId: 'wf-r'};
+  await journal.beginRoot(wfOwner, {kind: 'workflow'});
+  await journal.beginGoal(wfOwner, '工作流目标', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  await journal.suspendRoot(wfOwner);
+  assert.equal((await journal.findResumableGoal(owner.conversationId)).goalId, 'main-r');
+  assert.equal((await journal.findResumableGoal(owner.conversationId, {goalId: 'main-r'})).goalId, 'main-r');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'wf-r'}), null);
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal.goalId, 'main-r');
+  const resumed = await journal.resumeGoal({...owner, rootRunId: 'resume-1'}, {goalId: 'main-r'});
+  assert.equal(resumed.goal.id, stopped.rootRunId);
+});
+
+test('同链恢复后再次停止仍可恢复：链不换 goal.id，段位与累计请求跨恢复连续', async t => {
+  const {journal} = await fixture(t);
+  await stoppedGoal(journal, {rootRunId: 'r', requests: 2});
+  const first = await journal.resumeGoal({...owner, rootRunId: 'resume-1'});
+  assert.equal(first.goal.round, 2);
+  assert.equal(first.goal.requestOffset, 2);
+  // 恢复回合再次被停止：仍是最近受理链（恢复不换链），可再次恢复。
+  const r1 = {...owner, rootRunId: 'resume-1'};
+  await journal.requestStart(r1, {requestId: 'r1-q1', role: 'main'}, 3);
+  await journal.requestEnd('r1-q1', {error: null});
+  await journal.checkGoal(r1);
+  await journal.recordGoalCheck(r1, {status: 'continue', reason: '还差收尾', evidence: ['已有产出'], remaining: ['验证剩余结果'], nextAction: '运行剩余验证'});
+  await journal.endGoal(r1, 'cancelled', '用户停止');
+  await journal.finishRoot(r1, 'cancelled', '用户停止');
+  const again = await journal.findResumableGoal(owner.conversationId);
+  assert.equal(again.goalId, 'r', '同链 goal.id 不变');
+  assert.equal(again.sourceRootRunId, 'resume-1', '链内取最近可恢复 root');
+  assert.equal(again.unconfirmedWork, false);
+  const second = await journal.resumeGoal({...owner, rootRunId: 'resume-2'}, {goalId: 'r'});
+  assert.equal(second.goal.id, 'r');
+  assert.equal(second.goal.round, 3);
+  assert.equal(second.goal.requestOffset, 3, '累计请求跨恢复连续');
+});
+
+test('后台等待链不被恢复入口误杀；旧背景链晚接续/晚收口不压过新链', async t => {
+  const {journal} = await fixture(t);
+  const policy = {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3};
+  const bgOwner = {...owner, rootRunId: 'bg'};
+  await journal.beginRoot(bgOwner);
+  await journal.beginGoal(bgOwner, '后台目标', policy);
+  await journal.suspendGoal(bgOwner);
+  // 等待后台属同链非终态：幂等 already-active，不产生恢复投影。
+  assert.deepEqual(await journal.findResumableGoal(owner.conversationId), {alreadyActive: true, goalId: 'bg', rootRunId: 'bg'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x'}), {code: 'goal-already-active'});
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal, null);
+  // 新独立普通回合完成后，旧后台链迟到接续（root 重新 running）如实投影为活跃，
+  // 但晚终止后恢复入口仍只认最近受理的新链（此处新链已完成→无恢复入口）。
+  const newOwner = {...owner, rootRunId: 'new-r'};
+  await journal.beginRoot(newOwner);
+  await journal.beginGoal(newOwner, '新的普通问题', policy);
+  await journal.checkGoal(newOwner);
+  await journal.recordGoalCheck(newOwner, {status: 'complete', reason: '已答复', evidence: ['回答'], remaining: [], nextAction: ''});
+  await journal.finishRoot(newOwner, 'completed', '完成');
+  await journal.resumeBackgroundGoal(bgOwner);
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal.goalId, 'bg');
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal.resumable, false);
+  await journal.endGoal(bgOwner, 'cancelled', '用户停止');
+  await journal.finishRoot(bgOwner, 'cancelled', '用户停止');
+  assert.equal(await journal.findResumableGoal(owner.conversationId), null, '晚收口旧链不给恢复入口');
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal, null);
+});
+
+test('同毫秒受理的两个独立链：持久受理序决定恢复入口（重载后仍稳定）', async t => {
+  const {journal, dir} = await fixture(t);
+  const frozen = t.mock.method(Date, 'now', () => 1_700_000_000_000);
+  try {
+    await stoppedGoal(journal, {rootRunId: 'same-ms-a'});
+    await stoppedGoal(journal, {rootRunId: 'same-ms-b'});
+  } finally { frozen.mock.restore(); }
+  assert.equal((await journal.findResumableGoal(owner.conversationId)).goalId, 'same-ms-b', '后受理者持有恢复入口');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'same-ms-a'}), null);
+  // 受理序持久在 root 记录内：与时钟和存储读取顺序无关。
+  const seqA = (await journal.root({...owner, rootRunId: 'same-ms-a'})).admissionSeq;
+  const seqB = (await journal.root({...owner, rootRunId: 'same-ms-b'})).admissionSeq;
+  assert.ok(Number.isInteger(seqA) && Number.isInteger(seqB) && seqB > seqA, `admissionSeq 递增：${seqA} → ${seqB}`);
+  await journal.flush();
+  const restored = createRunJournal({dir});
+  await restored.ready();
+  assert.equal((await restored.findResumableGoal(owner.conversationId)).goalId, 'same-ms-b', '受理序随账本落盘');
+});
+
+test('迟到答复不能复活被遮断的旧链：beginGoal 续接要求等待链仍是最近受理链', async t => {
+  const {journal} = await fixture(t);
+  const policy = {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3};
+  const waitGoal = async (rootOwner, objective) => {
+    await journal.beginRoot(rootOwner);
+    await journal.beginGoal(rootOwner, objective, policy);
+    await journal.checkGoal(rootOwner);
+    await journal.recordGoalCheck(rootOwner, {status: 'awaiting_user', question: '要哪个？', reason: '需要选择', evidence: [], remaining: [], nextAction: ''});
+    await journal.finishRoot(rootOwner, 'awaiting_user');
+  };
+  // 旧链进入等待答复（挂起释放会话占用）。
+  await waitGoal({...owner, rootRunId: 'a'}, '等待答复的旧目标');
+  // 用户改问新的独立普通问题并完成。
+  const bOwner = {...owner, rootRunId: 'b'};
+  await journal.beginRoot(bOwner);
+  await journal.beginGoal(bOwner, '新的普通问题', policy);
+  await journal.checkGoal(bOwner);
+  await journal.recordGoalCheck(bOwner, {status: 'complete', reason: '已答复', evidence: ['回答'], remaining: [], nextAction: ''});
+  await journal.finishRoot(bOwner, 'completed', '完成');
+  // 旧链的迟到答复：续接被拒，不建 goal、不复活旧链。
+  const lateOwner = {...owner, rootRunId: 'late-cont'};
+  await journal.beginRoot(lateOwner);
+  await assert.rejects(journal.beginGoal(lateOwner, '答复', policy, {rootRunId: 'a', inputId: 'i1', answer: '选 A'}), /已变化/);
+  assert.equal((await journal.root(lateOwner)).goal, undefined);
+  assert.equal((await journal.root({...owner, rootRunId: 'a'})).status, 'awaiting_user', '旧等待 root 不被误改');
+  // 未被遮断的等待链照常续接（守卫不过度拦截）。
+  const cOwner = {conversationId: 'solo', rootRunId: 'c', generation: 1};
+  await waitGoal(cOwner, '单独等待的目标');
+  const contOwner = {conversationId: 'solo', rootRunId: 'c-cont', generation: 1};
+  await journal.beginRoot(contOwner);
+  const goal = await journal.beginGoal(contOwner, '答复', policy, {rootRunId: 'c', inputId: 'i1', answer: '选 A'});
+  assert.equal(goal.id, 'c');
+  assert.equal(goal.phase, 'active');
+});
+
+test('会话隔离：其他会话的新目标不拦截本会话等待链续接', async t => {
+  const {journal} = await fixture(t);
+  const policy = {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3};
+  const alphaOwner = {conversationId: 'alpha', rootRunId: 'a1', generation: 1};
+  await journal.beginRoot(alphaOwner);
+  await journal.beginGoal(alphaOwner, 'alpha 等待答复', policy);
+  await journal.checkGoal(alphaOwner);
+  await journal.recordGoalCheck(alphaOwner, {status: 'awaiting_user', question: '要哪个？', reason: '需要选择', evidence: [], remaining: [], nextAction: ''});
+  await journal.finishRoot(alphaOwner, 'awaiting_user');
+  // 另一会话随后受理并停止新目标（全局受理序更晚）。
+  const betaOwner = {conversationId: 'beta', rootRunId: 'b1', generation: 1};
+  await journal.beginRoot(betaOwner);
+  await journal.beginGoal(betaOwner, 'beta 新目标', policy);
+  await journal.endGoal(betaOwner, 'cancelled', '用户停止');
+  await journal.finishRoot(betaOwner, 'cancelled', '用户停止');
+  // alpha 的答复续接按本会话受理序判断，不被 beta 的 root 拦截。
+  const alphaCont = {conversationId: 'alpha', rootRunId: 'a1-cont', generation: 1};
+  await journal.beginRoot(alphaCont);
+  const goal = await journal.beginGoal(alphaCont, '选 A', policy, {rootRunId: 'a1', inputId: 'i1', answer: '选 A'});
+  assert.equal(goal.id, 'a1');
+  assert.equal(goal.phase, 'active');
+  // 两会话各自的恢复互不串扰：goalId 不跨会话命中。
+  assert.equal((await journal.findResumableGoal('beta')).goalId, 'b1');
+  assert.deepEqual(await journal.findResumableGoal('alpha'), {alreadyActive: true, goalId: 'a1', rootRunId: 'a1-cont'});
+  assert.equal(await journal.findResumableGoal('alpha', {goalId: 'b1'}), null);
+  assert.equal(await journal.findResumableGoal('beta', {goalId: 'a1'}), null);
+});
+
+test('已受理的独立主 root 尚未挂 goal 也遮断旧链（准备中/准备失败不留恢复窗口）', async t => {
+  const {journal} = await fixture(t);
+  await stoppedGoal(journal, {rootRunId: 'old-r'});
+  // 新独立回合建 root 后、beginGoal 前的准备阶段（running、无 goal）。
+  const prepping = {...owner, rootRunId: 'prep-r'};
+  await journal.beginRoot(prepping);
+  assert.deepEqual(await journal.findResumableGoal(owner.conversationId), {alreadyActive: true, goalId: 'prep-r', rootRunId: 'prep-r'});
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'old-r'}), null);
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x1'}, {goalId: 'old-r'}), {code: 'goal-not-resumable'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x2'}), {code: 'goal-already-active'});
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal, null, '准备中不出现旧恢复投影');
+  // 准备失败收口（failed、无 goal）：遮断保持，旧链不复活。
+  await journal.finishRoot(prepping, 'failed', '输入准备失败');
+  assert.equal(await journal.findResumableGoal(owner.conversationId), null);
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'old-r'}), null);
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x3'}), {code: 'goal-not-resumable'});
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'x4'}, {goalId: 'old-r'}), {code: 'goal-not-resumable'});
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal, null);
+  assert.equal((await journal.root({...owner, rootRunId: 'old-r'})).status, 'cancelled');
+});
+
+test('恢复保持会话 generation 隔离：跨代来源拒绝，同代预算/幂等保留', async t => {
+  const {journal} = await fixture(t);
+  await stoppedGoal(journal, {rootRunId: 'r', requests: 2});
+  // 回卷后的新时间线（generation 2）不能跨代恢复 generation 1 的旧链。
+  await assert.rejects(journal.resumeGoal({...owner, generation: 2, rootRunId: 'g2-resume'}), error => error.code === 'goal-generation-mismatch' && /回卷/.test(error.message));
+  const state = await journal.snapshot();
+  assert.equal(state.roots['g2-resume'], undefined, '拒绝不建新 root');
+  assert.equal(state.roots.r.status, 'cancelled', '旧 root 不被标 continued');
+  // 同代恢复照常：预算跨 root 连续、重复恢复幂等。
+  const resumed = await journal.resumeGoal({...owner, generation: 1, rootRunId: 'g1-resume'});
+  assert.equal(resumed.goal.id, 'r');
+  assert.equal(resumed.goal.round, 2);
+  assert.equal(resumed.goal.requestOffset, 2);
+  await assert.rejects(journal.resumeGoal({...owner, generation: 1, rootRunId: 'g1-resume-2'}), error => error.code === 'goal-already-active' && error.rootRunId === 'g1-resume');
+});
+
+// ---- 收口：同链后继不刷新链优先级；只读入口按 generation 过滤 ----
+
+/** 合成持久状态（注入内存 storage）：用于构造当前代码已不可再产生、但旧版账本
+ *  可能存在的历史形状（如新独立链之后又出现的迟到同链后继）。不读生产数据。 */
+async function fixtureState(t, roots) {
+  const dir = await mkdtemp(path.join(os.tmpdir(),'h64-journal-'));
+  t.after(() => rm(dir,{recursive:true,force:true}));
+  // roots 以数组传入（按受理序），账本表按 rootRunId 建键。
+  const table = Object.fromEntries(roots.map(root => [root.owner.rootRunId, structuredClone(root)]));
+  let state = {version: 2, roots: table, dispatches: {}, tasks: {}, inbox: {}, requests: {}, observations: {}, processes: {}};
+  const storage = {
+    load: async () => state,
+    commit: async changes => { for (const [table, records] of Object.entries(changes)) for (const [id, record] of Object.entries(records)) state[table][id] = structuredClone(record); },
+  };
+  const journal = createRunJournal({dir, storage});
+  await journal.ready();
+  return {journal};
+}
+const legacyGoal = (id, objective, {phase = 'cancelled', round = 1} = {}) => ({id, objective, phase, round, requestOffset: 0,
+  policy: {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3},
+  verifications: [{status: 'continue', reason: '还差收尾', evidence: ['已有产出'], remaining: ['验证剩余结果'], nextAction: '运行剩余验证', round}], startedAt: 1});
+const legacyRoot = (rootRunId, {goal = null, status = 'cancelled', seq, conversationId = 'c', generation = 1, kind = null} = {}) => ({
+  owner: {conversationId, rootRunId, generation}, status, createdAt: seq * 1000, admissionSeq: seq, terminalAt: seq * 1000 + 1,
+  reason: '用户停止', ...(kind ? {kind} : {}), ...(goal ? {goal} : {})});
+
+test('老版账本的迟到同链后继不把旧链顶回最新：默认/显式/投影/恢复均不复活旧链', async t => {
+  // 旧链 a 先停止；新独立链 b 随后受理并停止；老版代码此后又给旧链 a 建了迟到
+  // 恢复后继（goal.id='a'，admissionSeq 最高）——链优先级仍由链头决定。
+  const {journal} = await fixtureState(t, [
+    legacyRoot('a', {goal: legacyGoal('a', '旧链目标'), seq: 1}),
+    legacyRoot('b', {goal: legacyGoal('b', '新独立链目标'), seq: 2}),
+    legacyRoot('a-late-resume', {goal: legacyGoal('a', '旧链目标', {round: 2}), seq: 3}),
+    legacyRoot('a-late-cont', {goal: legacyGoal('a', '旧链目标', {round: 3}), seq: 4, status: 'interrupted'}),
+  ]);
+  const summary = await journal.findResumableGoal('c');
+  assert.equal(summary.goalId, 'b', '默认恢复入口属最近独立链，迟到后继不改变链序');
+  assert.equal(summary.sourceRootRunId, 'b');
+  assert.equal(await journal.findResumableGoal('c', {goalId: 'a'}), null, '显式旧 goalId 拒绝');
+  assert.equal((await journal.goalProjection('c')).goal.goalId, 'b', '投影不复活旧链');
+  const resumed = await journal.resumeGoal({conversationId: 'c', rootRunId: 'new-resume', generation: 1});
+  assert.equal(resumed.goal.id, 'b');
+  await assert.rejects(journal.resumeGoal({conversationId: 'c', rootRunId: 'new-resume-2', generation: 1}, {goalId: 'a'}), {code: 'goal-not-resumable'});
+});
+
+test('只读入口按 generation 过滤：跨代不显示、不回退历史同代链', async t => {
+  const {journal} = await fixture(t);
+  await stoppedGoal(journal, {rootRunId: 'g1-r'});
+  assert.equal((await journal.findResumableGoal(owner.conversationId, {generation: 1})).goalId, 'g1-r', '同代照常可见');
+  assert.equal((await journal.goalProjection(owner.conversationId, {generation: 1})).goal.goalId, 'g1-r');
+  // 回卷后的新时间线（generation 2）：旧链跨代不显示。
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {generation: 2}), null);
+  assert.equal((await journal.goalProjection(owner.conversationId, {generation: 2})).goal, null);
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'g1-r', generation: 2}), null);
+  // 新时间线随后受理并停止新链：按各自 generation 可见；查询旧代不回退到旧代链。
+  await stoppedGoal(journal, {rootRunId: 'g2-r', generation: 2, conversationId: owner.conversationId});
+  assert.equal((await journal.findResumableGoal(owner.conversationId, {generation: 2})).goalId, 'g2-r');
+  assert.equal((await journal.goalProjection(owner.conversationId, {generation: 2})).goal.goalId, 'g2-r');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {generation: 1}), null, '先选最近链再校验代际，不回退历史同代链');
+  assert.equal((await journal.goalProjection(owner.conversationId, {generation: 1})).goal, null);
+  // 不带 generation 的旧调用兼容：仍按最近独立链（此处为 g2）返回。
+  assert.equal((await journal.findResumableGoal(owner.conversationId)).goalId, 'g2-r');
+  assert.equal((await journal.goalProjection(owner.conversationId)).goal.goalId, 'g2-r');
 });
