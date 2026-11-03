@@ -99,9 +99,14 @@ async function fixture(t, scenario, policy = {}) {
           await until(()=>exists('proof.txt'));tools=[tool('read',{path:'proof.txt'})];
         }
         else if (scenario === 'model-error' && mainCalls === 2) {
-          // The child settled with an unknown report while its command stays live.
-          // Release the gate so the root's wait resolves; the next call consumes the command fact.
-          // (Only for the completion test: the stop test keeps the gate waiting for the root stop.)
+          // The child may not have settled yet when the parent sends its second request.
+          // Releasing the gate first lets the child consume the command fact (takeCompleted),
+          // so the parent would never receive an independent completion. Wait for the settled
+          // child with its command still live, then release — the scenario this test describes.
+          await until(async () => {
+            const state = await snapshot();
+            return Object.values(state.inbox ?? {}).length > 0 && Object.values(state.processes).some(item => item.state === 'active');
+          }, 15000);
           await fs.writeFile(path.join(workspace, 'release'), 'done');
           content = '子任务推理中断，命令仍在执行；等待真实完成。';
         } else content = '已收到全部结果，可以收口。';

@@ -547,7 +547,7 @@ test('签名握手 HTTP 失败保留阶段与状态，不发送模型请求或�
   assert.equal(f.transport.bigmodel.state.modelCalls, 0);
 });
 
-test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故障不重放已执行工作', async t => {
+test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故障不重放已执行工作', {timeout: 180_000}, async t => {
   for (const mode of ['complete', 'short-token', 'malformed', 'http-failure', 'preflight-failure']) await t.test(mode, async t => {
     const f = await fixture(t); await f.connect();
     const config = await mainConfig(f);
@@ -572,9 +572,13 @@ test('GLM 目标校验：冷启动预检和单次推理分别记账，校验故�
     };
     let runs = 0;
     const proof = path.join(f.dir, 'proof.txt');
-    const result = await driveGoal({ journal, owner, objective: '写入并核对文件', policy: goalPolicy(), signal: AbortSignal.timeout(10000),
+    // 这里的取消信号只是看门狗，不是被测行为：goal-driver 把外部取消当调用方中止
+    // （取消优先于供应商故障旁路），所以 5/10 秒的真实时钟预算在慢速 runner 上会把
+    // 用例自己取消掉。故障语义由 http-failure / preflight-failure 的真实故障覆盖。
+    const watchdog = AbortSignal.timeout(120_000);
+    const result = await driveGoal({ journal, owner, objective: '写入并核对文件', policy: goalPolicy(), signal: watchdog,
       run: async () => { runs++; await writeFile(proof, 'EXECUTED_ONCE'); return { texts: ['文件已写入'] }; },
-      verify: (objective, evidence) => verifyGoalCompletion({ execution, objective, evidence, signal: AbortSignal.timeout(5000) }),
+      verify: (objective, evidence) => verifyGoalCompletion({ execution, objective, evidence, signal: watchdog }),
       evidence: () => readFile(proof, 'utf8'), persist: async () => {} });
     assert.equal(runs, 1); assert.equal(await readFile(proof, 'utf8'), 'EXECUTED_ONCE');
     assert.equal(goalRunOutcome(result), 'completed'); await journal.finishRoot(owner, 'completed');
