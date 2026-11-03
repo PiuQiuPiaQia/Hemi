@@ -74,7 +74,7 @@ test('四家真实 SDK OAuth → 加密存储 → 账号目录 → 主对话与�
     const account = directory.providers.find(item => item.oauthProvider === provider);
     assert.equal(account.hasApiKey, true);
     if (provider === 'openai') assert.deepEqual(account.models.map(model => model.model), codexModelIds);
-    if (provider === 'github-copilot') assert.deepEqual(new Set(account.models.map(model => model.model)), new Set(['gpt-5-mini', 'claude-sonnet-5.5']));
+    if (provider === 'github-copilot') assert.deepEqual(new Set(account.models.map(model => model.model)), new Set(['gpt-5.4-nano', 'claude-sonnet-5.5']));
     const config = await f.profiles.get(account.models[0].modelKey);
     assert.equal(config.apiKey, 'oauth');
     for (const entry of account.models) {

@@ -45,9 +45,9 @@ The build copies `node_modules/electron/dist/LICENSE` and `LICENSES.chromium.htm
 
 Run `node scripts/verify-distribution-licenses.mjs <unpacked-app> <report.json>` after packaging. The report must be outside the application. It verifies shipped notice/source bytes against build inputs, rejects unregistered native package versions, and inventories native addons, shared libraries, WASM and executable binaries under the packaged app's node_modules, including prebuilds for other platforms. Electron's framework notices are checked separately. The macOS and Windows distribution reports accompany each Release.
 
-## Pi 1.3.0
+## Pi 1.5.0
 
-The seven installed Pi packages share the upstream [MIT license](licenses/Pi-MIT.txt), retained from commit `71023aec1546d6d677a65669c5665c0927ce0dd0` (tag `v1.3.0`). Their npm packages do not consistently include this full text. The `pi-mcp` package also ships its own `LICENSES` directory, which retains its embedded third-party notices. This does not replace notices for transitive npm or native libraries. Source and license hashes are recorded in sources.json.
+The eight installed Pi packages, including `@earendil-works/pi-schema`, share the upstream [MIT license](licenses/Pi-MIT.txt), retained from commit `f9a26365568127461c47a07a37dcb42c140a3ac5` (tag `v1.5.0`). Their npm packages do not consistently include this full text. The `pi-mcp` and `pi-schema` packages also ship their own `LICENSES` directories, retaining the embedded third-party notices, including TypeBox in `pi-schema`. This does not replace notices for transitive npm or native libraries. Source and license hashes are recorded in sources.json.
 
 ## Vendored shadcn stylesheet
 

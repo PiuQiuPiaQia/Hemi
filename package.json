@@ -43,8 +43,8 @@
     "build:bot": "node scripts/build-bot-runtime.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "1.3.0",
-    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@hemi/conversation-flow": "file:packages/conversation-flow",
     "@hemi/ui": "file:packages/ui",
     "@peculiar/x509": "2.2.0",

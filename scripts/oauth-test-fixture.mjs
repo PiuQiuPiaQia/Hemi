@@ -19,7 +19,9 @@ export function oauthTestReply(rawUrl, init = {}, bigmodel) {
   if (url.pathname === '/login/device/code') return json({ device_code: 'test-device', user_code: 'HEMI-TEST', verification_uri: 'https://github.com/login/device', interval: 0.01, expires_in: 60 });
   if (url.pathname === '/login/oauth/access_token') return json({ access_token: 'test-github-token', token_type: 'bearer' });
   if (url.pathname === '/copilot_internal/v2/token') return json({ token: 'test-copilot;proxy-ep=proxy.individual.githubcopilot.com;', expires_at: Math.floor(Date.now() / 1000) + 7200 });
-  if (url.pathname === '/models') return json({ data: ['gpt-5-mini', 'claude-sonnet-5.5'].map(id => ({ id, model_picker_enabled: true, policy: { state: 'enabled' }, capabilities: { supports: { tool_calls: true } } })) });
+  // Pi 1.5 no longer includes gpt-5-mini in Copilot's static catalog. Keep it
+  // advertised alongside two supported models to verify the SDK's intersection.
+  if (url.pathname === '/models') return json({ data: ['gpt-5.4-nano', 'claude-sonnet-5.5', 'gpt-5-mini'].map(id => ({ id, model_picker_enabled: true, policy: { state: 'enabled' }, capabilities: { supports: { tool_calls: true } } })) });
   const body = JSON.parse(init.body || '{}');
   let frames;
   const toolCheck = JSON.stringify(body).includes('Call hemi_connection_check');
