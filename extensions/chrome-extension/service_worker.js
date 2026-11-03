@@ -226,9 +226,50 @@ async function ensureWindow(task, defaults = {}) {
   await saveAgents();
 }
 
+/** 收尾先解组（2026-11-03）：Chrome 126+ 会在分组消失时把它存进「已保存的
+ *  标签组」（整窗关闭也触发）；实测先 tabs.ungroup 让组自然消失、再关窗/关页，
+ *  保存组记录才会真正删除。范围＝本任务窗口内容页＋taskTabIds 跨窗页，
+ *  不碰其它任务或用户窗口的分组；无分组的页面不需要解绑。 */
+async function ungroupTaskTabs(task) {
+  const candidates = new Set(task.taskTabIds ?? []);
+  if (Number.isInteger(task.windowId)) {
+    try {
+      for (const tab of await chrome.tabs.query({ windowId: task.windowId })) {
+        if (!isMarker(tab)) candidates.add(tab.id);
+      }
+    } catch { /* 窗口可能已被关掉；跨窗页仍按 ID 逐个核对。 */ }
+  }
+  const grouped = [];
+  for (const tabId of candidates) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.groupId >= 0) grouped.push(tabId);
+    } catch { /* 页面已关＝无需解组。 */ }
+  }
+  if (!grouped.length) return;
+  try {
+    await chrome.tabs.ungroup(grouped);
+  } catch (error) {
+    // 标签可能在收尾中途被用户/页面自己关掉（No tab）：重查仍活着且仍分组的
+    // 页面，一个不剩就当已解组（幂等）；还有活页没解组就抛错保留归属，供下次
+    // 收尾重试——不能吞错后直接关窗，伪装分组已从保存列表删除。
+    const pending = [];
+    for (const tabId of grouped) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.groupId >= 0) pending.push(tabId);
+      } catch { /* 已消失 */ }
+    }
+    if (pending.length) throw error;
+  }
+}
+
 /** 整窗关闭以捕获网页自行打开、未登记的标签；跨窗弹出页按 ID 单独回收。 */
 async function cleanupTaskTabs(task) {
   const ids = [...(task.taskTabIds ?? [])];
+  // 必须先解组再关：分组队列已由 session.end 排空、__ending 阻止重建，
+  // 顺序颠倒会把分组存进 Chrome 的「已保存的标签组」列表。
+  await ungroupTaskTabs(task);
   await closeWindow(task.windowId);
   for (const tabId of ids) {
     try { await chrome.tabs.get(tabId); } catch { continue; }

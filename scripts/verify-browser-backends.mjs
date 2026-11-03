@@ -12,6 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import electronPath from 'electron';
 import { _electron, chromium } from 'playwright-core';
 import { exportBrowserExtensionFiles } from '../src/main/agent/permission-state.mjs';
+import { readSavedGroupsFromFreshProfile } from './browser-saved-groups-fixture.mjs';
 
 const mode = process.env.VITE_DEV_SERVER_URL ? 'dev' : 'built';
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'hemi-browser-backends-'));
@@ -26,8 +27,10 @@ report.sources = Object.fromEntries(await Promise.all([
   'src/renderer/src/windows/voice/browser-section.tsx', 'extensions/chrome-extension/service_worker.js',
   'extensions/chrome-extension/page-cursor.js',
   'extensions/chrome-extension/page-operations.js', 'extensions/chrome-extension/manifest.json', 'package-lock.json',
+  'scripts/browser-saved-groups-fixture.mjs',
 ].map(async file => [file, createHash('sha256').update(await fs.readFile(new URL(`../${file}`, import.meta.url))).digest('hex')])));
 const check = (name, value) => { assert.ok(value, name); report.checks.push(name); };
+
 const server = http.createServer((req, res) => {
   if (req.url === '/slow') { report.slowStarted = true; return; }
   res.setHeader('content-type', 'text/html; charset=utf-8');
@@ -168,6 +171,16 @@ try {
   }, id);
   const controlPage = extension.pages()[0];
   await controlPage.goto(`${origin}/control`);
+  // Ordinary saved group is the positive control: closing a window must leave
+  // this group saved, while task cleanup must delete its own group completely.
+  const controlGroupTitle = 'Fixture ordinary saved group';
+  await extensionWorker.evaluate(async ({ origin, title }) => {
+    const win = await chrome.windows.create({ url: `${origin}/saved-control`, focused: false });
+    const tabs = await chrome.tabs.query({ windowId: win.id });
+    const groupId = await chrome.tabs.group({ tabIds: tabs.map(tab => tab.id), createProperties: { windowId: win.id } });
+    await chrome.tabGroups.update(groupId, { title, color: 'grey' });
+    await chrome.windows.remove(win.id);
+  }, { origin, title: controlGroupTitle });
   await invoke('headless-a', 'browser_extract');
   check('Late extension does not replace an active headless session', await backend('headless-a') === 'headless');
   const before = (await diagnostics()).launched;
@@ -231,11 +244,16 @@ try {
   await eventually(() => extension.pages().some(page => page.url() === `${origin}/popup-window`), 'real separate popup window');
   await invoke('extension-b', 'browser_navigate', { url: `${origin}/other-task` });
   const otherWindow = (await taskTabs('extension-b'))[0].windowId;
+  const otherGroupId = (await contentTabs('extension-b'))[0].groupId;
   await end('extension-a');
   check('Completion closes the full task window, group and separate popup',
     !await extensionWorker.evaluate(async id => (await chrome.windows.getAll()).some(window => window.id === id), taskWindow)
       && !extension.pages().some(page => ['/extension', '/popup', '/popup-window'].some(suffix => page.url() === origin + suffix)));
   check('Completion preserves another task and the ordinary browser tab', (await contentTabs('extension-b')).length === 1 && !controlPage.isClosed());
+  const remainingGroups = await extensionWorker.evaluate(() => chrome.tabGroups.query({}));
+  check('Completion removes its live group and preserves the concurrent task group',
+    !remainingGroups.some(group => group.id === groupId)
+      && remainingGroups.some(group => group.id === otherGroupId) && remainingGroups.length === 1);
   await extensionWorker.evaluate(async id => {
     const tabs = await chrome.tabs.query({ windowId: id });
     await chrome.tabs.remove(tabs.filter(tab => !tab.url.endsWith('/hemi-task.html')).map(tab => tab.id));
@@ -290,6 +308,10 @@ try {
   check('Reconnect migration closes legacy pooled windows, leaked pages and marker-only windows', legacy.pooledClosed && legacy.emptyClosed && !extension.pages().some(page => page.url() === `${origin}/legacy-leak`));
   check('Orphan cleanup preserves the ordinary browser window', !controlPage.isClosed());
   await extension.close(); extension = null;
+  report.savedTabGroups = await readSavedGroupsFromFreshProfile(path.join(temporary, 'extension-profile'));
+  check('Task cleanup deletes saved groups, with the ordinary closed group retained as a positive control',
+    report.savedTabGroups.groupEntityWrites > 0 && report.savedTabGroups.tombstones > 0
+      && report.savedTabGroups.groups.length === 1 && report.savedTabGroups.groups[0].title === controlGroupTitle);
   const switched = await invoke('extension-a', 'browser_extract').then(() => '', error => error.message);
   check('Disconnected extension falls back with an explicit page-reopen instruction', await backend('extension-a') === 'headless' && switched.includes('先 browser_navigate'));
   await invoke('extension-a', 'browser_navigate', { url: `${origin}/after-disconnect`, read: true });

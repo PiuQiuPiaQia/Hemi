@@ -12,6 +12,9 @@ async function fixture({ agents = {}, pool = [], tabs = [] } = {}) {
   const listeners = {};
   const storage = { hemiAgents: agents, hemiFreeWindows: pool };
   const failedWindows = new Set();
+  const failedUngroupTabs = new Set();
+  const opsLog = []; // 收尾动作顺序：ungroup 必须先于关窗/关页
+  const fault = { vanishOnUngroup: 0 }; // >0：下一次 ungroup 抛 No tab 并让目标页消失
   const event = name => ({ addListener: listener => { listeners[name] = listener; } });
   const missing = () => { throw new Error('No such target'); };
   let group = 10;
@@ -29,19 +32,31 @@ async function fixture({ agents = {}, pool = [], tabs = [] } = {}) {
       remove: async id => {
         if (failedWindows.has(id)) throw new Error('Injected close failure');
         windows.delete(id);
+        opsLog.push(`window.remove:${id}`);
         for (const [tabId, tab] of records) if (tab.windowId === id) records.delete(tabId);
       },
       onRemoved: event('windowRemoved'),
     },
     tabs: {
       get: async id => records.get(id) ?? missing(),
-      remove: async id => records.delete(id),
+      remove: async id => { records.delete(id); opsLog.push(`tabs.remove:${id}`); },
       query: async filter => [...records.values()].filter(tab => (filter.windowId == null || tab.windowId === filter.windowId) && (!filter.url || tab.url === filter.url)),
       group: async options => {
         grouping.push(options);
         const id = options.groupId ?? ++group;
         for (const tabId of options.tabIds) records.get(tabId).groupId = id;
         return id;
+      },
+      ungroup: async ids => {
+        const list = [...ids];
+        opsLog.push(`tabs.ungroup:${list.join(',')}`);
+        if (list.some(id => failedUngroupTabs.has(id))) throw new Error('Injected ungroup failure');
+        if (fault.vanishOnUngroup > 0) {
+          fault.vanishOnUngroup -= 1; // get 与 ungroup 之间页面被自己关掉
+          for (const id of list) records.delete(id);
+          throw new Error(`No tab with id: ${list[0]}`);
+        }
+        for (const id of list) { const tab = records.get(id); if (tab) tab.groupId = -1; }
       },
       onCreated: event('created'), onRemoved: event('removed'), onUpdated: event('updated'),
     },
@@ -66,7 +81,7 @@ async function fixture({ agents = {}, pool = [], tabs = [] } = {}) {
   runInContext(source, context);
   // Let the production startup load persisted state before invoking lifecycle paths.
   await runInContext('loadAgents()', context);
-  return { run: code => runInContext(code, context), records, windows, storage, failedWindows, grouping, groupTitles, listeners, sockets };
+  return { run: code => runInContext(code, context), records, windows, storage, failedWindows, failedUngroupTabs, opsLog, fault, grouping, groupTitles, listeners, sockets };
 }
 
 test('扩展清理整窗未登记标签和跨窗弹出页，保留普通窗口及并行任务', async () => {
@@ -133,6 +148,68 @@ test('分组沿用任务摘要；缺少摘要时用页面标题，不显示角�
   f.records.get(2).title = '另一个页面';
   await f.run("groupTaskTabs(getTask('random-123'))");
   assert.equal(f.groupTitles.at(-1), 'Hemi · 查询周末杭州天气');
+});
+
+test('收尾先解组再关窗，只解本任务（含跨窗页），并行任务与用户分组原样保留', async () => {
+  const f = await fixture({ agents: {
+    a: { windowId: 1, tabId: 2, taskTabIds: [2, 4], groupId: 10 },
+    b: { windowId: 2, tabId: 5, taskTabIds: [5], groupId: 11 },
+  }, tabs: [
+    { id: 1, windowId: 1, url: marker }, { id: 2, windowId: 1, url: 'https://task/', groupId: 10 },
+    { id: 3, windowId: 1, url: 'https://unrecorded/', groupId: 10 },
+    { id: 4, windowId: 3, url: 'https://popup/', groupId: 10 },
+    { id: 5, windowId: 2, url: 'https://other-task/', groupId: 11 },
+    { id: 6, windowId: 3, url: 'https://user/', groupId: 20 },
+  ] });
+  await f.run("opSessionEnd({}, getTask('a'))");
+  // 解组范围＝任务窗口内容页（含未登记页 3）＋taskTabIds 跨窗页 4，且先于关窗/关页。
+  const ungroupIndex = f.opsLog.findIndex(entry => entry.startsWith('tabs.ungroup:'));
+  assert.equal(ungroupIndex >= 0, true);
+  const ungrouped = f.opsLog[ungroupIndex].split(':')[1].split(',').map(Number).sort();
+  assert.deepEqual(ungrouped, [2, 3, 4]);
+  assert.ok(f.opsLog.indexOf('window.remove:1') > ungroupIndex, '必须先解组再关窗');
+  assert.ok(f.opsLog.indexOf('tabs.remove:4') > ungroupIndex, '跨窗页也先解组再关闭');
+  // 并行任务 b 的窗口、用户窗口 3 及两者的分组不受影响。
+  assert.equal(f.records.get(5).groupId, 11);
+  assert.equal(f.records.get(6).groupId, 20);
+  assert.equal(f.windows.has(2), true);
+  assert.equal(f.windows.has(3), true);
+  assert.deepEqual([...f.records.keys()], [5, 6]);
+});
+
+test('解组失败不关窗、保留页面归属；解除故障后重试可完成清理', async () => {
+  const f = await fixture({ agents: { a: { windowId: 1, tabId: 2, taskTabIds: [2], groupId: 10 } }, tabs: [
+    { id: 1, windowId: 1, url: marker }, { id: 2, windowId: 1, url: 'https://task/', groupId: 10 },
+  ] });
+  f.failedUngroupTabs.add(2);
+  await assert.rejects(f.run("opSessionEnd({}, getTask('a'))"), /Injected ungroup failure/);
+  assert.equal(f.opsLog.includes('window.remove:1'), false, '解组失败不能关窗伪装分组已删除');
+  assert.equal(f.windows.has(1), true);
+  assert.equal(f.storage.hemiAgents.a.windowId, 1, '归属保留供重试');
+  assert.equal(f.records.get(2).groupId, 10);
+  f.failedUngroupTabs.clear();
+  await f.run("opSessionEnd({}, getTask('a'))");
+  assert.deepEqual(f.opsLog.filter(entry => entry.startsWith('window.remove')), ['window.remove:1']);
+  assert.deepEqual([...f.records.keys()], []);
+});
+
+test('收尾途中标签被关掉时解组幂等，不盲目重放解组调用', async () => {
+  const f = await fixture({ agents: { a: { windowId: 1, tabId: 2, taskTabIds: [2], groupId: 10 } }, tabs: [
+    { id: 1, windowId: 1, url: marker }, { id: 2, windowId: 1, url: 'https://task/', groupId: 10 },
+  ] });
+  f.fault.vanishOnUngroup = 1; // get 之后、ungroup 之前页面被自己关掉
+  await f.run("opSessionEnd({}, getTask('a'))");
+  assert.deepEqual(f.opsLog.filter(entry => entry.startsWith('tabs.ungroup')), ['tabs.ungroup:2'], '只尝试一次，不重放');
+  assert.equal(f.windows.has(1), false);
+  assert.deepEqual(f.opsLog.indexOf('window.remove:1') > f.opsLog.indexOf('tabs.ungroup:2'), true);
+  // 已消失的标签直接跳过：没有仍分组的活页就不调用 ungroup。
+  const g = await fixture({ agents: { a: { windowId: 1, tabId: 2, taskTabIds: [2, 9], groupId: 10 } }, tabs: [
+    { id: 1, windowId: 1, url: marker }, { id: 2, windowId: 1, url: 'https://task/', groupId: 10 },
+  ] });
+  g.records.delete(2);
+  await g.run("opSessionEnd({}, getTask('a'))");
+  assert.equal(g.opsLog.some(entry => entry.startsWith('tabs.ungroup')), false);
+  assert.deepEqual(g.opsLog.filter(entry => entry.startsWith('window.remove')), ['window.remove:1']);
 });
 
 test('主窗口被手动关闭后重开任务，旧跨窗弹出页仍在回收范围', async () => {
