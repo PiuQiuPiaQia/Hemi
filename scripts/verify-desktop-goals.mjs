@@ -8,7 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {_electron} from 'playwright';
+import {_electron} from 'playwright-core';
 import electronPath from 'electron';
 import {GOAL_CHECK_SYSTEM} from '../src/main/agent-runtime/goal-driver.mjs';
 
@@ -25,7 +25,7 @@ const report = {mode,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'u
 const counts = new Map(), held = new Set();
 let app, page, vite;
 const verdict = (status, reason, remaining = [], question) => ({status,reason,evidence:['实际会话与真实工具结果'],remaining,nextAction:status === 'continue' ? '写入剩余成果' : '',...(question ? {question} : {})});
-const markers = ['PC_GOAL_CHUNK','PC_GOAL_WAIT_STOP','PC_GOAL_WAIT','PC_GOAL_STOP','PC_GOAL_INVALID','PC_GOAL_BLOCKED','PC_GOAL_JOBS','PC_GOAL_NO_PROGRESS'];
+const markers = ['PC_GOAL_CHUNK','PC_GOAL_WAIT_STOP','PC_GOAL_WAIT','PC_GOAL_STOP','PC_GOAL_RESUME','PC_GOAL_INVALID','PC_GOAL_BLOCKED','PC_GOAL_JOBS','PC_GOAL_NO_PROGRESS'];
 function respond(res, body, content, tool) {
   if (res.destroyed) return;
   res.writeHead(200, {'content-type':'text/event-stream'});
@@ -46,9 +46,11 @@ const server = http.createServer(async (req, res) => {
     if (checking) {
       assert.equal(body.tools?.length ?? 0,0); assert.equal(body.tool_choice,'none');
       if (marker === 'PC_GOAL_STOP') { const entry = {res,body}; held.add(entry); res.on('close', () => held.delete(entry)); return; }
+      if (marker === 'PC_GOAL_RESUME' && !fs.existsSync(path.join(workspace,'resume-proof.txt'))) { const entry = {res,body}; held.add(entry); res.on('close', () => held.delete(entry)); return; }
       if (marker === 'PC_GOAL_INVALID') { respond(res,body,'invalid json'); return; }
       if (marker === 'PC_GOAL_BLOCKED') { respond(res,body,JSON.stringify({...verdict('blocked','实际命令已确认外部资源不可用',['等待外部资源恢复']),nextAction:'请恢复外部资源后继续'})); return; }
       const done = marker === 'PC_GOAL_JOBS' ? fs.existsSync(path.join(workspace,'jobs-proof.txt')) : marker === 'PC_GOAL_CHUNK' ? fs.existsSync(path.join(workspace,'chunk-proof.txt'))
+        : marker === 'PC_GOAL_RESUME' ? fs.existsSync(path.join(workspace,'resume-proof.txt'))
         : marker === 'PC_GOAL_WAIT' && fs.existsSync(path.join(workspace,'clarified-proof.txt'));
       const value = done ? verdict('complete','实际文件已写入并核对')
         : marker?.startsWith('PC_GOAL_WAIT') ? verdict('awaiting_user','需要用户提供内容',['写入用户指定的内容'],'文件里写什么内容？')
@@ -59,10 +61,13 @@ const server = http.createServer(async (req, res) => {
     const count = counts.get(marker);
     let content, tool;
     if (marker === 'PC_GOAL_JOBS') {
-      if(count===1)tool=[
+      // 合成服务器即时响应会让回合在脚本轮询到 activity 前就收口；给真实的
+      // 「后台命令在途」窗口留出时间（断言语义不变，只稳定时序）。
+      if(count===1){await new Promise(r=>setTimeout(r,500));tool=[
         {name:'bash',args:{command:`"${process.execPath}" -e "process.stdout.write('FIRST_ALIVE');setTimeout(()=>require('fs').writeFileSync('bad-job.txt','BAD'),90000)"`,description:'等待第一个独立任务',run_in_background:true,timeout_ms:120000}},
         {name:'bash',args:{command:`"${process.execPath}" -e "process.stdout.write('SECOND_ALIVE');const t=setInterval(()=>{if(require('fs').existsSync('jobs-release')){clearInterval(t);require('fs').writeFileSync('jobs-proof.txt','DONE')}},30)"`,description:'等待第二个独立任务',run_in_background:true,timeout_ms:120000}},
-      ];else content=fs.existsSync(path.join(workspace,'jobs-proof.txt'))?'后台成果已核对完成。':'已核对现有输出，等待后台任务的实际结果。';
+      ];}
+      else { await new Promise(r=>setTimeout(r,1500)); content=fs.existsSync(path.join(workspace,'jobs-proof.txt'))?'后台成果已核对完成。':'已核对现有输出，等待后台任务的实际结果。'; }
     } else if (marker === 'PC_GOAL_CHUNK') {
       if (!all.includes('宿主目标续跑')) tool = {name:'read',args:{path:path.join(workspace,'seed.txt')}};
       else if (!fs.existsSync(path.join(workspace,'chunk-proof.txt'))) tool = {name:'write',args:{path:path.join(workspace,'chunk-proof.txt'),content:'PC_CHUNK_PROOF'}};
@@ -75,6 +80,13 @@ const server = http.createServer(async (req, res) => {
     } else if (marker === 'PC_GOAL_BLOCKED') {
       if(count===1)tool={name:'bash',args:{command:`"${process.execPath}" -e "process.stderr.write('EXTERNAL_RESOURCE_UNAVAILABLE');process.exit(23)"`,yield_ms:1000}};
       else content='已核对命令返回，外部资源不可用，请恢复资源后继续。';
+    } else if (marker === 'PC_GOAL_RESUME') {
+      if (all.includes('宿主目标恢复')) {
+        // 恢复回合：宿主注入恢复上下文；核对第一段成果后写最终产物。
+        if (!fs.existsSync(path.join(workspace,'resume-proof.txt'))) tool = {name:'write',args:{path:path.join(workspace,'resume-proof.txt'),content:'PC_GOAL_RESUMED'}};
+        else content = '恢复后已完成 PC_GOAL_RESUMED。';
+      } else if (count === 1) tool = {name:'write',args:{path:path.join(workspace,'resume-stage.txt'),content:'PC_GOAL_STAGE'}};
+      else content = '第一段成果已写入，等待完成校验。';
     } else content = '等待完成校验。';
     respond(res,body,content,tool);
   } catch (error) { report.errors.push(String(error.stack)); res.destroy(); }
@@ -211,6 +223,37 @@ try {
   for (const item of held) respond(item.res,item.body,JSON.stringify(verdict('continue','迟到校验',['不应执行'])));
   await page.waitForTimeout(150); assert.equal(counts.get('PC_GOAL_STOP'),1);
   check('停止取消真实在途完成校验，迟到结果不能触发续跑');
+
+  await newChat(); const resumeId=await send('PC_GOAL_RESUME 先做第一段，我会在校验期间停止，然后再显式恢复。');
+  await wait(() => held.size===1,'resume verifier request in flight');
+  const resumeRun=(await flow(resumeId)).activeRunId;
+  assert.ok(fs.existsSync(path.join(workspace,'resume-stage.txt')),'first stage effect is real');
+  await page.evaluate(({cid,runId}) => window.hemiVoice.flowCommand(cid,{type:'stop',targetRunId:runId}),{cid:resumeId,runId:resumeRun});
+  const resumeStopped=await settled(resumeId);
+  assert.equal(resumeStopped.runs[resumeRun].outcome,'stopped');
+  const stoppedRoot=journal().roots[resumeRun];
+  assert.notEqual(stoppedRoot.goal.phase,'complete');
+  assert.equal(stoppedRoot.status,'cancelled');
+  await wait(async()=>{const v=await flow(resumeId);return v.goal?.resumable===true;},'stopped goal projected as resumable');
+  assert.equal((await flow(resumeId)).goal.goalId,resumeRun);
+  check('显式停止后 flow 快照投影可恢复目标（goal-resume 按钮口径）');
+  // 用户显式恢复：新建 root 接续原目标，宿主注入恢复上下文，续跑至完成校验收口。
+  await page.evaluate(cid => window.hemiVoice.flowCommand(cid,{type:'goal-resume'}),resumeId);
+  await wait(async()=>{const v=await flow(resumeId);return v.activeRunId&&v.activeRunId!==resumeRun;},'resume turn started');
+  const resumedRunId=(await flow(resumeId)).activeRunId;
+  const busyAgain=await page.evaluate(cid => window.hemiVoice.flowCommand(cid,{type:'goal-resume'}),resumeId);
+  assert.equal(busyAgain.ok,false); assert.equal(busyAgain.code,'busy');
+  const resumed=await settled(resumeId,2);
+  assert.equal(resumed.runs[resumedRunId].outcome,'completed'); assert.deepEqual(errors(resumed),[]);
+  const resumedRoot=journal().roots[resumedRunId];
+  assert.equal(resumedRoot.goal.id,resumeRun,'restored goal keeps the original goal.id');
+  assert.equal(resumedRoot.goal.continuedFrom,resumeRun);
+  assert.equal(journal().roots[resumeRun].status,'continued');
+  assert.equal(fs.readFileSync(path.join(workspace,'resume-proof.txt'),'utf8'),'PC_GOAL_RESUMED');
+  assert.equal(resumed.runs[resumedRunId].continuationOf,resumeRun);
+  await wait(async()=>{const v=await flow(resumeId);return v.goal===null;},'completed goal leaves no resumable projection');
+  await page.screenshot({path:path.join(evidence,'goal-resume-completed.png')});
+  check('goal-resume 新建 root 接续原目标并续跑完成；进行中重复恢复被拒，完成后投影清空');
 
   await newChat(); const blockedId=await send('PC_GOAL_BLOCKED 尝试访问外部资源，按实际结果处理。');
   const blocked=await settled(blockedId),blockedRun=Object.values(blocked.runs)[0];

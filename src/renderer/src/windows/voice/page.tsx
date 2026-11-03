@@ -19,6 +19,8 @@ import {
   rewindToMessage,
 } from '@/windows/voice/lib/message-edit';
 import { retryInput } from '@/windows/voice/lib/turn-retry';
+import { isGoalResumePhrase } from '@/windows/voice/lib/goal-resume-phrase';
+import { createGoalResumeEcho, mergeGoalResumeEchoes, type GoalResumeEcho } from '@/windows/voice/lib/goal-resume-echo';
 import { cleanTitleSource } from '@/windows/voice/lib/conversation-format';
 import { contextWindow } from '@/windows/voice/lib/context-window';
 import { createPrimarySpeakerFilter } from '@/windows/voice/lib/primary-speaker';
@@ -81,7 +83,7 @@ import { useConversationFlow,sendLocalConversationCommand,waitLocalGeneration } 
 import { deriveModelBusy } from '@/windows/voice/lib/turn-busy';
 import { createComposerDraft } from '@/windows/voice/lib/composer-draft';
 import { createConversationResume, DRAFT_NEW_KEY } from '@/windows/voice/lib/conversation-resume';
-import {createDraftPersistence, projectConversationQueue, queueStoppedIdle as isQueueStoppedIdle} from '@hemi/conversation-flow/core';
+import {createDraftPersistence, projectConversationQueue} from '@hemi/conversation-flow/core';
 import { createFlowTimelineProjector } from '@/windows/voice/lib/flow-timeline-view';
 import { RemotePasswordDialog } from '@/windows/voice/remote-password-dialog';
 
@@ -244,7 +246,11 @@ export default function Home() {
     if (!items.length) return null;
     return { conversationId: flowSnapshot.conversationId, generation: flowSnapshot.generation, items };
   }, [flowSnapshot, conversationId]);
-  const transcripts = projection.transcripts;
+  /** goal-resume 不建用户消息：本地原话锚定提交前的运行边界，不能落在新回复/占位之后。 */
+  const [goalResumeEchoes, setGoalResumeEchoes] = useState<GoalResumeEcho[]>([]);
+  useEffect(() => { setGoalResumeEchoes([]); }, [conversationId]);
+  const transcripts = useMemo(() => mergeGoalResumeEchoes(projection.transcripts, goalResumeEchoes,
+    flowSnapshot?.conversationId === conversationId ? flowSnapshot : null), [projection, goalResumeEchoes, flowSnapshot, conversationId]);
   const transcriptsRef = useRef<TranscriptItem[]>([]);
   transcriptsRef.current = transcripts;
   const activeReply = transcripts.filter((item) => item.live && item.author === 'hemi');
@@ -1219,7 +1225,6 @@ export default function Home() {
   //  再由乐观 ID 隐藏队列）。
 
   const queueState: TurnQueueState = useMemo(() => projectConversationQueue(flowSnapshot), [flowSnapshot]);
-  const queueStoppedIdle = isQueueStoppedIdle(flowSnapshot);
 
   const handleEditQueued = useCallback(async (inputId: string) => {
     const cid = conversationIdRef.current;
@@ -1383,7 +1388,7 @@ export default function Home() {
     return null;
   }, []);
 
-  /** 063：/model 本地切换的轻量反馈（输入区短暂提示；不伪造对话消息）。 */
+  /** 063：模型切换反馈——sr-only 读屏播报（视觉反馈由 chip 文字变化承担；不伪造对话消息）。 */
   const [modelNotice, setModelNotice] = useState('');
   useEffect(() => {
     if (!modelNotice) return;
@@ -1860,6 +1865,38 @@ export default function Home() {
     }
   }, [adoptConversationTurn, flashAttachError]);
 
+  /** 文字与语音共用同一回显边界；先留原话，再发送目标恢复命令。 */
+  const appendGoalResumeEcho = useCallback((text: string, inputSource: InputSource) => {
+    const snapshot = flowSnapshotRef.current;
+    if (!snapshot || snapshot.conversationId !== conversationIdRef.current) return;
+    const echo = createGoalResumeEcho(snapshot, {
+      id: `goal-resume-echo-${createTranscriptId()}`, text, createdAt: Date.now(), author: 'user', inputSource,
+    });
+    setGoalResumeEchoes(current => [...current, echo]);
+  }, []);
+
+  /**
+   * 目标横幅「恢复」、错误重试和「继续」白名单转换共用 goal-resume 命令。
+   * 幂等（重复点击 already-active/busy 拒绝）不弹错误，轻提示即可；
+   * 返回是否受理成功（调用方可据此回退本地草稿）。
+   */
+  const sendGoalResume = useCallback(async (): Promise<boolean> => {
+    const bridge = window.hemiVoice;
+    const cid = conversationIdRef.current;
+    if (!bridge || !cid || workspaceMissingRef.current) return false;
+    const goal = flowSnapshotRef.current?.goal;
+    const receipt = await sendLocalConversationCommand(cid, { type: 'goal-resume', goalId: goal?.goalId }).catch(() => null);
+    if (!receipt) { logChain('goal-resume 发送失败（连接异常），保持现状'); return false; }
+    if (receipt.ok) {
+      logChain(`goal-resume 受理 · ${receipt.disposition ?? 'started'}${receipt.runId ? ` · run ${receipt.runId}` : ''}`);
+      return true;
+    }
+    // already-active/busy 幂等拒绝是正常态，不打断；其余原因轻提示一句。
+    if (receipt.code !== 'busy') flashAttachError(receipt.message ?? '没有可恢复的任务。');
+    logChain(`goal-resume 未受理（${receipt.code ?? 'unknown'}）：${receipt.message ?? ''}`);
+    return false;
+  }, [flashAttachError]);
+
   /** 用户新说完一轮：有新定稿才提交，上下文取最近若干回合。 */
   const submitTurn = useCallback(() => {
     if (!window.hemiVoice || !modelReadyRef.current) return;
@@ -1867,10 +1904,25 @@ export default function Home() {
     if (!unsent.length) return;
     const start = lastSubmitCountRef.current;
     const boundary = speechHistoryRef.current.length;
+    // 「继续」白名单受限转换（语音定稿汇入的文字轮）：整段定稿精确命中且目标
+    // 可恢复（idle）时改发 goal-resume；被拒则回退定稿边界，语音原文不丢。
+    const finalText = unsent.map((entry) => entry.text).join('\n');
+    if (isGoalResumePhrase(finalText) && flowSnapshotRef.current?.goal?.resumable
+      && (flowPhaseRef.current ?? 'idle') === 'idle') {
+      lastSubmitCountRef.current = boundary;
+      speechAcceptedCountRef.current = Math.max(speechAcceptedCountRef.current, boundary);
+      setSpeechDraftText('');
+      appendGoalResumeEcho(finalText, 'voice');
+      logChain(`语音「${finalText}」→ goal-resume 命令`);
+      void sendGoalResume().then((accepted) => {
+        if (!accepted && lastSubmitCountRef.current === boundary) lastSubmitCountRef.current = start;
+      });
+      return;
+    }
     const messages = contextWindow(historyFromTurns(transcriptsRef.current)).map((entry) => ({
       role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
     }));
-    messages.push({ role: 'user', content: unsent.map((entry) => entry.text).join('\n') });
+    messages.push({ role: 'user', content: finalText });
     lastSubmitCountRef.current = boundary;
     lastAttachmentViewsRef.current = [];
     lastReferencesRef.current = [];
@@ -1892,36 +1944,20 @@ export default function Home() {
         if (lastSubmitCountRef.current === boundary) lastSubmitCountRef.current = start;
       },
     });
-  }, [runTurn]);
-
-  /**
-   * 2026-10-18 裁决二读：「继续任务」＝真续跑——停止后没有新任务时，按普通文字
-   * 回合补一条「继续」，模型从停止处接着干；不再只是解除暂停位（用户实测反馈
-   * 「点了并没有继续」）。走既有受理/派发/落档链路，主进程旧实例上同样生效。
-   */
-  const handleContinueStoppedTask = useCallback(() => {
-    const bridge = window.hemiVoice;
-    const cid = conversationIdRef.current;
-    if (!bridge || !cid || workspaceMissingRef.current) return;
-    if ((flowPhaseRef.current ?? 'idle') !== 'idle') return;
-    // 先解除停止暂停（旧主进程没有「直发即解除」；新主进程两道都通）。
-    sendLocalConversationCommand(cid,{type:'resumeQueue'}).catch(() => {});
-    const messages = contextWindow(historyFromTurns(transcriptsRef.current)).map((entry) => ({
-      role: entry.author === 'hemi' ? 'assistant' : 'user', content: entry.text,
-    }));
-    messages.push({ role: 'user', content: '继续' });
-    lastAttachmentViewsRef.current = [];
-    lastReferencesRef.current = [];
-    lastSkillsRef.current = [];
-    logChain('继续任务 → 补「继续」回合');
-    void runTurn(messages, 'text', []);
-  }, [runTurn]);
+  }, [runTurn, sendGoalResume, appendGoalResumeEcho]);
 
   const handleRetryTurn = useCallback(() => {
     const cid = conversationIdRef.current;
     if (!cid || retryingRef.current === cid || flowRunActiveRef.current) return;
     if (!window.hemiVoice || !modelReadyRef.current || workspaceMissingRef.current) {
       flashAttachError(workspaceMissingRef.current ? '请先选择可用的工作区，再继续。' : '请先配置可用的模型，再继续。');
+      return;
+    }
+    // 失败回合可能属于被停止的目标：目标可恢复时优先 goal-resume 接续原目标；
+    // 不可恢复（回合从未受理、没有目标）时回退重发原输入。
+    if (flowSnapshotRef.current?.goal?.resumable) {
+      logChain('错误后继续 → goal-resume 命令');
+      void sendGoalResume();
       return;
     }
     const input = retryInput(transcriptsRef.current, flowSnapshotRef.current);
@@ -1937,7 +1973,7 @@ export default function Home() {
     void runTurn(messages, input.inputSource, input.attachmentIds, input).finally(() => {
       if (retryingRef.current === cid) { retryingRef.current = null; setRetryingConversation(null); }
     });
-  }, [runTurn, flashAttachError]);
+  }, [runTurn, flashAttachError, sendGoalResume]);
 
   /**
    * 024：文字发送——不经过 ASR 定稿入口，直接汇入同一模型回合；同步校验与
@@ -1980,6 +2016,25 @@ export default function Home() {
       logChain('text submit 跳过：工作区目录不可用');
       return;
     }
+    // 「继续」白名单受限转换：最终文本精确命中且目标可恢复（idle）、无附件时
+    // 改发 goal-resume 命令；用户原话以本地回显保留在时间线。白名单之外的
+    // 任何文本（如「继续，但是换个思路」）一律走普通文本回合。
+    if (isGoalResumePhrase(text) && !draftAttachments.length
+      && flowSnapshotRef.current?.goal?.resumable
+      && (flowPhaseRef.current ?? 'idle') === 'idle') {
+      const resumeVersion = composerDraft.getSnapshot().revision;
+      if (submittingDraftsRef.current.has(resumeVersion)) return;
+      submittingDraftsRef.current.add(resumeVersion);
+      stopTtsPlayback();
+      if (composerDraft.accept(resumeVersion)) setDiscussContext(null);
+      appendGoalResumeEcho(text, 'text');
+      lastAttachmentViewsRef.current = [];
+      lastReferencesRef.current = [];
+      lastSkillsRef.current = [];
+      logChain(`输入「${text}」→ goal-resume 命令`);
+      void sendGoalResume().finally(() => submittingDraftsRef.current.delete(resumeVersion));
+      return;
+    }
     // 播放中的语音回复让位（只停声音，不动通话与麦克风）。
     stopTtsPlayback();
     // 028 R-04：正文和附件作为同一条用户消息受理——冻结附件快照进对话流，
@@ -2002,7 +2057,7 @@ export default function Home() {
       submissionToken:composerDraft.getSnapshot().token,
       onAccepted: () => { if (composerDraft.accept(version)) setDiscussContext(null); },
     }).finally(() => submittingDraftsRef.current.delete(version));
-  }, [draft, draftAttachments, draftReferences, draftSkills, runTurn, stopTtsPlayback, composerDraft]);
+  }, [draft, draftAttachments, draftReferences, draftSkills, runTurn, stopTtsPlayback, composerDraft, sendGoalResume, appendGoalResumeEcho]);
 
   // —— 024 消息编辑（纯逻辑在 lib/message-edit.ts）——
   // 2026-10-10 语义改版（仿 zcode 回卷）：「重新发送」＝保存新文本＋把这条
@@ -3852,8 +3907,8 @@ export default function Home() {
         onAddReference={handleAddReference}
         onRemoveReference={handleRemoveReference}
         queueState={queueState}
-        queueStoppedIdle={queueStoppedIdle}
-        onContinueStoppedTask={handleContinueStoppedTask}
+        goal={flowSnapshot?.conversationId === conversationId ? flowSnapshot.goal ?? null : null}
+        onGoalResume={() => void sendGoalResume()}
         onPromoteQueued={handlePromoteQueued}
         onReorderQueued={handleReorderQueued}
         onWithdrawQueued={handleWithdrawQueued}

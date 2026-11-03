@@ -57,7 +57,7 @@ function diff(previous,next) {
   // Unchanged child transcripts can be large; compare their immutable entries
   // before serializing metadata for every streamed text patch.
   const equalMap=(a={},b={})=>a===b||(Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(key=>Object.hasOwn(b,key)&&equal(a[key],b[key])));
-  const meta={};for(const key of ['phase','activeRunId','awaitingUser','queuePaused','history'])if(!equal(previous[key],next[key]))meta[key]=next[key];
+  const meta={};for(const key of ['phase','activeRunId','awaitingUser','queuePaused','goal','history'])if(!equal(previous[key],next[key]))meta[key]=next[key];
   if(Object.keys(meta).length)changes.push({kind:'meta',meta});
   if(!equal(previous.pending,next.pending))changes.push({kind:'queue',pending:next.pending});
   const oldIds=previous.timeline.map(itemId),newIds=next.timeline.map(itemId);

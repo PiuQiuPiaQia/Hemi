@@ -92,6 +92,8 @@ const COMMANDS = new Set([
   'withdrawInput',
   'resendInput',
   'rewind',
+  // 目标恢复与 PC 同一受理口径（controller 内做准入与幂等）。
+  'goal-resume',
 ]);
 
 export async function createBotHost({

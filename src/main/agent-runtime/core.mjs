@@ -778,6 +778,32 @@ export function createAgentRuntime({
     hostEvent.content=[`原目标：${root.goal.objective}`,hostEvent.content,'只处理上述实际结果，继续原目标；不要重启已受理的命令，不恢复已取消的工作。'].join('\n');
     return runRootTurn(conversationId,{...pending.args,hostEvent});
   }
+  /** 恢复回合的宿主上下文（用户显式触发，重启后绝不自动恢复）。 */
+  const GOAL_RESUME_STATUS_LABELS = {cancelled:'用户停止', failed:'执行失败', partial:'分段预算耗尽或完成校验未通过，已有成果保留', interrupted:'进程中断，副作用待核对'};
+  function goalResumeHostEvent({goal, source}) {
+    const label = GOAL_RESUME_STATUS_LABELS[source.status] ?? '已停止';
+    const lines = [
+      '［宿主目标恢复 · 用户显式继续原目标，不是新指令］',
+      `原目标：${goal.objective}`,
+      `当前第 ${goal.round}/${goal.policy.maxRounds} 段；累计预算和执行归属不变。`,
+      `上次结束状态：${label}${source.reason ? `：${source.reason}` : ''}`,
+    ];
+    const last = [...(goal.verifications ?? [])].reverse().find(item => item.remaining?.length || item.nextAction);
+    if (last?.remaining?.length) lines.push(`剩余工作：${last.remaining.join('；')}`);
+    if (last?.nextAction) lines.push(`下一步：${last.nextAction}`);
+    lines.push('继续完成上述工作并验证结果；不要重复已生效的动作，不要恢复已取消的工作。');
+    return {customType:'hemi_goal_resume', content: lines.join('\n')};
+  }
+  /** 目标恢复公开入口：账本新建 root 接续（goal 不清零、旧 root 标 continued），
+   *  并组装恢复回合宿主上下文。runRootTurn 的 beginGoal 因 goal 已存在而幂等复用。 */
+  async function resumeGoal(conversationId, {generation, runId, goalId} = {}) {
+    const entry = agents.get(conversationId);
+    if (entry?.activeRootRunId) throw Object.assign(new Error('该对话已有执行中的根目标'), {code:'busy'});
+    if (!Number.isSafeInteger(generation) || generation < 0 || typeof runId !== 'string' || !runId) throw new Error('恢复回合缺少运行身份');
+    await journalReady;
+    const resumed = await journal.resumeGoal({conversationId, rootRunId: runId, generation}, {goalId});
+    return {...resumed, hostEvent: goalResumeHostEvent(resumed)};
+  }
   /** 上下文容量快照（渲染层轮末/切换会话时拉取；无在途会话返回 null）。 */
   function contextUsageFor(conversationId) {
     const entry = agents.get(conversationId);
@@ -1114,5 +1140,5 @@ export function createAgentRuntime({
     } finally {journal.dispose();disposeAll();environment?.release();}
   }
 
-  return { resumeBackground, backgroundContext, backgroundCommand, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
+  return { resumeBackground, backgroundContext, backgroundCommand, resumeGoal, isBusy: () => workflowClosures.size > 0 || [...agents.values()].some(entry => entry.activeRootRunId || entry.agent.isBusy()) || [...subagents._internals.tasks.values()].some(task => task.phase !== 'terminal'), prepareExecution, auxiliarySession, usageRecordsFor, usageHistory, observeTransport, auxiliaryCall, obtain, runRootTurn, contextUsageFor, completeConversation, suspendWorkflow, journal, executionForConversation: (id, purpose, rootRunId) => { const ctx = agents.get(id)?.ctx; if (!ctx || ctx.runId !== rootRunId || ctx.cancelled) throw new DOMException('根目标已停止', 'AbortError'); return executionFor(ctx, ctx.modelPlan, purpose); }, get, persist, invalidate, abort, stopRoot, requestHandoff, disposeAll, close, subagents, roles, openWorkflowNode };
 }

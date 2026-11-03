@@ -44,6 +44,8 @@ export function createFlowSnapshot({ conversationId, revision = 0, generation = 
     permissions: {},
     pendingReports: [],
     backgroundJobs: [],
+    /** 目标投影（宿主从账本组装）：可恢复目标摘要驱动「继续任务」按钮；无目标为 null。 */
+    goal: null,
   };
 }
 
@@ -306,7 +308,16 @@ export function applyFlowFact(snapshot, fact) {
     }
     case 'run-preparing': {
       if (snapshot.phase !== 'idle') return { snapshot, patch: null, applied: false, dropped: 'slot-busy' };
-      if (fact.continuationOf && snapshot.awaitingUser?.runId !== fact.continuationOf) return {snapshot,patch:null,applied:false,dropped:'stale-continuation'};
+      if (fact.resumeOf) {
+        // 目标恢复：continuationOf 指向已终态的来源 root（不经 awaitingUser 快照）。
+        // 同源恢复只受理一次——已有同源在途接续即过期（双击/重放按 stale 丢弃）。
+        if (fact.continuationOf !== fact.resumeOf) return { snapshot, patch: null, applied: false, dropped: 'invalid-resume' };
+        if (Object.values(snapshot.runs).some(run => run.resumeOf === fact.resumeOf && !run.closedAt)) {
+          return { snapshot, patch: null, applied: false, dropped: 'stale-resume' };
+        }
+      } else if (fact.continuationOf && snapshot.awaitingUser?.runId !== fact.continuationOf) {
+        return {snapshot,patch:null,applied:false,dropped:'stale-continuation'};
+      }
       const run = {
         runId: fact.runId,
         rootRunId: fact.rootRunId ?? fact.runId,
@@ -317,9 +328,11 @@ export function applyFlowFact(snapshot, fact) {
         endedAt: null,
         closedAt: null,
         outcome: null,
-        ...(fact.continuationOf ? {continuationOf:fact.continuationOf} : {}),
+        ...(fact.resumeOf ? {resumeOf: fact.resumeOf} : {}),
+        ...(fact.continuationOf ? {continuationOf: fact.continuationOf} : {}),
       };
-      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'preparing', activeRunId: fact.runId, runs: { ...snapshot.runs, [fact.runId]: run } };
+      const next = { ...snapshot, revision: snapshot.revision + 1, phase: 'preparing', activeRunId: fact.runId, runs: { ...snapshot.runs, [fact.runId]: run },
+        ...(fact.resumeGoal ? { goal: { ...fact.resumeGoal, resumable: false } } : {}) };
       return { snapshot: next, patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] }, applied: true };
     }
     case 'run-started': {
@@ -406,6 +419,14 @@ export function applyFlowFact(snapshot, fact) {
         patch: { kind: 'multi', changes: [{ kind: 'meta', meta: metaOf(next) }, { kind: 'runs', runs: next.runs }] },
         applied: true,
       };
+    }
+    case 'goal-status': {
+      // 宿主从账本组装的目标投影（收口后异步追加）；无变化不递增 revision。
+      if (!('goal' in fact)) return { snapshot, patch: null, applied: false, dropped: 'invalid-goal-status' };
+      const goal = fact.goal ?? null;
+      if (JSON.stringify(snapshot.goal ?? null) === JSON.stringify(goal)) return { snapshot, patch: null, applied: false, dropped: 'goal-unchanged' };
+      const next = { ...snapshot, revision: snapshot.revision + 1, goal };
+      return { snapshot: next, patch: { kind: 'meta', meta: metaOf(next) }, applied: true };
     }
     case 'part-appended': {
       // 追加不要求 part 已存在——只做代次与运行归属校验（新 part 找不到是正常态）。
@@ -514,7 +535,7 @@ export function applyFlowFact(snapshot, fact) {
 }
 
 function metaOf(snapshot) {
-  return { phase: snapshot.phase, activeRunId: snapshot.activeRunId, awaitingUser:snapshot.awaitingUser ?? null, queuePaused: snapshot.queuePaused, generation: snapshot.generation };
+  return { phase: snapshot.phase, activeRunId: snapshot.activeRunId, awaitingUser:snapshot.awaitingUser ?? null, queuePaused: snapshot.queuePaused, goal: snapshot.goal ?? null, generation: snapshot.generation };
 }
 
 /**

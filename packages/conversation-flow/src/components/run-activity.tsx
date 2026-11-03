@@ -4,10 +4,13 @@ import type { BackgroundJobView, RunActivityView } from "../types/presentation.j
 import { normalizeCommandDescription } from "../presentation/command-display.js";
 import {formatDuration} from "../presentation/task-process-state.js";
 
+// continuing（宿主目标续跑轮）刻意不投影为一行标题：它标记的是调度层"这轮是
+// 续跑而不是新用户回合"，对用户没有增量信息，且会与「正在想」等正文状态并排
+// 造成双状态（2026-11-03 用户裁决）。该轮若真有后台命令/资源等待，仍按 jobs/
+// resources 正常展示。
 const PHASE_TITLES: Partial<Record<RunActivityView["phase"], string>> = {
   compacting: "正在压缩上下文",
   verifying: "正在检查完成情况",
-  continuing: "继续处理剩余工作",
   "waiting-subagents": "等待子任务完成",
   finishing: "正在收尾",
 };

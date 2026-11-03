@@ -39,8 +39,22 @@ export type FlowSnapshotView = {
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
   backgroundJobs?: BackgroundJobView[];
+  /** 目标投影（宿主从账本组装）：可恢复目标驱动「继续任务」入口；无目标为 null。 */
+  goal?: GoalSummaryView | null;
   /** Negotiated active window; older items remain available through history paging. */
   history?: {start:number;total:number;gap?:{start:number;end:number;beforeId:string};continuation?:{questionId:string|null}};
+};
+
+export type GoalSummaryView = {
+  goalId: string;
+  objective: string;
+  phase: string;
+  round: number;
+  status: string;
+  nextAction?: string | null;
+  remaining?: string[];
+  /** 当前 idle 且存在可恢复目标时为 true；目标活跃（恢复中/执行中）为 false。 */
+  resumable: boolean;
 };
 export type FlowHistoryPage = {conversationId:string;generation:number;revision:number;start:number;end:number;total:number;snapshot:FlowSnapshotView;continuation?:{questionId:string|null;earlier:boolean;later:boolean}};
 

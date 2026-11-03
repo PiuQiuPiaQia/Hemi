@@ -224,3 +224,129 @@ test('工作流挂起释放会话占用，恢复原身份前须等其他目标�
   await restored.finishRoot(owner,'cancelled');
   await assert.rejects(restored.beginRoot(owner),/终结/);
 });
+
+// ---- goal-resume：终态目标显式恢复（新建 root 接续，不复活旧 root） ----
+
+/** 造一个带校验记录的已停止目标；requests 控制停止前已用的请求数。 */
+async function stoppedGoal(journal, {rootRunId = 'r', verdict = null, finish = 'cancelled', reason = '用户停止', requests = 2} = {}) {
+  const rootOwner = {...owner, rootRunId};
+  await journal.beginRoot(rootOwner);
+  await journal.beginGoal(rootOwner, '完成目标恢复验收', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  for (let i = 1; i <= requests; i++) {
+    await journal.requestStart(rootOwner, {requestId: `${rootRunId}-q${i}`, role: 'main'}, 3);
+    await journal.requestEnd(`${rootRunId}-q${i}`, {error: null});
+  }
+  await journal.checkGoal(rootOwner);
+  await journal.recordGoalCheck(rootOwner, verdict ?? {status: 'continue', reason: '还差收尾', evidence: ['已有产出'], remaining: ['验证剩余结果'], nextAction: '运行剩余验证'});
+  if (finish === 'blocked') {
+    await journal.checkGoal(rootOwner);
+    await journal.recordGoalCheck(rootOwner, {status: 'blocked', reason: '外部资源不可用', evidence: ['实际命令失败'], remaining: ['资源恢复后完成'], nextAction: '恢复资源'});
+    await journal.finishRoot(rootOwner, 'blocked');
+    return rootOwner;
+  }
+  await journal.endGoal(rootOwner, finish === 'partial' ? 'budget_limited' : finish === 'cancelled' ? 'cancelled' : finish, reason);
+  await journal.finishRoot(rootOwner, finish, reason);
+  return rootOwner;
+}
+
+test('goal-resume 资格矩阵：被停止/失败/部分完成/中断可恢复，blocked/完成/等待答复/继续过不可恢复', async t => {
+  const {journal} = await fixture(t);
+  for (const [finish, expected] of [['cancelled', true], ['failed', true], ['partial', true], ['interrupted', true], ['blocked', false]]) {
+    const rootOwner = await stoppedGoal(journal, {rootRunId: `st-${finish}`, finish});
+    const summary = await journal.findResumableGoal(owner.conversationId, {goalId: rootOwner.rootRunId});
+    assert.equal(Boolean(summary), expected, finish);
+    if (expected) {
+      assert.equal(summary.goalId, rootOwner.rootRunId);
+      assert.equal(summary.sourceRootRunId, rootOwner.rootRunId);
+      assert.equal(summary.objective, '完成目标恢复验收');
+      assert.equal(summary.status, finish);
+      assert.deepEqual(summary.remaining, ['验证剩余结果']);
+      assert.equal(summary.nextAction, '运行剩余验证');
+      assert.equal(summary.unconfirmedWork, false);
+      assert.equal(summary.budgetExhausted, false);
+    }
+  }
+  // 完成校验通过的目标不可恢复；等待答复走答复续接，也不是恢复对象。
+  const doneOwner = {...owner, rootRunId: 'st-done'};
+  await journal.beginRoot(doneOwner);
+  await journal.beginGoal(doneOwner, '已完成', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  await journal.checkGoal(doneOwner);
+  await journal.recordGoalCheck(doneOwner, {status: 'complete', reason: '已完成', evidence: ['结果验证'], remaining: [], nextAction: ''});
+  await journal.finishRoot(doneOwner, 'completed');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'st-done'}), null);
+  // goalId 缺省取最新可恢复者。
+  const latest = await journal.findResumableGoal(owner.conversationId);
+  assert.ok(latest && ['st-cancelled','st-failed','st-partial','st-interrupted'].includes(latest.goalId), `latest=${latest?.goalId}`);
+});
+
+test('goal-resume 新建 root 接续：goal.id/累计请求连续，旧 root 标 continued；二次恢复幂等拒绝', async t => {
+  const {journal,dir} = await fixture(t);
+  const sourceOwner = await stoppedGoal(journal, {rootRunId: 'r'});
+  const nextOwner = {...owner, rootRunId: 'resume-1'};
+  const resumed = await journal.resumeGoal(nextOwner);
+  assert.equal(resumed.goal.id, 'r');
+  assert.equal(resumed.goal.objective, '完成目标恢复验收');
+  assert.equal(resumed.goal.round, 2);
+  assert.equal(resumed.goal.requestOffset, 2, '前一段已用请求计入 requestOffset');
+  assert.equal(resumed.source.rootRunId, 'r');
+  assert.equal(resumed.source.status, 'cancelled');
+  const oldRoot = await journal.root(sourceOwner);
+  assert.equal(oldRoot.status, 'continued');
+  assert.equal(oldRoot.continuedBy, 'resume-1');
+  assert.ok(oldRoot.terminalAt);
+  assert.equal(oldRoot.goal.phase, 'continued');
+  // 持久化断言：continued 标记必须落盘（行内 mutation 不进变更集的回归在此暴露）。
+  await journal.flush();
+  const persisted = createRunJournal({dir}); await persisted.ready();
+  assert.equal((await persisted.root(sourceOwner)).status, 'continued');
+  const newRoot = await journal.root(nextOwner);
+  assert.equal(newRoot.goal.phase, 'active');
+  assert.equal(newRoot.goal.continuedFrom, 'r');
+  // 累计预算跨 root 连续：旧请求计入新 goal（requestOffset=2），新请求接着占用剩余总额。
+  await journal.requestStart(nextOwner, {requestId: 'resume-q1', role: 'main'}, 3);
+  // 已恢复的活跃 goal 再次恢复：幂等 already-active 并指向既有 root。
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-2'}), error => error.code === 'goal-already-active' && error.rootRunId === 'resume-1');
+  // 恢复回合后续 beginGoal 幂等复用账本 goal，不覆盖 objective/round。
+  const goal = await journal.beginGoal(nextOwner, '', {maxRounds: 1, maxRequests: 1, maxRequestsPerRound: 1, noProgressRounds: 1});
+  assert.equal(goal.id, 'r'); assert.equal(goal.round, 2); assert.equal(goal.objective, '完成目标恢复验收');
+});
+
+test('goal-resume 拒绝：无可恢复目标、未确认工作、预算耗尽（不执行任何请求、不建 root）', async t => {
+  const {journal} = await fixture(t);
+  await assert.rejects(journal.resumeGoal(owner), {code: 'goal-not-resumable'});
+  const sourceOwner = await stoppedGoal(journal, {rootRunId: 'r', requests: 10});
+  // 预算耗尽拒绝：goalRequests 已达 maxRequests=10。
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), {code: 'goal-budget-limit'});
+  const state = await journal.snapshot();
+  assert.equal(state.roots['resume-1'], undefined, '拒绝恢复不建新 root');
+  assert.equal(state.roots.r.status, 'cancelled', '拒绝恢复不改旧 root');
+  // 停止时残留的未完成观察（如进程重启后副作用未核对）拒绝恢复。
+  const another = {...owner, rootRunId: 'r2'};
+  await journal.beginRoot(another);
+  await journal.beginGoal(another, '完成目标恢复验收', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  await journal.observationStart({id: 'stray', owner: another, tool: 'write'});
+  await journal.endGoal(another, 'cancelled', '用户停止');
+  await journal.finishRoot(another, 'cancelled', '用户停止');
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), {code: 'goal-unconfirmed-work'});
+  await journal.observationEnd('stray', {isError: false});
+  const resumed = await journal.resumeGoal({...owner, rootRunId: 'resume-1'});
+  assert.equal(resumed.goal.id, 'r2');
+});
+
+test('goal-resume 绕过 workflow root；同会话其他执行目标占用时拒绝', async t => {
+  const {journal} = await fixture(t);
+  const wfOwner = {...owner, rootRunId: 'wf'};
+  await journal.beginRoot(wfOwner, {kind: 'workflow'});
+  await journal.beginGoal(wfOwner, '工作流目标', {maxRounds: 6, maxRequests: 10, maxRequestsPerRound: 6, noProgressRounds: 3});
+  await journal.endGoal(wfOwner, 'cancelled', '用户停止');
+  await journal.finishRoot(wfOwner, 'cancelled');
+  assert.equal(await journal.findResumableGoal(owner.conversationId, {goalId: 'wf'}), null);
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-wf'}), {code: 'goal-not-resumable'});
+  const sourceOwner = await stoppedGoal(journal, {rootRunId: 'r'});
+  const busyOwner = {...owner, rootRunId: 'busy'};
+  await journal.beginRoot(busyOwner);
+  await assert.rejects(journal.resumeGoal({...owner, rootRunId: 'resume-1'}), {code: 'busy'});
+  await journal.finishRoot(busyOwner, 'completed');
+  const resumed = await journal.resumeGoal({...owner, rootRunId: 'resume-1'});
+  assert.equal(resumed.goal.id, sourceOwner.rootRunId);
+});

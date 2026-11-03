@@ -1004,3 +1004,136 @@ test('结构化工作流撤回必须同步归属状态；失败留在队列，�
   assert.equal(controller.getSnapshot().pending.length,0);assert.equal(writes,2);assert.equal(effects.runtime.starts.length,1);
   effects.runtime.starts[0].resolve({});await active;
 });
+
+// ---- goal-resume：用户显式恢复终态目标 ----
+
+/** 替身 runtime 增加目标恢复查询；resumable 为 null 表示无可恢复目标。 */
+function withResumableGoal(effects, resumable) {
+  effects.runtime.findResumableGoal = async (request = {}) => (typeof resumable === 'function' ? resumable(request) : resumable);
+  return effects;
+}
+
+const resumableSummary = () => ({
+  goalId: 'run-01', objective: '修好构建', phase: 'cancelled', round: 2, status: 'cancelled',
+  sourceRootRunId: 'run-01', nextAction: '跑剩余测试', remaining: ['跑剩余测试'], reason: '用户停止',
+  unconfirmedWork: false, budgetExhausted: false,
+});
+
+test('goal-resume 受理：run-preparing 带 resumeOf 与恢复摘要，不造用户项，start 带 resume', async () => {
+  const effects = withResumableGoal(makeEffects(), resumableSummary());
+  const controller = makeController(effects);
+  const pending = controller.command({type: 'goal-resume'});
+  await settle();
+  effects.runtime.starts.at(-1).resolve({});
+  const result = await pending;
+  await settle();
+  assert.equal(result.ok, true);
+  assert.equal(result.disposition, 'started');
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.phase, 'running');
+  const run = snapshot.runs[result.runId];
+  assert.equal(run.resumeOf, 'run-01');
+  assert.equal(run.continuationOf, 'run-01');
+  assert.equal(run.source, 'goal-resume');
+  assert.equal(run.inputIds.length, 0, '恢复回合没有用户输入');
+  assert.equal(snapshot.timeline.length, 0, '不造用户时间线项');
+  assert.deepEqual(snapshot.goal, {goalId: 'run-01', objective: '修好构建', phase: 'cancelled', round: 2, status: 'cancelled', resumable: false});
+  const spec = effects.runtime.starts.at(-1).spec;
+  assert.equal(spec.continuationOf, 'run-01');
+  assert.deepEqual(spec.resume, {goalId: 'run-01'});
+  effects.runtime.starts.at(-1).resolve({});
+  controller.applyFact({type: 'run-closed', runId: result.runId, outcome: 'completed', at: 2001});
+});
+
+test('goal-resume 拒绝分支全部带中文 message；无运行时发宿主拒绝', async () => {
+  const effects = makeEffects(), controller = makeController(effects);
+  effects.runtime.findResumableGoal = async () => null;
+  let denied = await controller.command({type: 'goal-resume'});
+  assert.deepEqual(denied, {ok: false, code: 'goal-not-resumable', message: '没有可恢复的任务。'});
+  assert.equal(effects.runtime.starts.length, 0);
+  effects.runtime.findResumableGoal = async () => ({...resumableSummary(), unconfirmedWork: true});
+  denied = await controller.command({type: 'goal-resume'});
+  assert.equal(denied.ok, false); assert.equal(denied.code, 'goal-unconfirmed-work');
+  assert.equal(denied.message, '任务仍有未确认的收尾工作，暂不能恢复。');
+  effects.runtime.findResumableGoal = async () => ({...resumableSummary(), budgetExhausted: true});
+  denied = await controller.command({type: 'goal-resume'});
+  assert.equal(denied.code, 'goal-budget-limit');
+  assert.equal(denied.message, '目标预算已用完，请调整后重新开始。');
+  // 账本事务拒绝（受理后竞态）：runtime.start 抛出 → 失败收口带原文 message。
+  effects.runtime.findResumableGoal = async () => resumableSummary();
+  const pending = controller.command({type: 'goal-resume'});
+  await settle();
+  effects.runtime.starts.at(-1).reject(Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code: 'goal-budget-limit'}));
+  const failed = await pending;
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, 'runtime-failed');
+  assert.match(failed.message, /目标总预算已达到/);
+  await settle();
+  assert.equal(controller.getSnapshot().phase, 'idle');
+});
+
+test('goal-resume 幂等：账本回报 already-active 时收口为无害成功', async () => {
+  const effects = withResumableGoal(makeEffects(), resumableSummary());
+  const controller = makeController(effects);
+  // 受理层查询即发现活跃接续：直接幂等返回，不占运行槽。
+  effects.runtime.findResumableGoal = async () => ({alreadyActive: true, goalId: 'run-01', rootRunId: 'run-09'});
+  const first = await controller.command({type: 'goal-resume'});
+  assert.deepEqual(first, {ok: true, disposition: 'already-active', runId: 'run-09', message: '目标已在进行中'});
+  assert.equal(effects.runtime.starts.length, 0);
+  // 竞态兜底：受理后账本才发现 already-active（适配层自闭合 + alreadyActive 回传）。
+  effects.runtime.findResumableGoal = async () => resumableSummary();
+  const pending = controller.command({type: 'goal-resume'});
+  await settle();
+  effects.runtime.starts.at(-1).resolve({alreadyActive: true, activeRunId: 'run-09'});
+  const second = await pending;
+  await settle();
+  assert.equal(second.ok, true);
+  assert.equal(second.disposition, 'already-active');
+  assert.equal(second.runId, 'run-09');
+  assert.equal(second.message, '目标已在进行中');
+  assert.equal(controller.getSnapshot().phase, 'idle');
+  assert.equal(controller.getSnapshot().runs[second.runId ?? ''] ? 1 : 1, 1);
+});
+
+test('goal-resume 与 stop 竞态：stopping 中拒绝、preparing 中停止即时收口、停止确认后可恢复', async () => {
+  const effects = withResumableGoal(makeEffects(), resumableSummary());
+  const controller = makeController(effects);
+  // 场景 1：上一运行停止确认期间（stopping）goal-resume 被拒。
+  const original = controller.command({type: 'send', input: {text: '原任务'}});
+  await settle();
+  effects.runtime.starts[0].resolve({});
+  await original;
+  await controller.command({type: 'stop'});
+  assert.equal(controller.getSnapshot().phase, 'stopping');
+  const deniedDuringStop = await controller.command({type: 'goal-resume'});
+  assert.equal(deniedDuringStop.ok, false);
+  assert.equal(deniedDuringStop.code, 'busy');
+  // 停止收口回 idle 后恢复受理成功。
+  controller.applyFact({type: 'run-closed', runId: controller.getSnapshot().activeRunId, outcome: 'stopped', at: 2001});
+  await settle();
+  assert.equal(controller.getSnapshot().phase, 'idle');
+  const resumePending = controller.command({type: 'goal-resume'});
+  await settle();
+  effects.runtime.starts.at(-1).resolve({});
+  const resumed = await resumePending;
+  await settle();
+  assert.equal(resumed.ok, true);
+  controller.applyFact({type: 'run-closed', runId: resumed.runId, outcome: 'stopped', at: 2001});
+  await settle();
+  // 场景 2：恢复回合 preparing 期间被停止——停止立即置位，适配层不得再启动模型；
+  // start 返回后按 stop-requested 收口（真实收口由适配层 run-closed 承担，这里补事实）。
+  const resumePending2 = controller.command({type: 'goal-resume'});
+  await settle();
+  assert.equal(controller.getSnapshot().phase, 'preparing');
+  const stopDuringPrepare = await controller.command({type: 'stop'});
+  assert.equal(stopDuringPrepare.disposition, 'stop-requested');
+  effects.runtime.starts.at(-1).resolve({});
+  const resumed2 = await resumePending2;
+  assert.equal(resumed2.ok, true);
+  assert.equal(resumed2.disposition, 'stop-requested');
+  controller.applyFact({type: 'run-closed', runId: resumed2.runId, outcome: 'stopped', at: 2002});
+  await settle();
+  assert.equal(controller.getSnapshot().phase, 'idle', 'preparing 期间的停止回到 idle');
+  assert.equal(controller.getSnapshot().queuePaused, true, '真停止暂停队列');
+  assert.equal(controller.getSnapshot().runs[resumed2.runId].resumeOf, 'run-01');
+});

@@ -7,6 +7,8 @@ import { createPortal } from 'react-dom'
 import { AttachmentCard } from './attachment-card';
 import { RunActivity } from './run-activity';
 import { TurnErrorNotice } from './turn-error-notice';
+import { GoalBar } from './goal-bar';
+import type { GoalSummaryView } from '@hemi/conversation-flow';
 import {
   ArrowDown,
   Check,
@@ -274,14 +276,15 @@ type VoiceScreenProps = {
   draftSkills?: SkillSelectionView[];
   onSetDraftSkills?: (next: SkillSelectionView[]) => void;
   modelNotice?: string;
-  /** 待发送队列托盘：主进程权威状态；执行中普通发送默认排队。 */
+  /** 待发送队列托盘：只展示已排队的输入；空队列不提供目标恢复入口。 */
   queueState?: TurnQueueState;
-  /** 停止收口后且无排队条目：托盘退位给单个「继续任务」按钮（2026-10-18 裁决）。 */
-  queueStoppedIdle?: boolean;
+  /** 目标横幅（goal-resume）：当前会话的目标投影；只有可恢复时才渲染。 */
+  goal?: GoalSummaryView | null;
+  /** 目标恢复统一由横幅提供；没有可恢复目标时不显示恢复动作。 */
+  onGoalResume?: () => void;
   onWithdrawQueued?: (queueItemId: string) => void;
+  /** 恢复发送已排队输入，与目标恢复分开。 */
   onResumeQueue?: () => void;
-  /** 「继续任务」按钮（停止后无新任务）：真续跑，补一条「继续」回合。 */
-  onContinueStoppedTask?: () => void;
   onEditQueued?: (queueItemId: string) => void;
   /** 060 R-21：让该条优先（停止当前任务，确认后优先派发）。 */
   onPromoteQueued?: (queueItemId: string) => void;
@@ -423,10 +426,10 @@ export function VoiceScreen({
   onSetDraftSkills,
   modelNotice = '',
   queueState = { paused: false, items: [] },
-  queueStoppedIdle = false,
+  goal = null,
+  onGoalResume,
   onWithdrawQueued,
   onResumeQueue,
-  onContinueStoppedTask,
   onEditQueued,
   onPromoteQueued,
   onReorderQueued,
@@ -972,6 +975,8 @@ export function VoiceScreen({
               }}
             />
 
+            <GoalBar goal={goal} onResume={onGoalResume} />
+
             {isError ? (
               <div className="h24-turn-error">
                 <TurnErrorNotice message={errorCopy} speech={sessionState === 'error'} />
@@ -1003,17 +1008,15 @@ export function VoiceScreen({
                   </button>
                 </div>
               ) : null}
-              {/* 待发送托盘：排序、阶段交接、编辑、撤回和暂停后继续。 */}
-              <TurnQueueTray
+              {/* 托盘只管理待发送输入；空队列不再退位渲染「继续任务」，目标恢复归 GoalBar。 */}
+              {queueState.items.length ? <TurnQueueTray
                 state={queueState}
-                stoppedIdle={queueStoppedIdle}
-                onContinue={onContinueStoppedTask}
                 onWithdraw={(id) => onWithdrawQueued?.(id)}
                 onEdit={(id) => onEditQueued?.(id)}
                 onResume={() => onResumeQueue?.()}
                 onPromote={(id) => onPromoteQueued?.(id)}
                 onReorder={onReorderQueued}
-              />
+              /> : null}
               {/* 026 R-10：「继续讨论」带回的追问对象（发送前可见、可移除；不清空草稿）。 */}
               {discussContext ? (
                 <div className="h24-discuss-context">

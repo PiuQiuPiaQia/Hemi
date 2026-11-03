@@ -31,7 +31,7 @@ import {
   ConversationEnvironmentIdContext,
   ConversationOnlineContext,
 } from '../voice/lib/conversation-bridge';
-import {createConversationTranscriptPresenter, projectConversationQueue, queueStoppedIdle, retryInput} from '@hemi/conversation-flow/core';
+import {createConversationTranscriptPresenter, projectConversationQueue, retryInput} from '@hemi/conversation-flow/core';
 import {useConversationFlow} from '../voice/lib/use-conversation-flow';
 import { botModelDirectory, createBotConversationBridge } from './bridge';
 import { useClipboardCopy } from '@/lib/use-clipboard-copy';
@@ -930,8 +930,12 @@ export function BotPage({
                 changeDraft({ skills })
               }
               queueState={queue}
-              queueStoppedIdle={!sending && !unknownSend && Boolean(queueStoppedIdle(flow))}
-              onContinueStoppedTask={() => void send('继续任务')}
+              goal={flow?.goal ?? null}
+              onGoalResume={() =>
+                void command({ type: 'goal-resume', goalId: flow?.goal?.goalId }).catch((e) =>
+                  setError(message(e)),
+                )
+              }
               onWithdrawQueued={(inputId) =>
                 void command({ type: 'withdrawInput', inputId }).catch((e) =>
                   setError(message(e)),

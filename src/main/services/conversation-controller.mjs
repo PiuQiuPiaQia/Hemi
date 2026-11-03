@@ -139,11 +139,15 @@ export function createConversationController({
 
   // ------------------------------------------------------------ 主运行启动（用户发送/队列派发/事件唤醒共用）
 
-  async function startRun({ input, source, fromPending = false, background = null }) {
+  async function startRun({ input, source, fromPending = false, background = null, resume = null }) {
     const runId = makeId(`run-${++seq.run}`);
-    const continuationOf = input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
+    // 恢复回合没有用户文本：continuationOf 指向已终态的来源 root（归约层按 resumeOf 放行），
+    // 适配层据此跳过「新输入先收掉旧运行」的 abort 守卫并绑定原目标。
+    const continuationOf = resume ? resume.sourceRootRunId : input && !input.workflow ? snapshot.awaitingUser?.runId ?? null : null;
     preparingAborted = false;
-    commit({ type: 'run-preparing', runId, rootRunId: background?.rootRunId ?? runId, continuationOf, source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
+    commit({ type: 'run-preparing', runId, rootRunId: background?.rootRunId ?? runId, continuationOf,
+      ...(resume ? { resumeOf: resume.sourceRootRunId, resumeGoal: resume.goal } : {}),
+      source, inputIds: input ? [input.inputId] : [], at: now(), generation: snapshot.generation });
     try {
       // 受理先落最小快照再执行（契约 §8）：运行记录带 inputIds 保存输入身份；
       // 用户消息项在保存成功后才转正（失败回 pending 时时间线不留残影）。
@@ -163,7 +167,8 @@ export function createConversationController({
     }
     let started;
     try {
-      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, continuationOf, envelope: input, source, ...(background?{background}: {}) });
+      started = await runtime.start({ conversationId, generation: snapshot.generation, runId, continuationOf, envelope: input, source,
+        ...(background?{background}: {}), ...(resume?{resume:{goalId:resume.goalId}}:{}) });
     } catch (error) {
       // 真实适配层在运行终态时已自行 applyFact 关闭运行（自闭合）——那种情况不重复收口。
       if (snapshot.activeRunId !== runId) {
@@ -173,6 +178,11 @@ export function createConversationController({
       return failStart(runId, input, fromPending, 'runtime-failed', error);
     }
     if (snapshot.activeRunId === runId && !preparingAborted) {
+      // 账本准入发现同 goal 已有活跃接续：幂等收口，按钮重复点击无害。
+      if (started?.alreadyActive) {
+        commit({ type: 'run-closed', runId, outcome: 'stopped', at: now(), generation: snapshot.generation });
+        return { ok: true, disposition: 'already-active', runId: started.activeRunId ?? null, message: '目标已在进行中' };
+      }
       // 替身语义（runtime 不自闭合）：成功返回即占稳运行槽。
       commit({ type: 'run-started', runId, at: now(), modelUsed: started?.modelUsed ?? null, generation: snapshot.generation });
       return { ok: true, disposition: 'started', runId, inputId: input?.inputId ?? null, runtimeResult: started ?? null };
@@ -358,6 +368,28 @@ export function createConversationController({
     }
     if (command.pauseQueue) commit({ type: 'queue-paused', generation: snapshot.generation });
     return { ok: true, disposition: 'idle', revision: snapshot.revision };
+  }
+
+  /** 用户显式恢复终态目标（goal-resume）：只读准入查询 → startRun 恢复回合；
+   *  账本事务在适配层 runtime.start 内做最终准入（already-active 幂等无害）。 */
+  async function commandGoalResume(command) {
+    if (snapshot.awaitingUser) return { ok: false, code: 'busy', message: '目标正在等待你的答复，直接回复即可，无需恢复。' };
+    if (snapshot.phase !== 'idle') return { ok: false, code: 'busy', message: '当前有任务进行中，暂不能恢复。' };
+    let resumable = null;
+    try {
+      resumable = await runtime.findResumableGoal?.({ goalId: command.goalId ?? null }) ?? null;
+    } catch (error) {
+      return { ok: false, code: 'runtime-failed', message: String(error?.message ?? error) };
+    }
+    if (!resumable) return { ok: false, code: 'goal-not-resumable', message: '没有可恢复的任务。' };
+    if (resumable.alreadyActive) return { ok: true, disposition: 'already-active', runId: resumable.rootRunId ?? null, message: '目标已在进行中' };
+    if (resumable.unconfirmedWork) return { ok: false, code: 'goal-unconfirmed-work', message: '任务仍有未确认的收尾工作，暂不能恢复。' };
+    if (resumable.budgetExhausted) return { ok: false, code: 'goal-budget-limit', message: '目标预算已用完，请调整后重新开始。' };
+    return startRun({ source: 'goal-resume', resume: {
+      goalId: resumable.goalId,
+      sourceRootRunId: resumable.sourceRootRunId,
+      goal: { goalId: resumable.goalId, objective: resumable.objective, phase: resumable.phase, round: resumable.round, status: resumable.status },
+    } });
   }
 
   /** 060 R-21/R-23：显式插队——持久受理优先关系后才请求停止旧目标；停止确认由
@@ -577,6 +609,7 @@ export function createConversationController({
           return handleSend({ ...item, inputId: undefined, modelPolicySnapshot: undefined, workspaceSnapshot: undefined });
         }
         case 'stop': return commandStop(command);
+        case 'goal-resume': return commandGoalResume(command);
         case 'resumeQueue': {
           const result = commit({ type: 'queue-resumed', generation: snapshot.generation });
           // 解除要落盘：否则只改内存，控制器重建/重启后暂停位复活（2026-10-18 真机）。

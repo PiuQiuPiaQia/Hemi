@@ -49,6 +49,19 @@ function advanceGoalRound(s, root) {
   if (root.requestLimitReached) { (goal.limitHistory ??= []).push(root.requestLimitReached); delete root.requestLimitReached; }
   return goal;
 }
+// 目标恢复（goal-resume）只认被用户停止/失败/中断的终态：blocked/budget_limited 的收口
+// 是宿主裁决不可自行推翻，continued 已被新 root 接续；恢复=新建 root 接续，不复活旧 root
+// （terminal 集合保持终态正是防迟到续跑的栅栏）。workflow root 不参与恢复。
+const RESUMABLE_STATUSES = ['cancelled','failed','partial','interrupted'];
+const resumableRoot = root => root.kind !== 'workflow' && root.goal && RESUMABLE_STATUSES.includes(root.status) && root.goal.phase !== 'complete';
+const latestRoot = roots => roots.slice().sort((a, b) => (b.terminalAt ?? b.startedAt ?? 0) - (a.terminalAt ?? a.startedAt ?? 0))[0] ?? null;
+const lastGoalVerdict = goal => [...(goal.verifications ?? [])].reverse().find(item => item.remaining?.length || item.nextAction) ?? null;
+const goalSummaryOf = (root, extra = {}) => {
+  const last = lastGoalVerdict(root.goal);
+  return {goalId: goalIdentity(root), objective: root.goal.objective, phase: root.goal.phase, round: root.goal.round,
+    status: root.status, sourceRootRunId: root.owner.rootRunId, nextAction: last?.nextAction ?? null,
+    remaining: last?.remaining ?? [], reason: root.reason ?? null, ...extra};
+};
 export const dispatchIdentity = ({ conversationId, rootRunId, generation = 0, sessionId, callAnchorId, toolCallId }) => {
   if (![conversationId,rootRunId,sessionId,callAnchorId,toolCallId].every(x => typeof x === 'string' && x)) throw new Error('派单缺少可信调用身份');
   return createHash('sha256').update(JSON.stringify([conversationId,rootRunId,generation,sessionId,callAnchorId,toolCallId])).digest('hex');
@@ -190,6 +203,73 @@ export function createRunJournal({ dir, storage = createJournalStorage(dir) }) {
     }),
     backgroundYieldReady: owner => read(s=>!hasUnconfirmedWork(pendingGoalWork(s,owner))),
     rootForFlow: (conversationId,runId) => read(s=>s.roots[runId]?.owner.conversationId===conversationId?runId:Object.values(s.roots).find(root=>root.owner.conversationId===conversationId&&root.eventRunIds?.includes(runId))?.owner.rootRunId??runId),
+    /** 只读：最近一条可恢复目标摘要（goalId 缺省取最新）；无候选返回 null。
+     *  同链 goal 已有活跃接续（含 continued 线索推导）时返回 alreadyActive 摘要，
+     *  供受理层幂等返回「目标已在进行中」。 */
+    findResumableGoal: (conversationId, {goalId} = {}) => read(s => {
+      const mine = Object.values(s.roots).filter(root => root.owner.conversationId === conversationId);
+      const chain = mine.filter(root => root.goal && (resumableRoot(root) || root.status === 'continued'));
+      const head = goalId ? chain.find(root => goalIdentity(root) === goalId) : latestRoot(chain);
+      if (!head) return null;
+      const identity = goalIdentity(head);
+      const active = mine.find(root => !terminal.has(root.status) && goalIdentity(root) === identity);
+      if (active) return {alreadyActive: true, goalId: identity, rootRunId: active.owner.rootRunId};
+      const source = latestRoot(mine.filter(root => resumableRoot(root) && goalIdentity(root) === identity));
+      if (!source) return null;
+      const used = goalRequests(s, source);
+      return goalSummaryOf(source, {unconfirmedWork: hasUnconfirmedWork(pendingGoalWork(s, source.owner)),
+        budgetExhausted: source.goal.round >= source.goal.policy.maxRounds || used >= source.goal.policy.maxRequests});
+    }),
+    /** 用户显式恢复终态目标：新建 root 接续（goal.id 保持，goalRequests 按 identity 跨 root
+     *  连续，累计预算不清零）；旧 root 标 continued，迟到续跑仍被终态栅栏挡住。 */
+    resumeGoal: (owner, {goalId} = {}) => transaction(s => {
+      const mine = Object.values(s.roots).filter(root => root.owner.conversationId === owner.conversationId);
+      const chain = mine.filter(root => root.goal && (resumableRoot(root) || root.status === 'continued'));
+      const head = goalId ? chain.find(root => goalIdentity(root) === goalId) : latestRoot(chain);
+      const identity = head ? goalIdentity(head) : (goalId ?? null);
+      // 同 goal 已有非终态接续（执行中/等答复/等后台，含此前恢复/续接新建的 root）：
+      // 幂等拒绝并给出既有 root，重复点击无害。
+      const active = mine.find(root => !terminal.has(root.status) && identity && goalIdentity(root) === identity);
+      if (active) throw Object.assign(new Error('目标已在进行中'), {code:'goal-already-active', rootRunId: active.owner.rootRunId});
+      const source = latestRoot(mine.filter(root => resumableRoot(root) && (!identity || goalIdentity(root) === identity)));
+      if (!source) throw Object.assign(new Error('没有可恢复的目标'), {code:'goal-not-resumable'});
+      const busy = mine.find(root => root.owner.rootRunId !== owner.rootRunId && root.kind !== 'auxiliary' && !terminal.has(root.status) && !suspended(root));
+      if (busy) throw Object.assign(new Error('该对话已有执行中的根目标'), {code:'busy'});
+      if (hasUnconfirmedWork(pendingGoalWork(s, source.owner))) throw Object.assign(new Error('来源目标仍有未确认的收尾工作'), {code:'goal-unconfirmed-work'});
+      const goal = source.goal, used = goalRequests(s, source);
+      if (used >= goal.policy.maxRequests || goal.round >= goal.policy.maxRounds) throw Object.assign(new Error('目标总预算已达到，工作尚未完成'), {code:'goal-budget-limit'});
+      if (s.roots[owner.rootRunId]) throw new Error('恢复回合的根目标已存在');
+      // 形状沿用 beginGoal 的 awaiting_user 续接分支：恢复回合随后的 beginGoal 走 `root.goal ??=`
+      // 幂等复用，不覆盖账本 goal。
+      const cloned = {...structuredClone(goal), phase: 'active', round: goal.round + 1, requestOffset: used,
+        budgetExhausted: false, continuedFrom: source.owner.rootRunId};
+      delete cloned.waitingForUser;
+      const sourceInfo = {rootRunId: source.owner.rootRunId, status: source.status, reason: source.reason ?? null};
+      s.roots[owner.rootRunId] = {owner, status: 'running', createdAt: Date.now(),
+        ...(source.policySnapshot ? {policySnapshot: structuredClone(source.policySnapshot)} : {}),
+        ...(source.workspace ? {workspace: structuredClone(source.workspace)} : {}),
+        goal: cloned};
+      // 旧 root 标 continued 必须经 edit() 拷贝进变更集——draft 的行内 mutation 不落盘。
+      const sourceEdit = edit(s, 'roots', source.owner.rootRunId);
+      Object.assign(sourceEdit, {status: 'continued', continuedBy: owner.rootRunId, terminalAt: Date.now()});
+      sourceEdit.goal.phase = 'continued';
+      return {goal: cloned, source: sourceInfo};
+    }),
+    /** flow 快照的目标投影：活跃目标优先（resumable=false），否则最近可恢复目标；无则 null。 */
+    goalProjection: conversationId => read(s => {
+      const mine = Object.values(s.roots).filter(root => root.owner.conversationId === conversationId && root.goal);
+      const active = mine.find(root => root.kind !== 'workflow' && !terminal.has(root.status) && !suspended(root));
+      if (active) {
+        const summary = goalSummaryOf(active);
+        return {goal: {goalId: summary.goalId, objective: summary.objective, phase: summary.phase, round: summary.round,
+          status: summary.status, nextAction: summary.nextAction, remaining: summary.remaining, resumable: false}};
+      }
+      const source = latestRoot(mine.filter(resumableRoot));
+      if (!source) return {goal: null};
+      const summary = goalSummaryOf(source);
+      return {goal: {goalId: summary.goalId, objective: summary.objective, phase: summary.phase, round: summary.round,
+        status: summary.status, nextAction: summary.nextAction, remaining: summary.remaining, resumable: true}};
+    }),
     resumeBackgroundGoal: (owner,{flowRunId}={}) => transaction(s => {
       const root=edit(s, 'roots', owner.rootRunId);
       if(!owns(root,owner)||root.status!=='waiting_background'||root.goal?.phase!=='waiting_background')throw new Error('后台目标已停止或已恢复');

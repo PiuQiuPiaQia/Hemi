@@ -1731,6 +1731,9 @@ export type FlowSnapshotView = {
   permissions: Record<string, Record<string, unknown>>;
   pendingReports: Array<{ taskId: string; resultVersion: number }>;
   backgroundJobs?: BackgroundJobView[];
+  /** 目标投影（宿主从账本组装）：可恢复目标驱动「继续任务」入口；无目标为 null。
+   *  类型以 @hemi/conversation-flow 包内权威投影为准。 */
+  goal?: import('@hemi/conversation-flow').GoalSummaryView | null;
 };
 
 export type FlowInputView = {

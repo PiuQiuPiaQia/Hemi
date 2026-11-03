@@ -397,6 +397,7 @@ async function executeBackgroundTurn(conversationId,{runId,background,controller
     controller.applyFact({type:'run-settled',runId,generation,at:Date.now()});
     controller.applyFact({type:'run-closed',runId,generation,outcome,at:Date.now(),...(result?.waitingForUser?{waitingForUser:result.waitingForUser}:{}),
       ...(result?.blocked?{blocked:result.blocked}:{}),...(result?.halted?{halted:result.halted}:{})});
+    void applyGoalStatus(conversationId);
   }
 }
 
@@ -406,10 +407,36 @@ function createLlmFlowRuntime(conversationId) {
 
   return {
     freezeInput: input => freezeAcceptedInput({ store: getProfiles(), workspaceService: getWorkspaceService(), input }),
-    async start({ runId, envelope, source, continuationOf, background }) {
+    /** goal-resume 受理前的只读准入查询（账本摘要；事务准入仍在 runtime.resumeGoal）。 */
+    findResumableGoal: async (request = {}) => {
+      const agentRuntime = getAgentRuntime();
+      return agentRuntime?.journal?.findResumableGoal(conversationId, {goalId: request.goalId}) ?? null;
+    },
+    async start({ runId, envelope, source, continuationOf, background, resume }) {
       if(background){
         void executeBackgroundTurn(conversationId,{runId,background,controller:controllerOf()});
         return {modelUsed:null};
+      }
+      // 目标恢复回合：无用户文本。先做账本准入（新建 root 接续，沿用来源 root 的冻结策略）；
+      // goal-already-active 幂等自闭合（按钮重复点击无害），其余拒绝经 startRun 失败收口回传。
+      let resumeContext = null;
+      if (resume) {
+        const controller = controllerOf();
+        const generation = controller.getSnapshot().generation;
+        // 停止屏障（run-stopping 先于 runtime.stop 落定）：迟到的恢复不再启动模型。
+        if (controller.getSnapshot().runs[runId]?.stopRequested || controller.getSnapshot().activeRunId !== runId) {
+          return { modelUsed: null, aborted: true };
+        }
+        try {
+          const resumed = await getAgentRuntime().resumeGoal(conversationId, {generation, runId, goalId: resume.goalId});
+          resumeContext = { sourceRootRunId: resumed.source.rootRunId, hostEvent: resumed.hostEvent };
+        } catch (error) {
+          if (error?.code === 'goal-already-active') {
+            controller.applyFact({ type: 'run-closed', runId, generation, outcome: 'stopped', at: Date.now() });
+            return { modelUsed: null, alreadyActive: true, activeRunId: error.rootRunId ?? null };
+          }
+          throw error;
+        }
       }
       // 059：workflow-start 结构化输入走宿主 workflow 分派器（S3a）——不进 executeChatTurn，
       // 不造用户文字回合；卡片事实由 router 经 part-updated 更新在同一 partId 上；
@@ -498,6 +525,8 @@ function createLlmFlowRuntime(conversationId) {
         const result = await executeChatTurn(payload ?? { conversationId }, {
           runId,
           continuationOf,
+          // 目标恢复回合：绑定原目标的恢复上下文（无用户文本，hostEvent 为恢复说明）。
+          resume: resumeContext,
           // 057：用户轮派发即落档——原始 envelope 经参数交给内胆，在 obtain 之后落档
           //（先于 obtain 落档会让首回合建新 agent 时从档案 turns 种子带上这条
           // 未回答用户轮，prompt 再供给一次＝同文双写，2026-10-15 真机钓出）。
@@ -596,6 +625,7 @@ function createLlmFlowRuntime(conversationId) {
         if (flushTimer) clearTimeout(flushTimer);
         turnIdByRun.get(conversationId)?.delete(runId);
         stoppingRuns.delete(runId);
+        void applyGoalStatus(conversationId);
       }
       })();
       // 执行失败已进入 flow 和结果通路；队列派发没有 IPC 等待者也不得未处理拒绝。
@@ -642,6 +672,17 @@ function createLlmFlowRuntime(conversationId) {
 
 function completeInput(inputId, error, result) {
   inputResults.settle(inputId, error ? { error } : result);
+}
+
+/** 目标投影进 flow 快照（goal-resume 按钮口径）：运行收口后从账本组装追加；
+ *  投影失败静默——按钮状态由下一次收口纠正，不阻断运行收口。 */
+async function applyGoalStatus(conversationId) {
+  try {
+    const agentRuntime = getAgentRuntime();
+    if (!agentRuntime?.journal || !flowService?.has(conversationId)) return;
+    const { goal } = await agentRuntime.journal.goalProjection(conversationId);
+    getConversationFlowService().controllerFor(conversationId).applyFact({ type: 'goal-status', goal: goal ?? null });
+  } catch { /* 迟到/旧代事实由归约层丢弃 */ }
 }
 
 /** 队列派发的 chat payload：最新历史＋条目正文（旧 turn-queue 同口径；profile 缺省）。 */
@@ -786,7 +827,7 @@ function mapCommandError(result, fallbackMessage) {
 
 // ================================================================ chat 执行内胆（056 原样，调度已上移控制器）
 
-async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope = null, dispatchMeta = {}, runId = null, continuationOf = null } = {}) {
+async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope = null, dispatchMeta = {}, runId = null, continuationOf = null, resume = null } = {}) {
   const turnId = Number(payload?.turnId) || 0;
   const turnStartedAt = Date.now();
   const conversationId = typeof payload?.conversationId === 'string' && payload.conversationId
@@ -853,10 +894,11 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
       : null);
 
     const rawMessages = Array.isArray(payload?.messages) ? payload.messages : [];
-    if (conversationId) dialogueHistoryByConversation.set(conversationId, rawMessages);
+    // 恢复回合没有用户文本：不改写对话历史缓存（空 user 项会污染后续队列派发的 payload）。
+    if (conversationId && !resume) dialogueHistoryByConversation.set(conversationId, rawMessages);
     const lastUser = [...rawMessages].reverse().find((m) => m?.role === 'user');
-    const userText = (typeof lastUser?.content === 'string' ? lastUser.content.trim() : '') || (payload?.attachmentIds?.length ? '请查看附件。' : '');
-    if (!userText) throw new Error('本轮没有用户消息。');
+    const userText = resume ? '' : (typeof lastUser?.content === 'string' ? lastUser.content.trim() : '') || (payload?.attachmentIds?.length ? '请查看附件。' : '');
+    if (!userText && !resume) throw new Error('本轮没有用户消息。');
     llmLog.info(`turn ${turnId} 收到回合：${conversationId ?? '无会话'} · ${inputSource} · 末条「${userText.replace(/\s+/g, ' ').slice(0, 30)}」`);
 
     runtimeDiagnostic = buildRuntimeDiagnostic({
@@ -912,7 +954,7 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
     llmLog.info(`turn ${turnId} → 主 agent ${config.model}${routed ? '（角色路由）' : ''} @ ${config.baseUrl}${config.api === 'anthropic-messages' ? '（anthropic 协议）' : ''}${fallback ? `，备用 ${fallback.model}` : ''}${workspace ? `，工作区 ${workspace.name}` : ''}`);
 
     const turnContextText = [
-      envelope.contextEnvelope,
+      envelope?.contextEnvelope,
       buildFlowFactsBlock(flowService?.controllerFor(conversationId).getSnapshot(), { inputSource, runId }),
       buildTurnContextBlock({ ambientBlock: buildAmbientBlock(), workspaceBlock: buildWorkspaceTurnBlock(workspace), runtimeBlock, routingBlock: `【本目标模型策略】${routed ? '自动路由：各角色使用用户为它配置的模型，未配置时跟随主 agent，共用已配置的备用模型；角色同时决定职责和工具边界。' : '具体模型：主 agent 与所有子 agent 均保持所选模型，不切备用。'}` }),
     ].filter(Boolean).join('\n\n');
@@ -992,7 +1034,10 @@ async function executeChatTurn(payload, { onStreamEvent = null, dispatchEnvelope
         agent.on('model-route', onModelRoute);
         let run;
         try {
-          run = await agentRuntime.runRootTurn(conversationId, { userText, inputId: dispatchEnvelope?.inputId, contextText: turnContextText, imageBlocks: envelope.imageBlocks,
+          run = await agentRuntime.runRootTurn(conversationId, { userText, inputId: dispatchEnvelope?.inputId, contextText: turnContextText,
+            imageBlocks: envelope?.imageBlocks,
+            // 目标恢复回合：宿主注入恢复上下文（原目标/剩余工作/下一步），替代用户文本。
+            ...(resume?.hostEvent ? { hostEvent: resume.hostEvent } : {}),
             getBudgetArtifacts: () => Object.values(flowService.controllerFor(conversationId).getSnapshot().artifacts).filter(artifact => artifact.producerRunId === runId || artifact.producers?.some(producer => producer.runId === runId)),
           });
         } finally {

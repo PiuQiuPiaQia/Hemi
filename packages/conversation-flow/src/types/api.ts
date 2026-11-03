@@ -1,4 +1,6 @@
 export type {ModelRecoveryView} from "./presentation.js";
+/** 目标投影（goal-resume）：随 FlowSnapshotView.goal 下发的权威视图类型。 */
+export type {GoalSummaryView} from "../core/protocol.js";
 import type { CSSProperties, Ref } from "react";
 import type {
   TranscriptItem,

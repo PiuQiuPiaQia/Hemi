@@ -45,3 +45,75 @@
     min-height: 44px;
   }
 }
+
+/* —— 目标横幅（goal-resume）：对话区与输入区之间的一行目标状态 ——
+   与回合错误行同一层（滚动区外、输入区上方）；可恢复态用轻琥珀底提示
+   「有件事等你拿主意」，进行中保持中性安静。 */
+.compact-shell .h24-goal-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  max-width: var(--h24-read-w);
+  margin: 0 auto var(--sp-4);
+  padding: var(--sp-6) var(--sp-12);
+  border: 1px solid color-mix(in srgb, var(--warn-200) 45%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warn-200) 10%, transparent);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .h24-goal-bar[data-resumable='false'] {
+  border-color: color-mix(in srgb, var(--line) 60%, transparent);
+  background: var(--bg-canvas);
+}
+
+.compact-shell .h24-goal-objective {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.compact-shell .h24-goal-status {
+  flex: none;
+  color: var(--muted);
+}
+
+.compact-shell .h24-goal-bar[data-resumable='true'] .h24-goal-status {
+  color: var(--warn);
+}
+
+.compact-shell .h24-goal-resume {
+  flex: none;
+  padding: var(--sp-4) var(--sp-10);
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--n-0);
+  font-size: var(--fs-12);
+}
+
+.compact-shell .h24-goal-resume:hover {
+  background: var(--g-600);
+}
+
+html.kb-nav .compact-shell .h24-goal-resume:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 窄窗：objective 优先截断，动作始终可达。 */
+@container (max-width: 480px) {
+  .compact-shell .h24-goal-bar {
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+  }
+
+  .compact-shell .h24-goal-objective {
+    flex-basis: 100%;
+  }
+}

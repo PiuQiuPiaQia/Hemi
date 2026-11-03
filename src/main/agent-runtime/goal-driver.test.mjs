@@ -216,3 +216,51 @@ test('分段触顶与续跑通知可取消、按归属隔离，子请求仍阻�
  await assert.rejects(journal.checkGoal(owner),/未确认/);await finish(journal,'two');await journal.checkGoal(owner);
  guard.abort();
 });
+
+test('恢复回合幂等复用账本 goal：verifier 看到原目标，预算连续，完成校验正常收口', async t => {
+  const {journal} = await fixture(t);
+  const signal = new AbortController();
+  let calls = 0;
+  // 第一段：一轮进展（校验 continue 进入第 2 段）后被用户停止。
+  await assert.rejects(
+    driveGoal({journal, owner, objective: '完成请求', policy: goalPolicy({maxRequestsPerRound: 2, maxRequests: 4}),
+      signal: signal.signal, persist: async () => {}, evidence: async () => '',
+      run: async () => {
+        calls += 1;
+        if (calls === 2) { signal.abort(); return {aborted: true}; }
+        await journal.requestStart(owner, {requestId: `seg1-q${calls}`, role: 'main'}, 4);
+        await journal.requestEnd(`seg1-q${calls}`, {error: null});
+        return {texts: ['第一段进展'], requests: 1};
+      },
+      verify: async () => next}),
+    error => error.name === 'AbortError',
+  );
+  await journal.finishRoot(owner, 'cancelled', '用户停止');
+  const source = await journal.root(owner);
+  assert.equal(source.goal.phase, 'cancelled');
+  // 用户显式恢复：新建 root 接续（goal.id 不变，round/requestOffset 延续）。
+  const resumeOwner = {...owner, rootRunId: 'resume-root'};
+  const resumed = await journal.resumeGoal(resumeOwner);
+  assert.equal(resumed.goal.id, 'root');
+  assert.equal(resumed.goal.round, 3);
+  assert.equal(resumed.goal.requestOffset, 1);
+  // 恢复回合 driveGoal：objective 为空、continuation 指向来源 root；beginGoal 幂等不覆盖。
+  let seenEvent = null, seenObjective = null, seenRunArgs = null;
+  const hostEvent = {customType: 'hemi_goal_resume', content: '［宿主目标恢复 · 用户显式继续原目标，不是新指令］\n原目标：完成请求\n剩余工作：验证成果'};
+  const result = await driveGoal({journal, owner: resumeOwner, objective: '', policy: goalPolicy(),
+    continuation: {rootRunId: 'r', inputId: 'resume-input', answer: '继续'}, initialEvent: hostEvent,
+    signal: new AbortController().signal, persist: async () => {}, evidence: async () => '',
+    run: async event => { seenEvent = event; seenRunArgs = journal.root(resumeOwner).then(root => root.goal); return {texts: ['恢复后完成剩余验证'], requests: 1}; },
+    verify: async objective => { seenObjective = objective; return complete;}});
+  assert.equal(result.goalComplete, true);
+  assert.equal(seenEvent, hostEvent, '恢复回合首轮 run 收到宿主恢复上下文');
+  assert.equal(seenObjective, '完成请求', 'verifier 使用账本原目标，不使用空 userText');
+  const goal = await (seenRunArgs ?? journal.root(resumeOwner).then(root => root.goal));
+  const finalRoot = await journal.root(resumeOwner);
+  assert.equal(finalRoot.goal.id, 'root');
+  assert.equal(finalRoot.goal.objective, '完成请求');
+  assert.equal(finalRoot.goal.phase, 'complete');
+  await journal.finishRoot(resumeOwner, 'completed');
+  // 旧 root 保持 continued 终态；恢复后完成不留可恢复目标。
+  assert.equal((await journal.root(owner)).status, 'continued');
+});
