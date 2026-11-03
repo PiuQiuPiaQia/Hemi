@@ -65,10 +65,26 @@ test('terminal recovery retains full error details once at its anchored position
     {partId: 'error', kind: 'notice', level: 'error', text: 'Provider failure details'},
   ]};
   const rows = projectFlowTimeline({...snapshot([item]), runs: {r: {startedAt: 1, closedAt: 50, recovery}}}).transcripts;
-  assert.equal(rows.length, 1);
+  // 2026-11-03 用户裁决（a7997251）：终态恢复行只保留极简状态，错误原文回归回合留痕原位——恢复行＋错误行各一条。
+  assert.equal(rows.length, 2);
   assert.equal(rows[0].kind, 'error');
   assert.equal(rows[0].text, 'Provider failure details');
   assert.equal(rows[0].recovery.phase, 'failed');
+  assert.equal(rows[1].kind, 'error');
+  assert.equal(rows[1].text, 'Provider failure details');
+});
+
+test('non-terminal recovery shows its status line while the error stays in the turn', () => {
+  const recovery = modelRecovery({phase: 'waiting', anchor: {itemId: 'a', afterPartId: null}});
+  const item = {itemId: 'a', kind: 'assistant', runId: 'r', parts: [
+    {partId: 'error', kind: 'notice', level: 'error', text: 'Provider failure details'},
+  ]};
+  const rows = projectFlowTimeline({...snapshot([item]), runs: {r: {startedAt: 1, closedAt: 50, recovery}}}).transcripts;
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].recovery.phase, 'waiting');
+  assert.equal(rows[0].text, '');
+  assert.equal(rows[1].kind, 'error');
+  assert.equal(rows[1].text, 'Provider failure details');
 });
 
 test('deliverable cards recovered from the registry cannot push recovery behind later output', () => {
