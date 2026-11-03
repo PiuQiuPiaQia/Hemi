@@ -186,21 +186,12 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
     const [slashLoading, setSlashLoading] = useState(false);
     /** /model 二层的搜索词。 */
     const [modelQuery, setModelQuery] = useState('');
-    /** /model 本地切换反馈（组件内兜底展示；外层 modelNotice 优先）。 */
-    const [localModelNotice, setLocalModelNotice] = useState('');
     /** 063：标签感知撤销栈（受控 textarea 原生 undo 已随程序化赋值断裂）。 */
     const undoRef = useRef(createTagUndoStack());
     const conversationIdRefForMention = useRef<string | null>(null);
     useEffect(() => {
         conversationIdRefForMention.current = mentionConversationId;
     }, [mentionConversationId]);
-    const activeModelNotice = modelNotice || localModelNotice;
-    useEffect(() => {
-        if (!localModelNotice)
-            return;
-        const timer = window.setTimeout(() => setLocalModelNotice(''), 2600);
-        return () => window.clearTimeout(timer);
-    }, [localModelNotice]);
     const inlineTagList = useMemo(() => [
         ...skills.map((skill) => ({ kind: 'skill' as const, tag: skill })),
         ...references.filter(isInlineReference).map((reference) => ({ kind: 'reference' as const, tag: reference })),
@@ -313,7 +304,7 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
         return [...groups.entries()]
             .sort((a, b) => REFERENCE_GROUP_ORDER.indexOf(a[0]) - REFERENCE_GROUP_ORDER.indexOf(b[0]));
     }, [mentionItems]);
-    /** 二层模型列表（与模型按钮同源：分组、自动路由、禁用原因）。 */
+    /** 二层模型列表（与模型按钮同源：分组、自动路由、禁用原因；文案与 chip 下拉一致）。 */
     const modelEntries = useMemo(() => {
         if (panel?.kind !== 'model')
             return [];
@@ -324,17 +315,36 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
             providerName: string;
             hasApiKey: boolean;
             isAuto?: boolean;
+            disabledReason?: string;
+            unavailable?: boolean;
         }> = [];
         const directory = modelProfiles;
         const { ready: autoReady, hint: autoHint } = modelPolicyView(directory);
         if (!botEnvironment && (!keyword || `自动路由 auto ${autoHint}`.toLowerCase().includes(keyword))) {
-            out.push({ modelKey: 'auto', model: `自动路由 · ${autoHint}`, providerName: '', hasApiKey: autoReady, isAuto: true });
+            out.push({
+                modelKey: 'auto',
+                model: `自动路由 · ${autoHint}`,
+                providerName: '',
+                hasApiKey: autoReady,
+                isAuto: true,
+                disabledReason: autoReady ? undefined : '自动路由未配置（模型路由弹窗里配主 agent）',
+            });
         }
         for (const provider of directory?.providers ?? []) {
             for (const model of provider.models) {
                 if (keyword && !provider.name.toLowerCase().includes(keyword) && !model.model.toLowerCase().includes(keyword))
                     continue;
-                out.push({ modelKey: model.modelKey, model: model.model || '未填型号', providerName: provider.name, hasApiKey: provider.hasApiKey });
+                out.push({
+                    modelKey: model.modelKey,
+                    model: model.model || '未填型号',
+                    providerName: provider.name,
+                    hasApiKey: provider.hasApiKey,
+                    disabledReason: model.unavailableReason
+                        || (!provider.hasApiKey
+                            ? (provider.oauthProvider ? '账号未登录，到 设置 → 模型 重新登录后可选' : '这个供应商还没配 API Key，到 设置 → 模型 补上后可选')
+                            : undefined),
+                    unavailable: Boolean(model.unavailableReason),
+                });
             }
         }
         return out;
@@ -351,7 +361,7 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
             return mentionGroups.flatMap(([, items]) => items.map((item) => ({ key: `${item.kind}:${item.key}`, disabled: false })));
         }
         if (panel?.kind === 'model') {
-            return modelEntries.map((item) => ({ key: `model:${item.modelKey}`, disabled: !item.hasApiKey }));
+            return modelEntries.map((item) => ({ key: `model:${item.modelKey}`, disabled: Boolean(item.disabledReason) }));
         }
         return [];
     }, [panel?.kind, slashCommands, slashSkills, mentionGroups, modelEntries]);
@@ -491,12 +501,12 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
         dismissPanel(token);
         applyCaret(insertion.caret);
     };
-    /** /model 二层：确认模型——本地切换，消费命令片段，正文其余部分保留。 */
+    /** /model 二层：确认模型——本地切换，消费命令片段，正文其余部分保留。
+     *  视觉反馈由 chip 文字变化承担，不再发可见提示。 */
     const selectModel = (token: ComposerTokenState, profileId: string) => {
         undoRef.current.pushCheckpoint({ text: value, skills, references, caret });
         replaceTokenWith(token, '');
         onSelectModelProfile?.(profileId);
-        setLocalModelNotice('已选择，后续新提交使用');
         dismissPanel(token);
     };
     const movePanelIndex = (delta: number) => {
@@ -804,7 +814,8 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
                 setDragActive(false);
         }} onDrop={handleDrop}>
       {header}
-      {activeModelNotice ? (<p className="text-composer-hint text-composer-model-notice" role="status">{activeModelNotice}</p>) : null}
+      {/* 模型切换反馈：仅读屏播报（sr-only），视觉反馈由 chip 文字变化承担。 */}
+      {modelNotice ? (<p className="sr-only" role="status">{modelNotice}</p>) : null}
       {hint ? (<p className="text-composer-hint" id={hint.id} role="status">
           {hint.text}
           {!modelReady && onOpenSettings ? (<button type="button" className="text-composer-hint-link" onClick={onOpenSettings}>
@@ -946,12 +957,12 @@ export function ConversationComposer({ adapter, layout = 'desktop', placeholder,
             }}/>
           </div>
           {modelProfiles?.envOverride ? (<p className="h63-panel-status">环境变量覆盖中：切换要等环境变量移除后才生效。</p>) : null}
-          {modelEntries.length ? modelEntries.map((entry, index) => (<button key={`model:${entry.modelKey}`} type="button" role="menuitemradio" className="h24-model-item h63-panel-item" data-active={index === panelIndex ? 'true' : undefined} disabled={!entry.hasApiKey} title={!entry.hasApiKey ? (entry.isAuto ? '自动路由未配置（模型路由弹窗里配主 agent）' : '供应商尚未连接，到 设置 → 模型 完成登录或密钥配置后可选') : undefined} onMouseEnter={() => { if (entry.hasApiKey)
-                setPanelIndex(index); }} onClick={() => { if (entry.hasApiKey && activeToken)
+          {modelEntries.length ? modelEntries.map((entry, index) => (<button key={`model:${entry.modelKey}`} type="button" role="menuitemradio" className="h24-model-item h63-panel-item" data-active={index === panelIndex ? 'true' : undefined} disabled={Boolean(entry.disabledReason)} title={entry.disabledReason} onMouseEnter={() => { if (!entry.disabledReason)
+                setPanelIndex(index); }} onClick={() => { if (!entry.disabledReason && activeToken)
                 selectModel(activeToken, entry.modelKey); }}>
               <span className="h24-model-item-name">{entry.model}</span>
               {entry.providerName ? <span className="h24-model-item-model">{entry.providerName}</span> : null}
-              {!entry.hasApiKey ? <small>{entry.isAuto ? '未配置' : '未配 Key'}</small> : null}
+              {entry.disabledReason ? <small>{entry.isAuto ? '未配置' : entry.unavailable ? '不可用' : '未配 Key'}</small> : null}
             </button>)) : <p className="h63-panel-status">没有匹配的模型。</p>}
           <p className="h24-command-hint">Esc 返回命令列表；选择只影响后续新提交</p>
         </div>) : null}

@@ -87,10 +87,10 @@ export function ModelSelectorChip({ directory, currentProfileId, onSelect, onOpe
     return <ModelSelectorControl automatic={isAuto} models={[]} selected={currentProfileId} onSelect={onSelect} text={isAuto ? '自动路由' : current?.model?.model || '模型'} title={directory.envOverride
             ? '模型由环境变量覆盖，这里的选择暂不生效'
             : isAuto
-                ? `自动路由：${autoHint}（点击切换）`
-                : `当前模型：${current?.model?.model ?? '自动路由'}${current?.provider?.name ? ` · ${current.provider.name}` : ''}（点击切换，只影响接下来的回合）`} defaultOpen={fixtureOpen} onOpen={() => setFilter('')}>
+                ? `自动路由：${autoHint}`
+                : `当前模型：${current?.model?.model ?? '自动路由'}${current?.provider?.name ? ` · ${current.provider.name}` : ''}`} defaultOpen={fixtureOpen} onOpen={() => setFilter('')}>
       {close => <>
-          <MenuSearch className="h24-model-filter" placeholder="搜索名称 / 型号 / 端点" value={filter} autoFocus onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => {
+          <MenuSearch className="h24-model-filter" placeholder="搜索名称 / 型号 / 供应商" value={filter} autoFocus onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     close();

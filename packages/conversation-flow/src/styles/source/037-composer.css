@@ -820,11 +820,6 @@ html.kb-nav .compact-shell .h24-queue-resume:focus-visible { outline: 2px solid 
   background: color-mix(in srgb, var(--n-500) 10%, transparent);
 }
 
-/* /model 本地切换的轻量反馈（输入区短暂提示，不进对话时间线）。 */
-.compact-shell .text-composer-model-notice {
-  color: var(--accent-text);
-}
-
 /* 候选面板的分组头/状态/搜索框（沿用 h24-command-menu 容器样式）。 */
 .h63-panel-group {
   padding: var(--sp-2) 0;
