@@ -5,6 +5,7 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createBotHost} from '../../src/main/bot/host.mjs';
 import {replyToGoalCheck} from './goal-model-fixture.mjs';
+import {botFlowDiagnostic} from './bot-fixture-diagnostics.mjs';
 
 export async function untilBot(read, timeout = 30000) {
   const end = Date.now() + timeout;
@@ -56,14 +57,16 @@ export async function createBotCapabilityFixture(respond, {capabilityOptions = {
     async send(id, text, input = {}, decidePermission = null) {
       trace('send', id, text);
       await call('flow.command', {id, command: {type: 'send', input: {inputId: 'input-' + randomUUID(), text, ...input}}});
-      return untilBot(async () => {
-        if (errors.length) throw new Error('Synthetic provider failed: ' + errors.at(-1));const detail = await call('session.open', {id});
+      let latestDetail;
+      try { return await untilBot(async () => {
+        if (errors.length) throw new Error('Synthetic provider failed: ' + errors.at(-1));const detail = latestDetail = await call('session.open', {id});
         if (decidePermission) for (const permission of Object.values(detail.permissions ?? {}).filter(permission => permission.status === 'pending')) {
           await call('permission.decide', {id, permissionId: permission.id, value: await decidePermission(permission)});
         }
-        if (detail.flow.phase === 'idle' && !detail.flow.pending.length) {trace('idle', id);return detail;}
+        if (detail.flow.phase === 'idle' && !detail.flow.pending.length) {trace('idle', id, botFlowDiagnostic(detail));return detail;}
         return null;
-      }, decidePermission ? 120000 : 30000);
+      }, decidePermission ? 120000 : 30000); }
+      catch(error){console.error('[bot-fixture] failed',JSON.stringify({id,text,flow:botFlowDiagnostic(latestDetail??{})}));throw error;}
     },
     async restart() {trace('restart-close');await host.close();trace('restart-create');host = await createBotHost(options);trace('restarted');},
     close,

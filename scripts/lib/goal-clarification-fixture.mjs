@@ -7,10 +7,12 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createBotHost} from '../../src/main/bot/host.mjs';
 import {GOAL_CHECK_SYSTEM} from '../../src/main/agent-runtime/goal-driver.mjs';
+import {botFixtureTrace, botFlowDiagnostic} from './bot-fixture-diagnostics.mjs';
+const trace=(...values)=>botFixtureTrace('clarification',...values);
 export const CLARIFICATION_QUESTION='proof.txt 里需要写什么内容？';
 export async function createClarificationFixture({verificationFailsAfterAnswer=false,clientId='clarification-fixture'}={}) {
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-clarify-'))),dataDir=path.join(root,'data'),workspace=path.join(root,'workspace');await fs.mkdir(workspace);
- const requests=[];let seedCalls=0,host,instanceId;
+ const requests=[];let seedCalls=0,host,instanceId,lastFlowDiagnostic;trace('create',root);
  const exists=file=>fs.stat(path.join(workspace,file)).then(()=>true,()=>false);
  const server=http.createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);requests.push(body);
@@ -29,19 +31,20 @@ export async function createClarificationFixture({verificationFailsAfterAnswer=f
    if(!afterAnswer.some(m=>m.role==='tool'&&String(m.content).includes('CLARIFIED_VALUE')))tool={name:'read',args:{path:'proof.txt'}};
    else content='已写入并读回核对 CLARIFIED_VALUE。';
   }
+  trace('provider',{checking,answered,tool:tool?.name,seedCalls});
   res.writeHead(200,{'content-type':'text/event-stream'});
   const delta=tool?{role:'assistant',tool_calls:[{index:0,id:randomUUID(),type:'function',function:{name:tool.name,arguments:JSON.stringify(tool.args)}}]}:{role:'assistant',content};
   for(const [value,finish]of [[delta,null],[{},tool?'tool_calls':'stop']])res.write('data: '+JSON.stringify({id:randomUUID(),model:'clarification',choices:[{index:0,delta:value,finish_reason:finish}],...(finish?{usage:{prompt_tokens:30,completion_tokens:10}}:{})})+'\n\n');
   res.end('data: [DONE]\n\n');
  });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const start=async()=>{host=await createBotHost({dataDir,defaultDir:workspace,allowLoopbackModels:true,validateModel:async()=>{}});({instanceId}=await host.request('handshake'));};await start();
+ const start=async()=>{trace('host-create');host=await createBotHost({dataDir,defaultDir:workspace,allowLoopbackModels:true,validateModel:async()=>{}});({instanceId}=await host.request('handshake'));trace('handshake');};await start();
  const call=(method,params={})=>host.request(method,{instanceId,requestId:randomUUID(),...params},{clientId});
  await call('model.sync',{models:[{modelKey:'test/clarification',providerId:'test',model:'clarification',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});
  const {id}=await call('session.create');
  return {root,dataDir,workspace,id,requests,call,get host(){return host;},get seedCalls(){return seedCalls;},
-  send:(text,inputId=randomUUID())=>call('flow.command',{id,command:{type:'send',input:{inputId,text}}}),
-  flow:()=>call('flow.snapshot',{id}),journal:()=>readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json')),
-  async restart(){await host.close();await start();},
-  async close(){await host.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});},
+  send:(text,inputId=randomUUID())=>{trace('send',{inputId,text});return call('flow.command',{id,command:{type:'send',input:{inputId,text}}});},
+  flow:async()=>{const value=await call('flow.snapshot',{id}),summary=botFlowDiagnostic(value),key=JSON.stringify(summary);if(key!==lastFlowDiagnostic){trace('flow',summary);lastFlowDiagnostic=key;}return value;},journal:()=>readRunJournalFileSync(path.join(dataDir,'runtime-v2/run-journal.json')),
+  async restart(){trace('restart-close');await host.close();trace('restart-create');await start();trace('restarted');},
+  async close(){trace('close-start');if(process.env.HEMI_BOT_FIXTURE_TRACE==='1')trace('close-state',botFlowDiagnostic(await call('flow.snapshot',{id})));await host.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});trace('close-end');},
  };
 }

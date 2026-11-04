@@ -67,7 +67,10 @@ test('actual Bot conversation_read retrieves early and long public history acros
   }, {capabilityOptions: {platform: 'linux'}});
   t.after(() => fixture.close());
   const archive = await fixture.call('session.create');
-  for (let i = 0; i < 24; i++) await fixture.send(archive.id, 'ARCHIVE_' + i);
+  for (let i = 0; i < 24; i++) {
+    const result = await fixture.send(archive.id, 'ARCHIVE_' + i);
+    assert.equal(Object.values(result.flow.runs).at(-1).outcome, 'completed', `ARCHIVE_${i}: ${JSON.stringify(result.flow.timeline.flatMap(item => item.parts ?? []).filter(part => part.kind === 'notice' && part.level === 'error'))}`);
+  }
   await fixture.restart();const reader = await fixture.call('session.create');
   const detail = await fixture.send(reader.id, 'READ_HISTORY:' + archive.id);
   assert.equal(Object.values(detail.flow.runs).at(-1).outcome, 'completed');assert.ok(pages.length > 5);

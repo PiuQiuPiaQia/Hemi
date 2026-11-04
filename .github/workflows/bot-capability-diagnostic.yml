@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Focused capability matrix or the actual full npm test gate'
+        description: 'Focused checks, full gate, or full-suite default/serial timing comparison'
         type: choice
-        options: [focused, full, jobs]
+        options: [focused, full, jobs, timing]
         default: focused
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON(inputs.mode == 'full' && '["full"]' || inputs.mode == 'jobs' && '["jobs","jobs-delayed"]' || '["browser","history","all"]') }}
+        scenario: ${{ fromJSON(inputs.mode == 'timing' && '["full-default","full-serial"]' || inputs.mode == 'full' && '["full"]' || inputs.mode == 'jobs' && '["jobs","jobs-delayed"]' || '["browser","history","all"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -9,8 +9,12 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { testRunnerArgs, testRunnerExitCode } from './lib/test-runner-args.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const userArgs = process.argv.slice(2);
+try { testRunnerArgs(userArgs, []); }
+catch (error) { console.error(error.message); process.exit(2); }
 
 /** 递归收集目录下 *.test.mjs（跳过 node_modules 与隐藏目录）。 */
 function collectTestFiles(dir, out = []) {
@@ -36,8 +40,8 @@ if (!files.length) {
   process.exit(1);
 }
 
-const result = spawnSync(process.execPath, ['--test', ...files], {
+const result = spawnSync(process.execPath, testRunnerArgs(userArgs, files), {
   stdio: 'inherit',
   cwd: root,
 });
-process.exit(result.status ?? 1);
+process.exit(testRunnerExitCode(result));

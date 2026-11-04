@@ -1,5 +1,7 @@
 import {readRunJournalFileSync} from '../agent-runtime/journal-inspection.mjs';
 import {replyToGoalCheck} from '../../../scripts/lib/goal-model-fixture.mjs';
+import {botFixtureTrace, botFlowDiagnostic} from '../../../scripts/lib/bot-fixture-diagnostics.mjs';
+const trace = (...values) => botFixtureTrace('execution', ...values);
 // Production Host -> shared runtime -> installed SDK -> real HTTP and POSIX tools.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,12 +27,17 @@ function reply(res,{text='DONE',command,tool='bash'}={}) {
   res.end('data: [DONE]\n\n');
 }
 async function fixture(t) {
-  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-shared-execution-'))),held=new Map(),requests=[];
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hemi-shared-execution-'))),held=new Map(),requests=[],recaps=[];
   const first=path.join(root,'workspace'),other=path.join(root,'other');await fs.mkdir(first);await fs.mkdir(other);
   const server=http.createServer(async(req,res)=>{
     let raw='';for await(const chunk of req)raw+=chunk;
-    const body=JSON.parse(raw);if(replyToGoalCheck(body,res))return;const text=JSON.stringify(body.messages);requests.push(body);
+    const body=JSON.parse(raw);if(replyToGoalCheck(body,res))return;const text=JSON.stringify(body.messages);
+    const recap=body.messages.some(message=>message.role==='system'&&String(message.content).startsWith('You are a session recap assistant.'));
     const lastUser=JSON.stringify(body.messages.filter(message=>message.role==='user').at(-1));
+    trace('provider',{recap,hold:lastUser?.includes('HOLD_MODEL'),tools:body.messages.filter(message=>message.role==='tool').length});
+    // Exit summaries quote old HOLD_MODEL inputs, but are not scenario turns.
+    if(recap){recaps.push(body);reply(res,{text:'### Decisions\n- None.\n### Lessons Learned\n- None.\n### Notes\n- Synthetic verification.\n### Follow-ups\n- None.'});return;}
+    requests.push(body);
     if(lastUser?.includes('HOLD_MODEL')){held.set(lastUser.match(/HOLD_MODEL_(\w+)/)[1].toLowerCase(),res);return;}
     const toolCalled=body.messages.some(message=>message.role==='tool');
     if(text.includes('BLOCK_SHELL')&&!toolCalled){reply(res,{command:{command:'printf started > a.started; while [ ! -f release ]; do sleep 0.02; done; printf A_DONE',run_in_background:true,yield_ms:20}});return;}
@@ -42,14 +49,17 @@ async function fixture(t) {
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const host=await createBotHost({dataDir:path.join(root,'data'),defaultDir:first,allowLoopbackModels:true,validateModel:async()=>{}});
-  t.after(async()=>{await host.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});});
+  let closing;
+  const close=()=>closing??=(async()=>{trace('close-start');try{await host.close();}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});trace('close-end');}})();
+  t.after(close);
   const {instanceId}=await host.request('handshake'),call=(method,p={})=>host.request(method,{instanceId,requestId:randomUUID(),...p});
   await call('model.sync',{models:[{modelKey:'fixture/model',providerId:'fixture',name:'Fixture',model:'fixture',api:'openai-completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'SYNTHETIC_ONLY'}]});
   const create=async(dir=first)=>{const {id}=await call('session.create');if(dir!==first)await call('session.update',{id,dir});return id;};
-  const send=(id,text)=>call('flow.command',{id,command:{type:'send',input:{inputId:randomUUID(),text}}});
-  const detail=id=>call('session.open',{id,activate:false});
+  const send=(id,text)=>{trace('send',{id,text});return call('flow.command',{id,command:{type:'send',input:{inputId:randomUUID(),text}}});};
+  const previous=new Map();
+  const detail=async id=>{const d=await call('session.open',{id,activate:false}),summary=botFlowDiagnostic(d),key=JSON.stringify(summary);if(key!==previous.get(id)){trace('flow',id,summary);previous.set(id,key);}return d;};
   const done=(id,timeoutMs)=>until(async()=>{const d=await detail(id);return !d.flow.activeRunId&&d;},timeoutMs);
-  return{root,first,other,held,requests,host,call,create,send,detail,done};
+  return{root,first,other,held,requests,recaps,host,call,create,send,detail,done,close};
 }
 
 test('independent model requests run together; stopping one does not abort another and permission waits stay scoped',{timeout:30000},async t=>{
@@ -74,11 +84,17 @@ test('independent model requests run together; stopping one does not abort anoth
   assert.equal((await f.detail(b)).status,'running');assert.equal(f.held.get('b').destroyed,false);
   reply(f.held.get('b'));await f.done(b);
   const c=await f.create(),d=await f.create();await fs.writeFile(path.join(f.root,'outside.txt'),'preserve');
-  await f.send(c,'ASK_PERMISSION');await until(async()=>Object.values((await f.detail(c)).permissions).some(p=>p.status==='pending'));
+  await f.send(c,'ASK_PERMISSION');let permissionState;
+  try{await until(async()=>{permissionState=await f.detail(c);const summary=botFlowDiagnostic(permissionState);assert.notEqual(summary.latestOutcome,'failed',`permission run failed: ${JSON.stringify(summary)}`);return Object.values(permissionState.permissions).some(p=>p.status==='pending');});}
+  catch(error){console.error('[bot-execution] permission-wait-failed',JSON.stringify(botFlowDiagnostic(permissionState??{})));throw error;}
   await f.send(d,'PLAIN');assert.equal((await f.done(d)).flow.timeline.flatMap(item=>item.parts??[]).some(p=>p.kind==='text'&&p.content==='DONE'),true);
   const pending=Object.values((await f.detail(c)).permissions).find(p=>p.status==='pending');
   await f.call('permission.decide',{id:c,permissionId:pending.id,value:pending.options.at(-1)});await f.done(c);
   assert.equal(await fs.readFile(path.join(f.root,'outside.txt'),'utf8'),'preserve');
+  trace('body-complete');
+  const heldBeforeClose=new Map(f.held);await f.close();
+  assert.ok(f.recaps.some(body=>JSON.stringify(body.messages).includes('HOLD_MODEL_A')),'real native-memory exit recap quotes the held scenario');
+  for(const [key,response]of heldBeforeClose)assert.equal(f.held.get(key),response,'exit recaps must not replace held scenario responses');
 });
 
 test('background shell does not block same-workspace file tools or commands, and completion still resumes its own goal',{timeout:30000,skip:process.platform==='win32'},async t=>{

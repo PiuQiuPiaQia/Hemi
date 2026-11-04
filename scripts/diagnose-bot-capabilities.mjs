@@ -1,16 +1,23 @@
 // Bounded real SDK/browser probe. It deliberately preserves test failures and
 // hangs; the watchdog kills only this probe's process tree and exits nonzero.
 import {spawn, spawnSync} from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import {mkdtempSync} from 'node:fs';
 const scenario=process.argv[2] ?? 'all';
-const patterns={browser:'actual Bot Host/SDK navigates',history:'actual Bot conversation_read',all:'.*',full:'.*',jobs:'.*','jobs-delayed':'.*'};
-const timeoutMs=scenario==='full'?900000:180000;
+const patterns={browser:'actual Bot Host/SDK navigates',history:'actual Bot conversation_read',all:'.*',full:'.*','full-default':'.*','full-serial':'.*',jobs:'.*','jobs-delayed':'.*'};
+const full=scenario==='full'||scenario.startsWith('full-');
+const timeoutMs=full?900000:180000;
 if(!Object.hasOwn(patterns,scenario))throw new Error('Unknown probe scenario');
-console.log('BOT_PROBE',JSON.stringify({scenario,node:process.version,platform:process.platform,arch:process.arch}));
+console.log('BOT_PROBE',JSON.stringify({scenario,node:process.version,platform:process.platform,arch:process.arch,os:os.release(),availableParallelism:os.availableParallelism(),sha:process.env.GITHUB_SHA??spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout?.trim()}));
 const files=scenario.startsWith('jobs')?['src/main/bot/background-jobs.test.mjs']:['src/main/bot/capabilities.integration.test.mjs',...(scenario==='all'?['scripts/test/bot-capability-fixture.test.mjs','src/main/bot/runtime.integration.test.mjs']:[])];
-const executable=scenario==='full'?(process.platform==='win32'?'cmd.exe':'npm'):process.execPath;
-const args=scenario==='full'?(process.platform==='win32'?['/d','/s','/c','npm test']:['test']):['--test','--test-reporter=spec',`--test-name-pattern=${patterns[scenario]}`,...files];
+// Complete suite in both modes; only the explicit file-concurrency flag differs.
+const executable=full?(process.platform==='win32'?'cmd.exe':'npm'):process.execPath;
+const concurrency=scenario==='full-serial'?['--','--test-concurrency=1']:[];
+const args=full?(process.platform==='win32'?['/d','/s','/c',`npm test${concurrency.length?' -- --test-concurrency=1':''}`]:['test',...concurrency]):['--test','--test-reporter=spec',`--test-name-pattern=${patterns[scenario]}`,...files];
+console.log('BOT_PROBE argv',JSON.stringify({executable,args}));
 const child=spawn(executable,args,{
- stdio:'inherit',env:{...process.env,HEMI_BOT_FIXTURE_TRACE:'1',HEMI_BOT_JOB_GOAL_DELAY_MS:scenario==='jobs-delayed'?'5000':'0',DEBUG:'pw:browser'},detached:process.platform!=='win32',
+ stdio:'inherit',env:{...process.env,HEMI_USER_DATA_DIR:mkdtempSync(path.join(os.tmpdir(),'hemi-bot-probe-')),HEMI_BOT_FIXTURE_TRACE:'1',HEMI_BOT_JOB_GOAL_DELAY_MS:scenario==='jobs-delayed'?'5000':'0',DEBUG:'pw:browser'},detached:process.platform!=='win32',
 });
 let expired=false;
 const timer=setTimeout(()=>{
