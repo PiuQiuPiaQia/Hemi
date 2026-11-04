@@ -68,3 +68,13 @@ node scripts/build-windows-command-job.mjs
 使用生产 Host 和现有模型配置创建专用测试会话，真实后台命令正常结束、取消后交接均通过：命令记录为 `windows-job-v1 / finished / cleanupConfirmed:true`，子进程退出，排队输入只派发一次。测试会话和临时目录已清理，全部 4 条原有会话和 727 个原有数据文件仍在，原排队输入未执行。DSH 的两个原进程及创建时间不变，原端口继续监听，直接 HTTP 返回 401；没有验证需鉴权的 DSH 页面或 QQ 桥接。
 
 上线证据在忽略目录 `.visual/workflow/bot-command-update/`。其中 `deployment-report.json` 汇总实际版本、迁移、生产测试、正式版重连和回滚路径；远端私有维护目录保留完整备份、旧组件及带“受理必须暂停”保护的 `rollback.ps1`。回滚脚本经过语法检查，未在健康生产实例上实际切回旧版；后续回滚不得用旧数据快照直接覆盖维护后新增的用户输入。后续组件发布应继续使用不低于 0.2.20 的组件版本，避免较新的云端组件被旧桌面维护覆盖。
+
+## 2026-11-04：即时取消后的同组残留
+
+v0.2.59 发布前，macOS CI `41813126023` 的 `background-job-controls.test.mjs:69` 再次出现 `cleanup-unconfirmed`（约 8.3 秒），Windows 同批通过。基线 `79da2070` 下的隔离实验仅创建最多存活 8 秒的合成 Node 命令：90 次启动后 0–10 毫秒取消／500 毫秒超时，3 路并发，复现 4 次真实残留。主 shell 已被 SIGKILL，但相同 PGID 内仍有 PPID=1 的 Node 持续存活；每次 ps 仅约 10–15 毫秒。这不是慢探针误报。首轮信号与 fork 同窗是机制假设；已证实的缺陷是“首轮信号之后仍有活成员，却只等待不再清理”。
+
+POSIX 收尾现在在阳性探针确认本命令的独立进程组仍有非僵尸成员时补发 SIGKILL，随后继续探测，只有无活成员且输出关闭才确认成功。清理预算不延长，探针失败仍按未确认处理；不按进程名／PPID 追杀，也不改 Windows Job 分支。探针可能在外层 Promise.race 到期后才返回，因此在 await 后和发信号前均检查期限及清理有效标记，禁止迟到补杀。数字 PGID 不是永久身份，仍不宣称它能替代内核级沙箱或解决任意脱组守护进程。
+
+新增两项确定性回归：首轮信号后仍有真实受管成员时必须补杀且保留独立组；期限后才返回的阳性探针不得再发信号。第一项用旧代码作负对照，真实失败于 `cleanupConfirmed:false`；信号替身只用于稳定触发残留条件，不冒充 fork 时序复现。最终定向集合 29 项通过、1 项 Windows 专属跳过；同一 90 次真实进程实验修复后零失败，其中 4 次阳性存活被继续清理。环境为 macOS 26.5.1 arm64、Node 22.21.1；未触碰任何生产 Bot 或原有命令。
+
+证据在 `.visual/workflow/release-v0.2.59/`：`cleanup-diagnostic-baseline.{json,log}`、`cleanup-negative-control-recheck.log`、`cleanup-fix-targeted-final.log`、`cleanup-diagnostic-final.log`。完整发布检查和打包体结果以对应 CI 为准。

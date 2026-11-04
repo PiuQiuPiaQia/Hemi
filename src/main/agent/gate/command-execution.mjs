@@ -25,7 +25,7 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
   catch(error){return {...empty,spawnError:error.code??'supervisor-unavailable',stderr:error.message,status:'start-failed'};}
   if(signal?.aborted)return {...empty,aborted:true,status:'cancelled'};
   return new Promise(resolve=>{
-    let child,timer,ending=false,closed=false,code=null,exitSignal=null,spawnError=null;
+    let child,timer,ending=false,closed=false,cleanupActive=false,code=null,exitSignal=null,spawnError=null;
     let stdout='',stderr='',truncated=false,aborted=false,timedOut=false;
     const output = new CommandOutput(maxOutput);
     const decoders={out:new StringDecoder('utf8'),err:new StringDecoder('utf8')};
@@ -43,25 +43,37 @@ export async function runCommand({command,cwd,timeoutMs=120_000,signal,env=proce
         return true;
       }
       let signalError=null;
-      try {process.kill(-child.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')signalError=error;}
       const until=Date.now()+Math.max(100,cleanupTimeoutMs-500);
+      const killOwnedGroup=()=>{
+        if(!cleanupActive||Date.now()>=until)return;
+        try {process.kill(-child.pid,'SIGKILL');}catch(error){if(error.code!=='ESRCH')signalError=error;}
+      };
+      killOwnedGroup();
       do{
         let rows;
         // ps 偶发慢/失败（CI 高负载下实测会让单次探针超时）不等于进程还活着：
         // 探针预算给到剩余清理窗口并期限内重试；确认只认探针的阳性证据，到期仍无证据按未确认处理（fail-closed）。
         try {({stdout:rows}=await groupProbe(Math.max(2000,until-Date.now()),child.pid));}
         catch {await pause(50);continue;}
+        // commandDeadline 不取消仍在执行的探针：期限后返回的快照不能触发补杀。
+        if(!cleanupActive||Date.now()>=until)return false;
         if(!rows.split('\n').some(row=>{const [group,state]=row.trim().split(/\s+/);return Number(group)===child.pid&&state&&!state.startsWith('Z');}))return true;
+        // SIGKILL 与 shell 的 fork 可同窗：组长已退出，晚生后代却没收到首轮信号。
+        // 仅在探针确认本命令独立进程组仍有活成员时补杀；预算不延长，空组/僵尸
+        // 与输出管道仍按原规则确认，绝不因发过信号就报告清理成功。
+        killOwnedGroup();
         await pause(25);
-      }while(Date.now()<until);
+      }while(cleanupActive&&Date.now()<until);
       if(signalError)throw signalError;
       return false;
     };
     const finish=async()=>{
       if(ending)return;ending=true;clearTimeout(timer);
       let cleanupConfirmed=false,cleanupError=null;
+      cleanupActive=true;
       try {cleanupConfirmed=await commandDeadline(clean(),cleanupTimeoutMs,'命令进程清理未能在期限内确认');}
       catch(error){cleanupError=error.message;}
+      finally {cleanupActive=false;}
       child?.stdin?.destroy();
       await commandDeadline(streamsClosed.promise,outputDrainMs,'命令输出管道仍被持有').catch(error=>{
         // An empty process group/Job with open output can indicate an escaped descendant.

@@ -47,6 +47,75 @@ test('060 超时、取消和正常退出均清理同组后台子孙；独立命�
   } finally { await Promise.all([own.abort(), independent.abort()]); await rm(dir, { recursive: true, force: true }); }
 });
 
+test('060 首轮信号遗漏的同组后代仍须清理，不能只等组长退出', { ...posix, timeout: 5000 }, async t => {
+  const nativeKill = process.kill.bind(process);
+  const controller = new AbortController(), ready = Promise.withResolvers();
+  let pgid = null, signals = 0;
+  // 确定性模拟首轮信号发出后组里仍有活成员（例如 fork 同窗）：第一次保留
+  // 真实的受管进程组，后续必须补发信号，不能放宽 cleanupConfirmed。
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -pgid && signal === 'SIGKILL' && ++signals === 1) return true;
+    return nativeKill(pid, signal);
+  });
+  const independent = runCommand({ command: 'sleep 0.3; printf independent' });
+  const pending = runCommand({
+    command: `"${process.execPath}" -e "process.stdout.write('READY');setTimeout(()=>{},8000)"`,
+    signal: controller.signal, cleanupTimeoutMs: 900,
+    onSpawn: pid => { pgid = pid; },
+    onOutput: () => ready.resolve(),
+  });
+  try {
+    await ready.promise;
+    controller.abort();
+    const result = await pending;
+    assert.equal(result.cleanupConfirmed, true, JSON.stringify(result));
+    assert.equal(result.status, 'cancelled');
+    assert.ok(signals >= 2, '探针确认仍有活后代后必须再次清理本组');
+    const other = await independent;
+    assert.equal(other.status, 'succeeded');
+    assert.equal(other.stdout, 'independent', '其它独立命令不能被补杀波及');
+  } finally {
+    controller.abort();
+    if (pgid !== null) { try { nativeKill(-pgid, 'SIGKILL'); } catch {} }
+    await Promise.allSettled([pending, independent]);
+  }
+});
+
+test('060 期限后才返回的阳性探针不能再向旧进程组补发信号', { ...posix, timeout: 5000 }, async t => {
+  const nativeKill = process.kill.bind(process), controller = new AbortController();
+  const spawned = Promise.withResolvers(), entered = Promise.withResolvers(), release = Promise.withResolvers(), returned = Promise.withResolvers();
+  let pgid = null, signals = 0;
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -pgid && signal === 'SIGKILL' && ++signals > 1) return true;
+    return nativeKill(pid, signal);
+  });
+  const pending = runCommand({
+    command: 'sleep 30', signal: controller.signal, cleanupTimeoutMs: 250,
+    onSpawn: pid => { pgid = pid; spawned.resolve(); },
+    groupProbe: async () => {
+      entered.resolve();
+      await release.promise;
+      returned.resolve();
+      return { stdout: `${pgid} S` };
+    },
+  });
+  try {
+    await spawned.promise;
+    controller.abort();
+    await entered.promise;
+    const result = await pending;
+    assert.equal(result.cleanupConfirmed, false, '期限内未获得证据不能报告清理成功');
+    release.resolve();
+    await returned.promise;
+    await pause(25);
+    assert.equal(signals, 1, '清理失效后不得因迟到阳性探针向旧 PGID 发信号');
+  } finally {
+    release.resolve();
+    if (pgid !== null) { try { nativeKill(-pgid, 'SIGKILL'); } catch {} }
+    await pending;
+  }
+});
+
 test('060 已取消信号不启动命令，不留下副作用', posix, async () => {
   const out = await runCommand({ command: 'echo must-not-run', signal: AbortSignal.abort() });
   assert.equal(out.status, 'cancelled');
