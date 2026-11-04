@@ -142,15 +142,18 @@ jobs:
           ASSETS="release/*.dmg release/*-mac.zip release/*.blockmap release/latest-mac.yml release/uiohook-napi-1.5.5-source.tar.gz release/licenses-macos.json"
           # 双端模式两个 job 并行：谁先到谁建草稿，后到的只补资产
           #（--clobber 兼容重跑重传；绝不并行走 electron-builder publisher）。
+          # 补挂统一走 upload-draft-assets（v0.2.59 CI41816791105：--clobber 删旧
+          # 资产后撞 HTTP 502、exe 丢失）：仅确认 5xx 有界重试，每次重传前重新
+          # 核实仍是草稿，绝不覆盖已正式发布的资产；其余失败退出真实非 0。
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" $ASSETS --clobber
+            node scripts/upload-draft-assets.mjs "$GITHUB_REF_NAME" $ASSETS
           elif gh release create "$GITHUB_REF_NAME" $ASSETS \
               --title "Hemi ${GITHUB_REF_NAME#v}" \
               --notes-file docs/release-notes.md \
               --draft; then
             echo "draft release created by mac job"
           else
-            gh release upload "$GITHUB_REF_NAME" $ASSETS --clobber
+            node scripts/upload-draft-assets.mjs "$GITHUB_REF_NAME" $ASSETS
           fi
 
       - name: 保留另一平台更新清单（仅单平台发版需要中继）
@@ -250,9 +253,12 @@ jobs:
           $assets += @(Get-ChildItem release -Filter 'uiohook-napi-1.5.5-source.tar.gz')
           if (-not $assets) { throw 'release/ 下没找到安装包' }
           # 双端模式两个 job 并行：谁先到谁建草稿，后到的只补资产。
+          # 补挂统一走 upload-draft-assets（v0.2.59 CI41816791105 同款加固）：
+          # 仅确认 5xx 有界重试、每次重传前核实仍是草稿；@() 展开数组元素
+          # 逐个传参，路径含空格也不会拆分。
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:GITHUB_REF_NAME @($assets.FullName) --clobber
+            node scripts/upload-draft-assets.mjs $env:GITHUB_REF_NAME @($assets.FullName)
             if ($LASTEXITCODE -ne 0) { throw '资产补挂失败' }
           } else {
             gh release create $env:GITHUB_REF_NAME @($assets.FullName) --title "Hemi $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file docs/release-notes.md --draft
