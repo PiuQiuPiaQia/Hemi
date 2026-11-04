@@ -6,6 +6,7 @@
  * 这里只做「等不到就算失败」的时间上界，不复制渲染层的动画时长常量。
  */
 import { app, screen } from 'electron';
+import { isVisibleCaptionSample } from './lib/caption-smoke-probe.mjs';
 
 import {
   FLOATING_CAPTION_MAX_WIDTH,
@@ -92,13 +93,10 @@ export async function runSmokeTest(context) {
   const captionLayout = { ...context.readCaptionLayout() };
 
   context.publishUiState(START_STATE);
-  // 新句带 240ms 入场动画（globals.css 的 floating-caption-line-in），
-  // 等它走完再采样，否则行不透明度停在过渡中途。Windows 真机首帧渲染
-  // 偏慢时动画会晚启动，固定 sleep 采在半途——再轮询到「全部行不透明」。
-  await sleep(340);
-  await waitForCaptionVisible(caption);
+  // 在同一次渲染器采样中确认目标字幕可见并保存完整快照。先等可见、再跨窗口
+  // IPC 后重读会遇到自动淡出；空状态药丸也不能因 [].every(...) 提前放行。
+  const captionProbe = await waitForCaptionVisible(caption, probeCaptionDom, START_STATE.interimText);
   const orbProbe = await probeOrbDom(orb);
-  const captionProbe = await probeCaptionDom(caption);
 
   const autoFade = await probeCaptionAutoFade(context, caption);
   const thinking = await probeCaptionThinking(context, caption);
@@ -232,6 +230,7 @@ function probeCaptionDom(caption) {
       const lines = Array.from(
         document.querySelectorAll('[data-floating-caption] span'),
       );
+      if (!copy || !lines.length) return { visible: '', lineOpacities: [], lines: [] };
       const copyStyle = getComputedStyle(copy);
       const shell = document.querySelector('.floating-caption-shell');
       const shellStyle = getComputedStyle(shell);
@@ -466,12 +465,10 @@ async function pollCaptionLineCount(caption) {
   );
 }
 
-async function waitForCaptionVisible(caption) {
+async function waitForCaptionVisible(caption, read = readCaptionFade, expectedText = null) {
   return waitFor(
-    () => readCaptionFade(caption),
-    (state) =>
-      state.visible === 'true' &&
-      state.lineOpacities.every((opacity) => opacity >= 0.9),
+    () => read(caption),
+    (state) => isVisibleCaptionSample(state, expectedText),
   );
 }
 
