@@ -9,7 +9,7 @@
 
 ## 当前重构需求
 
-- [基于 DSH 官方 Desktop 重构：二开范围需求梳理](requirements/dsh-rebuild-requirements.md)：放弃 Pi 自研栈后的删改盘点、P0–P2 二开清单、风险与 go/no-go 验证原型；草案，待评审，未批准实施。
+- [基于 DSH fork 的 Hemi 二代适配计划](requirements/dsh-rebuild-requirements.md)：v2 按 fork 源码（v0.2.2-alpha.3）校准——上游已有语音/浏览器/桌面/SSH 基础，真空点=角色模型路由、Windows CUA、跨会话记忆、品牌合规；草案待评审，未批准实施。
 - [Agent 与后台任务生命周期](requirements/agent-task-lifecycle.md)：等待、额度、超时、异常反馈和历史回归约束；[候选方案](requirements/agent-task-lifecycle-proposal.md)记录与 CC 讨论后的边界处理及验证要求，待 review。
 - [Bot 订阅账号](technical/bot-oauth.md)：独立浏览器授权、服务器凭据与续期、首次配置和验证边界。
 - [Windows Bot](technical/bot-windows.md)：Windows x64 SSH 主机、计划任务常驻、安装维护与实机验收。
